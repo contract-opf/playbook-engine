@@ -1,0 +1,83 @@
+name: Docker Smoke Test
+
+# Exercises the canonical docling/OCR runtime (Dockerfile) end to end. The
+# unit suite (ci.yml) runs in a venv against the legacy adapters only — it
+# never builds or runs this image, so the "canonical runtime" the README
+# points adopters at could break silently between releases (issue #176).
+# Runs weekly (drift/upstream breakage) and whenever the image's own inputs
+# change.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  push:
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - ".github/workflows/docker-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t playbook-engine:smoke .
+
+      - name: lint-corpus against the judge-fixture corpus
+        run: |
+          docker run --rm \
+            -v "$PWD/examples/judge-fixture/corpus:/work/corpus:ro" \
+            playbook-engine:smoke lint-corpus /work/corpus
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build a scanned (image-only, no text layer) PDF fixture
+        run: |
+          pip install --quiet pillow fpdf2
+          mkdir -p /tmp/ocr-fixture
+          python - <<'PY'
+          from pathlib import Path
+
+          from fpdf import FPDF
+          from PIL import Image, ImageDraw, ImageFont
+
+          # Synthetic clause text, fictitious parties only — same convention
+          # as tests/test_pdf_ingester.py's programmatic fixtures. Rendered
+          # to an image and embedded with NO text layer, so the container's
+          # docling/RapidOCR stack — not pdfplumber's text extraction — is
+          # what has to read it back.
+          text = "INDEMNIFICATION. Alpha Corp shall indemnify Beta Ltd."
+          img = Image.new("RGB", (1600, 300), "white")
+          draw = ImageDraw.Draw(img)
+          font = ImageFont.truetype(
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48
+          )
+          draw.text((40, 100), text, fill="black", font=font)
+          img_path = Path("/tmp/ocr-fixture/page.png")
+          img.save(img_path)
+
+          pdf = FPDF(unit="pt", format=(1600, 300))
+          pdf.add_page()
+          pdf.image(str(img_path), x=0, y=0, w=1600, h=300)
+          pdf.output("/tmp/ocr-fixture/scanned.pdf")
+          PY
+          chmod -R a+rX /tmp/ocr-fixture
+
+      - name: Run the scanned PDF through docling/OCR extraction, assert non-empty text
+        run: |
+          docker run --rm \
+            -v /tmp/ocr-fixture:/fixture:ro \
+            --entrypoint python \
+            playbook-engine:smoke -c "
+          from pathlib import Path
+          from playbook_engine.extraction import extract_blocks
+          canonical_text, blocks, extractor = extract_blocks(Path('/fixture/scanned.pdf'))
+          assert extractor == 'docling', f'expected docling extractor, got {extractor!r}'
+          assert canonical_text.strip(), 'OCR extraction yielded no text'
+          print(f'OK extractor={extractor} chars={len(canonical_text)}')
+          "

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# VCS / editor / OS
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Local scratch — disposable artifacts, staging adapters, run configs
+ignore/
+
+# Engine outputs / intermediates
+out/
+out*/
+normalized/
+*.opf.json
+*.opf.json.tmp
+
+# Corpora are private/sensitive — never bake into the image
+corpus/
+corpus*/
+!examples/**

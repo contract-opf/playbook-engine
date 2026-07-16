@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "playbook-engine"
+version = "0.2.0"
+description = "Corpus-to-playbook compiler emitting the Open Playbook Format (OPF)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Exos" }]
+keywords = ["contracts", "negotiation", "playbook", "legal", "opf", "clause-analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Legal Industry",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing",
+]
+
+dependencies = [
+    "anthropic>=0.115",
+    "click>=8.1",
+    "jsonschema>=4.23",
+    "pdfplumber>=0.11",
+    "python-docx>=1.1",
+    "striprtf>=0.0.26",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+# The standard's post-launch home is the contract-opf org (issue #181 —
+# schema $ids already point there); these URLs match that destination.
+[project.urls]
+Homepage = "https://github.com/contract-opf/playbook-engine"
+Repository = "https://github.com/contract-opf/playbook-engine"
+Issues = "https://github.com/contract-opf/playbook-engine/issues"
+Changelog = "https://github.com/contract-opf/playbook-engine/blob/main/CHANGELOG.md"
+
+[project.scripts]
+playbook = "playbook_engine.cli:cli"
+# Alias for installs alongside other tools where the generic `playbook`
+# name is prone to collide on PATH (issue #176).
+playbook-engine = "playbook_engine.cli:cli"
+
+[project.optional-dependencies]
+dev = [
+    "fpdf2>=2.7",
+    # Also the build backend (see [build-system] above); a dev extra so the
+    # B1 packaging regression test can build a real wheel in-process to
+    # verify non-editable installs actually get spec/ (issue #182).
+    "hatchling>=1.27",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-PyYAML>=6.0",
+]
+
+# Ship the bundled spec dir (JSON schemas + builtin taxonomies) into the wheel
+# at ``site-packages/spec/`` so ``config._BUILTIN_TAXONOMY_DIR`` and
+# ``validator._SCHEMA_PATH_*`` — both ``Path(__file__).parent.parent / "spec"``
+# — resolve under a NON-editable install (e.g. the Docker image's
+# ``pip install /app``). Without this, ``builtin:`` taxonomies and OPF schema
+# validation only work from an editable/source checkout, so `project`/`validate`
+# fail in the container even though the files sit at ``/app/spec`` (issue #182).
+[tool.hatch.build.targets.wheel.force-include]
+"spec" = "spec"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# Local scratch dir for disposable artifacts/adapters — not part of the package.
+extend-exclude = ["ignore"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "PIE", "RET", "SIM", "TID"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

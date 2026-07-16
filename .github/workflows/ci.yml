@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The legacy (non-Docker) extraction path shells out to pandoc for RTF
+      # — several pipeline tests exercise it. Dev machines have it via brew;
+      # the hosted runner does not (first public CI run failed on exactly
+      # this, 2026-07-14).
+      - name: Install system dependencies (pandoc)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pandoc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Type check (mypy)
+        run: mypy playbook_engine
+
+      - name: Test (pytest)
+        run: pytest --cov=playbook_engine --cov-report=term-missing

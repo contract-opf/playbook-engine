@@ -1,0 +1,27 @@
+{
+  "opf_version": "0.3",
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": { "source": "custom", "entries": [] },
+  "clauses": [],
+  "evidence": {
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "our_standard": {
+          "text": "Each party shall indemnify the other against claims arising from its own negligence.",
+          "source_ref": {
+            "document_id": "counterparty-example",
+            "version": 1,
+            "clause_path": "8",
+            "char_span": [0, 75]
+          }
+        }
+      }
+    ]
+  },
+  "corpus": { "documents": [], "stats": {} },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}

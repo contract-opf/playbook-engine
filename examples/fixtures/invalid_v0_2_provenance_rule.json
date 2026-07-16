@@ -1,0 +1,62 @@
+{
+  "opf_version": "0.2",
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [{ "id": "indemnification", "label": "Indemnification", "status": "active" }]
+  },
+  "evidence": {
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "our_standard": {
+          "text": "Counterparty shall indemnify all claims.",
+          "source_ref": {
+            "document_id": "counterparty-doc",
+            "version": 1,
+            "clause_path": "9",
+            "char_span": [0, 40]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Unilateral indemnification.",
+            "example_ref": {
+              "document_id": "counterparty-doc",
+              "version": 1,
+              "clause_path": "9",
+              "char_span": [0, 40]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "material" },
+            "provenance": "counterparty_paper",
+            "outcome": "signed",
+            "precedent_count": 1
+          }
+        ],
+        "summary": {
+          "historical_stance": "consistently_held",
+          "confidence": { "score": 0.5, "n_our_paper": 0, "n_counterparty_paper": 1 }
+        }
+      }
+    ],
+    "clause_library": []
+  },
+  "posture": {},
+  "floor": {},
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "counterparty-doc",
+        "title": "Other Party's Template",
+        "provenance": "counterparty_paper",
+        "in_scope": true
+      }
+    ],
+    "stats": {}
+  },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}

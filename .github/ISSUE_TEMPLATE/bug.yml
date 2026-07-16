@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in the engine or a produced playbook is wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you run, what did you expect, what did you get?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Exact commands from a clean checkout, ideally against a synthetic
+        fixture corpus (never attach real agreements).
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: "`make all` output"
+      description: Paste the tail of `make all` (run with the venv on PATH).
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: e.g. main @ abc1234

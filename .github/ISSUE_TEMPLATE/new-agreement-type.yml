@@ -1,0 +1,33 @@
+name: New agreement type
+description: Ask about compiling a playbook for a new agreement type
+labels: [agreement-type]
+body:
+  - type: input
+    id: type
+    attributes:
+      label: Agreement type
+      placeholder: e.g. Mutual NDA, MSA, DPA
+    validations:
+      required: true
+  - type: textarea
+    id: corpus
+    attributes:
+      label: Corpus shape
+      description: >
+        How many deals, versions per deal, formats (DOCX/PDF/RTF), whether a
+        canonical template exists. Describe — do not attach real agreements.
+    validations:
+      required: true
+  - type: textarea
+    id: taxonomy
+    attributes:
+      label: Taxonomy status
+      description: >
+        Existing taxonomy you plan to use (e.g. builtin, custom YAML,
+        induced via `playbook induce-taxonomy`)?
+  - type: textarea
+    id: config
+    attributes:
+      label: Config attempted
+      description: Your `playbook.config.yaml` (redact party names).
+      render: yaml

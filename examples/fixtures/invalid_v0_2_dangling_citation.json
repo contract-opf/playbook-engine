@@ -1,0 +1,102 @@
+{
+  "opf_version": "0.2",
+  "agreement_type": {
+    "id": "educational-affiliation",
+    "name": "Educational Affiliation Agreement"
+  },
+  "baseline": {
+    "has_canonical_template": true,
+    "template_ref": {
+      "document_id": "template",
+      "title": "FixtureCorp Affiliation Template",
+      "source": "template/affiliation-template.docx"
+    }
+  },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [
+      {
+        "id": "indemnification",
+        "label": "Indemnification",
+        "status": "active",
+        "cuad_origin": "Indemnification",
+        "description": "Who bears third-party claim risk."
+      }
+    ]
+  },
+  "evidence": {
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "our_standard": {
+          "text": "Each party shall indemnify the other against claims arising from its own negligence.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "8",
+            "char_span": [0, 75]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Mutual indemnification, negligence-based.",
+            "example_ref": {
+              "document_id": "not-in-corpus",
+              "version": 1,
+              "clause_path": "8.1",
+              "char_span": [0, 50]
+            },
+            "deviation": "reworded_equivalent",
+            "risk_delta": { "direction": "neutral", "magnitude": "none" },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2
+          }
+        ],
+        "summary": {
+          "historical_stance": "usually_held",
+          "acceptable_if": ["mutual", "negligence-limited"],
+          "fallbacks": [],
+          "rejected": [],
+          "confidence": {
+            "score": 0.6,
+            "basis": "precedent_count + provenance_mix",
+            "n_our_paper": 2,
+            "n_counterparty_paper": 0
+          }
+        }
+      }
+    ],
+    "clause_library": []
+  },
+  "posture": {},
+  "floor": {},
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "university-of-example",
+        "title": "University of Example Affiliation Agreement",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.98,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      }
+    ],
+    "stats": {
+      "documents_total": 1,
+      "documents_in_scope": 1,
+      "versions_total": 3
+    }
+  },
+  "compiler": {
+    "name": "playbook-engine",
+    "version": "0.1.0",
+    "run_id": "test-run-001",
+    "generated_at": "2026-01-01T00:00:00Z"
+  }
+}

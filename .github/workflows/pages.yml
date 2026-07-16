@@ -1,0 +1,51 @@
+name: Pages
+
+# Publishes the OPF JSON Schemas under spec/ to GitHub Pages so their
+# canonical $id URLs (https://contract-opf.github.io/playbook-engine/spec/...)
+# resolve. Requires GitHub Pages to be enabled in repo settings with source
+# "GitHub Actions" — a manual admin step (see issue #160), not done by this
+# workflow.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "spec/*.schema*.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage schemas at their canonical paths
+        run: |
+          mkdir -p _site/spec
+          cp spec/*.schema*.json _site/spec/
+          touch _site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

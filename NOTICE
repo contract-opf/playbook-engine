@@ -1,0 +1,13 @@
+playbook-engine
+Copyright (c) 2026 Exos.
+
+This product includes software developed by Exos, licensed under the
+Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------
+
+This repository includes clause-category names and descriptions derived from
+CUAD v1 (Contract Understanding Atticus Dataset), created by The Atticus Project
+(https://www.atticusprojectai.org/cuad), licensed under CC-BY-4.0
+(https://creativecommons.org/licenses/by/4.0/). Derived material appears in
+spec/taxonomy/ and playbook_engine/taxonomy_inductor.py.

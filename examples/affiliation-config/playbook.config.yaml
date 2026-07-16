@@ -1,0 +1,27 @@
+agreement_type:
+  id: educational-affiliation
+  name: "Educational Affiliation Agreement"
+  description: >
+    Clinical/practicum placement agreement between FixtureCorp and a university or college.
+    Governs the rights and responsibilities of both parties during student placements
+    at FixtureCorp facilities.
+  aliases:
+    - eiaa  # a consuming app's own registry key for this same agreement type (see #124)
+
+baseline:
+  # Path to the canonical FixtureCorp template, relative to this config file.
+  # Set to null (or omit) for an emergent playbook with no standard template.
+  template: null  # Replace with: ../../template/affiliation-template.docx
+
+
+# `builtin:` resolves against the engine's own bundled spec/taxonomy/ dir,
+# not a path relative to this file — so this config keeps working after
+# being copied anywhere (next to a corpus, into a container mount, etc.).
+taxonomy: builtin:affiliation-agreement.yaml
+
+provenance:
+  our_party_aliases:
+    - "FixtureCorp"
+    - "FixtureCorp Holdings, LLC"
+    - "FixtureCorp Works"
+    - "FixtureCorp Performance"
