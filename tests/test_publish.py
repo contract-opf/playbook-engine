@@ -545,10 +545,12 @@ def test_publish_report_carries_proper_noun_findings() -> None:
     """End to end: a surviving unknown name shows up on the PublishReport (it is
     advisory — it does NOT block, unlike a KNOWN-name backstop hit)."""
     doc = _make_doc()
-    # Inject an unknown name into a free-text surface the sweep scans. It is
-    # NOT in known_entity_names, so step-4's backstop cannot catch it — the
-    # proper-noun sweep is the layer that surfaces it.
-    doc["evidence"]["clauses"][0]["our_standard"]["text"] += " Ashland University drafted this."
+    # Inject an unknown name into a free-text surface the sweep scans. A
+    # signatory-style PERSONAL name is advisory: not in known_entity_names, and
+    # not an institution shape, so neither step-4 nor the step-5.5 gate blocks —
+    # the proper-noun sweep is the layer that surfaces it. (An institution name
+    # like "Ashland University" would now HARD-block; see the gate tests below.)
+    doc["evidence"]["clauses"][0]["our_standard"]["text"] += " Dana Ashland drafted this."
 
     report = publish_playbook(
         doc,
@@ -559,7 +561,276 @@ def test_publish_report_carries_proper_noun_findings() -> None:
     )
 
     texts = [f.text for f in report.proper_noun_findings]
-    assert "Ashland University" in texts
+    assert "Dana Ashland" in texts
     # Advisory only — publish still succeeded and produced a doc.
     assert report.doc is not None
     assert "proper_noun_findings" in report.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Issue #234: publication-noise scrub + GC redact list
+# ---------------------------------------------------------------------------
+
+
+def _publish_with_text(text: str, redact_terms: list[str] | None = None) -> dict:
+    doc = _make_doc()
+    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = text
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-16T00:00:00Z",
+        redact_terms=redact_terms or (),
+    )
+    return report.doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"]  # type: ignore[no-any-return]
+
+
+def test_publish_strips_esign_audit_lines() -> None:
+    text = (
+        "Notices shall be sent to the parties.\n"
+        "DocuSigned by: Pat Example\n"
+        "Envelope Id: CBJCHBCAABAAdvXXQkglEeVYM\n"
+        "Signed 07/01/2024 10:32:11 AM PDT\n"
+        "IP Address: 10.0.0.1\n"
+        "The remainder of the clause survives."
+    )
+    out = _publish_with_text(text)
+    assert "Notices shall be sent" in out
+    assert "remainder of the clause survives" in out
+    assert "DocuSigned" not in out
+    assert "Envelope" not in out
+    assert "IP Address" not in out
+    assert "10:32:11" not in out
+
+
+def test_publish_redacts_address_spans() -> None:
+    text = (
+        "Notices to the Institution at 1234 Campus Garden Lane, Springfield, "
+        "IL 62704, Suite 400, or P.O. Box 6186, with a copy to Legal."
+    )
+    out = _publish_with_text(text)
+    assert "1234" not in out
+    assert "Campus Garden Lane" not in out
+    assert "62704" not in out
+    assert "P.O. Box 6186" not in out
+    assert "[address redacted]" in out
+    assert "with a copy to Legal" in out
+
+
+def test_publish_never_scrubs_content_addresses() -> None:
+    doc = _make_doc()
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-16T00:00:00Z",
+    )
+    published = report.doc
+    for document in published["corpus"]["documents"]:
+        for vf in document.get("version_files", []):
+            assert vf["sha256"].startswith("sha256:")
+            assert "[redacted]" not in vf["sha256"]
+    assert published["identity"]["content_hash"].startswith("sha256:")
+
+
+def test_publish_redact_terms_replace_and_join_backstop() -> None:
+    # The institution name must be on the redact list now — the step-5.5 gate
+    # hard-blocks a surviving "... University". With it listed, redaction takes
+    # it out (joining the backstop) while a non-listed term ("Provost") stays.
+    text = "Signature: Pat Q. Example, Provost, Example State University (KSU)."
+    out = _publish_with_text(
+        text, redact_terms=["Pat Q. Example", "Example State University", "KSU"]
+    )
+    assert "Pat Q. Example" not in out
+    assert "KSU" not in out
+    assert "State University" not in out
+    assert out.count("[redacted]") >= 2
+    assert "Provost" in out  # a non-listed term still survives
+
+
+def test_publish_version_ingest_stems_become_ordinals() -> None:
+    doc = _make_doc()
+    doc["corpus"]["documents"][0]["version_ingest"] = [
+        {"version": "01__Real Filename Stem- Some University (002)", "status": "ok"},
+        {"version": "02__Real Filename Stem- Some University (002)", "status": "ok"},
+    ]
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-16T00:00:00Z",
+    )
+    ingests = report.doc["corpus"]["documents"][0]["version_ingest"]
+    assert [i["version"] for i in ingests] == ["v1", "v2"]
+
+
+def test_publish_scrubs_emails_uuids_urls() -> None:
+    text = (
+        "Contact pat.example@someuniversity.edu with questions.\n"
+        "Transaction ref 21345135-f8f5-4497-a929-6e64db805306 follows.\n"
+        "See https://dms.example.edu/contracts/123 and www.example.edu for details.\n"
+        "The clause text itself survives."
+    )
+    out = _publish_with_text(text)
+    assert "someuniversity" not in out
+    assert "pat.example" not in out
+    assert "21345135" not in out
+    assert "https://" not in out and "www.example.edu" not in out
+    assert "The clause text itself survives." in out
+
+
+def test_publish_redact_terms_match_across_punctuation() -> None:
+    """A redact term must hit slugs and e-mail localparts, not just prose —
+    the same normalization class as the step-4 backstop."""
+    text = (
+        "Deal id fwd-legaladmin-counterparty-9-chapel-hill-agreem-773a "
+        "and mail to amanda.wynn@example.edu about it."
+    )
+    out = _publish_with_text(text, redact_terms=["Chapel Hill", "Amanda Wynn"])
+    assert "chapel-hill" not in out and "Chapel Hill" not in out
+    assert "amanda" not in out.lower()
+    assert "counterparty-9" in out  # surrounding slug context survives
+
+
+def test_backstop_and_redaction_cover_dict_keys() -> None:
+    """document_id slugs appear as dict KEYS in stats tallies — a
+    counterparty fragment there must trip the backstop, and a redact term
+    must rewrite it consistently."""
+    doc = _make_doc()
+    doc["corpus"]["stats"] = {"observations_by_document": {"deal-somewhere-chapel-hill-773a": 3}}
+
+    # 1. backstop sees the key
+    with pytest.raises(PublishError, match="chapel"):
+        publish_playbook(
+            doc,
+            redaction_judge=_NeverCallJudge(),
+            verify_judge=_NeverCallJudge(),
+            known_entity_names=["Chapel Hill"],
+            published_at="2026-07-17T00:00:00Z",
+        )
+
+    # 2. a redact term rewrites the key, so the backstop then passes
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=["Chapel Hill"],
+        published_at="2026-07-17T00:00:00Z",
+        redact_terms=["Chapel Hill"],
+    )
+    keys = list(report.doc["corpus"]["stats"]["observations_by_document"])
+    assert keys == ["deal-somewhere-[redacted]-773a"]
+
+
+def test_redact_terms_with_punctuation_match_normalized_text() -> None:
+    """A term written with punctuation ('Fairview, Westland') must match
+    however the extraction rendered it (double spaces, no comma, case)."""
+    text = "THE JUNIOR COLLEGE DISTRICT OF METROPOLITAN  FAIRVIEW WESTLAND agrees."
+    out = _publish_with_text(
+        text, redact_terms=["Junior College District of Metropolitan Fairview, Westland"]
+    )
+    assert "FAIRVIEW" not in out and "Fairview" not in out
+    assert "[redacted] agrees." in out
+
+
+# ---------------------------------------------------------------------------
+# Final institution-identity gate (list-independent, full-surface, hard):
+# the fix for the 2026-07-22 public example-playbook leak class — a real
+# counterparty name that was never registered, surviving in extracted prose,
+# a stats dict key, or a filename-derived document_id slug.
+# ---------------------------------------------------------------------------
+
+_INST_NAME = "Wexford University"  # fictional; registered NOWHERE
+
+
+def _doc_leaking_institution_everywhere() -> dict[str, Any]:
+    """A clean base doc with a fictional institution name planted in the three
+    surfaces the born-safe pass historically missed: signature-block prose, a
+    corpus.stats dict KEY, and a filename-derived document_id slug value."""
+    doc = _make_doc()
+    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = (
+        f"IN WITNESS WHEREOF, signed on behalf of {_INST_NAME} by its officer."
+    )
+    slug = "affiliation-agreement-wexford-university-0212e146"
+    doc["corpus"]["documents"][0]["document_id"] = slug
+    doc["corpus"]["stats"]["observations_by_document"] = {slug: 3}
+    return doc
+
+
+def test_institution_gate_blocks_unregistered_name_across_surfaces() -> None:
+    """An institution name never given to the backstop still HARD-blocks —
+    whether it hides in prose, a dict key, or a document_id slug."""
+    doc = _doc_leaking_institution_everywhere()
+
+    with pytest.raises(PublishError, match="institution") as exc_info:
+        publish_playbook(
+            doc,
+            redaction_judge=_CleanRedactionJudge(),
+            verify_judge=_CleanVerifyJudge(),
+            known_entity_names=[],  # NOT registered — step-4 backstop is blind to it
+            published_at="2026-07-22T00:00:00Z",
+        )
+    message = str(exc_info.value)
+    assert "wexford university" in message.lower()
+    # every leaking surface is named in the failure
+    assert "observed_positions" in message
+    assert "document_id" in message
+    assert "observations_by_document" in message
+
+
+def test_institution_gate_passes_once_name_is_redacted() -> None:
+    """Naming the survivor in redact_terms clears the gate on every surface —
+    prose, key, and slug transform identically, so publish succeeds clean."""
+    doc = _doc_leaking_institution_everywhere()
+
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-22T00:00:00Z",
+        redact_terms=[_INST_NAME],
+    )
+    blob = " ".join(_walk_strings(report.doc))
+    assert "wexford" not in blob.lower()
+    # the counterparty fragment is gone from BOTH the slug value and the key
+    stats_keys = list(report.doc["corpus"]["stats"]["observations_by_document"])
+    assert stats_keys == ["affiliation-agreement-[redacted]-0212e146"]
+    assert (
+        report.doc["corpus"]["documents"][0]["document_id"]
+        == "affiliation-agreement-[redacted]-0212e146"
+    )
+
+
+def test_institution_gate_ignores_governing_law_and_generic_descriptors() -> None:
+    """The gate must NOT fire on governing-law states or generic org
+    descriptors — those stay the advisory sweep's job, so a clean publish is
+    never falsely blocked."""
+    doc = _make_doc()
+    doc["evidence"]["clauses"][0]["our_standard"]["text"] = (
+        "This Agreement is governed by the laws of the State of New York. "
+        "The University shall provide services through its College of Health "
+        "Professions and the Board of Directors shall meet annually."
+    )
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-22T00:00:00Z",
+    )
+    assert report.doc is not None  # no PublishError
+
+
+def test_publish_scrub_redacts_city_full_state_zip() -> None:
+    """A notice block written 'City, <FullStateName> <ZIP>' (which the
+    two-letter ``ST`` rule misses) is redacted; the gate confirms none
+    survives."""
+    text = "Notices to the Institution at New York, New York 10017, attn: Legal."
+    out = _publish_with_text(text)
+    assert "10017" not in out
+    assert "[address redacted]" in out
+    assert "attn: Legal" in out
