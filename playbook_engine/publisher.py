@@ -42,6 +42,17 @@ does all of that, in order:
      ``leaked`` raises :class:`PublishError` unless the caller passes
      ``accept_residue_risk=True``. The report always lists every finding
      either way.
+  5.5. Final institution-identity gate (:func:`_institution_identity_hits`):
+     re-scans the WHOLE surface — every string value AND dict key — for
+     high-confidence institution-name shapes ("University of X", "X University",
+     "X College", "Regents of ...", "Board of Trustees/Regents") and any postal
+     address that survived the scrub. ANY hit raises :class:`PublishError`,
+     unconditionally (like step 4). This is the layer the step-4 backstop
+     (list-dependent) and the #211 proper-noun sweep (advisory, samples-only)
+     both miss: an unregistered counterparty name hiding in a signature block,
+     a ``corpus.stats`` dict key, or a filename-derived ``document_id`` slug —
+     the exact class of leak that shipped in a public example-playbook publish
+     (2026-07-22). Governing-law states and generic descriptors do not match.
   6. Recomputes ``identity`` on the transformed document — it is a
      different artifact. ``identity.supersedes`` is set to the PRIVATE
      document's own ``content_hash`` (before any of the above ran).
@@ -204,6 +215,13 @@ def _strip_source_paths(doc: dict[str, Any]) -> None:
         for document in corpus.get("documents", []):
             for version_file in document.get("version_files", []):
                 version_file.pop("source_uri", None)
+            # version_ingest[].version carries raw source filename stems —
+            # DMS structure (and, when a counterparty acronym is missing from
+            # the entity registry, an identity leak — issue #234/#189). The
+            # public artifact needs only the ordinal.
+            for i, ingest in enumerate(document.get("version_ingest", [])):
+                if isinstance(ingest, dict) and "version" in ingest:
+                    ingest["version"] = f"v{i + 1}"
 
     baseline = doc.get("baseline")
     if isinstance(baseline, dict):
@@ -240,17 +258,205 @@ def _coarsen_dates(doc: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Step 3.5: publication-noise scrub + GC redact list (issue #234)
+# ---------------------------------------------------------------------------
+
+#: E-signature/CLM audit-trail noise (DocuSign/Adobe Sign): signature pages
+#: extract into full_text as event lines, envelope/transaction ids, and IP
+#: labels. None of it is contract content, and audit trails carry signatory
+#: names and network metadata — strip the LINE, conservatively (a line must
+#: match one of these unambiguous markers to be dropped).
+_ESIGN_LINE_RE = re.compile(
+    r"("
+    r"docusign|adobe\s*sign|envelopeid|envelope\s+id|source\s+envelope|"
+    r"transaction\s+id|ip\s+address|final\s+audit\s+report|record\s+tracking|"
+    r"autonav|time\s+source|timestamp|holder:|signer\s+events|carbon\s+copy\s+events|"
+    r"notary\s+events|payment\s+events|envelope\s+(sent|summary|originator)|"
+    r"certified\s+delivered|signing\s+complete|envelope\s+stamping|"
+    r"^\s*(signed|viewed|sent|delivered|created|completed|resent|read)\b.*"
+    r"\b\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?"
+    r")",
+    re.IGNORECASE,
+)
+
+#: Long opaque tokens (envelope ids, base64-ish audit hashes) anywhere in a
+#: line — redacted in place rather than dropping the line. Requires mixed
+#: case so lowercase-hex content addresses (sha256) never match; strings
+#: beginning with "sha256:" are additionally exempted wholesale in the
+#: scrubber.
+_OPAQUE_TOKEN_RE = re.compile(
+    r"\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])[A-Za-z0-9_-]{18,}\b"
+)
+
+#: Street-address spans: "123 Rose Garden Lane", "P.O. Box 6186",
+#: "Suite 400", and City, ST 12345 tails. Addresses in notice/signature
+#: blocks uniquely identify a counterparty even after its name is aliased.
+_ADDRESS_SPAN_RE = re.compile(
+    r"("
+    r"\b\d{1,6}(\s+[A-Za-z][A-Za-z.'-]*){1,5}\s+"
+    r"(Road|Rd|Street|St|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr|Parkway|Pkwy|"
+    r"Highway|Hwy|Way|Circle|Court|Ct|Place|Pl|Trail|Terrace)\b\.?"
+    r"|\bP\.?\s*O\.?\s+Box\s+\d+\b"
+    r"|\b(Suite|Ste|Room|Rm|Bldg|Building)\s*#?\s*[A-Za-z0-9-]+\b"
+    r"|\b[A-Z][A-Za-z.-]+,?\s+[A-Z]{2}\s+\d{5}(-\d{4})?\b"
+    r")"
+)
+
+_ADDRESS_LABEL = "[address redacted]"
+_REDACT_LABEL = "[redacted]"
+
+#: Full US state names — for the "City, <State> <ZIP>" postal form that the
+#: two-letter ``[A-Z]{2}`` rule in ``_ADDRESS_SPAN_RE`` misses (e.g. a notice
+#: block written "New York, New York 10017"). Kept separate so the address
+#: scrub and the final address backstop share one authority.
+_US_STATE_NAMES = (
+    "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|"
+    "Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|"
+    "Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|"
+    "Missouri|Montana|Nebraska|Nevada|New\\s+Hampshire|New\\s+Jersey|New\\s+Mexico|"
+    "New\\s+York|North\\s+Carolina|North\\s+Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|"
+    "Rhode\\s+Island|South\\s+Carolina|South\\s+Dakota|Tennessee|Texas|Utah|Vermont|"
+    "Virginia|Washington|West\\s+Virginia|Wisconsin|Wyoming"
+)
+_STATE_ZIP_RE = re.compile(
+    r"\b[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)*,?\s+"
+    rf"(?:{_US_STATE_NAMES})\s+\d{{5}}(?:-\d{{4}})?\b"
+)
+
+#: E-mail addresses: NAME@institution-domain is a double identity leak
+#: (person + counterparty domain), never contract content.
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+
+#: UUIDs (e-sign transaction/document ids) — lowercase hex evades the
+#: mixed-case opaque-token rule, so match the canonical shape directly.
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
+#: URLs: portal/DMS links (and institution web addresses) are structure, not
+#: contract content.
+_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
+
+
+def _transform_all_strings(node: Any, fn: Any, *, include_keys: bool = False) -> Any:
+    """Recursively apply *fn* to every string in *node* (returns new tree).
+
+    ``include_keys=True`` also rewrites dict KEYS — needed by the redact-term
+    pass, because document_id slugs appear as map keys (``corpus.stats``
+    tallies) and a redacted id must transform identically everywhere it
+    occurs, key or value, to keep cross-references consistent. The noise
+    scrub deliberately leaves keys alone (structural key names are not
+    prose).
+    """
+    if isinstance(node, str):
+        return fn(node)
+    if isinstance(node, dict):
+        return {
+            (fn(k) if include_keys and isinstance(k, str) else k): _transform_all_strings(
+                v, fn, include_keys=include_keys
+            )
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        return [_transform_all_strings(item, fn, include_keys=include_keys) for item in node]
+    return node
+
+
+def _scrub_publication_noise(doc: dict[str, Any]) -> dict[str, Any]:
+    """Strip e-sign audit lines and redact address spans, doc-wide.
+
+    Operates on EVERY string (the same surface ``proper_noun_residue``
+    sweeps) so the scrub and the residue report cannot disagree about
+    coverage. Deterministic; never raises.
+    """
+
+    def scrub(text: str) -> str:
+        if text.startswith("sha256:"):
+            return text  # content addresses are never publication noise
+        lines_out = []
+        for line in text.split("\n"):
+            if _ESIGN_LINE_RE.search(line):
+                continue
+            line = _EMAIL_RE.sub(_REDACT_LABEL, line)
+            line = _UUID_RE.sub(_REDACT_LABEL, line)
+            line = _URL_RE.sub(_REDACT_LABEL, line)
+            line = _OPAQUE_TOKEN_RE.sub(_REDACT_LABEL, line)
+            line = _ADDRESS_SPAN_RE.sub(_ADDRESS_LABEL, line)
+            line = _STATE_ZIP_RE.sub(_ADDRESS_LABEL, line)
+            lines_out.append(line)
+        return "\n".join(lines_out)
+
+    identity = doc.pop("identity", None)  # recomputed in step 6; never scrub it
+    scrubbed = _transform_all_strings(doc, scrub)
+    if identity is not None:
+        scrubbed["identity"] = identity
+    return scrubbed  # type: ignore[no-any-return]
+
+
+def _apply_redact_terms(doc: dict[str, Any], terms: Sequence[str]) -> dict[str, Any]:
+    """Replace every GC-supplied redact term with ``[redacted]``, doc-wide.
+
+    The redaction list is the GC's residue-review output (signatory names,
+    institution name fragments, campus towns — whatever the residue report
+    surfaced that the entity registry did not know). Matching is
+    case-insensitive and whitespace-flexible (extraction doubles spaces);
+    the list itself is sensitive and stays out of the repo — pass it via
+    ``--redact-terms`` from a local, gitignored file.
+    """
+    cleaned = [t.strip() for t in terms if t.strip()]
+    if not cleaned:
+        return doc
+
+    # Terms tokenize on \w+ runs and join on ANY non-word separator run
+    # ([\W_]+) — the same normalization class as the step-4 backstop. So
+    # "Chapel Hill" also redacts "chapel-hill" inside a document_id slug and
+    # "amanda.wynn" inside an e-mail localpart, and a term written with
+    # punctuation ("Kansas City, Missouri") matches the text however the
+    # punctuation/casing/spacing came out of extraction. Slug redaction is
+    # safe: every reference to the same document_id transforms identically,
+    # so citations keep resolving.
+    def _term_pattern(term: str) -> re.Pattern[str] | None:
+        words = re.findall(r"\w+", term)
+        if not words:
+            return None
+        return re.compile(
+            r"\b" + r"[\W_]+".join(re.escape(w) for w in words) + r"\b", re.IGNORECASE
+        )
+
+    patterns = [p for term in sorted(cleaned, key=len, reverse=True) if (p := _term_pattern(term))]
+
+    def redact(text: str) -> str:
+        for pat in patterns:
+            text = pat.sub(_REDACT_LABEL, text)
+        return text
+
+    identity = doc.pop("identity", None)
+    redacted = _transform_all_strings(doc, redact, include_keys=True)
+    if identity is not None:
+        redacted["identity"] = identity
+    return redacted  # type: ignore[no-any-return]
+
+
+# ---------------------------------------------------------------------------
 # Step 4: deterministic no-known-entity backstop
 # ---------------------------------------------------------------------------
 
 
 def _walk_strings(node: Any, path: str = "$") -> list[tuple[str, str]]:
-    """Return ``(path, value)`` for every string leaf reachable from *node*."""
+    """Return ``(path, value)`` for every string reachable from *node*.
+
+    Dict KEYS are included (path ``{key}``), not just values: document_id
+    slugs appear as map keys in ``corpus.stats``-style tallies, and a
+    counterparty fragment hiding in a key must trip the backstop and the
+    residue sweep exactly like one in a value (issue #234 follow-up).
+    """
     found: list[tuple[str, str]] = []
     if isinstance(node, str):
         found.append((path, node))
     elif isinstance(node, dict):
         for key, value in node.items():
+            if isinstance(key, str):
+                found.append((f"{path}.{{{key}}}", key))
             found.extend(_walk_strings(value, f"{path}.{key}"))
     elif isinstance(node, list):
         for idx, value in enumerate(node):
@@ -279,6 +485,138 @@ def _entity_backstop_scan(
         for real_name, normalized_name in normalized_names:
             if normalized_name and f" {normalized_name} " in haystack:
                 hits.append((path, real_name))
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# Step 5.5: final institution-identity gate (deterministic, full-surface)
+# ---------------------------------------------------------------------------
+#
+# The step-4 backstop only catches names it was GIVEN (``known_entity_names``);
+# the #211 proper-noun sweep is list-independent but ADVISORY and only sees the
+# free-text *samples*. A real counterparty that was never registered — its name
+# surviving in a signature block, a notices address, a dict KEY, or a
+# filename-derived ``document_id`` slug — slips past both. That is exactly the
+# class of leak that shipped in a public example-playbook publish (2026-07-22):
+# a real institution name (a public university, a college-of-health, a
+# community-college district) survived in extracted text, stats keys, and slugs
+# the pseudonymizer never rewrote.
+#
+# This is a deterministic, list-INDEPENDENT, FULL-SURFACE gate. It walks every
+# string — values AND dict keys, via :func:`_walk_strings` — for high-confidence
+# institution-name shapes and any postal address that survived the scrub, and
+# HARD-FAILS the publish on a hit. The fix path for a real survivor is the same
+# as the step-4 backstop: add the name to ``--redact-terms`` (or register it),
+# and re-run. Governing-law states ("the laws of the State of New York") and
+# generic descriptors ("College of Health Professions", bare "the University")
+# deliberately do NOT match, so the gate stays fail-closed without tripping on
+# benign content — those remain the advisory proper-noun sweep's job.
+
+# Distinctive-token guard: a token from one of these is a role/qualifier word,
+# never the identifying part of an institution name, so a match carrying only
+# these is dropped ("the University", "State University", "of the ...").
+_INSTITUTION_TOKEN_STOP = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "our",
+        "its",
+        "their",
+        "this",
+        "that",
+        "these",
+        "those",
+        "each",
+        "any",
+        "all",
+        "such",
+        "state",
+        "community",
+        "technical",
+        "international",
+        "public",
+        "private",
+        "national",
+        "american",
+        "new",
+        "other",
+        "same",
+        "said",
+        "and",
+        "or",
+        "of",
+        "for",
+        "by",
+        "to",
+        "at",
+        "in",
+        "on",
+        "from",
+        "counterparty",
+        "company",
+        "provider",
+        "institution",
+        "party",
+        "parties",
+        "educational",
+        "academic",
+        "affiliated",
+        "affiliate",
+    }
+)
+
+# All matched against the case/punctuation-normalized string (``_normalize_for_scan``),
+# so "University of Westmoor", "university-of-westmoor" (a slug), and
+# "UNIVERSITY  OF  WESTMOOR" (double-spaced extraction) all reduce to the same
+# "university of westmoor" and match identically.
+_INST_UNIVERSITY_OF_RE = re.compile(r"\buniversity\s+of\s+(?:the\s+)?([a-z][a-z0-9]*)")
+_INST_X_UNIVERSITY_RE = re.compile(
+    r"\b([a-z][a-z0-9]*)\s+"
+    r"(?:state\s+|community\s+|technical\s+|international\s+|memorial\s+)?university\b"
+)
+_INST_X_COLLEGE_RE = re.compile(
+    # "junior" is deliberately NOT a qualifier: it is itself the distinctive
+    # token of "Junior College [District of ...]", so treating it as a skip
+    # word would let a leading stopword ("... Institution junior college ...")
+    # absorb the match and hide the name.
+    r"\b([a-z][a-z0-9]*)\s+"
+    r"(?:community\s+|technical\s+|city\s+|state\s+)?college\b"
+)
+_INST_REGENTS_RE = re.compile(r"\bregents\s+of\b")
+_INST_BOARD_RE = re.compile(r"\bboard\s+of\s+(?:trustees|regents)\b")
+
+
+def _institution_identity_hits(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Return every ``(path, matched_text, kind)`` institution-name or postal-
+    address pattern surviving anywhere in *doc* (values AND dict keys).
+
+    ``kind`` is ``"institution"`` or ``"address"``. List-independent and
+    LLM-free — see the section header for why this exists.
+    """
+    hits: list[tuple[str, str, str]] = []
+    for path, text in _walk_strings(doc):
+        if not text or text.startswith("sha256:"):
+            continue
+        normalized = _normalize_for_scan(text)
+        # Token-bearing rules: flag only when the distinctive token is a real
+        # name, not a role/qualifier word (so "the University" never trips).
+        for pattern in (_INST_UNIVERSITY_OF_RE, _INST_X_UNIVERSITY_RE, _INST_X_COLLEGE_RE):
+            for match in pattern.finditer(normalized):
+                token = match.group(1)
+                if token and token not in _INSTITUTION_TOKEN_STOP:
+                    hits.append((path, match.group(0).strip(), "institution"))
+        # Unambiguous org markers: a governing body is always a specific
+        # (usually public) institution, whatever token follows.
+        for pattern in (_INST_REGENTS_RE, _INST_BOARD_RE):
+            marker = pattern.search(normalized)
+            if marker:
+                hits.append((path, marker.group(0).strip(), "institution"))
+        # Postal address that survived the scrub (address regexes are
+        # case-sensitive, so match the ORIGINAL text, not the normalized form).
+        for pattern in (_ADDRESS_SPAN_RE, _STATE_ZIP_RE):
+            for match in pattern.finditer(text):
+                hits.append((path, match.group(0).strip(), "address"))
     return hits
 
 
@@ -555,6 +893,7 @@ def publish_playbook(
     counterparty_label: str = DEFAULT_COUNTERPARTY_LABEL,
     keep_dates: bool = False,
     accept_residue_risk: bool = False,
+    redact_terms: Sequence[str] = (),
 ) -> PublishReport:
     """Run the six-step party-anonymous publication transform (issue #188).
 
@@ -592,9 +931,12 @@ def publish_playbook(
 
     Raises:
         PublishError: step 4 found a known real entity name surviving in the
-                      output, OR step 5's verify pass flagged residual
-                      semantic residue and ``accept_residue_risk`` is
-                      ``False``.
+                      output; OR step 5's verify pass flagged residual semantic
+                      residue and ``accept_residue_risk`` is ``False``; OR the
+                      final step-5.5 institution-identity gate found an
+                      institution-name shape or postal address surviving
+                      anywhere (value or dict key) — unconditional, fixed by
+                      naming the survivor in ``redact_terms``.
     """
     published = copy.deepcopy(doc)
 
@@ -612,8 +954,17 @@ def publish_playbook(
     if not keep_dates:
         _coarsen_dates(published)
 
+    # --- step 3.5: publication-noise scrub + GC redact list (issue #234) ---
+    # E-sign audit trails and notice-block street addresses identify parties
+    # and people even after every entity name is aliased; the redact list is
+    # the GC's residue-review output for anything the registry didn't know.
+    published = _scrub_publication_noise(published)
+    published = _apply_redact_terms(published, redact_terms)
+
     # --- step 4: deterministic no-known-entity backstop (hard, unconditional) ---
-    hits = _entity_backstop_scan(published, known_entity_names)
+    # Redact terms join the backstop: a term the GC ordered redacted
+    # surviving anywhere is as blocking as a known entity name.
+    hits = _entity_backstop_scan(published, [*known_entity_names, *redact_terms])
     if hits:
         listing = "; ".join(f"{path} matches {name!r}" for path, name in hits)
         raise PublishError(
@@ -634,6 +985,29 @@ def publish_playbook(
             f"{len(export_report.leaked)} sample(s) as still leaking semantic "
             f"residue: {leaked_paths}. Pass accept_residue_risk=True "
             "(--accept-residue-risk) to publish anyway."
+        )
+
+    # --- step 5.5: final institution-identity gate (deterministic, hard) ---
+    # After EVERY transform above, re-scan the whole surface (values AND keys)
+    # for institution-name shapes and surviving addresses the born-safe
+    # pseudonymizer / redact list never covered. Unconditional — no flag
+    # suppresses it (like step 4); the fix is to name the survivor in
+    # redact_terms. Catches the class of leak that shipped in a public
+    # example-playbook publish: a real counterparty name in a signature block,
+    # a stats dict key, or a filename-derived document_id slug.
+    identity_hits = _institution_identity_hits(published)
+    if identity_hits:
+        listing = "; ".join(
+            f"{path}: {matched!r} ({kind})" for path, matched, kind in identity_hits[:25]
+        )
+        more = "" if len(identity_hits) <= 25 else f" (+{len(identity_hits) - 25} more)"
+        raise PublishError(
+            f"publish blocked: {len(identity_hits)} institution-identity / address "
+            f"pattern(s) survived every transform — a real counterparty name or postal "
+            f"address the born-safe pseudonymizer and redact list did not cover: "
+            f"{listing}{more}. Add each offending name to --redact-terms (or register it "
+            "in the entity registry) and re-run. Deterministic backstop — no flag "
+            "suppresses it (identity-residue backstop; 2026-07-22 publish incident)."
         )
 
     # --- step 6: recompute identity — a published doc is a different artifact ---
