@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# VCS / editor / OS
+.git/
+.github/
+.idea/
+.vscode/
+.DS_Store
+
+# Local scratch — disposable artifacts, staging adapters, run configs
+ignore/
+
+# Engine outputs / intermediates
+out/
+out*/
+normalized/
+*.opf.json
+*.opf.json.tmp
+
+# Corpora are private/sensitive — never bake into the image. The final
+# "*-corpus/" pattern is load-bearing: "corpus/"/"corpus*/" only match a
+# top-level dir whose name STARTS with "corpus", so a real private corpus
+# named e.g. "<something>-corpus/" (which does not) would otherwise be sent
+# into the build context and COPY'd into the image. "*-corpus/" catches any
+# top-level "*-corpus" dir; nested example fixtures under examples/ are not
+# matched ("*" does not cross "/") and are re-included below regardless.
+corpus/
+corpus*/
+*-corpus/
+!examples/**

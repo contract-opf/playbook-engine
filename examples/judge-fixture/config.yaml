@@ -1,0 +1,19 @@
+# Engine config for judge end-to-end fixture (issue #66).
+# Synthetic agreements only — no real corpus, no real parties.
+# Uses the existing affiliation-agreement taxonomy (see spec/taxonomy/).
+agreement_type:
+  id: fixture-affiliation
+  name: "Fixture Affiliation Agreement"
+  description: >
+    Synthetic agreement type used only for judge end-to-end testing.
+
+baseline:
+  template: null
+
+# Path relative to this config file.
+taxonomy: ../../spec/taxonomy/affiliation-agreement.yaml
+
+provenance:
+  our_party_aliases:
+    - "FixtureCorp"
+    - "TestOrg"

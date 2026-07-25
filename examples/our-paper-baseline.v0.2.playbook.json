@@ -1,0 +1,714 @@
+{
+  "opf_version": "0.2",
+  "agreement_type": {
+    "id": "educational-affiliation",
+    "name": "Educational Affiliation Agreement",
+    "description": "Clinical/practicum placement agreement between FixtureCorp and a university or college.",
+    "aliases": [
+      "eiaa"
+    ]
+  },
+  "baseline": {
+    "has_canonical_template": true,
+    "template_ref": {
+      "document_id": "template",
+      "title": "FixtureCorp Affiliation Template",
+      "source": "template/affiliation-template.docx",
+      "sha256": "sha256:d51ff1a520d266e4c327e58ddc3d17703e6baf72dc966a929f6c94c5b9a79466"
+    }
+  },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [
+      {
+        "id": "indemnification",
+        "label": "Indemnification",
+        "status": "active",
+        "cuad_origin": "Indemnification",
+        "description": "Who bears third-party claim risk."
+      },
+      {
+        "id": "insurance",
+        "label": "Insurance",
+        "status": "active",
+        "cuad_origin": "Insurance",
+        "description": "Required coverage types and minimums."
+      },
+      {
+        "id": "governing_law",
+        "label": "Governing Law",
+        "status": "active",
+        "cuad_origin": "Governing Law",
+        "description": "Which state's law governs and where disputes are heard."
+      }
+    ]
+  },
+  "perspective": {
+    "party": "FixtureCorp",
+    "counterparty_type": "Educational Institution"
+  },
+  "de_minimis": [
+    "typo fixes",
+    "renumbering with no substantive change"
+  ],
+  "evidence": {
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "our_standard": {
+          "text": "Each party shall indemnify, defend, and hold harmless the other party against third-party claims to the extent arising from its own negligence or willful misconduct in connection with the Program.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "8",
+            "char_span": [
+              0,
+              330
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Mutual, negligence-based indemnification matching our standard (no deviation).",
+            "example_ref": {
+              "document_id": "state-university-2023",
+              "version": 3,
+              "clause_path": "8",
+              "char_span": [
+                0,
+                328
+              ]
+            },
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 5,
+            "proposed_by": "us",
+            "observed_at": "2023-09-14",
+            "counterparty_ref": {
+              "alias": "Counterparty-1",
+              "counterparty_type": "public university"
+            }
+          },
+          {
+            "text_summary": "Mutual indemnification narrowed to gross negligence and willful misconduct.",
+            "example_ref": {
+              "document_id": "city-college-2022",
+              "version": 4,
+              "clause_path": "9.1",
+              "char_span": [
+                0,
+                290
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "minor"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2,
+            "full_text": "Each party shall indemnify the other against third-party claims to the extent arising from its own gross negligence or willful misconduct in connection with the Program.",
+            "proposed_by": "counterparty",
+            "observed_at": "2022-11-02",
+            "counterparty_ref": {
+              "alias": "Counterparty-2",
+              "counterparty_type": "community college"
+            }
+          },
+          {
+            "text_summary": "One-way indemnification flowing only from FixtureCorp — proposed in redline, rejected before signing.",
+            "example_ref": {
+              "document_id": "metro-tech-2021",
+              "version": 2,
+              "clause_path": "8",
+              "char_span": [
+                0,
+                260
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "provenance": "our_paper",
+            "outcome": "proposed_then_reversed",
+            "precedent_count": 1,
+            "proposed_by": "counterparty",
+            "counterparty_ref": {
+              "alias": "Counterparty-3"
+            }
+          }
+        ],
+        "negotiation_trail": [
+          {
+            "document_id": "metro-tech-2021",
+            "round": 1,
+            "moved_by": "counterparty",
+            "change_summary": "Asked to make indemnification one-way (FixtureCorp indemnifies Institution only).",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "ref": {
+              "document_id": "metro-tech-2021",
+              "version": 2,
+              "clause_path": "8",
+              "char_span": [
+                0,
+                260
+              ]
+            }
+          },
+          {
+            "document_id": "metro-tech-2021",
+            "round": 2,
+            "moved_by": "us",
+            "change_summary": "Restored mutual, negligence-based indemnification; landed as signed.",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "ref": {
+              "document_id": "metro-tech-2021",
+              "version": 3,
+              "clause_path": "8",
+              "char_span": [
+                0,
+                330
+              ]
+            }
+          }
+        ],
+        "summary": {
+          "historical_stance": "mixed",
+          "stance_detail": {
+            "held": 2,
+            "of": 3,
+            "basis": "our_paper"
+          },
+          "acceptable_if": [
+            {
+              "if": "mutual indemnification narrowed to gross negligence",
+              "to": "Each party shall indemnify the other against third-party claims to the extent arising from its own gross negligence or willful misconduct in connection with the Program.",
+              "rationale": "Signed once with a minor-worse risk_delta; carried as a fallback, not an unconditional tolerance.",
+              "observation_ref": {
+                "document_id": "city-college-2022",
+                "version": 4,
+                "clause_path": "9.1",
+                "char_span": [
+                  0,
+                  290
+                ]
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "text_summary": "Mutual indemnification narrowed to gross negligence and willful misconduct.",
+              "example_ref": {
+                "document_id": "city-college-2022",
+                "version": 4,
+                "clause_path": "9.1",
+                "char_span": [
+                  0,
+                  290
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "minor"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 2,
+              "full_text": "Each party shall indemnify the other against third-party claims to the extent arising from its own gross negligence or willful misconduct in connection with the Program.",
+              "proposed_by": "counterparty",
+              "observed_at": "2022-11-02",
+              "counterparty_ref": {
+                "alias": "Counterparty-2",
+                "counterparty_type": "community college"
+              }
+            }
+          ],
+          "rejected": [
+            {
+              "text_summary": "One-way indemnification flowing only from FixtureCorp — proposed in redline, rejected before signing.",
+              "example_ref": {
+                "document_id": "metro-tech-2021",
+                "version": 2,
+                "clause_path": "8",
+                "char_span": [
+                  0,
+                  260
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "provenance": "our_paper",
+              "outcome": "proposed_then_reversed",
+              "precedent_count": 1,
+              "proposed_by": "counterparty",
+              "counterparty_ref": {
+                "alias": "Counterparty-3"
+              }
+            }
+          ],
+          "confidence": {
+            "score": 1.0,
+            "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper",
+            "n_our_paper": 3,
+            "n_counterparty_paper": 0,
+            "evidence_sufficient": true
+          }
+        }
+      },
+      {
+        "id": "clause.insurance",
+        "taxonomy_id": "insurance",
+        "title": "Insurance",
+        "our_standard": {
+          "text": "During the term of this Agreement, FixtureCorp shall maintain: (a) Commercial General Liability insurance with limits of not less than $1,000,000 per occurrence and $3,000,000 annual aggregate; (b) Professional Liability insurance of not less than $1,000,000 per claim; and (c) Workers' Compensation insurance as required by applicable law.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "12",
+            "char_span": [
+              0,
+              355
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Insurance minimums matching our standard (no deviation).",
+            "example_ref": {
+              "document_id": "state-university-2023",
+              "version": 3,
+              "clause_path": "12",
+              "char_span": [
+                0,
+                355
+              ]
+            },
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 4,
+            "proposed_by": "us",
+            "observed_at": "2023-09-14",
+            "counterparty_ref": {
+              "alias": "Counterparty-1",
+              "counterparty_type": "public university"
+            }
+          },
+          {
+            "text_summary": "Same coverage minimums, reworded to the university's insurance rider format.",
+            "example_ref": {
+              "document_id": "metro-tech-2021",
+              "version": 3,
+              "clause_path": "11.2",
+              "char_span": [
+                0,
+                340
+              ]
+            },
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2,
+            "full_text": "FixtureCorp shall carry commercial general liability coverage of at least $1,000,000 per occurrence / $3,000,000 aggregate, professional liability coverage of at least $1,000,000 per claim, and statutory workers' compensation coverage, each maintained for the term of this Agreement.",
+            "proposed_by": "counterparty",
+            "observed_at": "2021-06-30",
+            "counterparty_ref": {
+              "alias": "Counterparty-3"
+            }
+          }
+        ],
+        "summary": {
+          "historical_stance": "usually_held",
+          "stance_detail": {
+            "held": 2,
+            "of": 2,
+            "basis": "our_paper"
+          },
+          "acceptable_if": [
+            {
+              "if": "equivalent coverage minimums in the counterparty's rider format",
+              "to": "FixtureCorp shall carry commercial general liability coverage of at least $1,000,000 per occurrence / $3,000,000 aggregate, professional liability coverage of at least $1,000,000 per claim, and statutory workers' compensation coverage, each maintained for the term of this Agreement.",
+              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 2x precedent in the corpus.",
+              "observation_ref": {
+                "document_id": "metro-tech-2021",
+                "version": 3,
+                "clause_path": "11.2",
+                "char_span": [
+                  0,
+                  340
+                ]
+              }
+            }
+          ],
+          "fallbacks": [],
+          "rejected": [],
+          "confidence": {
+            "score": 1.0,
+            "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper",
+            "n_our_paper": 2,
+            "n_counterparty_paper": 0,
+            "evidence_sufficient": true
+          }
+        }
+      },
+      {
+        "id": "clause.governing_law",
+        "taxonomy_id": "governing_law",
+        "title": "Governing Law",
+        "our_standard": {
+          "text": "This Agreement shall be governed by the laws of the State of Delaware, without regard to conflict-of-laws principles.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "14",
+            "char_span": [
+              0,
+              180
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Delaware governing law matching our standard (no deviation).",
+            "example_ref": {
+              "document_id": "city-college-2022",
+              "version": 4,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                180
+              ]
+            },
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2,
+            "proposed_by": "us",
+            "observed_at": "2022-11-02",
+            "counterparty_ref": {
+              "alias": "Counterparty-2",
+              "counterparty_type": "community college"
+            }
+          },
+          {
+            "text_summary": "Governing law moved to the institution's home state.",
+            "example_ref": {
+              "document_id": "state-university-2023",
+              "version": 3,
+              "clause_path": "15",
+              "char_span": [
+                0,
+                190
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "minor"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 3,
+            "full_text": "This Agreement shall be governed by the laws of the state in which the Institution maintains its principal campus, without regard to conflict-of-laws principles.",
+            "proposed_by": "counterparty",
+            "observed_at": "2023-09-14",
+            "counterparty_ref": {
+              "alias": "Counterparty-1",
+              "counterparty_type": "public university"
+            }
+          }
+        ],
+        "summary": {
+          "historical_stance": "usually_conceded",
+          "stance_detail": {
+            "held": 1,
+            "of": 2,
+            "basis": "our_paper"
+          },
+          "acceptable_if": [],
+          "fallbacks": [
+            {
+              "text_summary": "Governing law moved to the institution's home state.",
+              "example_ref": {
+                "document_id": "state-university-2023",
+                "version": 3,
+                "clause_path": "15",
+                "char_span": [
+                  0,
+                  190
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "minor"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3,
+              "full_text": "This Agreement shall be governed by the laws of the state in which the Institution maintains its principal campus, without regard to conflict-of-laws principles.",
+              "proposed_by": "counterparty",
+              "observed_at": "2023-09-14",
+              "counterparty_ref": {
+                "alias": "Counterparty-1",
+                "counterparty_type": "public university"
+              }
+            }
+          ],
+          "rejected": [],
+          "confidence": {
+            "score": 1.0,
+            "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper",
+            "n_our_paper": 2,
+            "n_counterparty_paper": 0,
+            "evidence_sufficient": true
+          }
+        }
+      }
+    ],
+    "clause_library": []
+  },
+  "posture": {
+    "system_prompt": "This is a generally low-risk agreement type for FixtureCorp; default toward ACCEPT and close quickly. We typically go two negotiation rounds before escalating. Hold firm on mutual indemnification and on the insurance minimums (see Floor for the red lines). Governing law is flexible to close — we have accepted the institution's home state before and can again when the rest of the paper is clean. Term, notice periods, and renewal mechanics are flexible. Write rationale tersely for a GC audience; cite precedent by document and version.",
+    "version": 1,
+    "generation": {
+      "generated_by": "playbook-engine v0.2.0",
+      "generated_at": "2023-10-01T00:00:00Z",
+      "interview": [
+        {
+          "q": "rounds",
+          "question": "How many negotiation rounds do you typically go on this agreement type before escalating or walking?",
+          "answer": "Usually two; escalate to the GC on round three."
+        },
+        {
+          "q": "risk_appetite",
+          "question": "What is your risk appetite on this agreement type?",
+          "answer": "Low-risk paper; we optimize for closing speed, not position maximization."
+        },
+        {
+          "q": "sacred",
+          "question": "What is sacred — the things you would walk away over?",
+          "answer": "Mutual indemnification and our insurance minimums. Everything else is negotiable."
+        },
+        {
+          "q": "audience",
+          "question": "Who reads the review output?",
+          "answer": "Contract administrators first, GC on escalation — keep rationale terse."
+        }
+      ],
+      "grounded_in": "sha256:32736a498d177c86817ffae8e3ac82b7dc8c496da337c39300396d095c2edf09"
+    }
+  },
+  "floor": {
+    "invariants": [
+      {
+        "id": "no-uncapped-liability",
+        "statement": "Never accept uncapped liability.",
+        "rationale": "Uncapped exposure is categorically unacceptable regardless of deal value."
+      },
+      {
+        "id": "no-one-way-indemnity",
+        "statement": "Never give one-way indemnification flowing only from FixtureCorp.",
+        "rationale": "Indemnification must be mutual on this paper; the corpus shows every one-way ask was reversed."
+      },
+      {
+        "id": "insurance-minimums-preserved",
+        "statement": "Never accept insurance coverage minimums below the standard form's amounts.",
+        "rationale": "The minimums are set by FixtureCorp's carrier requirements, not negotiation preference."
+      }
+    ]
+  },
+  "curation": {
+    "pins": [
+      {
+        "clause_id": "clause.governing_law",
+        "item_id": "C3",
+        "position": "Prefer Delaware, but accept the institution's home state without escalation.",
+        "baseline_stance": "usually_held",
+        "pinned_at": "2023-06-15T00:00:00Z",
+        "pinned_by": "gc@fixturecorp.example",
+        "comment": "Pinned before the 2023 recompile; evidence has since moved.",
+        "conflict": {
+          "flagged_at": "2023-10-01T00:00:00Z",
+          "recomputed_historical_stance": "usually_conceded",
+          "reason": "Fresh evidence shows the clause is usually conceded, contradicting the pinned baseline_stance of usually_held."
+        }
+      }
+    ]
+  },
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "state-university-2023",
+        "title": "State University 2023",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.97,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:d6c84dff4367cd7b9c1076a673e569262b3a6433cea2487faa9270a0ff4d24e9",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:d6e01c38e335918e910da896285fd6c4ba16dffc194d0816b3a07d09293264c6",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:0c9ab7b417a8d501c45ae217e17bd79de534ff8ba71d95fc114460d0438df5a9",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        ]
+      },
+      {
+        "document_id": "city-college-2022",
+        "title": "City College 2022",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.97,
+        "versions": 4,
+        "signed_version": 4,
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:c965ca0500daef2d9724d769ec754dc31803ffb970d98f6e62c680c78883f77c",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:85e0ab1c5a1c2f809a2db0c4a875207f753fb7e53bc313be26838a02e144e642",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:ce559cd119cc006022d2c345109b52049b63d96b36cca36219e897777488e74a",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 4,
+            "sha256": "sha256:28743fa156fd73970749eccf9441bf107d0aa813634c08de95706adfac6a9c85",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        ]
+      },
+      {
+        "document_id": "metro-tech-2021",
+        "title": "Metro Tech 2021",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.97,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:460039d0011c05d5e9999c7d8992106291887be2fd0cc99dac1b21d6e433eab6",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:fe98e352bccaf5f4917312378231ef1150a32003195e7a61968a4a0aef0ecd82",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:ee6e72bf39d0d3f6cb9cece9af1306100b8f53faf53af0cd449956c250c1c625",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        ]
+      },
+      {
+        "document_id": "regional-health-university-2023",
+        "title": "Regional Health University 2023",
+        "provenance": "counterparty_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.97,
+        "versions": 2,
+        "signed_version": 2,
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:0eacd7e21e2811c13e8a35e48391d794df1548311370dffbf630dcd65e1b192a",
+            "media_type": "application/pdf"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:04aebc22c4e80a0873eaa3c8c90f5c287897b429ee18c08e9b4a56b26383a1aa",
+            "media_type": "application/pdf"
+          }
+        ]
+      }
+    ],
+    "stats": {
+      "documents_total": 4,
+      "documents_in_scope": 4,
+      "versions_total": 12
+    },
+    "snapshot": {
+      "manifest_hash": "sha256:c338ebfe5009792770f455566907d14f4a9dcd39139269d8e8bc3ad2a67eaadf"
+    }
+  },
+  "compiler": {
+    "name": "playbook-engine",
+    "version": "0.2.0",
+    "run_id": "example-run-001",
+    "generated_at": "2023-10-01T00:00:00Z",
+    "stub_basis_present": false
+  },
+  "identity": {
+    "id": "fixturecorp/educational-affiliation",
+    "version": "2023.10",
+    "supersedes": null,
+    "content_hash": "sha256:231b5acce96cbcea77bd853b8b02b5255978a387cc7b64a1973b1274cd547bf7",
+    "section_digests": {
+      "evidence": "sha256:32736a498d177c86817ffae8e3ac82b7dc8c496da337c39300396d095c2edf09",
+      "posture": "sha256:7bdda4cc31b92465a920c9277764c4b3d03d29c281656cc63a103f2b9991228c",
+      "floor": "sha256:9ef0cb0cb39cc46dd2285b74eb4e417c8129330c6096019471f9bcaf221290b9",
+      "curation": "sha256:a475a8529daf0f57a3f596cc436082a1188c4752098dbee4498ac693d902d30d"
+    }
+  }
+}

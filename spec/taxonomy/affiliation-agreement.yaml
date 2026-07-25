@@ -1,0 +1,48 @@
+# Clause taxonomy — Educational Affiliation Agreement
+# Derived from CUAD v1 (41 categories) + custom entries for this agreement type.
+# Curation rule: prune by setting status: inactive (never delete), so a future CUAD
+# upgrade can be merged without losing these choices. status: custom = our addition.
+#
+# Attribution: category names/descriptions derived from CUAD v1, created by
+# The Atticus Project (https://www.atticusprojectai.org/cuad), licensed under
+# CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/). See NOTICE.
+source: CUAD-v1
+
+entries:
+  # --- Active: present/material in affiliation agreements ---
+  - { id: parties_and_recitals,      label: "Parties & Recitals",            status: active, cuad_origin: Parties,                       description: "Who is bound; the Institution/Company/Student framing." }
+  - { id: term,                      label: "Term",                          status: active, cuad_origin: "Expiration Date",              description: "Initial term and effective date." }
+  - { id: renewal_term,              label: "Renewal / Auto-Renewal",        status: active, cuad_origin: "Renewal Term",                 description: "Whether and how the agreement renews." }
+  - { id: termination_convenience,   label: "Termination for Convenience",   status: active, cuad_origin: "Termination For Convenience",   description: "Non-renewal / no-fault exit and notice period." }
+  - { id: termination_cause,         label: "Termination for Cause",         status: active, cuad_origin: null,                          description: "Breach, cure period, immediate termination triggers." }
+  - { id: indemnification,           label: "Indemnification",               status: active, cuad_origin: null,                          description: "Who bears third-party claim risk; mutual vs one-way." }
+  - { id: insurance,                 label: "Insurance",                     status: active, cuad_origin: Insurance,                     description: "Required coverage types and limits; student health insurance." }
+  - { id: governing_law,             label: "Governing Law",                 status: active, cuad_origin: "Governing Law",                description: "Which state's law governs." }
+  - { id: assignment,                label: "Assignment",                    status: active, cuad_origin: "Anti-Assignment",              description: "Consent to assign; affiliate/M&A carve-outs." }
+  - { id: confidentiality,           label: "Confidentiality",               status: active, cuad_origin: null,                          description: "Confidential Information definition and obligations." }
+  - { id: ferpa_student_records,     label: "FERPA / Student Records",       status: active, cuad_origin: null,                          description: "Handling of education records under FERPA." }
+  - { id: hipaa_phi,                 label: "HIPAA / PHI",                   status: active, cuad_origin: null,                          description: "Protected health information; business-associate status." }
+  - { id: data_privacy_security,     label: "Data Privacy & Security",       status: active, cuad_origin: null,                          description: "Data protection beyond FERPA/HIPAA." }
+  - { id: background_checks,         label: "Background Checks",             status: active, cuad_origin: null,                          description: "Right to screen students before placement." }
+  - { id: supervision_evaluation,    label: "Supervision & Evaluation",      status: active, cuad_origin: null,                          description: "Coordinators, supervision, student evaluation." }
+  - { id: student_responsibilities,  label: "Student Responsibilities",      status: active, cuad_origin: null,                          description: "Conduct, timeliness, uniforms, confidentiality." }
+  - { id: relationship_of_parties,   label: "Relationship of Parties",       status: active, cuad_origin: null,                          description: "No employment/partnership; students not employees." }
+  - { id: non_discrimination,        label: "Non-Discrimination",            status: active, cuad_origin: null,                          description: "Anti-discrimination obligations." }
+  - { id: remuneration,              label: "Remuneration / No-Pay",         status: active, cuad_origin: null,        description: "Whether students are paid; no-payment-between-parties." }
+  - { id: notices,                   label: "Notices",                       status: active, cuad_origin: null, description: "Notice addresses and method." }
+  - { id: severability,              label: "Severability",                  status: active, cuad_origin: null,                          description: "Invalid-provision survival." }
+  - { id: entire_agreement,          label: "Entire Agreement",              status: active, cuad_origin: null,                          description: "Integration / merger clause." }
+  - { id: amendments,                label: "Amendments",                    status: active, cuad_origin: null,                          description: "How the agreement may be modified." }
+  - { id: accreditation_licensure,   label: "Accreditation & Licensure",     status: active, cuad_origin: null,                          description: "Both parties' duty to maintain qualifications." }
+  - { id: limitation_of_liability,   label: "Limitation of Liability",       status: active, cuad_origin: "Cap On Liability",             description: "Liability caps and exclusions (often absent; flag if introduced)." }
+
+  # --- Inactive: CUAD categories not material to this agreement type (kept for upgrades) ---
+  - { id: most_favored_nation,       label: "Most Favored Nation",           status: inactive, cuad_origin: "Most Favored Nation",        description: "Not applicable to affiliation agreements." }
+  - { id: non_compete,               label: "Non-Compete",                   status: inactive, cuad_origin: "Non-Compete",                description: "Superseded by Non-Exclusive; flag if a true non-compete appears." }
+  - { id: exclusivity,               label: "Exclusivity",                   status: inactive, cuad_origin: "Exclusivity",                description: "Agreements are expressly non-exclusive." }
+  - { id: ip_ownership,              label: "IP Ownership Assignment",       status: inactive, cuad_origin: "Ip Ownership Assignment",     description: "Rare here; activate if IP terms appear." }
+  - { id: license_grant,             label: "License Grant",                 status: inactive, cuad_origin: "License Grant",              description: "Not typical." }
+  - { id: minimum_commitment,        label: "Minimum Commitment",            status: inactive, cuad_origin: "Minimum Commitment",          description: "Placement counts are discretionary, not committed." }
+  - { id: price_restrictions,        label: "Price Restrictions",            status: inactive, cuad_origin: "Price Restrictions",          description: "No pricing; no-pay arrangement." }
+  - { id: audit_rights,              label: "Audit Rights",                  status: inactive, cuad_origin: "Audit Rights",               description: "Inspection right exists but not a financial audit; revisit." }
+  - { id: warranty_duration,         label: "Warranty Duration",             status: inactive, cuad_origin: "Warranty Duration",           description: "Not applicable." }

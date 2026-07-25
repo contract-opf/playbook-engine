@@ -1,0 +1,379 @@
+{
+  "opf_version": "0.1",
+  "agreement_type": {
+    "id": "educational-affiliation",
+    "name": "Educational Affiliation Agreement",
+    "description": "Clinical/practicum placement agreement between FixtureCorp and a university or college."
+  },
+  "baseline": {
+    "has_canonical_template": true,
+    "template_ref": {
+      "document_id": "template",
+      "title": "FIXTURECORP Standard Affiliation Agreement Template",
+      "source": "template/affiliation-template.docx"
+    },
+    "notes": "Version 3.2 of the FixtureCorp standard template, approved by legal 2024-01."
+  },
+  "taxonomy": {
+    "source": "CUAD-v1",
+    "entries": [
+      {
+        "id": "indemnification",
+        "label": "Indemnification",
+        "status": "active",
+        "cuad_origin": "Indemnification",
+        "description": "Who bears third-party claim risk; mutual vs one-way."
+      },
+      {
+        "id": "insurance",
+        "label": "Insurance",
+        "status": "active",
+        "cuad_origin": "Insurance",
+        "description": "Required coverage types and limits; student health insurance."
+      },
+      {
+        "id": "governing_law",
+        "label": "Governing Law",
+        "status": "active",
+        "cuad_origin": "Governing Law",
+        "description": "Which state's law governs."
+      },
+      {
+        "id": "ferpa_student_records",
+        "label": "FERPA / Student Records",
+        "status": "active",
+        "cuad_origin": null,
+        "description": "Handling of education records under FERPA."
+      },
+      {
+        "id": "hipaa_phi",
+        "label": "HIPAA / PHI",
+        "status": "active",
+        "cuad_origin": null,
+        "description": "Protected health information; business-associate status."
+      },
+      {
+        "id": "termination_convenience",
+        "label": "Termination for Convenience",
+        "status": "active",
+        "cuad_origin": "Termination For Convenience",
+        "description": "Non-renewal / no-fault exit and notice period."
+      }
+    ]
+  },
+  "clauses": [
+    {
+      "id": "clause.indemnification",
+      "taxonomy_id": "indemnification",
+      "title": "Indemnification",
+      "our_standard": {
+        "text": "Each party (\"Indemnifying Party\") shall defend, indemnify, and hold harmless the other party and its officers, directors, employees, and agents from and against any claims, damages, losses, and expenses, including reasonable attorneys' fees, arising out of or resulting from the Indemnifying Party's negligent or wrongful acts or omissions in performing its obligations under this Agreement.",
+        "source_ref": {
+          "document_id": "template",
+          "version": "template",
+          "clause_path": "8",
+          "char_span": [0, 330]
+        }
+      },
+      "observed_positions": [
+        {
+          "text_summary": "Mutual, negligence-based indemnification matching our standard (no deviation).",
+          "example_ref": {
+            "document_id": "state-university-2023",
+            "version": 3,
+            "clause_path": "8",
+            "char_span": [0, 328]
+          },
+          "deviation": "none",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 7
+        },
+        {
+          "text_summary": "Mutual indemnification but limited to gross negligence and willful misconduct rather than negligence — materially narrower than our standard.",
+          "example_ref": {
+            "document_id": "city-college-2022",
+            "version": 4,
+            "clause_path": "9.1",
+            "char_span": [0, 290]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "minor" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 3
+        },
+        {
+          "text_summary": "Unilateral indemnification flowing only from FixtureCorp to Institution — proposed by counterparty in redline, rejected before signing.",
+          "example_ref": {
+            "document_id": "metro-tech-2021",
+            "version": 2,
+            "clause_path": "8",
+            "char_span": [0, 260]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "material" },
+          "provenance": "our_paper",
+          "outcome": "proposed_then_reversed",
+          "precedent_count": 2
+        }
+      ],
+      "rollup": {
+        "position": "negotiable",
+        "acceptable_if": [
+          "mutual indemnification",
+          "negligence or gross-negligence standard"
+        ],
+        "fallbacks": [
+          {
+            "text_summary": "Mutual indemnification limited to gross negligence and willful misconduct.",
+            "example_ref": {
+              "document_id": "city-college-2022",
+              "version": 4,
+              "clause_path": "9.1",
+              "char_span": [0, 290]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "minor" },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 3
+          }
+        ],
+        "rejected": [
+          {
+            "text_summary": "Unilateral indemnification flowing only from FixtureCorp — explicitly rejected in every instance.",
+            "example_ref": {
+              "document_id": "metro-tech-2021",
+              "version": 2,
+              "clause_path": "8",
+              "char_span": [0, 260]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "material" },
+            "provenance": "our_paper",
+            "outcome": "proposed_then_reversed",
+            "precedent_count": 2
+          }
+        ],
+        "confidence": {
+          "score": 0.82,
+          "basis": "precedent_count + provenance_mix",
+          "n_our_paper": 12,
+          "n_counterparty_paper": 0
+        }
+      }
+    },
+    {
+      "id": "clause.insurance",
+      "taxonomy_id": "insurance",
+      "title": "Insurance",
+      "our_standard": {
+        "text": "During the term of this Agreement, FixtureCorp shall maintain: (a) Commercial General Liability insurance with limits of not less than $1,000,000 per occurrence and $3,000,000 annual aggregate; (b) Professional Liability (Errors & Omissions) insurance of not less than $1,000,000 per claim; and (c) Workers' Compensation insurance as required by applicable law.",
+        "source_ref": {
+          "document_id": "template",
+          "version": "template",
+          "clause_path": "9",
+          "char_span": [0, 350]
+        }
+      },
+      "observed_positions": [
+        {
+          "text_summary": "Institution requires umbrella/excess liability at $5M in addition to the standard primary coverages.",
+          "example_ref": {
+            "document_id": "regional-health-university-2023",
+            "version": 2,
+            "clause_path": "7.1",
+            "char_span": [0, 310]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 4
+        }
+      ],
+      "rollup": {
+        "position": "acceptable_variants_exist",
+        "acceptable_if": [
+          "umbrella/excess liability addition",
+          "limits at or above our standard"
+        ],
+        "fallbacks": [],
+        "rejected": [],
+        "confidence": {
+          "score": 0.71,
+          "basis": "precedent_count + provenance_mix",
+          "n_our_paper": 4,
+          "n_counterparty_paper": 0
+        }
+      }
+    },
+    {
+      "id": "clause.governing_law",
+      "taxonomy_id": "governing_law",
+      "title": "Governing Law",
+      "our_standard": {
+        "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of Texas, without regard to its conflict of laws principles.",
+        "source_ref": {
+          "document_id": "template",
+          "version": "template",
+          "clause_path": "14",
+          "char_span": [0, 150]
+        }
+      },
+      "observed_positions": [
+        {
+          "text_summary": "Institution insists on its home state's law (California) — we signed because in-scope work was entirely at the CA campus.",
+          "example_ref": {
+            "document_id": "pacific-state-college-2022",
+            "version": 3,
+            "clause_path": "12",
+            "char_span": [0, 145]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "minor" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 2
+        }
+      ],
+      "rollup": {
+        "position": "negotiable",
+        "acceptable_if": [
+          "Institution home state, where all work is performed on-site"
+        ],
+        "fallbacks": [
+          {
+            "text_summary": "Institution home-state law where all performance is on-site (concession with minor risk delta).",
+            "example_ref": {
+              "document_id": "pacific-state-college-2022",
+              "version": 3,
+              "clause_path": "12",
+              "char_span": [0, 145]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "minor" },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2
+          }
+        ],
+        "rejected": [],
+        "confidence": {
+          "score": 0.55,
+          "basis": "precedent_count + provenance_mix",
+          "n_our_paper": 9,
+          "n_counterparty_paper": 0
+        }
+      }
+    }
+  ],
+  "clause_library": [
+    {
+      "concept_id": "concept.hipaa_baa",
+      "taxonomy_id": "hipaa_phi",
+      "description": "Business Associate Agreement / HIPAA obligations when FixtureCorp staff have access to PHI at clinical sites.",
+      "risk_profile": "BAA obligations increase compliance burden; indemnity for PHI breaches can be unlimited.",
+      "accepted_forms": [
+        {
+          "text_summary": "Separate standalone BAA incorporated by reference, with limited liability carve-out for breaches caused by Institution's own systems.",
+          "example_ref": {
+            "document_id": "regional-health-university-2023",
+            "version": 1,
+            "clause_path": "Exhibit-B",
+            "char_span": [0, 420]
+          },
+          "provenance": "counterparty_paper",
+          "risk_delta_vs_our_standard": {
+            "direction": "worse",
+            "magnitude": "minor"
+          }
+        }
+      ],
+      "notes": "Tolerated in 4 of 6 counterparty-paper healthcare-affiliated deals. The standalone BAA structure is common; negotiate the liability carve-out but do not refuse outright."
+    }
+  ],
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "state-university-2023",
+        "title": "State University — Affiliation Agreement 2023",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement for clinical internship placements.",
+        "scope_confidence": 0.99,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "city-college-2022",
+        "title": "City College — Affiliation Agreement 2022",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement for health science practicum placements.",
+        "scope_confidence": 0.97,
+        "versions": 4,
+        "signed_version": 4,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "metro-tech-2021",
+        "title": "Metro Tech Institute — Affiliation Agreement 2021",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement, sport performance track.",
+        "scope_confidence": 0.96,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "regional-health-university-2023",
+        "title": "Regional Health University — Affiliation Agreement 2023",
+        "provenance": "counterparty_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement drafted on Institution's paper; clinical setting with HIPAA exposure.",
+        "scope_confidence": 0.94,
+        "versions": 2,
+        "signed_version": 2,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "pacific-state-college-2022",
+        "title": "Pacific State College — Affiliation Agreement 2022",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement, kinesiology department placement.",
+        "scope_confidence": 0.98,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "vendor-services-2022",
+        "title": "Vendor Services Agreement — IT Procurement",
+        "provenance": "our_paper",
+        "in_scope": false,
+        "scope_rationale": "IT procurement agreement; no student placement or clinical element. Excluded.",
+        "scope_confidence": 0.99,
+        "versions": 1,
+        "signed_version": 1,
+        "version_order_basis": "filename_date"
+      }
+    ],
+    "stats": {
+      "documents_total": 6,
+      "documents_in_scope": 5,
+      "versions_total": 16
+    }
+  },
+  "compiler": {
+    "name": "playbook-engine",
+    "version": "0.1.0",
+    "run_id": "hand-authored-our-paper-v1",
+    "generated_at": "2026-01-15T09:00:00Z"
+  }
+}

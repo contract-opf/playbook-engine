@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contract-opf.github.io/playbook-engine/spec/clause-tree.schema.json",
+  "title": "ClauseTree",
+  "description": "Normalized clause tree for one version of one document (intermediate artifact, not OPF).",
+  "type": "object",
+  "required": ["document_id", "version", "source_file", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "document_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Corpus document identifier (corpus/<document_id>/)."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version label within the document folder."
+    },
+    "source_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Original filename (basename) of the source document."
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Top-level clause nodes in document order.",
+      "items": { "$ref": "#/$defs/ClauseNode" }
+    }
+  },
+  "$defs": {
+    "ClauseNode": {
+      "type": "object",
+      "required": ["clause_path", "text", "char_span"],
+      "additionalProperties": false,
+      "properties": {
+        "clause_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dotted section numbering, e.g. '1', '2.3', '10.1.2'."
+        },
+        "heading": {
+          "type": ["string", "null"],
+          "description": "Section title, or null if absent."
+        },
+        "text": {
+          "type": "string",
+          "description": "Body text of this node (not including children)."
+        },
+        "char_span": {
+          "type": "array",
+          "description": "Exclusive-end character span [start, end] in the document's full normalized text.",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "children": {
+          "type": "array",
+          "description": "Ordered child ClauseNode objects.",
+          "items": { "$ref": "#/$defs/ClauseNode" },
+          "default": []
+        }
+      }
+    }
+  }
+}
