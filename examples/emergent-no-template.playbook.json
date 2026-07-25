@@ -1,0 +1,347 @@
+{
+  "opf_version": "0.1",
+  "agreement_type": {
+    "id": "provider-wellness-services",
+    "name": "Provider Wellness Services Agreement",
+    "description": "Agreement for FixtureCorp to provide on-site wellness and performance coaching services at a third-party employer site. No FixtureCorp template exists; playbook is built from signed deals."
+  },
+  "baseline": {
+    "has_canonical_template": false,
+    "template_ref": null,
+    "notes": "Emergent playbook — no standard FixtureCorp template. Positions derived from signed deal corpus only. Treat all rollup.position values as provisional; low confidence until ≥5 our-paper precedents per clause."
+  },
+  "taxonomy": {
+    "source": "CUAD-v1",
+    "entries": [
+      {
+        "id": "indemnification",
+        "label": "Indemnification",
+        "status": "active",
+        "cuad_origin": "Indemnification",
+        "description": "Who bears third-party claim risk; mutual vs one-way."
+      },
+      {
+        "id": "termination_convenience",
+        "label": "Termination for Convenience",
+        "status": "active",
+        "cuad_origin": "Termination For Convenience",
+        "description": "Non-renewal / no-fault exit and notice period."
+      },
+      {
+        "id": "governing_law",
+        "label": "Governing Law",
+        "status": "active",
+        "cuad_origin": "Governing Law",
+        "description": "Which state's law governs."
+      },
+      {
+        "id": "limitation_of_liability",
+        "label": "Limitation of Liability",
+        "status": "active",
+        "cuad_origin": "Cap On Liability",
+        "description": "Liability caps and exclusions."
+      },
+      {
+        "id": "data_privacy_security",
+        "label": "Data Privacy & Security",
+        "status": "active",
+        "cuad_origin": null,
+        "description": "Data protection obligations."
+      }
+    ]
+  },
+  "clauses": [
+    {
+      "id": "clause.indemnification",
+      "taxonomy_id": "indemnification",
+      "title": "Indemnification",
+      "our_standard": null,
+      "observed_positions": [
+        {
+          "text_summary": "Mutual indemnification for own negligence — seen in majority of signed our-paper deals.",
+          "example_ref": {
+            "document_id": "acme-corp-wellness-2023",
+            "version": 2,
+            "clause_path": "10",
+            "char_span": [0, 290]
+          },
+          "deviation": "none",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 4
+        },
+        {
+          "text_summary": "Indemnification caps at 12 months of fees paid — introduced by employer client in negotiation; signed after adding a carve-out for gross negligence.",
+          "example_ref": {
+            "document_id": "fintech-employer-2022",
+            "version": 3,
+            "clause_path": "11",
+            "char_span": [0, 340]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "minor" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 2
+        },
+        {
+          "text_summary": "Sole and exclusive indemnification flowing only from FixtureCorp, no reciprocity — rejected in every instance.",
+          "example_ref": {
+            "document_id": "retail-chain-2021",
+            "version": 2,
+            "clause_path": "9",
+            "char_span": [0, 260]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "material" },
+          "provenance": "our_paper",
+          "outcome": "proposed_then_reversed",
+          "precedent_count": 2
+        }
+      ],
+      "rollup": {
+        "position": "negotiable",
+        "acceptable_if": [
+          "mutual indemnification",
+          "cap with gross-negligence carve-out"
+        ],
+        "fallbacks": [
+          {
+            "text_summary": "Indemnification capped at 12 months of fees with gross-negligence carve-out.",
+            "example_ref": {
+              "document_id": "fintech-employer-2022",
+              "version": 3,
+              "clause_path": "11",
+              "char_span": [0, 340]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "minor" },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 2
+          }
+        ],
+        "rejected": [
+          {
+            "text_summary": "Sole and exclusive indemnification from FixtureCorp only — unacceptable in all cases.",
+            "example_ref": {
+              "document_id": "retail-chain-2021",
+              "version": 2,
+              "clause_path": "9",
+              "char_span": [0, 260]
+            },
+            "deviation": "substantive",
+            "risk_delta": { "direction": "worse", "magnitude": "material" },
+            "provenance": "our_paper",
+            "outcome": "proposed_then_reversed",
+            "precedent_count": 2
+          }
+        ],
+        "confidence": {
+          "score": 0.51,
+          "basis": "precedent_count + provenance_mix (emergent — no template anchor)",
+          "n_our_paper": 8,
+          "n_counterparty_paper": 0
+        }
+      }
+    },
+    {
+      "id": "clause.termination_convenience",
+      "taxonomy_id": "termination_convenience",
+      "title": "Termination for Convenience",
+      "our_standard": null,
+      "observed_positions": [
+        {
+          "text_summary": "30-day written notice for either party, no cause required.",
+          "example_ref": {
+            "document_id": "acme-corp-wellness-2023",
+            "version": 2,
+            "clause_path": "12.1",
+            "char_span": [0, 120]
+          },
+          "deviation": "none",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 5
+        },
+        {
+          "text_summary": "60-day notice required for FixtureCorp to terminate; 30-day for employer client — asymmetric in client's favor.",
+          "example_ref": {
+            "document_id": "healthcare-employer-2023",
+            "version": 4,
+            "clause_path": "13",
+            "char_span": [0, 150]
+          },
+          "deviation": "substantive",
+          "risk_delta": { "direction": "worse", "magnitude": "minor" },
+          "provenance": "counterparty_paper",
+          "outcome": "signed",
+          "precedent_count": 1
+        }
+      ],
+      "rollup": {
+        "position": "negotiable",
+        "acceptable_if": [
+          "symmetric 30-day notice",
+          "asymmetric notice accepted only for multi-year contracts >$500K"
+        ],
+        "fallbacks": [],
+        "rejected": [],
+        "confidence": {
+          "score": 0.44,
+          "basis": "precedent_count + provenance_mix (emergent — low sample, mixed provenance)",
+          "n_our_paper": 5,
+          "n_counterparty_paper": 1
+        }
+      }
+    },
+    {
+      "id": "clause.limitation_of_liability",
+      "taxonomy_id": "limitation_of_liability",
+      "title": "Limitation of Liability",
+      "our_standard": null,
+      "observed_positions": [
+        {
+          "text_summary": "Mutual cap at 12 months' fees; excludes gross negligence and willful misconduct from the cap.",
+          "example_ref": {
+            "document_id": "fintech-employer-2022",
+            "version": 3,
+            "clause_path": "12",
+            "char_span": [0, 280]
+          },
+          "deviation": "none",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 3
+        }
+      ],
+      "rollup": {
+        "position": "negotiable",
+        "acceptable_if": [
+          "mutual cap",
+          "gross-negligence and willful-misconduct carve-out"
+        ],
+        "fallbacks": [],
+        "rejected": [],
+        "confidence": {
+          "score": 0.38,
+          "basis": "precedent_count only — emergent, low sample",
+          "n_our_paper": 3,
+          "n_counterparty_paper": 0
+        }
+      }
+    }
+  ],
+  "clause_library": [
+    {
+      "concept_id": "concept.data_processing_addendum",
+      "taxonomy_id": "data_privacy_security",
+      "description": "Data Processing Addendum required by employer when FixtureCorp handles employee health data or biometrics.",
+      "risk_profile": "Unlimited liability for data breaches under CCPA/CPRA or equivalent; sub-processor restrictions can block our vendors.",
+      "accepted_forms": [
+        {
+          "text_summary": "Employer's standard DPA, limiting sub-processors to those on an approved list, with breach notification within 48 hours.",
+          "example_ref": {
+            "document_id": "healthcare-employer-2023",
+            "version": 2,
+            "clause_path": "Exhibit-A",
+            "char_span": [0, 510]
+          },
+          "provenance": "counterparty_paper",
+          "risk_delta_vs_our_standard": {
+            "direction": "worse",
+            "magnitude": "material"
+          }
+        },
+        {
+          "text_summary": "Employer's lightweight DPA, no sub-processor list requirement, 72-hour breach notification.",
+          "example_ref": {
+            "document_id": "fintech-employer-2022",
+            "version": 1,
+            "clause_path": "Exhibit-B",
+            "char_span": [0, 380]
+          },
+          "provenance": "counterparty_paper",
+          "risk_delta_vs_our_standard": {
+            "direction": "worse",
+            "magnitude": "minor"
+          }
+        }
+      ],
+      "notes": "DPA is nearly universal in employer-side agreements. Prefer the lightweight form; push back on approved-vendor lists as operationally unworkable."
+    }
+  ],
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "acme-corp-wellness-2023",
+        "title": "Acme Corp — Wellness Services Agreement 2023",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "FixtureCorp wellness services agreement with employer client; direct scope match.",
+        "scope_confidence": 0.98,
+        "versions": 2,
+        "signed_version": 2,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "fintech-employer-2022",
+        "title": "Fintech Employer — Wellness Services Agreement 2022",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "FixtureCorp wellness and performance coaching services; employer-side client.",
+        "scope_confidence": 0.97,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "retail-chain-2021",
+        "title": "Retail Chain Inc — Wellness Services Agreement 2021",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Employer wellness program; in-scope agreement type.",
+        "scope_confidence": 0.96,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "healthcare-employer-2023",
+        "title": "Healthcare Employer Network — Wellness Services Agreement 2023",
+        "provenance": "counterparty_paper",
+        "in_scope": true,
+        "scope_rationale": "Wellness services agreement drafted on counterparty's paper; same agreement type.",
+        "scope_confidence": 0.93,
+        "versions": 4,
+        "signed_version": 4,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "consulting-nda-2022",
+        "title": "Consulting NDA — Vendor Confidentiality",
+        "provenance": "our_paper",
+        "in_scope": false,
+        "scope_rationale": "Standalone NDA with a vendor; not a wellness services agreement. Excluded from playbook.",
+        "scope_confidence": 0.99,
+        "versions": 1,
+        "signed_version": 1,
+        "version_order_basis": "filename_date"
+      }
+    ],
+    "stats": {
+      "documents_total": 5,
+      "documents_in_scope": 4,
+      "versions_total": 13
+    }
+  },
+  "compiler": {
+    "name": "playbook-engine",
+    "version": "0.1.0",
+    "run_id": "hand-authored-emergent-v1",
+    "generated_at": "2026-01-15T09:00:00Z"
+  }
+}

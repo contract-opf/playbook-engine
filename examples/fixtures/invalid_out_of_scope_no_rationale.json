@@ -1,0 +1,20 @@
+{
+  "opf_version": "0.1",
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": { "source": "custom", "entries": [] },
+  "clauses": [],
+  "clause_library": [],
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "stray-doc",
+        "title": "Stray NDA",
+        "provenance": "our_paper",
+        "in_scope": false
+      }
+    ],
+    "stats": {}
+  },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}

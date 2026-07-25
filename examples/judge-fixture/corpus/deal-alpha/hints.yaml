@@ -1,0 +1,9 @@
+# Marks which version is the executed (signed) copy. The fixture RTFs carry
+# no signature blocks (they are minimal synthetic documents), so without this
+# hint no version is detected as signed, every observation lands as
+# outcome="unsigned", and the position compiler withholds ALL of them — the
+# projected playbook would be schema-valid but semantically empty (issue #200).
+# hints.yaml is the documented remediation channel for exactly this situation
+# (docs/CORPUS-LAYOUT.md); a real corpus's executed copies are detected from
+# signature blocks / /s/ markers / DocuSign certs instead.
+signed_version: v2.rtf

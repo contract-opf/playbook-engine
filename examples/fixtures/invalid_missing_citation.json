@@ -1,0 +1,38 @@
+{
+  "opf_version": "0.1",
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [{ "id": "term", "label": "Term", "status": "active" }]
+  },
+  "clauses": [
+    {
+      "id": "clause.term",
+      "taxonomy_id": "term",
+      "title": "Term",
+      "our_standard": null,
+      "observed_positions": [
+        {
+          "text_summary": "One-year term, auto-renew.",
+          "example_ref": null,
+          "deviation": "none",
+          "risk_delta": { "direction": "neutral", "magnitude": "none" },
+          "provenance": "our_paper",
+          "outcome": "signed",
+          "precedent_count": 1
+        }
+      ],
+      "rollup": {
+        "position": "standard",
+        "confidence": { "score": 0.5, "n_our_paper": 1, "n_counterparty_paper": 0 }
+      }
+    }
+  ],
+  "clause_library": [],
+  "corpus": {
+    "documents": [],
+    "stats": {}
+  },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}

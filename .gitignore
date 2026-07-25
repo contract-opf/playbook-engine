@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Engine outputs / intermediates
+out/
+normalized/
+*.opf.json.tmp
+
+# Corpora are private/sensitive — never commit real agreements
+corpus/
+!corpus/.gitkeep
+!examples/**
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+pytest-of-*/
+
+# Local scratch — disposable artifacts, staging adapters, run configs
+ignore/
+
+# Private corpora — confidential, never commit. Generic anchored pattern so
+# the ignore rule itself never discloses a real corpus's name; matches any
+# top-level "*-corpus" directory (root-anchored, so example fixtures nested
+# under examples/ are unaffected).
+/*-corpus/

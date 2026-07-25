@@ -1,0 +1,55 @@
+name: Docker Publish
+
+# Builds the canonical docling/OCR runtime (Dockerfile) and pushes it to
+# GHCR on every version tag. This is the release path for the Docker image;
+# see docker-smoke.yml for the recurring health check of the same image
+# that runs independently of a release. PyPI publishing is deliberately
+# out of scope here — see issue #176 and #181 (org move / package name).
+#
+# Plain `docker build`/`docker push` (no buildx) — the local runner pool
+# provides a container daemon via DOCKER_HOST but doesn't support
+# buildx/QEMU or GitHub's container:/services: job containers.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          ref="${GITHUB_REF#refs/tags/}"
+          image="ghcr.io/${{ github.repository }}"
+          {
+            echo "image=$image"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: |
+          docker build \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.ref }}" \
+            -t "${{ steps.meta.outputs.image }}:latest" \
+            .
+
+      - name: Push image (:<tag> and :latest)
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.ref }}"
+          docker push "${{ steps.meta.outputs.image }}:latest"

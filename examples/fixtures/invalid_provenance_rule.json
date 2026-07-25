@@ -1,0 +1,43 @@
+{
+  "opf_version": "0.1",
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [{ "id": "indemnification", "label": "Indemnification", "status": "active" }]
+  },
+  "clauses": [
+    {
+      "id": "clause.indemnification",
+      "taxonomy_id": "indemnification",
+      "title": "Indemnification",
+      "our_standard": {
+        "text": "Counterparty shall indemnify all claims.",
+        "source_ref": {
+          "document_id": "counterparty-doc",
+          "version": 1,
+          "clause_path": "9",
+          "char_span": [0, 40]
+        }
+      },
+      "observed_positions": [],
+      "rollup": {
+        "position": "standard",
+        "confidence": { "score": 0.5, "n_our_paper": 0, "n_counterparty_paper": 1 }
+      }
+    }
+  ],
+  "clause_library": [],
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "counterparty-doc",
+        "title": "Other Party's Template",
+        "provenance": "counterparty_paper",
+        "in_scope": true
+      }
+    ],
+    "stats": {}
+  },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}

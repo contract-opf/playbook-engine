@@ -1,0 +1,8 @@
+{
+  "agreement_type": { "id": "test", "name": "Test" },
+  "baseline": { "has_canonical_template": false },
+  "taxonomy": { "source": "custom", "entries": [] },
+  "clauses": [],
+  "corpus": { "documents": [], "stats": {} },
+  "compiler": { "name": "x", "version": "0.1", "generated_at": "2026-01-01T00:00:00Z" }
+}
