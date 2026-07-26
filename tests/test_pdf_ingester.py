@@ -142,6 +142,90 @@ def test_para_level_numbered_paren() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Regression: _NUM_PREFIX backtracking (issue #241)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1.5 times the Fees",
+        "99.9% uptime guarantee",
+        "10.00 per unit",
+    ],
+)
+def test_para_level_decimal_number_is_body(text: str) -> None:
+    """Decimals at line-start must not be mistaken for clause numbers."""
+    assert _para_level(text) is None
+
+
+def test_para_level_multipart_number_not_mis_split() -> None:
+    """'10.1.3 Term and Termination' must not match as clause '10.1'."""
+    assert _para_level("10.1.3 Term and Termination") is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: bare page-number / year lines are not headings (issue #242)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text", ["2", "2024", "$1,000"])
+def test_para_level_bare_digit_line_is_body(text: str) -> None:
+    """A standalone digit/year/currency line (e.g. a footer page number)
+    must not qualify as an ALL-CAPS heading — it has no letters at all."""
+    assert _para_level(text) is None
+
+
+def test_para_level_allcaps_word_still_matches() -> None:
+    """The isalpha guard must not break genuine ALL-CAPS headings."""
+    assert _para_level("WITNESSETH") == 1
+
+
+def test_ingest_decimal_lines_do_not_become_headings(tmp_path: Path) -> None:
+    """Wrapped PDF lines starting with amounts must stay body text (issue #241)."""
+    pdf_path = _make_pdf(
+        paragraphs=[
+            "1. Payment",
+            "1.5 times the Fees shall be invoiced in the prior month.",
+            "99.9% uptime guarantee applies to the Platform.",
+            "10.00 per unit is the price ordered.",
+        ],
+        tmp_path=tmp_path,
+    )
+    result = ingest_pdf(pdf_path, "doc-241", "v1")
+    tree = result.tree
+
+    top_paths = {n.clause_path for n in tree.nodes}
+    assert "99" not in top_paths, "'99.9% uptime' must not become clause '99'"
+    assert "10" not in top_paths, "'10.00 per unit' must not become clause '10'"
+
+    all_text = " ".join(n.text for n in tree.all_nodes())
+    assert "1.5 times the Fees" in all_text
+    assert "99.9% uptime guarantee" in all_text
+    assert "10.00 per unit is the price" in all_text
+
+
+def test_ingest_multipart_number_not_mis_split(tmp_path: Path) -> None:
+    """'10.1.3 Term and Termination' must not fabricate clause '10.1' (issue #241)."""
+    pdf_path = _make_pdf(
+        paragraphs=[
+            "1. Definitions",
+            "Body text under definitions.",
+            "10.1.3 Term and Termination",
+        ],
+        tmp_path=tmp_path,
+    )
+    result = ingest_pdf(pdf_path, "doc-242", "v1")
+    tree = result.tree
+
+    assert tree.resolve_path("10.1") is None, "Backtrack must not fabricate clause '10.1'"
+    all_headings = [n.heading for n in tree.all_nodes() if n.heading]
+    assert not any((h or "").startswith("3 Term") for h in all_headings), (
+        "'10.1.3 Term and Termination' must not be mangled into heading '3 Term and Termination'"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Born-digital PDF — text-layer extraction
 # ---------------------------------------------------------------------------
 
@@ -460,6 +544,36 @@ def test_multi_page_pdf_text_concatenated(tmp_path: Path) -> None:
     assert "1" in all_paths
     assert "2" in all_paths
     assert "3" in all_paths
+
+
+def test_ingest_bare_page_number_does_not_fragment_clause(tmp_path: Path) -> None:
+    """A lone page-number line ('2', simulating a pdfplumber footer artifact)
+    interrupting a clause must not become a spurious level-1 heading that
+    splits the clause and strands its continuation text (issue #242)."""
+    pdf = FPDF()
+    pdf.set_font("Helvetica", size=12)
+    pdf.add_page()
+    pdf.cell(0, 8, "1. Confidentiality", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "The parties agree to keep all information", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "2", new_x="LMARGIN", new_y="NEXT")  # simulated footer page number
+    pdf.cell(
+        0, 8, "confidential and not disclose it to third parties.", new_x="LMARGIN", new_y="NEXT"
+    )
+    dest = tmp_path / "page_number.pdf"
+    pdf.output(str(dest))
+
+    result = ingest_pdf(dest, "pagenum-001", "v1")
+    all_nodes = list(result.tree.all_nodes())
+    all_paths = [n.clause_path for n in all_nodes]
+    assert len(result.tree.nodes) == 1, (
+        "the footer page number must not fork a second top-level node"
+    )
+    assert len(all_paths) == len(set(all_paths)), "clause paths must stay unique (no duplicate '1')"
+    assert not any(n.heading == "2" for n in all_nodes), "'2' must not become a heading"
+
+    node = result.tree.resolve_path("1")
+    assert node is not None
+    assert "confidential and not disclose" in node.text.lower()
 
 
 def test_char_span_resolves_to_heading_text(tmp_path: Path) -> None:

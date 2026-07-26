@@ -469,6 +469,56 @@ def test_judge_subset_limits_pending(tmp_path: Path) -> None:
     assert len(lines) <= 2, f"Expected at most 2 pending items with --subset 2; got {len(lines)}"
 
 
+# ---------------------------------------------------------------------------
+# Issue #295: --plan must honor --subset instead of silently ignoring it.
+# ---------------------------------------------------------------------------
+
+
+def test_judge_plan_with_subset_reflects_subset_count(tmp_path: Path) -> None:
+    """judge --plan --subset 2 reports the capped count, not the full corpus.
+
+    Before the fix, the --plan branch returned before --subset was ever
+    read, so this combination silently reported full-corpus pending counts.
+    """
+    code, output = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(tmp_path),
+        "--plan",
+        "--subset",
+        "2",
+    )
+    assert code == 0, f"judge --plan --subset 2 failed:\n{output}"
+    assert "Pending items: 2" in output, (
+        f"Expected 'Pending items: 2' with --subset 2; got:\n{output}"
+    )
+
+
+def test_judge_plan_with_invalid_subset_exits_nonzero(tmp_path: Path) -> None:
+    """judge --plan --subset 0 must be rejected, same as normal mode.
+
+    Before the fix, the subset<=0 validation lived only in normal mode
+    (after the --plan branch's early return), so this combination passed
+    silently despite being invalid.
+    """
+    code, output = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(tmp_path),
+        "--plan",
+        "--subset",
+        "0",
+    )
+    assert code != 0, f"judge --plan --subset 0 should fail; got exit 0:\n{output}"
+    assert "--subset must be a positive integer" in output
+
+
 def test_judge_missing_config_exits_nonzero(tmp_path: Path) -> None:
     """judge with a missing config file exits non-zero."""
     code, _ = _invoke(

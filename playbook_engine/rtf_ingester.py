@@ -132,7 +132,11 @@ def _split_lines(text: str) -> list[str]:
 # Structure detection (mirrors pdf_ingester._para_level)
 # ---------------------------------------------------------------------------
 
-_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)]\s*")
+# The trailing (?!\d) lookahead forbids a digit right after the terminator
+# so a multi-part number like "10.1.3 Term" is not mis-split as "10.1" with
+# a dangling "3 Term" heading, and decimals like "1.5 times" / "99.9%" /
+# "10.00" are not mistaken for clause numbers.
+_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)](?!\d)\s*")
 _MAX_ALLCAPS_HEADING_WORDS = 8
 
 
@@ -149,6 +153,7 @@ def _para_level(text: str) -> int | None:
         and stripped == stripped.upper()
         and stripped.isascii()
         and not stripped.endswith(".")
+        and any(c.isalpha() for c in stripped)  # bare digits/years/page numbers aren't headings
     ):
         return 1
 

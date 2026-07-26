@@ -156,6 +156,25 @@ def test_pseudonymize_text_does_not_corrupt_substring_words(tmp_path: Path) -> N
     assert out == text
 
 
+def test_pseudonymize_text_matches_name_ending_in_punctuation(tmp_path: Path) -> None:
+    """A known entity name ending in punctuation (e.g. "Acme Corp.") must
+    still be matched — a trailing ``\\b`` is unsatisfiable at a period-to-
+    space edge, so pseudonymize_text must use non-word-char lookarounds
+    instead (issue #245).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    text = "Between Acme Corp. and the school"
+    out = pseudonymize_text(text, ["Acme Corp."], reg)
+    assert "Acme Corp." not in out
+    assert reg.alias_for("Acme Corp.") in out
+
+    # Substring protection at non-word edges must still hold: "CUNY" inside
+    # "CUNYA" is not a known-name-then-non-word-boundary match.
+    reg2 = EntityRegistry.load(tmp_path / "entity_registry2.json")
+    out2 = pseudonymize_text("CUNYA is unaffected.", ["CUNY"], reg2)
+    assert out2 == "CUNYA is unaffected."
+
+
 def test_pseudonymize_document_id_replaces_matching_slug_span(tmp_path: Path) -> None:
     reg = EntityRegistry.load(tmp_path / "entity_registry.json")
     alias = reg.alias_for(_KNOWN_ENTITY)

@@ -221,8 +221,12 @@ def _split_paragraphs(text: str) -> list[str]:
 # Structure detection
 # ---------------------------------------------------------------------------
 
-# Matches numbered prefix: "1.", "1.2.", "10.1.3 ", "2.1)" at start of text.
-_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)]\s*")
+# Matches numbered prefix: "1.", "1.2.", "2.1)" at start of text. The
+# trailing (?!\d) lookahead forbids a digit right after the terminator so a
+# multi-part number like "10.1.3 Term" is not mis-split as "10.1" with a
+# dangling "3 Term" heading, and decimals like "1.5 times" / "99.9%" /
+# "10.00" are not mistaken for clause numbers.
+_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)](?!\d)\s*")
 
 # Heuristic: ALL-CAPS line ≤ 8 words → level-1 heading.
 _MAX_ALLCAPS_HEADING_WORDS = 8
@@ -242,6 +246,7 @@ def _para_level(text: str) -> int | None:
         and stripped == stripped.upper()
         and stripped.isascii()
         and not stripped.endswith(".")  # sentences end with "." — not headings
+        and any(c.isalpha() for c in stripped)  # bare digits/years/page numbers aren't headings
     ):
         return 1
 

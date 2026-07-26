@@ -138,15 +138,19 @@ def pseudonymize_text(text: str, known_entities: list[str], registry: EntityRegi
     Longest names are matched first so a shorter known name that is a prefix/
     substring of a longer one (e.g. "State" vs. "State University") never
     partially shadows the longer, more specific match. Matching is
-    case-insensitive but whole-word (``\\b``-bounded) to avoid corrupting an
-    unrelated word that merely contains a known name as a substring.
+    case-insensitive and boundary-checked with ``(?<!\\w)``/``(?!\\w)``
+    lookarounds rather than ``\\b`` — these are equivalent to ``\\b`` when the
+    name starts/ends with a word character, but (unlike ``\\b``) remain
+    satisfied when it starts/ends with punctuation (e.g. "Acme Corp." or
+    "Acme, Inc."), so substring protection is preserved without silently
+    failing on the common case of legal names ending in "Inc." or "Corp."
     """
     if not text or not known_entities:
         return text
     result = text
     for name in sorted((n for n in known_entities if n), key=len, reverse=True):
         alias = registry.alias_for(name)
-        pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
+        pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.IGNORECASE)
         result = pattern.sub(alias, result)
     return result
 

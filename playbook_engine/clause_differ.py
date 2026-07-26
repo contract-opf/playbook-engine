@@ -100,6 +100,20 @@ class ClauseDiff:
     Downstream citation building (``observation_builder.build_observations``)
     needs these to resolve a citation to a real file, since ``clause_path``
     alone is only unique within one version's tree.
+
+    ``alignment_index`` (issue #244) is the position of this clause's
+    ``ClauseAlignment`` row in the ``alignments`` list passed to
+    ``diff_aligned()`` — i.e. the logical-clause identity that is stable
+    across versions.  ``clause_path`` is per-version dotted numbering and is
+    NOT stable: ``clause_aligner._match_moves`` deliberately aligns the same
+    logical clause under different paths in different versions (e.g. a later
+    insertion renumbers everything after it).  Callers that need to recognize
+    "the same clause" across two ``ClauseDiff`` instances from different
+    ``VersionDiff``s built off the same ``alignments`` list (e.g.
+    ``reversal_detector.detect_reversals``) must key on ``alignment_index``,
+    not on ``clause_path_before``/``clause_path_after``.  ``None`` only for
+    ``ClauseDiff``s built outside ``diff_aligned`` (e.g.
+    ``pipeline._single_version_clause_diffs``), which have no alignment row.
     """
 
     taxonomy_id: str | None
@@ -113,6 +127,7 @@ class ClauseDiff:
     clause_version_after: str | None = None
     char_span_before: tuple[int, int] | None = None
     char_span_after: tuple[int, int] | None = None
+    alignment_index: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in _DIFF_KINDS:
@@ -226,7 +241,7 @@ def _version_diff(
 ) -> VersionDiff:
     diffs: list[ClauseDiff] = []
 
-    for alignment in alignments:
+    for alignment_index, alignment in enumerate(alignments):
         before_slot = next((s for s in alignment.slots if s.version == v_before), None)
         after_slot = next((s for s in alignment.slots if s.version == v_after), None)
 
@@ -267,6 +282,7 @@ def _version_diff(
                 clause_version_after=v_after if after_clause else None,
                 char_span_before=before_clause.node.char_span if before_clause else None,
                 char_span_after=after_clause.node.char_span if after_clause else None,
+                alignment_index=alignment_index,
             )
         )
 

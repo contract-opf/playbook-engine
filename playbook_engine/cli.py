@@ -1389,6 +1389,14 @@ def judge_cmd(
 
     store = VerdictStore(verdicts_path)
 
+    # Validate --subset once, up front, so it applies uniformly to both the
+    # --plan branch and the normal-mode branch below (issue #295: this check
+    # used to live only in normal mode, so `--plan --subset 0` passed
+    # silently instead of being rejected like a normal-mode run would be).
+    if subset is not None and subset <= 0:
+        click.secho("ERROR: --subset must be a positive integer", fg="red", err=True)
+        raise SystemExit(1)
+
     # --plan mode: report pending counts without writing observations.
     # We still run mine_corpus (with a temp pending queue) to compute the plan.
     if plan_only:
@@ -1432,6 +1440,21 @@ def judge_cmd(
                 for line in plan_pending_path.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
+
+            # Apply --subset (issue #295): --plan previously ignored --subset
+            # entirely and reported full-corpus counts/token estimate even
+            # though the intended run would only process the first N items.
+            # Cap the plan-mode pending_records here, before counts/token
+            # estimate are computed, so the plan reflects the trial run the
+            # caller is about to execute.
+            if subset is not None and len(pending_records) > subset:
+                click.secho(
+                    f"--subset {subset}: plan reflects first {subset} of "
+                    f"{len(pending_records)} pending items",
+                    fg="yellow",
+                )
+                pending_records = pending_records[:subset]
+
             counts: dict[str, int] = {}
             for rec in pending_records:
                 counts[rec["kind"]] = counts.get(rec["kind"], 0) + 1
@@ -1457,10 +1480,6 @@ def judge_cmd(
         return
 
     # Normal mode: write observations and update pending queue.
-    if subset is not None and subset <= 0:
-        click.secho("ERROR: --subset must be a positive integer", fg="red", err=True)
-        raise SystemExit(1)
-
     # Reset the pending queue so each round is rewritten from scratch (the
     # contract SKILL.md documents). PendingQueue appends and never truncates,
     # so without this a re-run after judge-apply keeps the prior round's stale
@@ -2125,7 +2144,7 @@ def report_cmd(out_dir: Path, report_path: Path | None) -> None:
             click.secho(f"OK  {json_twin}", fg="green")
         else:
             click.echo(build_after_action_report(out_dir.resolve()))
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 

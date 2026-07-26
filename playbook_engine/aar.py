@@ -183,7 +183,17 @@ def write_after_action_report(out_dir: Path, dest: Path) -> None:
 
     Raises:
         FileNotFoundError: If *out_dir* does not exist.
+        ValueError: If *dest* already ends in ``.json`` — the JSON twin is
+            derived from the Markdown path by replacing its suffix, so a
+            ``.json`` *dest* would collide with (and clobber) the twin.
     """
+    if dest.suffix.lower() == ".json":
+        raise ValueError(
+            f"--out must be the Markdown report path, not the JSON twin: {dest}. "
+            "The .json twin is derived automatically from the Markdown path "
+            "(e.g. --out report.md also writes report.json)."
+        )
+
     data = build_after_action_data(out_dir)
     md = _render_from_data(out_dir, data)
 
