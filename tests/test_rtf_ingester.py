@@ -87,6 +87,24 @@ def _preamble_rtf(tmp_path: Path) -> Path:
     return _write_rtf(_rtf(body), tmp_path)
 
 
+def _decimal_and_multipart_rtf(tmp_path: Path) -> Path:
+    """Regression fixture for issue #241 (_NUM_PREFIX backtracking).
+
+    Line-initial decimal lines ("1.5 times...", "99.9% uptime", "10.00 per
+    unit") must stay body text under "1. Payment" instead of being promoted
+    to spurious headings, and "10.1.3 Term and Termination" must not be
+    mis-split into clause path "10.1" with mangled heading "3 Term...".
+    """
+    body = (
+        r"1. Payment\par "
+        r"1.5 times the Fees shall be invoiced in the prior month.\par "
+        r"99.9% uptime guarantee applies to the Platform.\par "
+        r"10.00 per unit is the price ordered.\par "
+        r"10.1.3 Term and Termination\par "
+    )
+    return _write_rtf(_rtf(body), tmp_path)
+
+
 # ---------------------------------------------------------------------------
 # Unit: _split_lines
 # ---------------------------------------------------------------------------
@@ -139,6 +157,66 @@ def test_para_level_body_text() -> None:
 
 def test_para_level_allcaps_sentence_is_body() -> None:
     assert _para_level("ALL CAPS SENTENCE.") is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1.5 times the Fees",
+        "99.9% uptime guarantee",
+        "10.00 per unit",
+    ],
+)
+def test_para_level_decimal_number_is_body(text: str) -> None:
+    """Decimals must not be mistaken for clause numbers (issue #241)."""
+    assert _para_level(text) is None
+
+
+def test_para_level_multipart_number_not_mis_split() -> None:
+    """'10.1.3 Term and Termination' must not match as clause '10.1' (issue #241)."""
+    assert _para_level("10.1.3 Term and Termination") is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: bare page-number / year lines are not headings (issue #242)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text", ["2", "2024", "$1,000"])
+def test_para_level_bare_digit_line_is_body(text: str) -> None:
+    """A standalone digit/year/currency line (e.g. a footer page number)
+    must not qualify as an ALL-CAPS heading — it has no letters at all."""
+    assert _para_level(text) is None
+
+
+def test_para_level_allcaps_word_still_matches() -> None:
+    """The isalpha guard must not break genuine ALL-CAPS headings."""
+    assert _para_level("WITNESSETH") == 1
+
+
+def test_ingest_bare_digit_line_does_not_fragment_clause(tmp_path: Path) -> None:
+    """A lone digit line (simulating a stray page number) interrupting a
+    clause must not become a spurious level-1 heading that splits the
+    clause and strands its continuation text (issue #242)."""
+    body = (
+        r"1. Confidentiality\par "
+        r"The parties agree to keep all information\par "
+        r"2\par "
+        r"confidential and not disclose it to third parties.\par "
+    )
+    path = _write_rtf(_rtf(body), tmp_path)
+    result = ingest_rtf(path, "doc", "v1")
+    tree = result.tree
+
+    all_nodes = list(tree.all_nodes())
+    all_paths = [n.clause_path for n in all_nodes]
+    assert len(tree.nodes) == 1, "the stray digit line must not fork a second top-level node"
+    assert len(all_paths) == len(set(all_paths)), "clause paths must stay unique (no duplicate '1')"
+    assert not any(n.heading == "2" for n in all_nodes), "'2' must not become a heading"
+
+    node = tree.resolve_path("1")
+    assert node is not None
+    assert "confidential and not disclose" in node.text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +275,33 @@ def test_ingest_allcaps_heading(tmp_path: Path) -> None:
     result = ingest_rtf(_allcaps_rtf(tmp_path), "doc", "v1")
     heading_nodes = [n for n in result.tree.all_nodes() if n.heading is not None]
     assert len(heading_nodes) >= 1
+
+
+def test_ingest_decimal_lines_do_not_become_headings(tmp_path: Path) -> None:
+    """Decimal-prefixed lines must stay body text (issue #241)."""
+    result = ingest_rtf(_decimal_and_multipart_rtf(tmp_path), "doc", "v1")
+    tree = result.tree
+
+    top_paths = {n.clause_path for n in tree.nodes}
+    assert "99" not in top_paths, "'99.9% uptime' must not become clause '99'"
+    assert "10" not in top_paths, "'10.00 per unit' must not become clause '10'"
+
+    all_text = " ".join(n.text for n in tree.all_nodes())
+    assert "1.5 times the Fees" in all_text
+    assert "99.9% uptime guarantee" in all_text
+    assert "10.00 per unit is the price" in all_text
+
+
+def test_ingest_multipart_number_not_mis_split(tmp_path: Path) -> None:
+    """'10.1.3 Term and Termination' must not fabricate clause '10.1' (issue #241)."""
+    result = ingest_rtf(_decimal_and_multipart_rtf(tmp_path), "doc", "v1")
+    tree = result.tree
+
+    assert tree.resolve_path("10.1") is None, "Backtrack must not fabricate clause '10.1'"
+    all_headings = [n.heading for n in tree.all_nodes() if n.heading]
+    assert not any((h or "").startswith("3 Term") for h in all_headings), (
+        "'10.1.3 Term and Termination' must not be mangled into heading '3 Term and Termination'"
+    )
 
 
 def test_ingest_body_appended_to_clause(tmp_path: Path) -> None:

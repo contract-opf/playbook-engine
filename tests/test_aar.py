@@ -697,6 +697,21 @@ def test_write_after_action_report_atomic(tmp_path: Path) -> None:
     assert not (tmp_path / "report.json").with_suffix(".tmp").exists()
 
 
+def test_write_after_action_report_rejects_json_dest(tmp_path: Path) -> None:
+    """A .json --out would collide with the derived JSON twin — reject it.
+
+    Regression for #296: dest.with_suffix('.json') is a no-op when dest
+    already ends in .json, so the JSON twin would atomically clobber the
+    Markdown report just written to the identical path.
+    """
+    out_dir = _make_out_dir(tmp_path)
+    dest = tmp_path / "report.json"
+    with pytest.raises(ValueError, match="Markdown"):
+        write_after_action_report(out_dir, dest)
+    # Nothing should be written when the guard rejects the destination.
+    assert not dest.exists()
+
+
 # ---------------------------------------------------------------------------
 # build_after_action_data — section structure tests
 # ---------------------------------------------------------------------------
@@ -905,6 +920,20 @@ def test_report_cmd_missing_dir_exits_nonzero(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["report", str(tmp_path / "no-such-dir")])
     assert result.exit_code != 0
     assert "ERROR" in result.output
+
+
+def test_report_cmd_json_out_rejected_cleanly(tmp_path: Path) -> None:
+    """report --out report.json exits non-zero with a clean ERROR message,
+    not a traceback, and never clobbers a Markdown report onto the .json
+    path (regression for #296)."""
+    out_dir = _make_out_dir(tmp_path)
+    report_path = tmp_path / "report.json"
+    runner = CliRunner()
+    result = runner.invoke(cli, ["report", str(out_dir), "--out", str(report_path)])
+    assert result.exit_code != 0
+    assert "ERROR" in result.output
+    assert "Traceback" not in result.output
+    assert not report_path.exists()
 
 
 def test_report_artifact_inventory_drops_retired_document_html(tmp_path: Path) -> None:

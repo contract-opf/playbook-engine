@@ -463,6 +463,10 @@ def _align_seqs(
     matched_sim: list[float | None] = [None] * len(ref_clauses)
     extra_rows: list[dict[int, ClassifiedClause | None]] = []
 
+    # Precompute reference-clause token sets once per bucket (not per pair, and
+    # not per non-reference version) to avoid O(n^2) re-tokenization below.
+    ref_tokens = [_tokens(rc.node.text or "") for rc in ref_clauses]
+
     for i, ver_clauses in enumerate(seqs):
         if i == ref_idx:
             continue
@@ -474,11 +478,15 @@ def _align_seqs(
                 extra_rows.append({i: clause})
                 continue
 
-            best_j = max(
-                unmatched_ref,
-                key=lambda j: _text_jaccard(clause, ref_clauses[j]),
-            )
-            sim = _text_jaccard(clause, ref_clauses[best_j])
+            clause_tokens = _tokens(clause.node.text or "")
+            best_j = unmatched_ref[0]
+            best_sim = _jaccard(clause_tokens, ref_tokens[best_j])
+            for j in unmatched_ref[1:]:
+                candidate_sim = _jaccard(clause_tokens, ref_tokens[j])
+                if candidate_sim > best_sim:
+                    best_sim = candidate_sim
+                    best_j = j
+            sim = best_sim
             if sim > 0.0:
                 matched[best_j][i] = clause
                 # Store the minimum Jaccard seen for this reference slot across
@@ -582,10 +590,8 @@ def _tokens(text: str) -> frozenset[str]:
     return frozenset(w for w in _normalize(text).split() if w not in _STOP_WORDS)
 
 
-def _text_jaccard(a: ClassifiedClause, b: ClassifiedClause) -> float:
-    """Token-Jaccard similarity on clause text (stop-words removed)."""
-    ta = _tokens(a.node.text or "")
-    tb = _tokens(b.node.text or "")
+def _jaccard(ta: frozenset[str], tb: frozenset[str]) -> float:
+    """Jaccard similarity between two precomputed token sets."""
     if not ta and not tb:
         return 1.0
     if not ta or not tb:

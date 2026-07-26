@@ -746,3 +746,45 @@ def test_alignment_judge_split_emits_multiple_rows() -> None:
     )
     assert v2_having[0].slots[2].clause is None, "the v2 row must not also carry v3's clause"
     assert v3_having[0].slots[1].clause is None, "the v3 row must not also carry v2's clause"
+
+
+def test_align_seqs_slow_path_tokenizes_each_clause_a_constant_number_of_times(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for issue #246: the slow (differing-count) path of
+    _align_seqs must not re-tokenize full clause text inside the greedy
+    max() scan. Each clause should be tokenized O(1) times (once for the
+    reference precompute, once for itself), not once per remaining
+    candidate — the old code was O(n^2) tokenization calls for an n-clause
+    bucket.
+    """
+    import playbook_engine.clause_aligner as ca
+
+    real_tokens = ca._tokens
+    call_count = 0
+
+    def counting_tokens(text: str) -> frozenset[str]:
+        nonlocal call_count
+        call_count += 1
+        return real_tokens(text)
+
+    monkeypatch.setattr(ca, "_tokens", counting_tokens)
+
+    # All clauses share taxonomy_id=None (the realistic default-classifier
+    # bucket per the ticket) and use short, sub-threshold text so none of
+    # them qualify for the global move-matching phase (Phase 0) — they land
+    # squarely in the differing-count slow path of _align_seqs.
+    n = 60
+    v1 = [_cc(str(i), None, f"clause number {i} text") for i in range(n)]
+    v2 = [_cc(str(i), None, f"clause number {i} text") for i in range(n - 1)]
+
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) >= n - 1
+
+    # Linear bound with generous slack (real O(n) cost is ~2n across both
+    # _match_pair's phase-2 gate and _align_seqs's precompute); the O(n^2)
+    # pre-fix code blows past this by roughly a factor of n.
+    assert call_count <= 6 * n, (
+        f"expected O(n) tokenization calls (<= {6 * n}), got {call_count} for n={n} — "
+        "likely re-tokenizing inside the greedy scan"
+    )

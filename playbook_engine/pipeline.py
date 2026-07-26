@@ -1893,76 +1893,14 @@ def mine_corpus(
         _cls_judge = BatchedClassificationJudge(delegate=_cls_judge, cache=verdict_cache)
         _dev_judge = BatchedDeviationJudge(delegate=_dev_judge, cache=verdict_cache)
 
-    # Config fingerprint: encodes the fields that affect L1-L4 outputs.
-    # Hash the template file's *content* (not its path) so that changing the
-    # file's text under the same path correctly busts per-doc cache entries.
+    # Config fingerprint prep: hash the template file's *content* (not its
+    # path) so that changing the file's text under the same path correctly
+    # busts per-doc cache entries. The fingerprint itself is assembled AFTER
+    # template ingestion below (see the comment there) so it also captures
+    # the template's classification OUTCOME, not just the file on disk.
     template_content_hash: str | None = None
     if config.baseline.template_path and config.baseline.template_path.exists():
         template_content_hash = _sha256_file(config.baseline.template_path)
-    config_fp = make_config_fingerprint(
-        {
-            "agreement_type_id": config.agreement_type.id,
-            "provenance_aliases": sorted(config.provenance.our_party_aliases),
-            "template_content_hash": template_content_hash,
-            # Switching segmentation paths changes L1 output for identical
-            # source files — must bust the cache, not replay a stale tree
-            # segmented (and classified) the other way.
-            "use_llm_segmentation": use_llm_segmentation,
-            # The batch path has no repair loop (see _ground_batch_result), so
-            # the same source content can in principle segment differently
-            # under batch vs. synchronous LLM calls — never replay one path's
-            # stage-cached tree as if it were the other's.
-            "use_batch_segmentation": use_batch_segmentation,
-            # Toggling cross-version taxonomy normalization changes the L1
-            # output for every version of every multi-version agreement — a
-            # prior run's un-normalized cached trees must not be replayed
-            # silently once this is switched on (issue #90).
-            "normalize_trail_across_versions": normalize_trail_across_versions,
-            # The segmenter's model id, prompt version, output schema shape,
-            # and effort each change what L1 produces for identical source
-            # content. These are read from the same module-level constants
-            # segment_documents_batch/normalize_trail default to — bumping
-            # any one of them (a code change, not a config change) must bust
-            # every per-doc cache entry rather than replay a tree produced by
-            # the old model/prompt/schema/effort (issue #90).
-            "segmentation_model": config.segmentation.model,
-            "segmentation_prompt_version": PROMPT_VERSION,
-            "segmentation_schema_hash": SCHEMA_HASH,
-            "segmentation_effort": DEFAULT_EFFORT,
-            # Producer-configurable classification bands (issue #168) change
-            # which clauses classify_tree auto-classifies, escalates to the
-            # judge, or auto-unclassifies for identical source content — a
-            # prior run's classifications under the old thresholds must not
-            # be replayed silently once these are changed.
-            "classification_ambiguity_threshold": config.classification.ambiguity_threshold,
-            "classification_auto_classify_threshold": (
-                config.classification.auto_classify_threshold
-            ),
-            # L1-L4 output depends on which judges produced it, not just which
-            # config values were passed — swapping the injected scope/
-            # classification/deviation judge (e.g. stub -> real, or one real
-            # judge for another) must bust every per-doc stage-cache entry.
-            # Without this, the #61 ArtifactStore would replay a whole cached
-            # document result computed under the old judge set, and the L1-L4
-            # loop would never even reach the judges (let alone the verdict
-            # cache) to notice the identity changed (issue #102).
-            "judge_identity": judge_identity,
-            # Taxonomy content feeds classification and the segmentation
-            # taxonomy gate; editing the taxonomy file must bust the per-doc
-            # stage cache rather than replay results classified against the
-            # old entries (the judges' own verdict keys already include
-            # taxonomy_ids — this closes the same hole for the L1-L4 layer).
-            "taxonomy_entries": sorted((e.id, e.label, e.description) for e in taxonomy.entries),
-            # Deviation assessment now diffs "unchanged" clauses (including
-            # every clause of a single-version document) against the
-            # canonical template rather than hardcoding deviation="none"
-            # (issue #103) — a code change, not a config change, but one that
-            # changes L1-L4 output for identical source content + judges. Bump
-            # this constant on any future change to that comparison logic so
-            # a warm cache from before the fix is never replayed verbatim.
-            "deviation_vs_template_version": _DEVIATION_VS_TEMPLATE_VERSION,
-        }
-    )
 
     # -----------------------------------------------------------------------
     # Ingest template
@@ -2039,6 +1977,89 @@ def mine_corpus(
     for t_obs in t_observations:
         if t_obs.taxonomy_id is not None and t_obs.taxonomy_id not in template_std_by_tid:
             template_std_by_tid[t_obs.taxonomy_id] = t_obs.full_text
+
+    # Config fingerprint: encodes the fields that affect L1-L4 outputs.
+    # Assembled HERE — after template ingestion above, not from the template
+    # file's content hash alone — so that the template's classification
+    # OUTCOME (not just the bytes on disk) busts the per-doc stage cache
+    # (issue #243). On the agent/LLM segmentation path, when the template's
+    # segmentation verdict isn't yet in the store, the except block above
+    # catches SegmentationQAError, leaves template_tree=None and
+    # template_std_by_tid={}, and the run proceeds in emergent mode; any doc
+    # whose own segmentation verdict is already store-resident then computes
+    # against EMPTY standards. Folding template_tree_present and a fingerprint
+    # of the actual template_std_by_tid contents in here means that once the
+    # advertised remediation ("run 'playbook segment'/'segment-apply' and
+    # re-mine") makes the template classify, config_fp changes even though
+    # template_content_hash is identical — so store.get_or_compute recomputes
+    # every per-doc result against the real standards instead of replaying
+    # the template-less cached ones verbatim, forever.
+    config_fp = make_config_fingerprint(
+        {
+            "agreement_type_id": config.agreement_type.id,
+            "provenance_aliases": sorted(config.provenance.our_party_aliases),
+            "template_content_hash": template_content_hash,
+            "template_tree_present": template_tree is not None,
+            "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),
+            # Switching segmentation paths changes L1 output for identical
+            # source files — must bust the cache, not replay a stale tree
+            # segmented (and classified) the other way.
+            "use_llm_segmentation": use_llm_segmentation,
+            # The batch path has no repair loop (see _ground_batch_result), so
+            # the same source content can in principle segment differently
+            # under batch vs. synchronous LLM calls — never replay one path's
+            # stage-cached tree as if it were the other's.
+            "use_batch_segmentation": use_batch_segmentation,
+            # Toggling cross-version taxonomy normalization changes the L1
+            # output for every version of every multi-version agreement — a
+            # prior run's un-normalized cached trees must not be replayed
+            # silently once this is switched on (issue #90).
+            "normalize_trail_across_versions": normalize_trail_across_versions,
+            # The segmenter's model id, prompt version, output schema shape,
+            # and effort each change what L1 produces for identical source
+            # content. These are read from the same module-level constants
+            # segment_documents_batch/normalize_trail default to — bumping
+            # any one of them (a code change, not a config change) must bust
+            # every per-doc cache entry rather than replay a tree produced by
+            # the old model/prompt/schema/effort (issue #90).
+            "segmentation_model": config.segmentation.model,
+            "segmentation_prompt_version": PROMPT_VERSION,
+            "segmentation_schema_hash": SCHEMA_HASH,
+            "segmentation_effort": DEFAULT_EFFORT,
+            # Producer-configurable classification bands (issue #168) change
+            # which clauses classify_tree auto-classifies, escalates to the
+            # judge, or auto-unclassifies for identical source content — a
+            # prior run's classifications under the old thresholds must not
+            # be replayed silently once these are changed.
+            "classification_ambiguity_threshold": config.classification.ambiguity_threshold,
+            "classification_auto_classify_threshold": (
+                config.classification.auto_classify_threshold
+            ),
+            # L1-L4 output depends on which judges produced it, not just which
+            # config values were passed — swapping the injected scope/
+            # classification/deviation judge (e.g. stub -> real, or one real
+            # judge for another) must bust every per-doc stage-cache entry.
+            # Without this, the #61 ArtifactStore would replay a whole cached
+            # document result computed under the old judge set, and the L1-L4
+            # loop would never even reach the judges (let alone the verdict
+            # cache) to notice the identity changed (issue #102).
+            "judge_identity": judge_identity,
+            # Taxonomy content feeds classification and the segmentation
+            # taxonomy gate; editing the taxonomy file must bust the per-doc
+            # stage cache rather than replay results classified against the
+            # old entries (the judges' own verdict keys already include
+            # taxonomy_ids — this closes the same hole for the L1-L4 layer).
+            "taxonomy_entries": sorted((e.id, e.label, e.description) for e in taxonomy.entries),
+            # Deviation assessment now diffs "unchanged" clauses (including
+            # every clause of a single-version document) against the
+            # canonical template rather than hardcoding deviation="none"
+            # (issue #103) — a code change, not a config change, but one that
+            # changes L1-L4 output for identical source content + judges. Bump
+            # this constant on any future change to that comparison logic so
+            # a warm cache from before the fix is never replayed verbatim.
+            "deviation_vs_template_version": _DEVIATION_VS_TEMPLATE_VERSION,
+        }
+    )
 
     all_observations: list[Observation] = []
     all_round_moves: list[RoundMove] = []

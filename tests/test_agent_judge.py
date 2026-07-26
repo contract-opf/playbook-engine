@@ -32,6 +32,7 @@ from playbook_engine.agent_judge import (
     StoreBackedScopeJudge,
     VerdictStore,
     _payload_key,
+    validate_verdict,
 )
 from playbook_engine.clause_classifier import ClassificationJudge
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
@@ -1104,3 +1105,91 @@ class TestStoreBackedScopeJudge:
         lines = path.read_text().splitlines()
         assert len(lines) == 1
         assert json.loads(lines[0])["kind"] == "scope"
+
+
+class TestValidateVerdictBasisWhitelist:
+    """Issue #247: validate_verdict's contract is "any verdict accepted here is
+    guaranteed to replay" — but it only rejected _UNRESOLVED_VERDICT_BASES and
+    otherwise accepted any ``_BASIS_VALUES``-valid basis. A plausible-but-nonstandard
+    value (e.g. "reworded_equivalent", emitted naturally by an LLM judge that finds
+    a hunk equivalent) passed here but crashed deviation_classifier.assess_deviations /
+    clause_classifier.classify_tree on the next replay, outside the quarantine catch
+    set — aborting the whole corpus run after the verdict was already committed to
+    the append-only verdicts.jsonl.
+    """
+
+    def test_deviation_rejects_reworded_equivalent_basis(self) -> None:
+        """ "reworded_equivalent" is a valid _BASIS_VALUES member but is not one of
+        the bases assess_deviations accepts from a replayed verdict — it must be
+        rejected here, not on the next mine round."""
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "deviation",
+                {
+                    "deviation": "reworded_equivalent",
+                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                    "basis": "reworded_equivalent",
+                },
+            )
+
+    def test_deviation_rejects_deterministic_basis(self) -> None:
+        """ "deterministic" is likewise valid but not replayable."""
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "deviation",
+                {
+                    "deviation": "none",
+                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                    "basis": "deterministic",
+                },
+            )
+
+    def test_deviation_accepts_judge_basis(self) -> None:
+        """The one basis a producer-supplied deviation verdict may carry."""
+        validate_verdict(
+            "deviation",
+            {
+                "deviation": "substantive",
+                "risk_delta": {"direction": "worse", "magnitude": "material"},
+                "basis": "judge",
+            },
+        )
+
+    def test_classify_rejects_exact_match_basis(self) -> None:
+        """ "exact_match" is a valid _BASIS_VALUES member but classify_tree raises
+        on replay for anything outside 'judge' / 'unclassified'."""
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "classify",
+                {"taxonomy_id": "x", "confidence": 0.9, "basis": "exact_match"},
+            )
+
+    def test_classify_rejects_heading_similarity_basis(self) -> None:
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "classify",
+                {"taxonomy_id": "x", "confidence": 0.9, "basis": "heading_similarity"},
+            )
+
+    def test_classify_rejects_llm_segmenter_basis(self) -> None:
+        """Verifier correction: "llm_segmenter" also passes the old whitelist-less
+        check and crashes classify_tree on replay."""
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "classify",
+                {"taxonomy_id": "x", "confidence": 0.9, "basis": "llm_segmenter"},
+            )
+
+    def test_classify_accepts_judge_basis(self) -> None:
+        validate_verdict(
+            "classify",
+            {"taxonomy_id": "indemnification", "confidence": 0.9, "basis": "judge"},
+        )
+
+    def test_classify_accepts_unclassified_basis(self) -> None:
+        """ "unclassified" is engine-accepted on replay for classify (unlike
+        deviation, which has no equivalent placeholder basis)."""
+        validate_verdict(
+            "classify",
+            {"taxonomy_id": None, "confidence": 0.0, "basis": "unclassified"},
+        )

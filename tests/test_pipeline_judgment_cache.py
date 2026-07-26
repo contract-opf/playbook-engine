@@ -45,8 +45,10 @@ from playbook_engine.artifact_store import make_config_fingerprint
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.config import load_config
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import mine_corpus
 from playbook_engine.scope_gate import ScopeDecision
+from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
 
 # ---------------------------------------------------------------------------
@@ -475,4 +477,211 @@ def test_config_fingerprint_differs_across_judge_identity(tmp_path: Path) -> Non
     assert fp_stub != fp_real, (
         "make_config_fingerprint must produce different fingerprints for "
         "different judge_identity values with every other field held constant"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #243 — config_fp must fold in the template's classification OUTCOME,
+# not just the template file's content hash, so a template-pending -> template-
+# available transition busts the #61 stage cache.
+# ---------------------------------------------------------------------------
+
+_HEADING_TAXONOMY = {
+    "1. Indemnification": "indemnification",
+    "2. Governing Law": "governing_law",
+}
+
+# Unique to the template's Indemnification clause — used by
+# _template_pending_segment_fn below to detect "this is the template" from
+# content alone (SegmentFn only receives (canonical_text, blocks), never a
+# document id).
+_TEMPLATE_MARKER = "hold harmless"
+
+_TEMPLATE_BODY = (
+    r"1. Indemnification\par "
+    r"Gamma LLC shall indemnify and hold harmless Delta University from any and all "
+    r"claims, liabilities, and damages whatsoever, without limitation, arising under "
+    r"or in connection with this agreement in perpetuity.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of Delaware.\par "
+)
+
+# Indemnification clause text deliberately shares little vocabulary with
+# _TEMPLATE_BODY's (Jaccard similarity well under the 0.92 reworded-equivalent
+# threshold) so it routes to the deviation judge once a template standard
+# exists. Governing Law is identical to the template's — a same-text control
+# clause that must stay deterministic in both runs.
+_DOC_BODY = (
+    r"1. Indemnification\par "
+    r"Gamma LLC shall provide reasonable indemnification to Delta University limited "
+    r"solely to direct damages arising from Gamma LLC's own negligence.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of Delaware.\par "
+)
+
+
+def _pairing_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Pair consecutive (heading, body) blocks into classified clause nodes.
+
+    Matches the RTF fixtures' block-per-paragraph shape from extract_blocks:
+    each clause is exactly two blocks (a numbered heading, then its body).
+    Segments *and* classifies correctly for both the template and the
+    document — the "template segmentation succeeds" half of issue #243's
+    repro.
+    """
+    del canonical_text
+    nodes: list[SegNode] = []
+    order = 1
+    i = 0
+    while i < len(blocks):
+        heading_block = blocks[i]
+        tid = _HEADING_TAXONOMY.get(heading_block.text)
+        body_block = blocks[i + 1] if i + 1 < len(blocks) else heading_block
+        nodes.append(
+            SegNode(
+                node_id=f"n{order}",
+                parent_id=None,
+                order=order,
+                heading=heading_block.text,
+                taxonomy_id=tid,
+                start_block_id=heading_block.block_id,
+                end_block_id=body_block.block_id,
+                start_quote=heading_block.text[:10],
+                end_quote=(body_block.text[-10:] if body_block is not heading_block else ""),
+            )
+        )
+        i += 2 if body_block is not heading_block else 1
+        order += 1
+    return nodes
+
+
+def _template_pending_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Segment the corpus document fine; fail the template's coverage gate.
+
+    Detects "this is the template" via ``_TEMPLATE_MARKER`` (unique to the
+    template's Indemnification clause) since ``SegmentFn`` only receives
+    ``(canonical_text, blocks)`` — never a document id. Mirrors
+    test_pipeline_llm_seg.py's ``_gate_failing_segment_fn``: covering only
+    the first block leaves the rest of ``canonical_text`` uncovered, so
+    ``segment_verify_repair`` exhausts every repair attempt and
+    ``SegmentationQAError`` propagates — exactly the "template's segmentation
+    verdict is not yet in the store" scenario from the issue.
+    """
+    if _TEMPLATE_MARKER in canonical_text:
+        first = blocks[0]
+        return [
+            SegNode(
+                node_id="n1",
+                parent_id=None,
+                order=1,
+                heading=first.text,
+                taxonomy_id=None,
+                start_block_id=first.block_id,
+                end_block_id=first.block_id,
+            )
+        ]
+    return _pairing_segment_fn(canonical_text, blocks)
+
+
+def _make_template_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Single-doc, single-version corpus + a template file; return (corpus_dir, config_path, out_dir)."""
+    corpus_dir = tmp_path / "corpus"
+    doc_dir = corpus_dir / "deal-alpha"
+    doc_dir.mkdir(parents=True)
+    _write_rtf(doc_dir / "v1.rtf", _DOC_BODY)
+
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, _TEMPLATE_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": "template.rtf"},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Gamma LLC"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    return corpus_dir, config_path, out_dir
+
+
+def test_stage_cache_busts_when_template_becomes_available(tmp_path: Path) -> None:
+    """issue #243: the #61 L1-L4 stage cache must not replay a template-less
+    result once the template's segmentation verdict becomes available.
+
+    Run 1: ``use_llm_segmentation=True`` with a segment_fn that raises
+    ``SegmentationQAError`` for the template only (the corpus document
+    segments fine) — ``mine_corpus`` catches it, warns, and proceeds in
+    emergent mode (``template_std_by_tid == {}``). The document's
+    Indemnification clause has no template standard to compare against, so
+    it is recorded ``deviation="none"``/``basis="deterministic"`` and the
+    per-doc result is cached under ``config_fp``.
+
+    Run 2: SAME out_dir, NO manual stage-cache busting, a working segment_fn
+    that classifies the template too. Before issue #243's fix, ``config_fp``
+    only hashed the template file's *content* — unchanged between runs — so
+    the #61 stage cache would replay run 1's cached result verbatim: the
+    recording deviation judge would never be called and the clause would
+    stay ``basis="deterministic"`` forever, despite a real template standard
+    now existing to diff it against. This test asserts the judge WAS called
+    and the clause's basis reflects the real comparison, not a stale replay.
+    """
+    corpus_dir, config_path, out_dir = _make_template_corpus(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    # -----------------------------------------------------------------------
+    # Run 1 — template segmentation pending (SegmentationQAError caught),
+    # document segments fine.
+    # -----------------------------------------------------------------------
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_template_pending_segment_fn,
+        deviation_judge=_CountingDeviationJudge(),
+    )
+
+    obs_path = out_dir / "observations.jsonl"
+    raw_obs_1 = read_observations_jsonl(obs_path)
+    indem_obs_1 = [o for o in raw_obs_1 if o["taxonomy_id"] == "indemnification"]
+    assert indem_obs_1, "Run 1 must produce an Indemnification observation"
+    assert all(o["basis"] == "deterministic" for o in indem_obs_1), (
+        "Run 1 (template pending) must record the Indemnification clause "
+        f"deterministically — no template standard exists yet: {indem_obs_1}"
+    )
+
+    # -----------------------------------------------------------------------
+    # Run 2 — SAME out_dir, no manual cache busting. Template now classifies.
+    # -----------------------------------------------------------------------
+    dev_judge_2 = _CountingDeviationJudge()
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_pairing_segment_fn,
+        deviation_judge=dev_judge_2,
+    )
+
+    assert dev_judge_2.call_count > 0, (
+        "Run 2 must call the deviation judge for the Indemnification clause "
+        "now that the template is available — a stale #61 stage-cache hit "
+        f"would skip it entirely; got {dev_judge_2.call_count} calls"
+    )
+
+    raw_obs_2 = read_observations_jsonl(obs_path)
+    indem_obs_2 = [o for o in raw_obs_2 if o["taxonomy_id"] == "indemnification"]
+    assert indem_obs_2, "Run 2 must produce an Indemnification observation"
+    assert all(o["basis"] == "judge" for o in indem_obs_2), (
+        "Run 2 must route the Indemnification clause (differs from the now-"
+        "available template) through the judge, not replay run 1's "
+        f"template-less deterministic result verbatim: {indem_obs_2}"
     )

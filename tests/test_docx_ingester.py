@@ -66,6 +66,27 @@ def _numbered_docx(tmp_path: Path) -> Path:
     return path
 
 
+def _decimal_and_multipart_docx(tmp_path: Path) -> Path:
+    """Regression fixture for issue #241 (_NUM_PREFIX backtracking).
+
+    - "1. Payment" is a genuine top-level heading.
+    - The paragraphs that follow are line-initial decimal numbers and must
+      remain body text under "1. Payment" — not be promoted to spurious
+      headings ("1", "99", "10") by the old backtracking regex.
+    - "10.1.3 Term and Termination" must not be mis-split into clause path
+      "10.1" with mangled heading text "3 Term and Termination".
+    """
+    doc = Document()
+    doc.add_paragraph("1. Payment")
+    doc.add_paragraph("1.5 times the Fees shall be invoiced in the prior month.")
+    doc.add_paragraph("99.9% uptime guarantee applies to the Platform.")
+    doc.add_paragraph("10.00 per unit is the price ordered.")
+    doc.add_paragraph("10.1.3 Term and Termination")
+    path = tmp_path / "decimal_multipart.docx"
+    doc.save(str(path))
+    return path
+
+
 def _table_docx(tmp_path: Path) -> Path:
     """Document with a table — table must be flattened to body text."""
     doc = Document()
@@ -260,6 +281,43 @@ def test_numbered_subsections_nested(tmp_path: Path) -> None:
     n12 = result.tree.resolve_path("1.2")
     assert n11 is not None, "Clause 1.1 should be in the tree"
     assert n12 is not None, "Clause 1.2 should be in the tree"
+
+
+# ---------------------------------------------------------------------------
+# Decimal / multi-part number regression (issue #241)
+# ---------------------------------------------------------------------------
+
+
+def test_decimal_prefixed_paragraphs_stay_body_text(tmp_path: Path) -> None:
+    """1.5x / 99.9% / 10.00 must not be promoted to clause headings."""
+    path = _decimal_and_multipart_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    tree = result.tree
+
+    top_paths = {n.clause_path for n in tree.nodes}
+    assert "99" not in top_paths, "'99.9% uptime' must not become clause '99'"
+    assert "10" not in top_paths, "'10.00 per unit' must not become clause '10'"
+
+    payment_node = next((n for n in tree.nodes if n.clause_path == "1"), None)
+    assert payment_node is not None, "Clause '1' (Payment) should exist"
+    assert "1.5 times the Fees" in payment_node.text
+    assert "99.9% uptime guarantee" in payment_node.text
+    assert "10.00 per unit is the price" in payment_node.text
+
+
+def test_multipart_number_not_mis_split(tmp_path: Path) -> None:
+    """'10.1.3 Term and Termination' must not become clause '10.1' / heading '3 Term...'."""
+    path = _decimal_and_multipart_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    tree = result.tree
+
+    assert tree.resolve_path("10.1") is None, "Backtrack must not fabricate clause '10.1'"
+    all_headings = [n.heading for n in tree.all_nodes() if n.heading]
+    assert not any((h or "").startswith("3 Term") for h in all_headings), (
+        "'10.1.3 Term and Termination' must not be mangled into heading '3 Term and Termination'"
+    )
+    all_text = " ".join(n.text for n in tree.all_nodes())
+    assert "10.1.3 Term and Termination" in all_text
 
 
 # ---------------------------------------------------------------------------

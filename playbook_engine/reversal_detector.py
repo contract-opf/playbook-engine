@@ -14,7 +14,18 @@ Algorithm (fully deterministic, no LLM):
 3. For each ``"insert"`` or ``"replace"`` hunk (or the whole clause for
    ``"added"``), collect the proposed word tokens.
 4. If those tokens are **not a subset** of the signed token set for the same
-   ``taxonomy_id``, the proposal was reversed → emit a ``ReversalRecord``.
+   logical clause (matched by ``ClauseDiff.alignment_index``, not by
+   per-version ``clause_path`` — see below), the proposal was reversed →
+   emit a ``ReversalRecord``.
+
+Matching is keyed by ``alignment_index`` rather than ``clause_path`` because
+``clause_path`` is per-version dotted numbering: the aligner
+(``clause_aligner._match_moves``, the v5 relocation feature) can legitimately
+align the same logical clause under a different path in each version (e.g. a
+later insertion renumbers everything after it). Keying the signed-token
+lookup by the draft version's path would then compare a proposal against the
+wrong clause's signed text, both fabricating reversals for clauses that
+actually survived and, in the mirror case, masking real reversals.
 
 Token-subset check: conservative but correct.  A proposed phrase whose content
 words are all retained in the signed text is treated as *accepted* even if the
@@ -128,16 +139,28 @@ def detect_reversals(doc_diff: DocumentDiff) -> list[ReversalRecord]:
 
     signed_version = doc_diff.version_order[-1]
 
-    # Build token sets keyed by clause_path in the signed (final) version.
-    # Using clause_path (not taxonomy_id) ensures clause-instance precision:
-    # two clauses that share a taxonomy_id (or both have None) are tracked
-    # independently, preventing cross-contamination of reversal outcomes.
-    signed_tokens: dict[str, frozenset[str]] = {}
+    # Build token sets keyed by alignment_index (logical-clause identity) in
+    # the signed (final) version, not by clause_path. clause_path is
+    # per-version numbering and is not stable across versions when clauses
+    # are inserted/removed elsewhere in the document (see module docstring);
+    # alignment_index is the stable row position in the alignments list both
+    # the net diff and every consecutive diff were built from
+    # (clause_differ._version_diff), so it identifies the same logical clause
+    # on both sides of the lookup below regardless of renumbering. This still
+    # preserves clause-instance precision (two clauses sharing a taxonomy_id,
+    # or both ``None``, get distinct alignment_index values and are tracked
+    # independently).
+    signed_tokens: dict[int, frozenset[str]] = {}
     for cd in doc_diff.net.diffs:
-        if cd.kind != "removed" and cd.text_after and cd.clause_path_after:
-            path = cd.clause_path_after
-            existing = signed_tokens.get(path, frozenset())
-            signed_tokens[path] = existing | _tokens(cd.text_after)
+        if (
+            cd.kind != "removed"
+            and cd.text_after
+            and cd.clause_path_after
+            and cd.alignment_index is not None
+        ):
+            idx = cd.alignment_index
+            existing = signed_tokens.get(idx, frozenset())
+            signed_tokens[idx] = existing | _tokens(cd.text_after)
 
     reversals: list[ReversalRecord] = []
 
@@ -165,8 +188,15 @@ def detect_reversals(doc_diff: DocumentDiff) -> list[ReversalRecord]:
             if not proposed_toks:
                 continue
 
-            # Compare against signed version's tokens for this clause instance.
-            signed = signed_tokens.get(clause_path, frozenset())
+            # Compare against signed version's tokens for this clause instance,
+            # keyed by alignment_index (logical-clause identity) — not by
+            # clause_path, which is per-version and may have been renumbered
+            # by the time the signed version was reached (see module docstring).
+            signed = (
+                signed_tokens.get(cd.alignment_index, frozenset())
+                if cd.alignment_index is not None
+                else frozenset()
+            )
             if not proposed_toks.issubset(signed):
                 reversals.append(
                     ReversalRecord(

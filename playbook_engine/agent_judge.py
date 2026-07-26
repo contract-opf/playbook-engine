@@ -269,6 +269,20 @@ def _provenance_needs_review() -> ProvenanceResult:
 #: pending queue looks drained. The store-backed judges set these themselves.
 _UNRESOLVED_VERDICT_BASES = frozenset({"needs_review", "judge_error", "stub"})
 
+#: The only basis values a *producer-supplied* deviation verdict may carry.
+#: Mirrors the whitelist ``deviation_classifier.assess_deviations`` enforces on
+#: replay (``"judge"``, ``"judge_error"``, ``"needs_review"``), minus the two
+#: engine-internal bases already rejected above — so a plausible-but-nonstandard
+#: value like "reworded_equivalent" or "deterministic" (both valid
+#: ``_BASIS_VALUES``) is caught here instead of aborting the next mine run.
+_DEVIATION_REPLAYABLE_BASES = frozenset({"judge"})
+
+#: The only basis values a *producer-supplied* classify verdict may carry.
+#: Mirrors the whitelist ``clause_classifier.classify_tree`` enforces on
+#: replay (``"judge"``, ``"judge_error"``, ``"needs_review"``, ``"unclassified"``),
+#: minus the two engine-internal bases already rejected above.
+_CLASSIFY_REPLAYABLE_BASES = frozenset({"judge", "unclassified"})
+
 
 def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     """Validate a producer-supplied *verdict* for *kind* at apply time.
@@ -291,10 +305,18 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
             "('llm' for provenance)"
         )
     if kind == "classify":
+        classify_basis = verdict.get("basis", "judge")
+        if classify_basis not in _CLASSIFY_REPLAYABLE_BASES:
+            raise ValueError(
+                f"basis {classify_basis!r} is not replayable for a classify verdict; "
+                f"a supplied verdict must carry basis in "
+                f"{sorted(_CLASSIFY_REPLAYABLE_BASES)!r} (clause_classifier.classify_tree "
+                "rejects anything else on replay)"
+            )
         ClauseClassification(
             taxonomy_id=verdict.get("taxonomy_id"),
             confidence=verdict.get("confidence", 0.0),
-            basis=verdict.get("basis", "judge"),
+            basis=classify_basis,
         )
     elif kind == "deviation":
         if verdict.get("deviation") == "needs_review":
@@ -309,6 +331,14 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
                 '{"direction": "neutral", "magnitude": "none"} for '
                 "none/reworded_equivalent deviations"
             )
+        deviation_basis = verdict.get("basis", "judge")
+        if deviation_basis not in _DEVIATION_REPLAYABLE_BASES:
+            raise ValueError(
+                f"basis {deviation_basis!r} is not replayable for a deviation verdict; "
+                f"a supplied verdict must carry basis in "
+                f"{sorted(_DEVIATION_REPLAYABLE_BASES)!r} "
+                "(deviation_classifier.assess_deviations rejects anything else on replay)"
+            )
         risk_raw = verdict["risk_delta"]
         DeviationResult(
             deviation=verdict.get("deviation", ""),
@@ -316,7 +346,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
                 direction=risk_raw.get("direction", ""),
                 magnitude=risk_raw.get("magnitude", ""),
             ),
-            basis=verdict.get("basis", "judge"),
+            basis=deviation_basis,
             rationale=verdict.get("rationale", ""),
             confidence=verdict.get("confidence"),
         )

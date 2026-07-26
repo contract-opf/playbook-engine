@@ -313,6 +313,44 @@ def test_reversal_same_taxonomy_id_two_clauses_no_cross_contamination() -> None:
     assert "2" not in reversed_paths, "clause '2' must NOT be cross-contaminated"
 
 
+# ---------------------------------------------------------------------------
+# detect_reversals: cross-version clause_path renumbering (issue #244)
+# ---------------------------------------------------------------------------
+
+
+def test_reversal_no_false_positive_on_cross_version_renumbering() -> None:
+    """A clause retained into the signed version, but renumbered by an
+    intervening insertion, must not be flagged as reversed.
+
+    v1: [A@"1"]
+    v2: [A@"1", B@"2"]                       <- B added
+    v3 (signed): [A@"1", C@"2", B@"3"]       <- C inserted before B, B renumbered
+
+    B's text is identical in v2 and v3 — it survived the negotiation
+    unchanged, just at a different clause_path because C pushed it down.
+    Keying the signed-token lookup by clause_path (rather than the stable
+    alignment identity) would look up path "2" for B and find C's tokens
+    instead, fabricating a reversal.
+    """
+    b_text = "Beta Ltd shall receive quarterly compliance reports."
+    v1 = [_cc("1", "a", "Alice Corp shall perform its obligations in full.")]
+    v2 = [
+        _cc("1", "a", "Alice Corp shall perform its obligations in full."),
+        _cc("2", "b", b_text),
+    ]
+    v3 = [
+        _cc("1", "a", "Alice Corp shall perform its obligations in full."),
+        _cc("2", "c", "Gamma Inc shall audit compliance annually."),
+        _cc("3", "b", b_text),
+    ]
+
+    doc = _doc_diff([("v1", v1), ("v2", v2), ("v3", v3)])
+    reversals = detect_reversals(doc)
+
+    b_reversals = [r for r in reversals if r.taxonomy_id == "b"]
+    assert b_reversals == [], f"clause B must not be flagged as reversed: {b_reversals!r}"
+
+
 def test_reversal_none_taxonomy_id_no_cross_contamination() -> None:
     """Two unclassified clauses (taxonomy_id=None); only the reversed one is flagged.
 

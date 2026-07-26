@@ -393,8 +393,12 @@ def _para_level(p_elem: Any) -> int | None:
 # Clause number extraction
 # ---------------------------------------------------------------------------
 
-# Rule 3: Matches "1.", "1.2.", "10.1.3 ", "2.1)" at paragraph start.
-_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)]\s*")
+# Rule 3: Matches "1.", "1.2.", "2.1)" at paragraph start. The trailing
+# (?!\d) lookahead forbids a digit right after the terminator so a
+# multi-part number like "10.1.3 Term" is not mis-split as "10.1" with a
+# dangling "3 Term" heading, and decimals like "1.5 times" / "99.9%" /
+# "10.00" are not mistaken for clause numbers.
+_NUM_PREFIX = re.compile(r"^(\d+(?:\.\d+)*)[.)](?!\d)\s*")
 
 
 def _parse_clause_number(
