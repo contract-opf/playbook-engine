@@ -50,6 +50,12 @@ _SUPPORTED = frozenset({".rtf", ".docx", ".pdf"})
 # entries). Overridable per-invocation via ``playbook stage --out``.
 DEFAULT_STAGING_ROOT = Path.home() / ".cache" / "playbook-engine" / "staging"
 
+# Sentinel written to the root of every staging output. Its presence is how
+# _recreate_out_dir distinguishes "a previous staging run I'm safe to
+# rmtree-and-replace" from "some unrelated directory the user pointed --out
+# at by mistake" (issue #248).
+_STAGING_MARKER = ".playbook-staging"
+
 # Filename-cue signed detection is advisory scaffolding only (CORPUS-LAYOUT.md
 # promises the engine never trusts filenames for anything load-bearing;
 # ``detect_signed`` — content-based — is the real source of truth). Tokenize
@@ -213,6 +219,81 @@ def _place(src: Path, dest: Path, *, copy_files: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _check_no_overlap(src_dir: Path, out_dir: Path) -> None:
+    """Raise if *out_dir* is *src_dir*, or one is an ancestor of the other.
+
+    Resolved, so this also catches symlinks and relative-path tricks.
+    Without this, ``playbook stage corpus --out corpus`` (or ``--out ..``)
+    could irreversibly delete (or write into) the source corpus itself.
+    """
+    src_resolved = src_dir.resolve()
+    out_resolved = out_dir.resolve()
+    if (
+        out_resolved == src_resolved
+        or out_resolved in src_resolved.parents
+        or src_resolved in out_resolved.parents
+    ):
+        raise ValueError(f"refusing to stage: --out {out_dir} overlaps the source corpus {src_dir}")
+
+
+def _recreate_out_dir(src_dir: Path, out_dir: Path) -> None:
+    """Wipe and recreate *out_dir* for a fresh staging run — guarded (issue #248).
+
+    Two independent guards, both fail-closed:
+
+    1. **Overlap.** See :func:`_check_no_overlap`.
+    2. **Unrelated directory.** If *out_dir* already exists, is non-empty,
+       and does *not* carry the ``.playbook-staging`` marker this function
+       (and :func:`ensure_staging_dest`) writes, refuse rather than assume
+       it's safe to wipe — it may be a directory of unrelated user files
+       that merely happens to share the ``--out`` path.
+
+    Legitimate re-staging (an *out_dir* previously produced by this same
+    function, or by a prior ``--plan-only`` run against the same path) is
+    unaffected: it carries the marker, so it's recreated as before.
+    """
+    _check_no_overlap(src_dir, out_dir)
+
+    if out_dir.exists():
+        if any(out_dir.iterdir()) and not (out_dir / _STAGING_MARKER).exists():
+            raise ValueError(
+                f"refusing to delete non-staging directory {out_dir}; "
+                "remove it yourself or choose another --out"
+            )
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    (out_dir / _STAGING_MARKER).write_text("", encoding="utf-8")
+
+
+def ensure_staging_dest(src_dir: Path, out_dir: Path) -> None:
+    """Prepare *out_dir* for a non-destructive write (``playbook stage --plan-only``).
+
+    Unlike :func:`_recreate_out_dir`, this never wipes an existing
+    directory — ``--plan-only`` only ever adds a ``staging_plan.json`` file
+    on top of whatever is already there, so there's nothing to recreate.
+    It still enforces both issue #248 guards up front:
+
+    1. **Overlap.** See :func:`_check_no_overlap` — refuses ``--out`` paths
+       that are, or contain, or are contained by, *src_dir* (so ``--plan-only``
+       can never write ``staging_plan.json`` into the source corpus).
+    2. **Unrelated directory.** Refuses to write into an existing, non-empty
+       *out_dir* that isn't itself a previous staging output.
+
+    Writes the ``.playbook-staging`` marker into *out_dir* so that a
+    follow-up ``playbook stage --out <same dir> --plan staging_plan.json``
+    is recognized by :func:`_recreate_out_dir` as legitimate re-staging
+    rather than an unrelated directory.
+    """
+    _check_no_overlap(src_dir, out_dir)
+    if out_dir.exists() and any(out_dir.iterdir()) and not (out_dir / _STAGING_MARKER).exists():
+        raise ValueError(
+            f"refusing to write into non-staging directory {out_dir}; "
+            "remove it yourself or choose another --out"
+        )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / _STAGING_MARKER).write_text("", encoding="utf-8")
+
+
 def stage(
     src_dir: Path,
     out_dir: Path,
@@ -234,7 +315,9 @@ def stage(
 
     Args:
         src_dir:       Source corpus root.
-        out_dir:       Destination directory.  Recreated on each call.
+        out_dir:       Destination directory.  Recreated on each call — refused
+                       if it overlaps *src_dir*, or if it exists, is non-empty,
+                       and isn't itself a previous staging output (issue #248).
         manifest_path: Override manifest file path (``manifest`` layout only).
                        Defaults to ``src_dir / "manifest.jsonl"``.
         docs_path:     Override base for resolving manifest ``filename_on_disk``
@@ -254,6 +337,10 @@ def stage(
     Raises:
         UnknownLayoutError: *src_dir*'s layout could not be determined (see
             :func:`detect_layout`). Does not touch *out_dir* in this case.
+        ValueError: *out_dir* overlaps *src_dir*, or *out_dir* exists,
+            is non-empty, and is not itself a previous staging output
+            (see :func:`_recreate_out_dir`). Does not touch *out_dir* in
+            either case.
     """
     layout = detect_layout(src_dir)
 
@@ -266,9 +353,7 @@ def stage(
             "to execute it."
         )
 
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    _recreate_out_dir(src_dir, out_dir)
 
     if layout == "manifest":
         return _stage_manifest(

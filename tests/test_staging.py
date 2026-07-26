@@ -27,9 +27,25 @@ from playbook_engine.staging import DEFAULT_STAGING_ROOT, detect_layout, scaffol
 
 FIXTURES = Path(__file__).parent.parent / "examples" / "staging-fixtures"
 
+# Reused by the --plan-only / --plan round-trip test below: real legal-boilerplate
+# text (unlike the synthetic staging-fixtures/flat-corpus stubs) so build_staging_plan's
+# content-distance clustering actually finds a deal instead of leaving everything
+# "unassigned" (same fixture test_intake_plan.py's TestBuildStagingPlan uses).
+JUDGE_FIXTURE_CORPUS = Path(__file__).parent.parent / "examples" / "judge-fixture" / "corpus"
+
 
 def _write_rtf(path: Path, text: str = "stub") -> None:
     path.write_text(f"{{\\rtf1 {text}}}\n", encoding="utf-8")
+
+
+def _scrambled_unknown_corpus(dest: Path) -> None:
+    """Write a flat, loosely-named copy of a single JUDGE_FIXTURE_CORPUS deal
+    (deal-alpha: v1 + v2) into *dest*, stripped of the folder/name signal that
+    would let ``detect_layout`` recognize it — forcing the "unknown" layout
+    path that ``--plan-only``/``--plan`` exists for."""
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(JUDGE_FIXTURE_CORPUS / "deal-alpha" / "v1.rtf", dest / "doc_001.rtf")
+    shutil.copy2(JUDGE_FIXTURE_CORPUS / "deal-alpha" / "v2.rtf", dest / "doc_002.rtf")
 
 
 def _read_hints(path: Path) -> dict:
@@ -209,6 +225,68 @@ class TestStageFlat:
         hints_alpha = _read_hints(tmp_path / "out" / "deal-alpha" / "hints.yaml")
         assert "01__01_draft" in hints_alpha["order"]
         assert hints_alpha.get("signed_version") is not None
+
+
+# ---------------------------------------------------------------------------
+# stage — out_dir guard (issue #248)
+#
+# stage()/execute_staging_plan() used to unconditionally shutil.rmtree() any
+# pre-existing --out, with no check on its relationship to src_dir. A
+# one-character CLI mistake (--out equal to, or an ancestor/descendant of,
+# the source corpus) could irreversibly destroy real negotiation history.
+# ---------------------------------------------------------------------------
+
+
+class TestStageOutDirGuard:
+    def _make_src(self, tmp_path: Path) -> Path:
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf")
+        return src
+
+    def test_out_dir_equal_to_src_raises(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        with pytest.raises(ValueError, match="overlaps the source corpus"):
+            stage(src, src)
+        # src must be left untouched
+        assert (src / "deal-a" / "v1.rtf").exists()
+
+    def test_out_dir_is_parent_of_src_raises(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        with pytest.raises(ValueError, match="overlaps the source corpus"):
+            stage(src, src.parent)
+        assert (src / "deal-a" / "v1.rtf").exists()
+
+    def test_out_dir_is_child_of_src_raises(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        with pytest.raises(ValueError, match="overlaps the source corpus"):
+            stage(src, src / "nested-out")
+        assert (src / "deal-a" / "v1.rtf").exists()
+
+    def test_out_dir_unrelated_nonstaging_dir_raises_without_deleting(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        out = tmp_path / "unrelated"
+        out.mkdir()
+        (out / "important.txt").write_text("do not delete me", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="refusing to delete non-staging directory"):
+            stage(src, out)
+
+        assert (out / "important.txt").read_text(encoding="utf-8") == "do not delete me"
+
+    def test_out_dir_previous_staging_output_succeeds(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        out = tmp_path / "out"
+        stage(src, out)  # first run — writes the staging marker
+        result = stage(src, out)  # second run — out_dir already exists, carries marker
+        assert result.agreement_count == 1
+
+    def test_out_dir_empty_existing_dir_succeeds(self, tmp_path: Path) -> None:
+        src = self._make_src(tmp_path)
+        out = tmp_path / "out"
+        out.mkdir()
+        result = stage(src, out)
+        assert result.agreement_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +730,85 @@ class TestStageCLI:
         assert result.exit_code == 0, result.output
         staged_file = next((out / "deal-alpha").glob("01__*"))
         assert not staged_file.is_symlink()
+
+    def test_stage_cmd_out_equal_to_src_refuses(self, tmp_path: Path) -> None:
+        """issue #248: `--out` pointed at SRC_DIR must refuse, not rmtree it."""
+        src = tmp_path / "corpus"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["stage", str(src), "--out", str(src)])
+
+        assert result.exit_code != 0
+        assert "ERROR" in result.output
+        assert (src / "deal-a" / "v1.rtf").exists()
+
+    def test_stage_cmd_out_unrelated_dir_with_file_refuses(self, tmp_path: Path) -> None:
+        """issue #248: an unrelated, non-empty `--out` must refuse rather than
+        be silently rmtree'd — and the file it contained must survive."""
+        out = tmp_path / "dir_with_a_file"
+        out.mkdir()
+        (out / "important.txt").write_text("keep me", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["stage", str(FIXTURES / "flat-corpus"), "--out", str(out)],
+        )
+
+        assert result.exit_code != 0
+        assert "ERROR" in result.output
+        assert (out / "important.txt").read_text(encoding="utf-8") == "keep me"
+
+    def test_stage_cmd_plan_only_then_plan_succeeds(self, tmp_path: Path) -> None:
+        """issue #248 (fix round 1): the documented two-step workflow —
+        `--plan-only` to write staging_plan.json, then `--plan
+        staging_plan.json` against the *same* `--out` — must stay green.
+        `--plan-only` must leave the staging marker behind so the follow-up
+        `--plan` run recognizes *out* as legitimate re-staging rather than an
+        unrelated non-staging directory."""
+        src = tmp_path / "unknown-corpus"
+        _scrambled_unknown_corpus(src)
+        out = tmp_path / "out"
+        runner = CliRunner()
+
+        plan_only_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out), "--plan-only"],
+        )
+        assert plan_only_result.exit_code == 0, plan_only_result.output
+        plan_file = out / "staging_plan.json"
+        assert plan_file.is_file()
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+        assert len(plan["deals"]) == 1, plan  # doc_001/doc_002 should cluster as one deal
+
+        plan_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out), "--plan", str(plan_file)],
+        )
+        assert plan_result.exit_code == 0, plan_result.output
+        assert "OK" in plan_result.output
+        agreement_dirs = [p for p in out.iterdir() if p.is_dir()]
+        assert len(agreement_dirs) == 1
+        assert sorted(p.name for p in agreement_dirs[0].glob("*__*")) == [
+            "01__doc_001.rtf",
+            "02__doc_002.rtf",
+        ]
+
+    def test_stage_cmd_plan_only_out_equal_to_src_refuses(self, tmp_path: Path) -> None:
+        """issue #248 (fix round 1): `--plan-only` must not write into SRC_DIR —
+        the overlap guard applies to it too, not just the destructive path."""
+        src = tmp_path / "corpus"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["stage", str(src), "--out", str(src), "--plan-only"])
+
+        assert result.exit_code != 0
+        assert "ERROR" in result.output
+        assert not (src / "staging_plan.json").exists()
 
 
 # ---------------------------------------------------------------------------

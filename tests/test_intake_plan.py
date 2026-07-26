@@ -250,3 +250,56 @@ class TestExecuteStagingPlan:
         result = execute_staging_plan(reloaded, scrambled, out_dir)
         assert result.agreement_count == 2
         assert result.staged_count == 3
+
+
+# ---------------------------------------------------------------------------
+# 4. execute_staging_plan out_dir guard (issue #248) — same defect/fix as
+#    staging.stage, since it shares staging._recreate_out_dir.
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteStagingPlanOutDirGuard:
+    def test_out_dir_equal_to_src_raises(self, tmp_path: Path) -> None:
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+
+        with pytest.raises(ValueError, match="overlaps the source corpus"):
+            execute_staging_plan(plan, scrambled, scrambled)
+
+        # src must be left untouched
+        assert list(scrambled.iterdir())
+
+    def test_out_dir_is_parent_of_src_raises(self, tmp_path: Path) -> None:
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+
+        with pytest.raises(ValueError, match="overlaps the source corpus"):
+            execute_staging_plan(plan, scrambled, scrambled.parent)
+
+        assert list(scrambled.iterdir())
+
+    def test_out_dir_unrelated_nonstaging_dir_raises_without_deleting(self, tmp_path: Path) -> None:
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+
+        out = tmp_path / "unrelated"
+        out.mkdir()
+        (out / "important.txt").write_text("do not delete me", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="refusing to delete non-staging directory"):
+            execute_staging_plan(plan, scrambled, out)
+
+        assert (out / "important.txt").read_text(encoding="utf-8") == "do not delete me"
+
+    def test_out_dir_previous_staging_output_succeeds(self, tmp_path: Path) -> None:
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+
+        out = tmp_path / "out"
+        execute_staging_plan(plan, scrambled, out)  # first run — writes the marker
+        result = execute_staging_plan(plan, scrambled, out)  # second run — carries marker
+        assert result.agreement_count == 2

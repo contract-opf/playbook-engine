@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import datetime
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -59,7 +58,13 @@ from typing import Any
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.pipeline import _ingest_file
 from playbook_engine.signed_detector import SignedStatus, detect_signed
-from playbook_engine.staging import _SUPPORTED, _looks_signed, _place, _write_hints
+from playbook_engine.staging import (
+    _SUPPORTED,
+    _looks_signed,
+    _place,
+    _recreate_out_dir,
+    _write_hints,
+)
 from playbook_engine.version_orderer import (
     VersionInput,
     VersionOrder,
@@ -513,18 +518,24 @@ def execute_staging_plan(
         plan:        A plan dict as produced by :func:`build_staging_plan`.
         src_dir:     Corpus root the plan's ``path`` entries are relative to.
         out_dir:     Destination directory. Recreated on each call (same
-                     contract as ``staging.stage``).
+                     contract as ``staging.stage``) — refused if it overlaps
+                     *src_dir*, or if it exists, is non-empty, and isn't
+                     itself a previous staging output (issue #248).
         copy_files:  Write real file copies instead of absolute symlinks
                      (see ``staging._place``).
 
     Returns:
         A ``staging.StagingResult`` with ``layout="unknown"``.
+
+    Raises:
+        ValueError: *out_dir* overlaps *src_dir*, or *out_dir* exists, is
+            non-empty, and is not itself a previous staging output (see
+            ``staging._recreate_out_dir``). Does not touch *out_dir* in
+            either case.
     """
     from playbook_engine.staging import StagingResult  # noqa: PLC0415
 
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    _recreate_out_dir(src_dir, out_dir)
 
     staged = 0
     agreement_count = 0
