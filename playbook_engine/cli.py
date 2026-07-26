@@ -1150,7 +1150,11 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     "out_dir",
     type=click.Path(path_type=Path),
     default=None,
-    help=("Staging output directory (default: ~/.cache/playbook-engine/staging/<src_dir_name>)."),
+    help=(
+        "Staging output directory (default: ~/.cache/playbook-engine/staging/<src_dir_name>). "
+        "If it already exists, it is replaced — refused if it overlaps SRC_DIR, or if it's a "
+        "non-empty directory that isn't itself a previous staging output."
+    ),
 )
 @click.option(
     "--copy",
@@ -1216,7 +1220,7 @@ def stage_cmd(
     from playbook_engine.intake_plan import build_staging_plan, execute_staging_plan
     from playbook_engine.staging import (  # noqa: PLC0415
         DEFAULT_STAGING_ROOT,
-        UnknownLayoutError,
+        ensure_staging_dest,
         scaffold_config,
         stage,
     )
@@ -1229,7 +1233,11 @@ def stage_cmd(
 
     if plan_path is not None:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        result = execute_staging_plan(plan, resolved, dest, copy_files=copy_files)
+        try:
+            result = execute_staging_plan(plan, resolved, dest, copy_files=copy_files)
+        except ValueError as exc:
+            click.secho(f"ERROR: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
         click.echo(f"layout : {result.layout} (from plan {plan_path})")
         click.echo(
             f"staged : {result.staged_count} version(s) across {result.agreement_count} agreement(s)"
@@ -1241,8 +1249,12 @@ def stage_cmd(
         return
 
     if plan_only:
+        try:
+            ensure_staging_dest(resolved, dest)
+        except ValueError as exc:
+            click.secho(f"ERROR: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
         plan = build_staging_plan(resolved)
-        dest.mkdir(parents=True, exist_ok=True)
         plan_file = dest / "staging_plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         click.echo(f"plan   : {plan_file}")
@@ -1258,7 +1270,7 @@ def stage_cmd(
 
     try:
         result = stage(resolved, dest, copy_files=copy_files)
-    except UnknownLayoutError as exc:
+    except ValueError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 

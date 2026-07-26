@@ -92,3 +92,11 @@ external contributions.
   in one tree.
 - Validate any produced playbook against the schema for its declared
   `opf_version`.
+
+## Issue-number provenance
+
+This repository went public on 2026-07-25 with a fresh single-commit history.
+Issue references in code comments, commit messages, and migrated issue bodies
+that predate the cutover (e.g. "issue #132", `internal#N`) refer to the
+original private tracker, not this repository's issue numbers. Migrated issues
+carry a provenance line naming their original number.
