@@ -87,9 +87,31 @@ class StoreBackedSegmentFn:
     Accepts the optional third ``last_error`` argument
     (``segment_verify_repair`` is repair-aware) but ignores it — there is no
     LLM retry here; the agent is the segmenter.
+
+    ``taxonomy_ids`` MUST be set to the corpus's real classifier ids (issue
+    #40's fix). ``segment_apply_cmd`` gates every agent-produced verdict with
+    ``run_gates(..., taxonomy_ids=payload["taxonomy_ids"])`` — the same
+    allow-list the ``playbook segment`` pre-pass writes into its own queued
+    payload. Leaving this at its empty-list default (as this class did before
+    issue #40) makes the taxonomy gate reject every verdict that assigns a
+    real (non-null) ``taxonomy_id``, since none of them are ever "in" an empty
+    allow-list — even though the same document queued via ``segment`` passes.
+
+    ``document_id``/``version`` are included for parity with the payload
+    shape ``segment_cmd`` writes (and so the gate's error message names a
+    document instead of ``"?"``), but — unlike ``taxonomy_ids`` — they are
+    **not** real per-document identity: a single ``StoreBackedSegmentFn``
+    instance is shared across every document ``mine_corpus`` segments in a
+    run (bound once in ``cli.py``'s ``_llm_segmentation_kwargs``), and the
+    ``SegmentFn`` contract this callable implements has no per-call document
+    identity to thread through. They default to ``run_gates``'s own
+    ``"doc"``/``"v1"`` defaults.
     """
 
     pending: PendingQueue
+    taxonomy_ids: list[str] = field(default_factory=list)
+    document_id: str = "doc"
+    version: str = "v1"
     _seen: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __call__(
@@ -105,6 +127,9 @@ class StoreBackedSegmentFn:
                 key,
                 "segment",
                 {
+                    "document_id": self.document_id,
+                    "version": self.version,
+                    "taxonomy_ids": self.taxonomy_ids,
                     "canonical_text": canonical_text,
                     "blocks": [block_to_dict(b) for b in blocks],
                 },
