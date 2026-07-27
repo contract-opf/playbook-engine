@@ -530,8 +530,20 @@ def resolve_citation_cmd(
         "Path to the run's entity_registry.json (the born-safe real-name "
         "sidecar 'playbook mine --entity-registry' wrote). Defaults to the "
         "machine-global ~/.cache/playbook-engine/entity_registry.json — which "
-        "inside a container is EMPTY, silently disabling the step-4 backstop. "
-        "Always pass the run's sidecar here."
+        "inside a container is EMPTY, disabling the step-4 backstop (see "
+        "--allow-empty-registry). Always pass the run's sidecar here."
+    ),
+)
+@click.option(
+    "--allow-empty-registry",
+    is_flag=True,
+    default=False,
+    help=(
+        "Explicitly allow publishing when the entity registry resolves empty "
+        "(step-4 no-known-entity backstop disabled for this run). Without "
+        "this flag an empty registry hard-fails publish. Use only for "
+        "no-corpus / template-mode workflows with no real counterparty names "
+        "for the backstop to guard."
     ),
 )
 def publish_cmd(
@@ -543,6 +555,7 @@ def publish_cmd(
     accept_residue_risk: bool,
     redact_terms_file: Path | None,
     entity_registry_path: Path | None,
+    allow_empty_registry: bool,
 ) -> None:
     """Produce a party-anonymous public playbook (issue #188).
 
@@ -576,19 +589,32 @@ def publish_cmd(
     # registry's alias -> canonical-name map IS the held-out real-name list
     # (write_holdout_map persists this same data to a sidecar) — an absent
     # registry (no corpus ever mined on this machine) yields an empty list,
-    # making the backstop a no-op rather than a crash. That silent no-op is
-    # exactly what happens inside a container using the ephemeral default
-    # path — warn LOUDLY so a no-op backstop is never mistaken for a pass.
+    # making the backstop a no-op rather than a crash. That is exactly what
+    # happens inside a container using the ephemeral default path, so it
+    # hard-fails unless the caller explicitly opts in via
+    # --allow-empty-registry (mirrors --accept-residue-risk): publish identity
+    # gates are fail-closed by design, and a scrolling stderr warning is not a
+    # sufficient control (issue #32).
     registry = EntityRegistry.load(
         entity_registry_path.resolve() if entity_registry_path else DEFAULT_REGISTRY_PATH
     )
     known_entity_names = list(registry.alias_map().values())
     if not known_entity_names:
+        if not allow_empty_registry:
+            click.secho(
+                "ERROR: entity registry is EMPTY — the step-4 no-known-entity "
+                "backstop is a NO-OP for this publish. Pass --entity-registry "
+                "<out>/entity_registry.json (the sidecar 'playbook mine "
+                "--entity-registry' wrote) for a real guarantee, or pass "
+                "--allow-empty-registry to publish anyway (no-corpus / "
+                "template-mode only).",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1)
         click.secho(
             "WARNING: entity registry is EMPTY — the step-4 no-known-entity "
-            "backstop is a NO-OP for this publish. Pass --entity-registry "
-            "<out>/entity_registry.json (the sidecar 'playbook mine "
-            "--entity-registry' wrote) for a real guarantee.",
+            "backstop is a NO-OP for this publish (--allow-empty-registry).",
             fg="yellow",
             err=True,
         )
