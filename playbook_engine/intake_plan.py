@@ -50,6 +50,7 @@ writes only to its ``out_dir`` argument, same invariant as ``staging.py``.
 from __future__ import annotations
 
 import datetime
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -60,6 +61,7 @@ from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.pipeline import _ingest_file
 from playbook_engine.signed_detector import SignedStatus, detect_signed
 from playbook_engine.staging import (
+    _STAGING_MARKER,
     _SUPPORTED,
     _looks_signed,
     _place,
@@ -518,6 +520,127 @@ def build_staging_plan(
     }
 
 
+def _is_safe_path_component(value: str) -> bool:
+    """True if *value* is usable as a single path segment with no traversal risk.
+
+    Rejects an absolute path, either separator (checked literally so this is
+    platform-independent — a ``deal_id`` containing a Windows-style ``\\``
+    must still be rejected when running on POSIX, and vice versa), and the
+    special ``.``/``..`` segments.
+    """
+    if os.path.isabs(value) or "/" in value or "\\" in value:
+        return False
+    return value not in (".", "..")
+
+
+# Filenames `stage --plan` itself writes directly into out_dir (see
+# cli.py's stage_cmd: the executed plan record, the scaffolded config, and
+# staging.py's own marker). A deal_id equal to one of these shadows that
+# file with a same-named deal *directory*, so the later write raises a raw
+# `IsADirectoryError` instead of the located, human-readable error this
+# validator exists to produce (issue #45 round 2).
+_RESERVED_OUT_DIR_NAMES = frozenset({"staging_plan.json", "playbook.config.yaml", _STAGING_MARKER})
+
+
+def _validate_plan(plan: dict[str, Any], src_dir: Path) -> None:
+    """Validate a (possibly hand/skill-edited) staging plan's shape.
+
+    ``execute_staging_plan`` calls this *before* ``_recreate_out_dir`` wipes
+    anything (issue #45): the plan file is documented as hand-editable, so a
+    malformed ``deals`` list is expected input, not a programming error — it
+    must be rejected with a located, human-readable message instead of an
+    unhandled ``KeyError``/``TypeError`` fired after ``out_dir`` (and
+    possibly the user's own hand-edited plan, if it lives at
+    ``out_dir/staging_plan.json``) has already been deleted.
+
+    Only the fields ``execute_staging_plan`` actually consumes — ``deal_id``,
+    ``files`` (each with ``path`` and ``proposed_version``) — are checked
+    here; ``counterparty_guess``, ``confidence``, ``unassigned``, and
+    ``warnings`` are informational and not validated.
+
+    ``deal_id`` is used directly as an ``out_dir`` subdirectory name and
+    ``path`` as a ``src_dir``-relative lookup (see ``execute_staging_plan``),
+    so both are also checked for path-traversal/absolute-path escapes here —
+    the plan is untrusted, hand/skill-edited input, and ``stage``'s
+    documented contract is that it writes only inside *out_dir* and reads
+    only from inside *src_dir*. ``deal_id`` is also checked against the
+    filenames ``stage --plan`` itself writes into ``out_dir`` (see
+    ``_RESERVED_OUT_DIR_NAMES``), and ``path`` is checked lexically for
+    ``..`` components rather than by resolving symlinks — a corpus file that
+    is itself a symlink pointing outside *src_dir* is still a legitimate,
+    in-corpus ``path`` (issue #45 round 2).
+
+    Args:
+        plan:    The plan dict to validate.
+        src_dir: Corpus root ``path`` entries are relative to. Unused for
+            the escape check itself (which is purely lexical) but kept for
+            signature/documentation symmetry with ``execute_staging_plan``.
+
+    Raises:
+        ValueError: the first shape problem found, naming the offending deal
+            index (and file index, where applicable) and field.
+    """
+    if not isinstance(plan, dict):
+        raise ValueError(f"plan must be a JSON object, got {type(plan).__name__}")
+
+    deals = plan.get("deals")
+    if not isinstance(deals, list):
+        raise ValueError("plan.deals must be a list")
+
+    seen_deal_ids: set[str] = set()
+    for i, deal in enumerate(deals):
+        if not isinstance(deal, dict):
+            raise ValueError(f"deal {i}: expected an object, got {type(deal).__name__}")
+
+        deal_id = deal.get("deal_id")
+        if not isinstance(deal_id, str) or not deal_id:
+            raise ValueError(f"deal {i}: 'deal_id' must be a non-empty string")
+        if not _is_safe_path_component(deal_id):
+            raise ValueError(
+                f"deal {i}: 'deal_id' {deal_id!r} must be a single path segment "
+                "(no '/', '\\', absolute path, or '..')"
+            )
+        if deal_id in _RESERVED_OUT_DIR_NAMES:
+            raise ValueError(
+                f"deal {i}: 'deal_id' {deal_id!r} collides with a reserved output "
+                f"filename ({sorted(_RESERVED_OUT_DIR_NAMES)!r}) that stage --plan "
+                "writes directly into out_dir"
+            )
+        if deal_id in seen_deal_ids:
+            raise ValueError(f"deal {i}: duplicate deal_id {deal_id!r}")
+        seen_deal_ids.add(deal_id)
+
+        files = deal.get("files")
+        if not isinstance(files, list) or not files:
+            raise ValueError(f"deal {i} ({deal_id}): 'files' must be a non-empty list")
+
+        for j, f in enumerate(files):
+            if not isinstance(f, dict):
+                raise ValueError(
+                    f"deal {i} ({deal_id}): file {j}: expected an object, got {type(f).__name__}"
+                )
+            path = f.get("path")
+            if not isinstance(path, str) or not path:
+                raise ValueError(
+                    f"deal {i} ({deal_id}): file {j}: 'path' must be a non-empty string"
+                )
+            if os.path.isabs(path):
+                raise ValueError(
+                    f"deal {i} ({deal_id}): file {j}: 'path' {path!r} must be relative "
+                    "to src_dir, not absolute"
+                )
+            if ".." in Path(path).parts:
+                raise ValueError(f"deal {i} ({deal_id}): file {j}: 'path' {path!r} escapes src_dir")
+            proposed_version = f.get("proposed_version")
+            # bool is a subclass of int in Python — exclude it explicitly so
+            # `"proposed_version": true` doesn't slip through as version 1.
+            if not isinstance(proposed_version, int) or isinstance(proposed_version, bool):
+                raise ValueError(
+                    f"deal {i} ({deal_id}): file {j}: 'proposed_version' must be an int, "
+                    f"got {type(proposed_version).__name__}"
+                )
+
+
 def execute_staging_plan(
     plan: dict[str, Any],
     src_dir: Path,
@@ -531,7 +654,8 @@ def execute_staging_plan(
     writer so the output is indistinguishable from a directly-staged corpus.
     *plan* may have been hand/skill-edited between :func:`build_staging_plan`
     and this call — only ``deal_id``, ``path``, ``proposed_version``, and
-    ``signed`` are consumed here.
+    ``signed`` are consumed here, and their shape is validated up front (see
+    :func:`_validate_plan`) before *out_dir* is touched.
 
     Args:
         plan:        A plan dict as produced by :func:`build_staging_plan`.
@@ -547,13 +671,15 @@ def execute_staging_plan(
         A ``staging.StagingResult`` with ``layout="unknown"``.
 
     Raises:
-        ValueError: *out_dir* overlaps *src_dir*, or *out_dir* exists, is
-            non-empty, and is not itself a previous staging output (see
-            ``staging._recreate_out_dir``). Does not touch *out_dir* in
-            either case.
+        ValueError: *plan* is malformed (issue #45) — see
+            :func:`_validate_plan` — or *out_dir* overlaps *src_dir*, or
+            *out_dir* exists, is non-empty, and is not itself a previous
+            staging output (see ``staging._recreate_out_dir``). Does not
+            touch *out_dir* in any of these cases.
     """
     from playbook_engine.staging import StagingResult  # noqa: PLC0415
 
+    _validate_plan(plan, src_dir)
     _recreate_out_dir(src_dir, out_dir)
 
     staged = 0
