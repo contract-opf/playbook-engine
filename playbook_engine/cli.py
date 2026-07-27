@@ -1238,11 +1238,20 @@ def stage_cmd(
         except ValueError as exc:
             click.secho(f"ERROR: {exc}", fg="red", err=True)
             raise SystemExit(1) from exc
+        # execute_staging_plan's _recreate_out_dir rmtrees dest before staging,
+        # which would silently destroy the hand-edited plan the user just
+        # reviewed if it lived at dest/staging_plan.json (issue #36). Re-persist
+        # the executed plan now that dest exists again, so re-running the exact
+        # `stage --plan` command this tool prints stays possible and the
+        # reviewed/edited plan survives as the staging record.
+        executed_plan_file = dest / "staging_plan.json"
+        executed_plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         click.echo(f"layout : {result.layout} (from plan {plan_path})")
         click.echo(
             f"staged : {result.staged_count} version(s) across {result.agreement_count} agreement(s)"
             + (" (copied)" if copy_files else " (symlinked)")
         )
+        click.echo(f"plan   : {executed_plan_file} (preserved as the staging record)")
         scaffold_config(resolved, dest)
         click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
         click.secho(f"OK  {dest}", fg="green")
