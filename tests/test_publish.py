@@ -333,6 +333,66 @@ def test_deterministic_backstop_catches_every_surface() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1b. the backstop is re-run on the doc step 5's judge rewrote (issue #50):
+#     a redaction judge's rewritten_text can itself reintroduce a known real
+#     entity name, and that must be caught even though step 4 already ran
+#     (and passed) on the PRE-judge doc.
+# ---------------------------------------------------------------------------
+
+
+class _ReintroducingRedactionJudge:
+    """Flags exactly one sample and "rewrites" it to text that itself
+    reintroduces a known real entity name — simulating a judge that
+    hallucinates or echoes the very name it was meant to scrub (issue #50)."""
+
+    def __init__(self, target_path: str, rewritten_text: str):
+        self._target_path = target_path
+        self._rewritten_text = rewritten_text
+
+    def evaluate_batch(self, samples):  # noqa: ANN001
+        findings = []
+        for s in samples:
+            if s.path == self._target_path:
+                findings.append(
+                    RedactionFinding(
+                        path=s.path,
+                        has_residue=True,
+                        rationale="Rewritten for residue.",
+                        rewritten_text=self._rewritten_text,
+                    )
+                )
+            else:
+                findings.append(
+                    RedactionFinding(path=s.path, has_residue=False, rationale="No residue found.")
+                )
+        return findings
+
+
+def test_step5_judge_rewrite_reintroducing_known_name_blocks_publish() -> None:
+    doc = _make_doc()
+    target_path = "posture.system_prompt"
+    # Deliberately NOT an institution-name shape (no "University"/"College"/
+    # "Regents"/"Board of Trustees") and not an address/contact pattern, so
+    # this proves the step-4b deterministic re-scan catches it — not that the
+    # unrelated shape-based 5.5/5.6 gates happen to also fire on this name.
+    reintroduced_name = "Brightwater Logistics Inc."
+
+    with pytest.raises(PublishError, match="step-5 judge rewrite"):
+        publish_playbook(
+            doc,
+            redaction_judge=_ReintroducingRedactionJudge(
+                target_path=target_path,
+                rewritten_text=f"Push back when {reintroduced_name} proposes uncapped liability.",
+            ),
+            # A clean verify judge proves the deterministic backstop — not
+            # the best-effort, bypassable verify pass — is what catches this.
+            verify_judge=_CleanVerifyJudge(),
+            known_entity_names=[reintroduced_name],
+            published_at="2026-07-13T00:00:00Z",
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2. happy path
 # ---------------------------------------------------------------------------
 

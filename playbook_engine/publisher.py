@@ -42,6 +42,13 @@ does all of that, in order:
      ``leaked`` raises :class:`PublishError` unless the caller passes
      ``accept_residue_risk=True``. The report always lists every finding
      either way.
+  5b. Re-runs step 4's SAME deterministic backstop on the doc returned by
+     step 5 — the judge's ``rewritten_text`` can itself echo or reconstruct a
+     known name, and that string would otherwise only ever be vetted by the
+     best-effort verify judge and the shape-based 5.5/5.6 gates below, never
+     by this list-based hard backstop. ANY hit raises :class:`PublishError`,
+     unconditionally, same as step 4 (issue #50) — so the guarantee holds on
+     the actual published artifact, not just an intermediate.
   5.5. Final institution-identity gate (:func:`_institution_identity_hits`):
      re-scans the WHOLE surface — every string value AND dict key — for
      high-confidence institution-name shapes ("University of X", "X University",
@@ -1036,12 +1043,14 @@ def publish_playbook(
 
     Raises:
         PublishError: step 4 found a known real entity name surviving in the
-                      output; OR step 5's verify pass flagged residual semantic
-                      residue and ``accept_residue_risk`` is ``False``; OR the
-                      final step-5.5 institution-identity gate found an
-                      institution-name shape or postal address surviving
-                      anywhere (value or dict key) — unconditional, fixed by
-                      naming the survivor in ``redact_terms``.
+                      output; OR step 5b's re-run of that same backstop found
+                      a known real entity name or redact term the step-5 judge
+                      rewrite reintroduced; OR step 5's verify pass flagged
+                      residual semantic residue and ``accept_residue_risk`` is
+                      ``False``; OR the final step-5.5 institution-identity
+                      gate found an institution-name shape or postal address
+                      surviving anywhere (value or dict key) — unconditional,
+                      fixed by naming the survivor in ``redact_terms``.
     """
     published = copy.deepcopy(doc)
 
@@ -1083,6 +1092,24 @@ def publish_playbook(
         published, redaction_judge=redaction_judge, verify_judge=verify_judge
     )
     published = export_report.doc
+
+    # --- step 4b: re-run the deterministic backstop on the POST-JUDGE doc ---
+    # Step 4 above only covers the pre-step-5 document. The redaction judge's
+    # ``rewritten_text`` (applied by ``export_profile``'s ``_apply_rewrites``)
+    # can itself echo or reconstruct a known name or redact term into a free-text
+    # sample; that string would otherwise be vetted only by the best-effort,
+    # bypassable verify judge and the shape-based 5.5/5.6 gates below, never by
+    # this list-based hard backstop. Same hard, unconditional gate — no flag
+    # suppresses it (issue #50).
+    post_judge_hits = _entity_backstop_scan(published, [*known_entity_names, *redact_terms])
+    if post_judge_hits:
+        listing = "; ".join(f"{path} matches {name!r}" for path, name in post_judge_hits)
+        raise PublishError(
+            f"publish blocked: {len(post_judge_hits)} known real-entity-name hit(s) "
+            f"survived the step-5 judge rewrite: {listing}. This is a hard backstop — "
+            "no flag suppresses it (issue #50)."
+        )
+
     if export_report.leaked and not accept_residue_risk:
         leaked_paths = ", ".join(f.path for f in export_report.leaked)
         raise PublishError(
