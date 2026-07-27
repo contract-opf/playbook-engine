@@ -427,7 +427,13 @@ class BatchedDeviationJudge:
                 {
                     "stage": "deviation",
                     "hunk": item.get("hunk", ""),
-                    "our_standard": our_standard[:500],
+                    # Full our_standard — NOT truncated (issue #41). The payload is
+                    # only ever SHA-256 hashed into the cache key (see module
+                    # docstring); only key+verdict are persisted, so there is no
+                    # size cost. A tail edit past the old 500-char cutoff must
+                    # bust the verdict cache, matching StoreBackedDeviationJudge
+                    # (agent_judge.py), which already hashes the full standard.
+                    "our_standard": our_standard,
                 }
             )
 

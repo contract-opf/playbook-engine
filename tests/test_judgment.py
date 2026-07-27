@@ -881,6 +881,34 @@ class TestBatchedDeviationJudge:
 
         assert delegate2.call_count == 1, "model_id change must invalidate cached verdicts"
 
+    def test_standard_tail_edit_past_char_500_busts_verdict_cache(self, tmp_path: Path) -> None:
+        """Issue #41: our_standard must NOT be truncated in the verdict cache key.
+
+        Two assess_batch calls with identical items but our_standard values that
+        share their first 500 chars and differ only at char 501 must NOT collide —
+        the second call must be a cache miss (delegate called twice). Template tail
+        edits beyond the old [:500] cutoff must bust the verdict cache; before the
+        fix, both payloads hashed identically and the second call silently replayed
+        the verdict rendered against the OLD standard.
+        """
+        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
+        delegate = _CountingDeviationJudge()
+        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
+        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
+
+        shared_prefix = "A" * 500
+        standard_v1 = shared_prefix + " ORIGINAL-TAIL"
+        standard_v2 = shared_prefix + " EDITED-TAIL"
+
+        judge.assess_batch(items, our_standard=standard_v1)
+        judge.assess_batch(items, our_standard=standard_v2)
+
+        assert delegate.call_count == 2, (
+            "our_standard values identical in their first 500 chars but differing "
+            "after must produce distinct cache keys — the full standard (not a "
+            "500-char truncation) must be part of the verdict cache payload"
+        )
+
     def test_verdict_round_trips_correctly(self, tmp_path: Path) -> None:
         """Cached DeviationResult must survive serialisation round-trip intact."""
         cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
