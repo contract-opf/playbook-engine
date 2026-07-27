@@ -162,6 +162,44 @@ class TestBuildStagingPlan:
             for f in deal["files"]:
                 assert f["evidence"], f"{f['path']} has no evidence recorded"
 
+    def test_progress_reports_one_line_per_file(self, tmp_path: Path) -> None:
+        """Issue #44: build_staging_plan/_gather_evidence ingest every file
+        with no progress feedback, so a large loose corpus sits silent for
+        minutes. A supplied progress callback must receive one line per
+        supported file ingested, plus a notice before the O(n^2) pairwise
+        distance computation."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+
+        lines: list[str] = []
+        build_staging_plan(scrambled, progress=lines.append)
+
+        # One line per ingested file (3 in the scrambled fixture), each
+        # naming the file it just processed.
+        per_file_lines = [ln for ln in lines if "doc_00" in ln]
+        assert len(per_file_lines) == 3
+        assert any("doc_001.rtf" in ln for ln in per_file_lines)
+        assert any("doc_002.rtf" in ln for ln in per_file_lines)
+        assert any("doc_003.rtf" in ln for ln in per_file_lines)
+
+        # A notice line precedes the pairwise-distance computation.
+        assert any("pairwise distance" in ln for ln in lines)
+
+    def test_plan_only_cli_streams_per_file_progress(self, tmp_path: Path) -> None:
+        """Manual verification from issue #44: `playbook stage --plan-only`
+        must stream per-file lines instead of sitting silent between
+        'src :'/'out :' and the finished plan."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["stage", str(scrambled), "--out", str(tmp_path / "out"), "--plan-only"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "doc_001.rtf" in result.output
+        assert "pairwise distance" in result.output
+
 
 # ---------------------------------------------------------------------------
 # 2. stage() refuses to guess on an unknown layout

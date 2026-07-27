@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -224,12 +225,21 @@ class _FileEvidence:
     ingest_error: str | None = None
 
 
-def _gather_evidence(src_dir: Path) -> tuple[dict[str, _FileEvidence], list[dict[str, str]]]:
+def _gather_evidence(
+    src_dir: Path,
+    progress: Callable[[str], None] = lambda _: None,
+) -> tuple[dict[str, _FileEvidence], list[dict[str, str]]]:
     """Ingest every supported file under *src_dir* and extract per-file evidence.
 
     Returns ``(evidence_by_relpath, unreadable)`` — files that fail to ingest
     (corrupt/unsupported content) are reported separately with a reason
     rather than silently dropped or crashing the whole run.
+
+    Args:
+        progress: Callable receiving one status line per file ingested (issue
+                  #44 — this loop can run seconds per file on scanned PDFs, so
+                  a large loose corpus otherwise sits silent for minutes with
+                  no way to distinguish a hang from work).
     """
     files = sorted(
         p
@@ -242,8 +252,9 @@ def _gather_evidence(src_dir: Path) -> tuple[dict[str, _FileEvidence], list[dict
     evidence: dict[str, _FileEvidence] = {}
     unreadable: list[dict[str, str]] = []
 
-    for path in files:
+    for i, path in enumerate(files, start=1):
         rel = str(path.relative_to(src_dir))
+        progress(f"  [{i}/{len(files)}] {rel}")
         try:
             tree = _ingest_file(path, path.stem, "1")
         except Exception as exc:  # noqa: BLE001 - unreadable file, not a fatal error
@@ -411,7 +422,10 @@ def _build_deal(
 # ---------------------------------------------------------------------------
 
 
-def build_staging_plan(src_dir: Path) -> dict[str, Any]:
+def build_staging_plan(
+    src_dir: Path,
+    progress: Callable[[str], None] = lambda _: None,
+) -> dict[str, Any]:
     """Assemble a ``staging_plan.json``-shaped proposal for *src_dir*.
 
     Never stages anything — the returned dict is a proposal for
@@ -419,13 +433,16 @@ def build_staging_plan(src_dir: Path) -> dict[str, Any]:
 
     Args:
         src_dir: Corpus root with no known layout (see ``staging.detect_layout``).
+        progress: Callable receiving status line strings (issue #44) — one
+                  per file ingested, plus one line before the O(n^2) pairwise
+                  distance computation. Defaults to a no-op.
 
     Returns:
         A dict matching the schema documented in issue #186: ``layout``,
         ``deals`` (each with ``deal_id``, ``counterparty_guess``,
         ``confidence``, ``files``), ``unassigned``, and ``warnings``.
     """
-    evidence, unreadable = _gather_evidence(src_dir)
+    evidence, unreadable = _gather_evidence(src_dir, progress)
     rel_paths = sorted(evidence)
 
     warnings: list[str] = []
@@ -443,6 +460,8 @@ def build_staging_plan(src_dir: Path) -> dict[str, Any]:
         VersionInput(version_id=rel, tree=evidence[rel].tree, signed=evidence[rel].signed)
         for rel in rel_paths
     ]
+    n_files = len(fingerprint_versions)
+    progress(f"  computing {n_files * (n_files - 1) // 2} pairwise distances…")
     dist = pairwise_distances(fingerprint_versions)
 
     clusters = _cluster(rel_paths, evidence, dist)
