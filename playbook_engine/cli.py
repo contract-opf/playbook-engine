@@ -1263,7 +1263,11 @@ def stage_cmd(
     click.echo(f"out    : {dest}")
 
     if plan_path is not None:
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            click.secho(f"ERROR: {plan_path} is not valid JSON: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
         try:
             result = execute_staging_plan(plan, resolved, dest, copy_files=copy_files)
         except ValueError as exc:
