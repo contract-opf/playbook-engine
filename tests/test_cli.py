@@ -1364,3 +1364,149 @@ def test_judge_segmentation_llm_true_invokes_anthropic_client(
     assert len(_fake_anthropic.instances) >= 1, (
         "judge must construct anthropic.Anthropic on the segmentation.llm path"
     )
+
+
+# ---------------------------------------------------------------------------
+# publish: fail-closed on an empty entity registry (issue #32)
+# ---------------------------------------------------------------------------
+
+_FAKE_HASH = "a" * 64
+
+
+def _minimal_publishable_doc() -> dict[str, Any]:
+    """Smallest schema-valid OPF v0.2 doc that ``publish_playbook`` accepts.
+
+    Synthetic names only (Alpha Corp / Beta University) — no real corpus data.
+    """
+    return {
+        "opf_version": "0.2",
+        "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
+        "taxonomy": {
+            "source": "test",
+            "entries": [{"id": "indemnification", "label": "Indemnification", "status": "active"}],
+        },
+        "perspective": {
+            "party": "Alpha Corp",
+            "counterparty_type": "Educational Institution",
+        },
+        "baseline": {
+            "has_canonical_template": True,
+            "template_ref": {
+                "document_id": "template",
+                "title": "Template MSA",
+                "source": "file:///dms/templates/msa-template.docx",
+                "sha256": f"sha256:{_FAKE_HASH}",
+            },
+        },
+        "posture": {
+            "system_prompt": "Push back when counterparty proposes uncapped liability.",
+            "version": 1,
+            "generation": {
+                "generated_by": "engine",
+                "generated_at": "2026-07-01T00:00:00Z",
+                "interview": [
+                    {
+                        "q": "q1",
+                        "question": "What is our risk tolerance?",
+                        "answer": "Low tolerance for uncapped liability.",
+                    }
+                ],
+            },
+        },
+        "floor": {
+            "invariants": [
+                {
+                    "id": "inv.cap",
+                    "statement": "Liability must be capped at fees paid.",
+                    "rationale": "Board-mandated risk ceiling.",
+                }
+            ]
+        },
+        "curation": {"pins": []},
+        "evidence": {"clauses": [], "clause_library": []},
+        "corpus": {
+            "documents": [],
+            "stats": {"documents_total": 0, "documents_in_scope": 0, "versions_total": 0},
+        },
+        "compiler": {
+            "name": "playbook-engine",
+            "version": "0.1.0",
+            "generated_at": "2026-07-01T00:00:00Z",
+            "stub_basis_present": False,
+        },
+        "identity": {
+            "content_hash": f"sha256:{_FAKE_HASH}",
+            "section_digests": {
+                "evidence": f"sha256:{_FAKE_HASH}",
+                "posture": f"sha256:{_FAKE_HASH}",
+                "floor": f"sha256:{_FAKE_HASH}",
+                "curation": f"sha256:{_FAKE_HASH}",
+            },
+        },
+    }
+
+
+def _write_publishable_doc(tmp_path: Path) -> Path:
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(_minimal_publishable_doc()), encoding="utf-8")
+    return doc_path
+
+
+def _write_empty_registry(tmp_path: Path) -> Path:
+    """An on-disk registry that loads successfully but resolves EMPTY."""
+    registry_path = tmp_path / "entity_registry.json"
+    registry_path.write_text(json.dumps({"aliases": {}, "canonical": {}}), encoding="utf-8")
+    return registry_path
+
+
+def test_publish_empty_registry_fails_closed(tmp_path: Path) -> None:
+    """No --allow-empty-registry + an empty registry -> hard fail (issue #32).
+
+    Prevents the step-4 no-known-entity backstop from silently becoming a
+    no-op (the pre-fix behavior was a stderr warning + exit 0).
+    """
+    doc_path = _write_publishable_doc(tmp_path)
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+        ],
+    )
+
+    assert result.exit_code == 1, f"expected fail-closed exit 1:\n{result.output}"
+    assert "backstop is a NO-OP" in result.output
+    assert not out_path.exists(), "no artifact should be written when the gate fails closed"
+
+
+def test_publish_empty_registry_allowed_with_explicit_flag(tmp_path: Path) -> None:
+    """--allow-empty-registry is the named, explicit opt-out (issue #32)."""
+    doc_path = _write_publishable_doc(tmp_path)
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success with explicit opt-out:\n{result.output}"
+    assert "backstop is a NO-OP" in result.output
+    assert out_path.exists()
