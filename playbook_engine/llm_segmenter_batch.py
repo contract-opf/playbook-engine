@@ -431,9 +431,14 @@ def segment_documents_batch(
         progress(f"  batch {batch_id}: {status} (request_counts={counts})")
 
     by_custom_id = {item.custom_id: item for item in to_submit}
+    failures: list[str] = []
     for entry in client.messages.batches.results(batch_id):
         custom_id = entry.custom_id
-        seg_nodes = _extract_seg_nodes_from_result(custom_id, entry.result)
+        try:
+            seg_nodes = _extract_seg_nodes_from_result(custom_id, entry.result)
+        except SegmentationLLMError as exc:
+            failures.append(str(exc))
+            continue
         resolved[custom_id] = seg_nodes
         if cache is not None and custom_id in by_custom_id:
             cache.put(
@@ -443,6 +448,17 @@ def segment_documents_batch(
                 prompt_version=prompt_version,
                 effort=effort,
             )
+
+    if failures:
+        # Every succeeded result above was already resolved and cache.put —
+        # only the failed custom_ids are lost, and the caller is told exactly
+        # which ones so a re-run resubmits just those rather than the whole
+        # batch (see BatchPollCapExceededError for the same non-resubmission
+        # intent).
+        raise SegmentationLLMError(
+            f"batch {batch_id} had {len(failures)} failed result(s):\n"
+            + "\n".join(f"  - {msg}" for msg in failures)
+        )
 
     return resolved
 
