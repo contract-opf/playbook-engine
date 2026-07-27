@@ -128,6 +128,20 @@ class TestStageFlat:
         hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
         assert hints["order"] == ["01__v1", "02__v2"]
 
+    def test_order_in_hints_uses_natural_sort_not_lexicographic(self, tmp_path: Path) -> None:
+        """Issue #37: unpadded version numbers (draft-1 ... draft-12, common in
+        real negotiation folders) must sort naturally (draft-1 < draft-2 <
+        draft-10), not lexicographically (which would put draft-10 before
+        draft-2)."""
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "draft-1.rtf")
+        _write_rtf(src / "deal-a" / "draft-2.rtf")
+        _write_rtf(src / "deal-a" / "draft-10.rtf")
+        stage(src, tmp_path / "out")
+        hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
+        assert hints["order"] == ["01__draft-1", "02__draft-2", "03__draft-10"]
+
     def test_signed_detected_from_stem(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         (src / "deal-a").mkdir(parents=True)
@@ -329,6 +343,60 @@ class TestStageCLMNested:
         stage(src, tmp_path / "out")
         hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
         assert len(hints["order"]) == 3
+
+    def test_versions_subfolder_order_uses_natural_sort_not_lexicographic(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #37: the ``Versions/`` branch of ``_stage_clm_nested`` must
+        also natural-sort (draft-1 < draft-2 < draft-10), not lexicographic."""
+        src = tmp_path / "src"
+        (src / "deal-a" / "Versions").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "Versions" / "draft-1.rtf")
+        _write_rtf(src / "deal-a" / "Versions" / "draft-2.rtf")
+        _write_rtf(src / "deal-a" / "Versions" / "draft-10.rtf")
+        stage(src, tmp_path / "out")
+        hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
+        assert hints["order"] == ["01__draft-1", "02__draft-2", "03__draft-10"]
+
+    def test_no_versions_subfolder_fallback_order_uses_natural_sort(self, tmp_path: Path) -> None:
+        """Issue #37: when a deal folder under a clm_nested corpus has no
+        ``Versions/`` subfolder, ``_stage_clm_nested`` falls back to treating
+        it as a flat agreement folder — that fallback branch must also
+        natural-sort (draft-1 < draft-2 < draft-10), not lexicographic.
+
+        ``deal-b`` (with ``Versions/``) is what makes the corpus detect as
+        ``clm_nested``; ``deal-a`` (without) exercises the fallback branch.
+        """
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "draft-1.rtf")
+        _write_rtf(src / "deal-a" / "draft-2.rtf")
+        _write_rtf(src / "deal-a" / "draft-10.rtf")
+        (src / "deal-b" / "Versions").mkdir(parents=True)
+        _write_rtf(src / "deal-b" / "Versions" / "v1.rtf")
+
+        result = stage(src, tmp_path / "out")
+        assert result.layout == "clm_nested"
+        hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
+        assert hints["order"] == ["01__draft-1", "02__draft-2", "03__draft-10"]
+
+    def test_executed_pdf_sweep_uses_natural_sort_not_lexicographic(self, tmp_path: Path) -> None:
+        """Issue #37: the top-level EXECUTED_*.pdf sweep in ``_stage_clm_nested``
+        must also natural-sort (amendment-2 < amendment-10), not lexicographic —
+        "last EXECUTED wins" otherwise picks the wrong signed copy."""
+        src = tmp_path / "src"
+        (src / "deal-a" / "Versions").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "Versions" / "v1.rtf")
+        (src / "deal-a" / "EXECUTED_amendment-2.pdf").write_bytes(b"%PDF-1.4 stub")
+        (src / "deal-a" / "EXECUTED_amendment-10.pdf").write_bytes(b"%PDF-1.4 stub")
+        stage(src, tmp_path / "out")
+        hints = _read_hints(tmp_path / "out" / "deal-a" / "hints.yaml")
+        assert hints["order"] == [
+            "01__v1",
+            "02__EXECUTED_amendment-2",
+            "03__EXECUTED_amendment-10",
+        ]
+        assert hints["signed_version"] == "03__EXECUTED_amendment-10"
 
     # ---- example fixture ----
 

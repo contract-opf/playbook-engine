@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from playbook_engine.natural_sort import natural_sort_key
+
 _SUPPORTED = frozenset({".rtf", ".docx", ".pdf"})
 
 # Default staging root — user-owned cache dir, not world-readable /tmp
@@ -392,7 +394,8 @@ def _stage_flat(
         d for d in src_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
     ):
         version_files = sorted(
-            p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED
+            (p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED),
+            key=lambda p: (natural_sort_key(p.stem), p.name),
         )
         if not version_files:
             continue
@@ -438,11 +441,17 @@ def _stage_clm_nested(
         if not versions_dir.is_dir():
             # Fall back: treat as flat agreement folder.
             version_files = sorted(
-                p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED
+                (p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED),
+                key=lambda p: (natural_sort_key(p.stem), p.name),
             )
         else:
             version_files = sorted(
-                p for p in versions_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED
+                (
+                    p
+                    for p in versions_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() in _SUPPORTED
+                ),
+                key=lambda p: (natural_sort_key(p.stem), p.name),
             )
 
         if not version_files:
@@ -461,9 +470,12 @@ def _stage_clm_nested(
 
         # Check for top-level EXECUTED_*.pdf (signed copy outside Versions/)
         executed_files = sorted(
-            p
-            for p in doc_dir.iterdir()
-            if p.is_file() and p.name.startswith("EXECUTED_") and p.suffix.lower() == ".pdf"
+            (
+                p
+                for p in doc_dir.iterdir()
+                if p.is_file() and p.name.startswith("EXECUTED_") and p.suffix.lower() == ".pdf"
+            ),
+            key=lambda p: (natural_sort_key(p.stem), p.name),
         )
         for exec_src in executed_files:
             n = len(order) + 1

@@ -80,6 +80,7 @@ from playbook_engine.llm_segmenter_batch import (
     normalize_trail,
     segment_documents_batch,
 )
+from playbook_engine.natural_sort import natural_sort_key
 from playbook_engine.observation_builder import (
     Observation,
     ObservationCitation,
@@ -335,14 +336,15 @@ def _ingest_file_tracked(
 
 
 def _discover_versions(doc_dir: Path) -> list[Path]:
-    """Return agreement files in a document directory, sorted by name."""
+    """Return agreement files in a document directory, in natural sort order."""
     return sorted(
-        p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
+        (p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS),
+        key=lambda p: (natural_sort_key(p.stem), p.name),
     )
 
 
 def _discover_legacy_doc_files(doc_dir: Path) -> list[Path]:
-    """Return legacy .doc files in a document directory, sorted by name.
+    """Return legacy .doc files in a document directory, in natural sort order.
 
     These are excluded from :func:`_discover_versions` (the engine cannot read
     them) but are common in real negotiation history, so callers surface them
@@ -350,7 +352,8 @@ def _discover_legacy_doc_files(doc_dir: Path) -> list[Path]:
     ``_LEGACY_EXTENSIONS``.
     """
     return sorted(
-        p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _LEGACY_EXTENSIONS
+        (p for p in doc_dir.iterdir() if p.is_file() and p.suffix.lower() in _LEGACY_EXTENSIONS),
+        key=lambda p: (natural_sort_key(p.stem), p.name),
     )
 
 
