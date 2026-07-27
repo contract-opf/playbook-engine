@@ -20,10 +20,11 @@ from playbook_engine.agent_segmenter import (
     block_to_dict,
     segment_payload_key,
 )
-from playbook_engine.cli import cli
+from playbook_engine.cli import _llm_segmentation_kwargs, cli
 from playbook_engine.config import load_config
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.segmentation_grounding import Block
+from playbook_engine.taxonomy import load_taxonomy
 
 # ---------------------------------------------------------------------------
 # Config: `segmentation.agent` implies llm+cache and forces the sentinel model
@@ -103,6 +104,104 @@ def test_store_backed_segment_fn_dedups_within_instance(tmp_path: Path) -> None:
 
     lines = [line for line in pending_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 1  # deduped by content hash
+
+
+def test_store_backed_segment_fn_includes_taxonomy_ids_in_payload(tmp_path: Path) -> None:
+    """Regression for issue #40: the queued payload must carry the corpus's
+    real taxonomy_ids (matching the shape `playbook segment` writes), or
+    segment_apply_cmd's taxonomy gate rejects every verdict that assigns a
+    real taxonomy_id."""
+    pending_path = tmp_path / "segment" / "pending.jsonl"
+    fn = StoreBackedSegmentFn(
+        pending=PendingQueue(pending_path),
+        taxonomy_ids=["term"],
+        document_id="fixture-doc",
+        version="v1",
+    )
+
+    with pytest.raises(AgentSegmentationPending):
+        fn("Hello world", _blocks())
+
+    lines = pending_path.read_text(encoding="utf-8").splitlines()
+    rec = json.loads(lines[0])
+    assert rec["payload"]["taxonomy_ids"] == ["term"]
+    assert rec["payload"]["document_id"] == "fixture-doc"
+    assert rec["payload"]["version"] == "v1"
+
+
+def test_llm_segmentation_kwargs_binds_real_taxonomy_ids_for_agent_mode(
+    tmp_path: Path,
+) -> None:
+    """Regression for issue #40: this exercises the actual production wiring
+    in ``cli._llm_segmentation_kwargs`` (not a hand-built ``StoreBackedSegmentFn``)
+    to prove the ``mine``-first flow binds the corpus's real taxonomy_ids —
+    not the empty default — into the queued payload's allow-list. Must fail
+    if cli.py's ``taxonomy_ids=[e.id for e in taxonomy.classifier_entries()]``
+    is ever dropped back to ``StoreBackedSegmentFn(pending=...)`` alone."""
+    config_path = _write_config(tmp_path, agent=True)
+    cfg = load_config(config_path)
+    taxonomy = load_taxonomy(tmp_path / "tax.yaml")
+
+    kwargs = _llm_segmentation_kwargs(cfg, taxonomy, tmp_path / "out", lambda _msg: None)
+
+    expected = [e.id for e in taxonomy.classifier_entries()]
+    assert expected  # sanity: the fixture taxonomy must actually have entries
+    assert kwargs["llm_segment_fn"].taxonomy_ids == expected
+
+
+def test_mine_queued_verdict_with_valid_taxonomy_id_passes_segment_apply(
+    tmp_path: Path,
+) -> None:
+    """Regression for issue #40: a document queued via StoreBackedSegmentFn
+    (the `mine`-first flow) with a real taxonomy_ids allow-list must let
+    segment-apply accept a verdict that assigns a valid (non-null)
+    taxonomy_id — this used to exit 1 with "taxonomy gate" because the
+    mine-queued payload carried no taxonomy_ids at all (empty allow-list)."""
+    out_dir = tmp_path / "out"
+    seg_dir = out_dir / "segment"
+    canonical = "Hello world"
+
+    # Queue exactly as `mine` does on a cache miss: via StoreBackedSegmentFn,
+    # bound to the corpus's real taxonomy_ids (as cli.py's
+    # _llm_segmentation_kwargs now does).
+    fn = StoreBackedSegmentFn(
+        pending=PendingQueue(seg_dir / "pending.jsonl"),
+        taxonomy_ids=["term"],
+        document_id="fixture-doc",
+        version="v1",
+    )
+    with pytest.raises(AgentSegmentationPending):
+        fn(canonical, _blocks())
+
+    verdicts = tmp_path / "seg-verdicts.jsonl"
+    verdicts.write_text(
+        json.dumps(
+            {
+                "canonical_text": canonical,
+                "nodes": [
+                    {
+                        "node_id": "n1",
+                        "parent_id": None,
+                        "order": 1,
+                        "heading": "One",
+                        "taxonomy_id": "term",  # a real, valid taxonomy_id
+                        "start_block_id": "b0",
+                        "end_block_id": "b1",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli, ["segment-apply", str(out_dir), "--verdicts", str(verdicts)])
+    assert result.exit_code == 0, result.output
+
+    cache = SegmentationVerdictCache(seg_dir / "cache.jsonl")
+    nodes = cache.get(canonical, model=AGENT_SEGMENTER_MODEL)
+    assert nodes is not None
+    assert nodes[0].taxonomy_id == "term"
 
 
 def test_block_to_dict_shape() -> None:

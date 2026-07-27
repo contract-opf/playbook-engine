@@ -95,8 +95,13 @@ def _llm_segmentation_kwargs(
 
         seg_dir = out_dir / "segment"
         kwargs["use_llm_segmentation"] = True
+        # taxonomy_ids must match the allow-list `playbook segment` writes into
+        # its own queued payload (segment_cmd), or segment_apply_cmd's taxonomy
+        # gate rejects every mine-queued verdict that assigns a real
+        # taxonomy_id (issue #40).
         kwargs["llm_segment_fn"] = StoreBackedSegmentFn(
-            pending=PendingQueue(seg_dir / "pending.jsonl")
+            pending=PendingQueue(seg_dir / "pending.jsonl"),
+            taxonomy_ids=[e.id for e in taxonomy.classifier_entries()],
         )
         kwargs["segmentation_cache"] = SegmentationVerdictCache(seg_dir / "cache.jsonl")
         kwargs["extraction_cache"] = ExtractionCache(out_dir / "extraction_cache.jsonl")
