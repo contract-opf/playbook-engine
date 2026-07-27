@@ -23,6 +23,7 @@ from playbook_engine.publisher import (
     DEFAULT_COUNTERPARTY_LABEL,
     DEFAULT_PARTY_LABEL,
     PublishError,
+    _apply_redact_terms,
     publish_playbook,
 )
 from playbook_engine.validator import validate_document
@@ -803,6 +804,80 @@ def test_institution_gate_passes_once_name_is_redacted() -> None:
         report.doc["corpus"]["documents"][0]["document_id"]
         == "affiliation-agreement-[redacted]-0212e146"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #33: concatenated (no-separator / camelCase-derived) entity-name
+# slugs evade every identity layer's word-boundary matching. A DMS folder
+# named "WestmoorUniversity 2023" becomes document_id
+# "westmooruniversity-2023" (lowercased, hyphen-joined) — there is no
+# separator between "westmoor" and "university" for a word-boundary check to
+# anchor on, so the token-match pseudonymizer, the padded-substring step-4
+# backstop, and the institution-name regexes all miss it even though the
+# name IS registered.
+# ---------------------------------------------------------------------------
+
+_CONCAT_INST_NAME = "Westmoor University"  # fictional; illustrative per issue #33
+_CONCAT_SLUG = "westmooruniversity-2023"
+
+
+def test_backstop_catches_concatenated_slug_value_and_dict_key() -> None:
+    """A no-separator document_id slug must trip the step-4 backstop, both
+    as a value and as a corpus.stats dict key, once the name is registered
+    — even though it has no word boundary for the padded-substring check."""
+    doc = _make_doc()
+    doc["corpus"]["documents"][0]["document_id"] = _CONCAT_SLUG
+    doc["corpus"]["stats"] = {"observations_by_document": {_CONCAT_SLUG: 1}}
+
+    with pytest.raises(PublishError, match="westmoor"):
+        publish_playbook(
+            doc,
+            redaction_judge=_NeverCallJudge(),
+            verify_judge=_NeverCallJudge(),
+            known_entity_names=[_CONCAT_INST_NAME],
+            published_at="2026-07-27T00:00:00Z",
+        )
+
+
+def test_backstop_ignores_short_names_in_concatenated_form() -> None:
+    """The collapsed-form check requires a length floor so a short registered
+    name (e.g. an acronym) doesn't false-positive on an ordinary substring."""
+    doc = _make_doc()
+    doc["corpus"]["documents"][0]["document_id"] = "abc-glossary-2023"
+
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=["A B C"],  # collapses to "abc" — only 3 chars, below the floor
+        published_at="2026-07-27T00:00:00Z",
+    )
+    assert report.doc["corpus"]["documents"][0]["document_id"] == "abc-glossary-2023"
+
+
+def test_apply_redact_terms_rewrites_concatenated_slug() -> None:
+    """The documented remedy — add the name to --redact-terms and re-run —
+    must actually redact the no-separator (concatenated) slug form, not just
+    the punctuated/spaced form the pre-fix ``[\\W_]+`` joiner required."""
+    doc = _make_doc()
+    doc["corpus"]["documents"][0]["document_id"] = _CONCAT_SLUG
+    doc["corpus"]["stats"] = {"observations_by_document": {_CONCAT_SLUG: 1}}
+
+    redacted = _apply_redact_terms(doc, [_CONCAT_INST_NAME])
+    assert redacted["corpus"]["documents"][0]["document_id"] == "[redacted]-2023"
+    assert list(redacted["corpus"]["stats"]["observations_by_document"]) == ["[redacted]-2023"]
+
+    # End to end: once the redact term is supplied, publish succeeds clean —
+    # the slug no longer contains the registered name in any form.
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[_CONCAT_INST_NAME],
+        published_at="2026-07-27T00:00:00Z",
+        redact_terms=[_CONCAT_INST_NAME],
+    )
+    assert report.doc["corpus"]["documents"][0]["document_id"] == "[redacted]-2023"
 
 
 def test_institution_gate_ignores_governing_law_and_generic_descriptors() -> None:

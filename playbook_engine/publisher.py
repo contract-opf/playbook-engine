@@ -436,20 +436,24 @@ def _apply_redact_terms(doc: dict[str, Any], terms: Sequence[str]) -> dict[str, 
     if not cleaned:
         return doc
 
-    # Terms tokenize on \w+ runs and join on ANY non-word separator run
-    # ([\W_]+) — the same normalization class as the step-4 backstop. So
-    # "Chapel Hill" also redacts "chapel-hill" inside a document_id slug and
-    # "amanda.wynn" inside an e-mail localpart, and a term written with
-    # punctuation ("Kansas City, Missouri") matches the text however the
+    # Terms tokenize on \w+ runs and join on ANY non-word separator run,
+    # ZERO-OR-MORE ([\W_]*) — the same normalization class as the step-4
+    # backstop, extended to match a no-separator run too. So "Chapel Hill"
+    # also redacts "chapel-hill" inside a document_id slug, "chapelhill"
+    # inside a concatenated (camelCase-derived) slug, and "amanda.wynn"
+    # inside an e-mail localpart, and a term written with punctuation
+    # ("Kansas City, Missouri") matches the text however the
     # punctuation/casing/spacing came out of extraction. Slug redaction is
     # safe: every reference to the same document_id transforms identically,
-    # so citations keep resolving.
+    # so citations keep resolving. (issue #33: without the zero-width
+    # allowance the documented remedy — "add the name to --redact-terms and
+    # re-run" — could not actually redact a concatenated slug.)
     def _term_pattern(term: str) -> re.Pattern[str] | None:
         words = re.findall(r"\w+", term)
         if not words:
             return None
         return re.compile(
-            r"\b" + r"[\W_]+".join(re.escape(w) for w in words) + r"\b", re.IGNORECASE
+            r"\b" + r"[\W_]*".join(re.escape(w) for w in words) + r"\b", re.IGNORECASE
         )
 
     patterns = [p for term in sorted(cleaned, key=len, reverse=True) if (p := _term_pattern(term))]
@@ -511,8 +515,23 @@ def _entity_backstop_scan(
         if not text:
             continue
         haystack = f" {_normalize_for_scan(text)} "
+        collapsed_haystack = haystack.replace(" ", "")
         for real_name, normalized_name in normalized_names:
-            if normalized_name and f" {normalized_name} " in haystack:
+            if not normalized_name:
+                continue
+            if f" {normalized_name} " in haystack:
+                hits.append((path, real_name))
+                continue
+            # A no-separator (camelCase/concatenated) folder-name slug — e.g.
+            # "westmooruniversity-2023" from a "WestmoorUniversity" DMS
+            # folder — destroys the word boundaries both the padded-substring
+            # check above and the token-match pseudonymizer rely on. Catch
+            # the collapsed form directly; require a floor length so short
+            # names (e.g. "ABC") don't false-positive on ordinary substrings.
+            # False positives just block a publish with a clear message —
+            # acceptable for a fail-closed gate (issue #33).
+            collapsed_name = normalized_name.replace(" ", "")
+            if len(collapsed_name) >= 8 and collapsed_name in collapsed_haystack:
                 hits.append((path, real_name))
     return hits
 
