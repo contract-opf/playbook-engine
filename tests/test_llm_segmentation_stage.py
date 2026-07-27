@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from playbook_engine.llm_segmentation_stage import segment_to_tree
+from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.segmentation_grounding import Block, GroundingResult, SegNode
 from playbook_engine.segmentation_qa import SegmentationQAError
 
@@ -125,6 +126,55 @@ def test_segment_to_tree_propagates_segmentation_qa_error(tmp_path: Path) -> Non
             taxonomy_ids=["indemnification"],
             segment_fn=_gate_failing_segment_fn,
         )
+
+
+# ---------------------------------------------------------------------------
+# Cache path must stay repair-aware (issue #38)
+# ---------------------------------------------------------------------------
+
+
+def test_segment_to_tree_cache_path_forwards_last_error_to_repair_aware_fn(
+    tmp_path: Path,
+) -> None:
+    """When a cache is passed, segment_to_tree wraps the injected segment_fn
+    in an internal recording closure so it can capture the winning attempt's
+    SegNodes for cache.put. Before the fix that closure declared only two
+    parameters, so segmentation_qa._accepts_last_error classified it as NOT
+    repair-aware, and segment_verify_repair never forwarded the previous
+    attempt's SegmentationQAError to it — a repair-aware injected segment_fn
+    always received last_error=None, re-sending byte-identical input on
+    every "repair". This asserts the second attempt actually receives the
+    first attempt's SegmentationQAError.
+    """
+    path = tmp_path / "v1.rtf"
+    _write_rtf(path, _BODY)
+
+    received_last_errors: list[SegmentationQAError | None] = []
+
+    def _repair_aware_segment_fn(
+        canonical_text: str,
+        blocks: list[Block],
+        last_error: SegmentationQAError | None = None,
+    ) -> list[SegNode]:
+        received_last_errors.append(last_error)
+        if len(received_last_errors) == 1:
+            # Fails the coverage gate — forces a repair attempt.
+            return _gate_failing_segment_fn(canonical_text, blocks)
+        return _two_block_segment_fn(canonical_text, blocks)
+
+    cache = SegmentationVerdictCache(tmp_path / "seg_cache.jsonl")
+
+    result = segment_to_tree(
+        path,
+        taxonomy_ids=["indemnification"],
+        segment_fn=_repair_aware_segment_fn,
+        cache=cache,
+    )
+
+    assert isinstance(result, GroundingResult)
+    assert len(received_last_errors) == 2
+    assert received_last_errors[0] is None
+    assert isinstance(received_last_errors[1], SegmentationQAError)
 
 
 # ---------------------------------------------------------------------------

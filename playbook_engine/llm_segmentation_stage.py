@@ -29,6 +29,7 @@ from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.segmentation_grounding import Block, GroundingResult, SegNode
 from playbook_engine.segmentation_qa import (
     SegmentationQAError,
+    _accepts_last_error,
     run_gates,
     segment_verify_repair,
 )
@@ -174,13 +175,29 @@ def segment_to_tree(
         if cached_nodes is not None:
             return run_gates(canonical_text, blocks, cached_nodes, taxonomy_ids=taxonomy_ids)
 
-    fn: SegmentFn = segment_fn if segment_fn is not None else _default_segment_fn(taxonomy_ids)
+    # Typed permissively (not `SegmentFn`) so the repair-aware call below
+    # (three positional args) type-checks: the underlying callable may be
+    # either the base two-argument shape or a repair-aware one with a third
+    # `last_error` parameter — see `fn_repair_aware` / `_accepts_last_error`.
+    fn: Callable[..., list[SegNode]] = (
+        segment_fn if segment_fn is not None else _default_segment_fn(taxonomy_ids)
+    )
 
     last_seg_nodes: list[SegNode] = []
 
-    def _recording_fn(_canonical_text: str, _blocks: list[Block]) -> list[SegNode]:
+    fn_repair_aware = _accepts_last_error(fn)
+
+    def _recording_fn(
+        _canonical_text: str,
+        _blocks: list[Block],
+        last_error: SegmentationQAError | None = None,
+    ) -> list[SegNode]:
         nonlocal last_seg_nodes
-        last_seg_nodes = fn(_canonical_text, _blocks)
+        last_seg_nodes = (
+            fn(_canonical_text, _blocks, last_error)
+            if fn_repair_aware
+            else fn(_canonical_text, _blocks)
+        )
         return last_seg_nodes
 
     result = segment_verify_repair(
