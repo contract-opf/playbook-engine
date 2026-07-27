@@ -286,6 +286,104 @@ def test_render_html_embeds_json(tmp_path: Path) -> None:
     assert '"opf_version"' in html
 
 
+def test_render_html_escapes_script_breakout_in_embedded_json(tmp_path: Path) -> None:
+    """A corpus-derived full_text containing '</script>' must not break out of
+    the embedded playbook-data block (issue #31 — stored XSS).
+
+    Covers the un-aliased path, where the embedded JSON is the raw on-disk
+    bytes rather than a fresh json.dumps of a resolved copy.
+    """
+    breakout = "</script><script>window.x=1</script>"
+    clauses = [
+        {
+            "id": "clause.indemnification",
+            "taxonomy_id": "indemnification",
+            "title": "Indemnification",
+            "our_standard": None,
+            "observed_positions": [
+                {
+                    "text_summary": "Mutual indemnification.",
+                    "full_text": breakout,
+                    "example_ref": {
+                        "document_id": "state-university-2023",
+                        "version": 3,
+                        "clause_path": "8",
+                    },
+                    "deviation": "none",
+                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                    "provenance": "our_paper",
+                    "outcome": "signed",
+                    "precedent_count": 7,
+                },
+            ],
+            "rollup": {
+                "position": "negotiable",
+                "confidence": {
+                    "score": 0.82,
+                    "basis": "precedent_count",
+                    "n_our_paper": 10,
+                    "n_counterparty_paper": 0,
+                },
+            },
+        },
+    ]
+    _make_opf(tmp_path, clauses=clauses)
+    html = render_review_html(tmp_path / "out")
+
+    # Exactly the two script tags we render ourselves must remain — none of
+    # the corpus text's own "</script>" may have split the block open.
+    # Only our own two script tags' closes may appear unescaped; the
+    # corpus-derived "</script>" must be escaped to "<\/script>" so it can
+    # never terminate the enclosing script element early.
+    assert html.count("</script>") == 2
+    assert breakout not in html
+    assert "<\\/script><script>window.x=1<\\/script>" in html
+
+
+def test_render_html_escapes_script_breakout_with_alias_map(tmp_path: Path) -> None:
+    """Same breakout, but through the alias-resolved (json.dumps) path."""
+    breakout = "</script><script>window.x=1</script>"
+    clauses = [
+        {
+            "id": "clause.indemnification",
+            "taxonomy_id": "indemnification",
+            "title": "Indemnification",
+            "our_standard": None,
+            "observed_positions": [
+                {
+                    "text_summary": "Mutual indemnification.",
+                    "full_text": breakout,
+                    "example_ref": {
+                        "document_id": "state-university-2023",
+                        "version": 3,
+                        "clause_path": "8",
+                    },
+                    "deviation": "none",
+                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                    "provenance": "our_paper",
+                    "outcome": "signed",
+                    "precedent_count": 7,
+                },
+            ],
+            "rollup": {
+                "position": "negotiable",
+                "confidence": {
+                    "score": 0.82,
+                    "basis": "precedent_count",
+                    "n_our_paper": 10,
+                    "n_counterparty_paper": 0,
+                },
+            },
+        },
+    ]
+    _make_opf(tmp_path, clauses=clauses)
+    html = render_review_html(tmp_path / "out", alias_map={"ALIAS_1": "Real Party Name"})
+
+    assert html.count("</script>") == 2
+    assert breakout not in html
+    assert "<\\/script><script>window.x=1<\\/script>" in html
+
+
 def test_render_html_requires_no_network(tmp_path: Path) -> None:
     """HTML must not reference external CDN / fetch URLs."""
     _make_opf(tmp_path)
