@@ -2351,9 +2351,12 @@ def mine_corpus(
         progress(f"    {len(doc_obs)} observation(s)")
 
     # Fail loud but isolated: surface every quarantined document prominently and
-    # persist the reasons so a reviewer can act on them.
+    # persist the reasons so a reviewer can act on them. Always rewritten (even
+    # when empty), same as every other run-level artifact (observations.jsonl,
+    # corpus_manifest.json, scope.json) — otherwise a stale quarantine.json from
+    # a prior run keeps flagging documents that a subsequent clean run resolved.
+    _atomic_json_write(quarantined, out_dir / "quarantine.json")
     if quarantined:
-        _atomic_json_write(quarantined, out_dir / "quarantine.json")
         ids = ", ".join(q["document_id"] for q in quarantined)
         progress(
             f"  WARNING: {len(quarantined)} document(s) quarantined for review "

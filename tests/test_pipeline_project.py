@@ -610,6 +610,84 @@ def test_all_versions_failed_document_is_quarantined(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #42: quarantine.json must be rewritten every run, not only when the
+# current run has quarantined entries — otherwise a stale quarantine.json
+# from a prior run keeps flagging documents that a subsequent clean run
+# resolved.
+# ---------------------------------------------------------------------------
+
+
+def test_quarantine_json_cleared_on_clean_rerun(tmp_path: Path) -> None:
+    """A document that quarantines on one run and mines cleanly on a
+    subsequent run must not leave a stale quarantine.json entry behind."""
+    corpus_dir = tmp_path / "corpus"
+
+    # deal-001 starts out with no ingestable content -> every version fails
+    # ingest -> quarantined (same fixture shape as
+    # test_all_versions_failed_document_is_quarantined).
+    deal1_dir = corpus_dir / "deal-001"
+    deal1_dir.mkdir(parents=True)
+    _write_rtf(deal1_dir / "v1.rtf", "")
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        progress=lambda _: None,
+    )
+
+    quarantine_path = out_dir / "quarantine.json"
+    assert quarantine_path.exists()
+    first_run = json.loads(quarantine_path.read_text(encoding="utf-8"))
+    assert {q["document_id"] for q in first_run} == {"deal-001"}
+
+    # Fix the document (real content) and re-run into the SAME out_dir, the
+    # documented cache/re-run design.
+    _write_rtf(deal1_dir / "v1.rtf", _CORPUS_BODY)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        progress=lambda _: None,
+    )
+
+    # quarantine.json must reflect the CURRENT run, not the stale prior one.
+    assert quarantine_path.exists(), (
+        "quarantine.json should still be present (as an empty list), not left stale"
+    )
+    second_run = json.loads(quarantine_path.read_text(encoding="utf-8"))
+    assert second_run == [], (
+        f"expected an empty quarantine.json after a clean re-run, got {second_run}"
+    )
+
+    # The AAR must not keep reporting deal-001 as needing attention.
+    from playbook_engine.aar import build_after_action_data
+
+    aar_data = build_after_action_data(out_dir)
+    matches = [i for i in aar_data["needs_attention"] if i["document_id"] == "deal-001"]
+    assert not matches, f"deal-001 should no longer be flagged, got {matches}"
+
+
+# ---------------------------------------------------------------------------
 # Issue #83: a trail with no detected signed copy must not fabricate
 # signed_copy_confidence or outcome="signed".
 # ---------------------------------------------------------------------------
