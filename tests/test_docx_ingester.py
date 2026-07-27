@@ -168,6 +168,85 @@ def _hyperlink_tracked_docx(tmp_path: Path) -> Path:
     return path
 
 
+def _sdt_content_control_docx(tmp_path: Path) -> Path:
+    """Document with a run wrapped in an inline w:sdt content control.
+
+    Structure: Heading 1 "Parties", then a body paragraph where a run is
+    wrapped in <w:sdt><w:sdtContent><w:r><w:t>Acme Corp</w:t></w:r>
+    </w:sdtContent></w:sdt>, as commonly produced by CLM/template-generated
+    Word files (content controls bind party names, dates, defined terms).
+    """
+    doc = Document()
+    doc.add_heading("Parties", level=1)
+    p = doc.add_paragraph()
+    p.add_run("This Agreement is between ")
+
+    sdt_elem = etree.SubElement(p._p, _w("sdt"))
+    sdt_content = etree.SubElement(sdt_elem, _w("sdtContent"))
+    r_sdt = etree.SubElement(sdt_content, _w("r"))
+    t_sdt = etree.SubElement(r_sdt, _w("t"))
+    t_sdt.text = "Acme Corp"
+
+    p.add_run(" and the Vendor.")
+    path = tmp_path / "sdt_content_control.docx"
+    doc.save(str(path))
+    return path
+
+
+def _block_level_sdt_docx(tmp_path: Path) -> Path:
+    """Document with an entire paragraph wrapped in a block-level w:sdt.
+
+    Structure: Heading 1 "Obligations", then a whole body paragraph wrapped
+    in <w:sdt><w:sdtContent><w:p>...</w:p></w:sdtContent></w:sdt>, inserted
+    directly as raw XML (python-docx has no API for content controls). The
+    wrapper is inserted before w:sectPr to keep the body well-formed.
+    """
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+
+    sdt_elem = etree.Element(_w("sdt"))
+    sdt_content = etree.SubElement(sdt_elem, _w("sdtContent"))
+    p_elem = etree.SubElement(sdt_content, _w("p"))
+    r_elem = etree.SubElement(p_elem, _w("r"))
+    t_elem = etree.SubElement(r_elem, _w("t"))
+    t_elem.text = "FixtureCorp shall deliver the wrapped clause text."
+
+    body = doc.element.body
+    sect_pr = body.find(_w("sectPr"))
+    if sect_pr is not None:
+        sect_pr.addprevious(sdt_elem)
+    else:
+        body.append(sdt_elem)
+
+    path = tmp_path / "block_sdt.docx"
+    doc.save(str(path))
+    return path
+
+
+def _fld_simple_docx(tmp_path: Path) -> Path:
+    """Document with a run wrapped in a w:fldSimple simple field.
+
+    Structure: Heading 1 "Effective Date", then a body paragraph where a run
+    is wrapped in <w:fldSimple w:instr="DATE"><w:r><w:t>1 January 2024</w:t>
+    </w:r></w:fldSimple>, as produced by Word's "Insert Field" feature.
+    """
+    doc = Document()
+    doc.add_heading("Effective Date", level=1)
+    p = doc.add_paragraph()
+    p.add_run("The Effective Date is ")
+
+    fld_elem = etree.SubElement(p._p, _w("fldSimple"))
+    fld_elem.set(_w("instr"), "DATE")
+    r_fld = etree.SubElement(fld_elem, _w("r"))
+    t_fld = etree.SubElement(r_fld, _w("t"))
+    t_fld.text = "1 January 2024"
+
+    p.add_run(".")
+    path = tmp_path / "fld_simple.docx"
+    doc.save(str(path))
+    return path
+
+
 def _multi_para_clause_docx(tmp_path: Path) -> Path:
     """Heading with multiple body paragraphs — tests document-absolute char_span offsets."""
     doc = Document()
@@ -528,6 +607,36 @@ def test_inserted_text_inside_hyperlink_in_normalized_text(tmp_path: Path) -> No
     result = ingest_docx(path, "d", "v1")
     all_text = " ".join(n.text for n in result.tree.all_nodes())
     assert "Schedule A" in all_text
+
+
+# ---------------------------------------------------------------------------
+# Issue #46: text inside w:sdt content controls (and w:fldSimple fields)
+# must not be silently dropped.
+# ---------------------------------------------------------------------------
+
+
+def test_run_inside_inline_sdt_content_control_in_normalized_text(tmp_path: Path) -> None:
+    """A run wrapped in an inline w:sdt content control must not vanish."""
+    path = _sdt_content_control_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    all_text = " ".join(n.text for n in result.tree.all_nodes())
+    assert "Acme Corp" in all_text
+
+
+def test_paragraph_inside_block_level_sdt_is_not_dropped(tmp_path: Path) -> None:
+    """A whole paragraph wrapped in a block-level w:sdt must still be ingested."""
+    path = _block_level_sdt_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    all_text = " ".join(n.text for n in result.tree.all_nodes())
+    assert "FixtureCorp shall deliver the wrapped clause text." in all_text
+
+
+def test_run_inside_fld_simple_in_normalized_text(tmp_path: Path) -> None:
+    """A run wrapped in a w:fldSimple simple field must not vanish."""
+    path = _fld_simple_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    all_text = " ".join(n.text for n in result.tree.all_nodes())
+    assert "1 January 2024" in all_text
 
 
 # ---------------------------------------------------------------------------

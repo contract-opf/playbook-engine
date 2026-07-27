@@ -222,12 +222,27 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
 
 def _iter_body_blocks(doc: Any) -> Any:
     """Yield paragraph XML elements and flattened table strings in document order."""
-    for child in doc.element.body:
+    yield from _iter_blocks_in(doc.element.body)
+
+
+def _iter_blocks_in(container: Any) -> Any:
+    """Yield paragraph XML elements and flattened table strings from ``container``.
+
+    Descends into block-level ``w:sdt`` (structured document tag / content
+    control) elements by unwrapping their ``w:sdtContent`` child, so that
+    paragraphs and tables wrapped in a content control are not silently
+    dropped. Recurses to handle nested content controls.
+    """
+    for child in container:
         tag = child.tag
         if tag == qn("w:p"):
             yield child
         elif tag == qn("w:tbl"):
             yield _flatten_table(child)
+        elif tag == qn("w:sdt"):
+            content = child.find(qn("w:sdtContent"))
+            if content is not None:
+                yield from _iter_blocks_in(content)
 
 
 def _flatten_table(tbl_elem: Any) -> str:
@@ -270,7 +285,10 @@ def _extract_para_text(p_elem: Any) -> tuple[str, list[dict[str, Any]]]:
     must add the document-level offset to obtain document-absolute positions.
 
     Handles ``w:ins`` and ``w:del`` nested inside ``w:hyperlink`` /
-    ``w:smartTag`` via recursive descent.
+    ``w:smartTag`` / ``w:fldSimple`` via recursive descent, and descends into
+    ``w:sdt`` (structured document tag / content control) elements via their
+    ``w:sdtContent`` child so that run text inside content controls is not
+    silently dropped.
     """
     parts: list[str] = []
     tracked: list[dict[str, Any]] = []
@@ -319,10 +337,16 @@ def _extract_para_text(p_elem: Any) -> tuple[str, list[dict[str, Any]]]:
                             "char_span": None,
                         }
                     )
-            elif tag in (qn("w:hyperlink"), qn("w:smartTag")):
+            elif tag in (qn("w:hyperlink"), qn("w:smartTag"), qn("w:fldSimple")):
                 # Recurse so that w:ins/w:del nested inside these wrappers
                 # are captured correctly.
                 _process(child)
+            elif tag == qn("w:sdt"):
+                # Structured document tag (content control): descend into
+                # its w:sdtContent wrapper so runs inside are not dropped.
+                content = child.find(qn("w:sdtContent"))
+                if content is not None:
+                    _process(content)
 
     _process(p_elem)
     return "".join(parts), tracked
