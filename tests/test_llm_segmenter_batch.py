@@ -312,6 +312,49 @@ class TestSegmentDocumentsBatch:
                 items, taxonomy_ids=["indemnification"], client=client, poll_interval_s=0
             )
 
+    def test_one_failed_result_does_not_discard_other_succeeded_results(
+        self, tmp_path: Path
+    ) -> None:
+        """issue #47: a single errored entry must not lose other successes.
+
+        Batch results are unordered; drain the full iterator, cache every
+        succeeded entry, then raise once naming the failures — successes must
+        survive in the cache so a re-run doesn't resubmit (and re-bill) them.
+        """
+        cache = SegmentationVerdictCache(tmp_path / "seg_cache.jsonl")
+        batches = _FakeBatchesResource(
+            {
+                "doc-a": _seg_response_text("n1", "indemnification"),
+                "doc-b": ("errored", "rate limited"),
+                "doc-c": _seg_response_text("n3", "governing_law"),
+            },
+            result_order=["doc-a", "doc-b", "doc-c"],
+        )
+        client = _FakeClient(batches)
+        items = [
+            SegmentationBatchItem("doc-a", "text a", _blocks("a")),
+            SegmentationBatchItem("doc-b", "text b", _blocks("b")),
+            SegmentationBatchItem("doc-c", "text c", _blocks("c")),
+        ]
+
+        with pytest.raises(SegmentationLLMError, match="doc-b"):
+            segment_documents_batch(
+                items,
+                taxonomy_ids=["indemnification", "governing_law"],
+                client=client,
+                cache=cache,
+                poll_interval_s=0,
+            )
+
+        # doc-c succeeded after the failing doc-b in iteration order — it must
+        # still have been cached, not lost.
+        assert cache.get("text c", model="claude-opus-4-8") == [
+            _expected_node("n3", "governing_law")
+        ]
+        assert cache.get("text a", model="claude-opus-4-8") == [
+            _expected_node("n1", "indemnification")
+        ]
+
     def test_empty_items_returns_empty_mapping_without_calling_client(self) -> None:
         batches = _FakeBatchesResource({})
         client = _FakeClient(batches)
