@@ -1294,7 +1294,7 @@ def stage_cmd(
         except ValueError as exc:
             click.secho(f"ERROR: {exc}", fg="red", err=True)
             raise SystemExit(1) from exc
-        plan = build_staging_plan(resolved)
+        plan = build_staging_plan(resolved, progress=click.echo)
         plan_file = dest / "staging_plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
         click.echo(f"plan   : {plan_file}")
