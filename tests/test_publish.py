@@ -605,6 +605,56 @@ def test_publish_strips_esign_audit_lines() -> None:
     assert "10:32:11" not in out
 
 
+def test_publish_scrub_does_not_drop_ambiguous_contract_language() -> None:
+    """issue #43: the e-sign/opaque-token markers were unanchored enough to
+    drop real contract sentences (and redact a real contract term) wholesale.
+    Every contract sentence below must survive verbatim; the accompanying
+    genuine DocuSign audit block must still be scrubbed.
+    """
+    contract_sentences = [
+        "Policyholder: obligations survive termination.",
+        "The Certificate Holder: shall be named as additional insured.",
+        "Each record shall bear a timestamp for audit purposes.",
+        "Signed counterparts delivered by 5:00 pm shall be effective.",
+        "This is a Work-Made-For-Hire under the Most-Favored-Nation clause.",
+    ]
+    audit_block = [
+        "Envelope Id: CBJCHBCAABAAdvXXQkglEeVYM",
+        "Signer Events",
+        "Signed 7/1/2024 3:02:11 PM",
+        "Holder: Pat Example",
+        "Time Stamp: 7/1/2024 3:02:11 PM",
+    ]
+    text = "\n".join(contract_sentences + audit_block)
+    out = _publish_with_text(text)
+
+    for sentence in contract_sentences:
+        assert sentence in out, f"contract sentence was corrupted: {sentence!r}"
+    assert "Work-Made-For-Hire" in out
+    assert "Most-Favored-Nation" in out
+
+    assert "Envelope Id" not in out
+    assert "Signer Events" not in out
+    assert "3:02:11" not in out
+    assert "Holder: Pat Example" not in out
+    assert "Time Stamp: 7/1/2024 3:02:11 PM" not in out
+
+
+def test_publish_redacts_opaque_token_in_ordinary_prose() -> None:
+    """issue #43: the mixed-case-plus-digit tightening on ``_OPAQUE_TOKEN_RE``
+    must still catch an envelope-id/base64-shaped token that appears in a
+    plain prose line with no e-sign vendor marker nearby (so the line isn't
+    dropped by ``_ESIGN_LINE_RE`` instead) — the redaction must come from the
+    opaque-token rule itself, not incidentally from the line-drop rule.
+    """
+    text = (
+        "The parties executed this Agreement under envelope CBJCHBCAABAAdvXXQkglEeVYM7Vg on file."
+    )
+    out = _publish_with_text(text)
+    assert "CBJCHBCAABAAdvXXQkglEeVYM7Vg" not in out
+    assert "[redacted]" in out
+
+
 def test_publish_redacts_address_spans() -> None:
     text = (
         "Notices to the Institution at 1234 Campus Garden Lane, Springfield, "

@@ -272,14 +272,25 @@ def _coarsen_dates(doc: dict[str, Any]) -> None:
 #: labels. None of it is contract content, and audit trails carry signatory
 #: names and network metadata — strip the LINE, conservatively (a line must
 #: match one of these unambiguous markers to be dropped).
+#: Month names, for the "Signed <date> <time>" audit-trail shape below.
+_MONTH_NAMES = (
+    r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+)
+#: A numeric (M/D/YYYY) or spelled-out (Month D, YYYY) audit-trail date —
+#: required alongside the clock time below so a bare "5:00 pm" in ordinary
+#: contract prose (no date attached) can never satisfy the alternative.
+_AUDIT_DATE_RE = rf"(\d{{1,2}}/\d{{1,2}}/\d{{2,4}}|(?:{_MONTH_NAMES})\.?\s+\d{{1,2}},?\s+\d{{4}})"
+
 _ESIGN_LINE_RE = re.compile(
     r"("
     r"docusign|adobe\s*sign|envelopeid|envelope\s+id|source\s+envelope|"
     r"transaction\s+id|ip\s+address|final\s+audit\s+report|record\s+tracking|"
-    r"autonav|time\s+source|timestamp|holder:|signer\s+events|carbon\s+copy\s+events|"
+    r"autonav|time\s+source|time\s*stamp:|^\s*holder:|signer\s+events|"
+    r"carbon\s+copy\s+events|"
     r"notary\s+events|payment\s+events|envelope\s+(sent|summary|originator)|"
     r"certified\s+delivered|signing\s+complete|envelope\s+stamping|"
-    r"^\s*(signed|viewed|sent|delivered|created|completed|resent|read)\b.*"
+    rf"^\s*(signed|viewed|sent|delivered|created|completed|resent|read)\b.*{_AUDIT_DATE_RE}.*"
     r"\b\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?"
     r")",
     re.IGNORECASE,
@@ -287,11 +298,14 @@ _ESIGN_LINE_RE = re.compile(
 
 #: Long opaque tokens (envelope ids, base64-ish audit hashes) anywhere in a
 #: line — redacted in place rather than dropping the line. Requires mixed
-#: case so lowercase-hex content addresses (sha256) never match; strings
-#: beginning with "sha256:" are additionally exempted wholesale in the
-#: scrubber.
+#: case (so lowercase-hex content addresses (sha256) never match) AND at
+#: least one digit, so pure-alpha hyphenated legal terms ("Work-Made-For-
+#: Hire", "Most-Favored-Nation") never match while envelope ids/base64
+#: hashes (which always carry digits) still do. Strings beginning with
+#: "sha256:" are additionally exempted wholesale in the scrubber.
 _OPAQUE_TOKEN_RE = re.compile(
-    r"\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])[A-Za-z0-9_-]{18,}\b"
+    r"\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)"
+    r"[A-Za-z0-9_-]{18,}\b"
 )
 
 #: Street-address spans: "123 Rose Garden Lane", "P.O. Box 6186",
