@@ -20,6 +20,7 @@ from playbook_engine.clause_position_compiler import (
     compile_clause_positions,
 )
 from playbook_engine.deviation_classifier import RiskDelta
+from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import (
     AssemblyError,
@@ -696,3 +697,32 @@ def test_assemble_content_hash_covers_stripped_content() -> None:
     dirty_doc = _minimal_playbook(obs_list=[dirty, _obs("governing_law", clause_path="12")])
     clean_doc = _minimal_playbook(obs_list=[clean, _obs("governing_law", clause_path="12")])
     assert dirty_doc["identity"]["content_hash"] == clean_doc["identity"]["content_hash"]
+
+
+def test_assemble_digest_matches_recompute_over_stripped_playbook() -> None:
+    """issue #35: embedded digest must be a pure function of the shipped evidence.
+
+    Two observations whose full_text is identical after stripping (one has a
+    ZWSP inside a word, the other is its clean twin) must land in the SAME
+    dedupe group. If the digest were built before stripping, they would form
+    two separate n=1 groups instead of one n=2 group, and recomputing
+    build_digest() over the final (stripped) playbook would then disagree
+    with the embedded digest.
+    """
+    dirty = _obs(
+        "indemnification",
+        text="Mutual inde​mnity obligations.",
+        doc_id="deal_002",
+        clause_path="8",
+    )
+    clean = _obs(
+        "indemnification",
+        text="Mutual indemnity obligations.",
+        doc_id="deal_003",
+        clause_path="8",
+    )
+    playbook = _minimal_playbook(
+        obs_list=[dirty, clean, _obs("governing_law", clause_path="12")],
+        corpus_docs=[_corpus_doc("deal_001"), _corpus_doc("deal_002"), _corpus_doc("deal_003")],
+    )
+    assert playbook["digest"] == build_digest(playbook)

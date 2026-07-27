@@ -317,9 +317,18 @@ def assemble_playbook(
     if curation:
         playbook["curation"] = curation
 
+    # Strip zero-width/bidi-control characters carried in from extraction
+    # BEFORE the digest is built, so digest._dedupe_rank groups observations
+    # by their post-strip text (issue #35) — otherwise an intra-word ZWSP
+    # splits what should be one dedupe group into two, and the embedded
+    # digest diverges from build_digest() recomputed over the shipped
+    # (stripped) playbook, breaking the "digest is a pure function of the
+    # evidence section" invariant that content_hash lineage relies on.
+    playbook = _strip_invisible(playbook)
+
     # --- digest (OPF 0.3) ---
     # The compact model-facing projection of the evidence section. Computed
-    # before identity so it is invisible-char-stripped and covered by
+    # after stripping (above) and before identity so it is covered by
     # content_hash like every other content section (it is a pure function of
     # evidence — two compiles of identical evidence carry identical digests).
     playbook["digest"] = build_digest(playbook)
@@ -333,9 +342,6 @@ def assemble_playbook(
     # fabricated. Computed last so canonicalize_playbook() sees the fully
     # assembled document (it excludes `identity` and the run-metadata
     # compiler keys itself — see playbook_engine/canonicalize.py).
-    # Strip zero-width/bidi-control characters carried in from extraction
-    # BEFORE identity hashing, so content_hash covers exactly what is written.
-    playbook = _strip_invisible(playbook)
 
     identity: dict[str, Any] = {}
     if playbook_id is not None:
