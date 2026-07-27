@@ -47,6 +47,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 import yaml
 
 from playbook_engine.clause_tree import ClauseTree
+from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 from playbook_engine.signed_detector import SignedStatus
 
 # ---------------------------------------------------------------------------
@@ -256,8 +257,10 @@ class Hints:
 
         Returns empty ``Hints`` when *path* does not exist — hints.yaml is
         optional, so a missing file is not an error.  When the file DOES
-        exist but fails to parse (invalid YAML, a non-mapping document, or
-        an ``order`` that isn't a list), raises ``HintsError`` instead of
+        exist but fails to parse (invalid YAML, a non-mapping document, an
+        ``order`` that isn't a list, a ``provenance`` outside
+        ``{"our_paper", "counterparty_paper"}``, or a ``timestamps`` that
+        isn't a mapping of str -> str), raises ``HintsError`` instead of
         silently discarding the lawyer's corrections.
 
         ``order`` entries and ``signed_version`` are normalised by stripping
@@ -285,11 +288,24 @@ class Hints:
         signed_version = data.get("signed_version") or None
         if signed_version is not None:
             signed_version = _strip_hint_ext(signed_version)
+        provenance = data.get("provenance") or None
+        if provenance is not None and (
+            not isinstance(provenance, str) or provenance not in _PROVENANCE_VALUES
+        ):
+            raise HintsError(
+                f"{path}: 'provenance' must be one of {sorted(_PROVENANCE_VALUES)}, "
+                f"got {provenance!r}"
+            )
+        timestamps = data.get("timestamps") or {}
+        if not isinstance(timestamps, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in timestamps.items()
+        ):
+            raise HintsError(f"{path}: 'timestamps' must be a mapping of string to string")
         return cls(
             order=order,
-            timestamps=data.get("timestamps") or {},
+            timestamps=timestamps,
             signed_version=signed_version,
-            provenance=data.get("provenance") or None,
+            provenance=provenance,
         )
 
 
