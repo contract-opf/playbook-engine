@@ -638,7 +638,14 @@ def render_review_html(
     # on-disk bytes — is left untouched, and never re-serialized unless a
     # map was supplied.
     render_doc = _resolve_aliases_in_doc(doc, alias_map) if alias_map else doc
-    embedded_json = json.dumps(render_doc, indent=2, ensure_ascii=False) if alias_map else raw
+    embedded_json_raw = json.dumps(render_doc, indent=2, ensure_ascii=False) if alias_map else raw
+    # Corpus-derived strings (e.g. observed_positions[].full_text) may contain
+    # "</script><script>..." which would close this block and execute
+    # attacker JavaScript in the DOM (document_renderer._escape_json_for_script
+    # solves the same problem for the public bundle). JSON.parse/json.loads
+    # restore the original text exactly, so escaping here is transparent to
+    # any consumer that parses the block.
+    embedded_json = embedded_json_raw.replace("</", "<\\/")
 
     index = _build_index(render_doc)
 
