@@ -796,6 +796,53 @@ class TestStageCLI:
             "02__doc_002.rtf",
         ]
 
+    def test_stage_cmd_plan_preserves_hand_edited_plan_file(self, tmp_path: Path) -> None:
+        """issue #36: `--plan` used to rmtree `dest` (via
+        execute_staging_plan -> _recreate_out_dir) without re-persisting the
+        plan, silently deleting the very staging_plan.json the user had just
+        hand-reviewed/edited at `--plan-only`'s default dest, and breaking any
+        re-run of the exact `stage --plan DEST/staging_plan.json` command this
+        tool prints. The executed plan must survive at the same path,
+        unchanged from what was executed."""
+        src = tmp_path / "unknown-corpus"
+        _scrambled_unknown_corpus(src)
+        out = tmp_path / "out"
+        runner = CliRunner()
+
+        plan_only_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out), "--plan-only"],
+        )
+        assert plan_only_result.exit_code == 0, plan_only_result.output
+        plan_file = out / "staging_plan.json"
+        assert plan_file.is_file()
+
+        # Simulate the human hand-editing the plan before executing it.
+        edited_plan = json.loads(plan_file.read_text(encoding="utf-8"))
+        edited_plan["deals"][0]["deal_id"] = "hand-edited-deal"
+        plan_file.write_text(json.dumps(edited_plan, indent=2), encoding="utf-8")
+
+        plan_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out), "--plan", str(plan_file)],
+        )
+        assert plan_result.exit_code == 0, plan_result.output
+
+        # The plan file must still exist at the same path (not deleted by the
+        # out_dir rmtree) and must equal what was actually executed.
+        assert plan_file.is_file(), "hand-edited staging_plan.json was deleted by --plan execution"
+        assert json.loads(plan_file.read_text(encoding="utf-8")) == edited_plan
+        assert (out / "hand-edited-deal").is_dir()
+
+        # Re-running the exact command the tool prints must keep working —
+        # this is exactly the workflow the CLI's own --plan-only output tells
+        # the user to follow.
+        rerun_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out), "--plan", str(plan_file)],
+        )
+        assert rerun_result.exit_code == 0, rerun_result.output
+
     def test_stage_cmd_plan_only_out_equal_to_src_refuses(self, tmp_path: Path) -> None:
         """issue #248 (fix round 1): `--plan-only` must not write into SRC_DIR —
         the overlap guard applies to it too, not just the destructive path."""
