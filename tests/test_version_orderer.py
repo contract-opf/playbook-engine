@@ -635,6 +635,72 @@ def test_hints_load_non_list_order_raises(tmp_path: Path) -> None:
         Hints.load(p)
 
 
+def test_hints_load_invalid_provenance_raises(tmp_path: Path) -> None:
+    """provenance must be 'our_paper' or 'counterparty_paper' (issue #48).
+
+    A typo like 'our-paper' previously passed through unvalidated and only
+    blew up later in ProvenanceResult.__post_init__ (a raw ValueError that
+    mine_corpus's quarantine tuple does not catch), aborting the entire
+    corpus run instead of quarantining just this document.
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("provenance: our-paper\n", encoding="utf-8")
+    with pytest.raises(HintsError, match="provenance"):
+        Hints.load(p)
+
+
+def test_hints_load_provenance_list_raises(tmp_path: Path) -> None:
+    """A YAML list for provenance must raise HintsError, not TypeError.
+
+    ``provenance`` is checked for set membership; an unhashable YAML value
+    (list) must not reach that check unguarded (issue #48 fix round 1).
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("provenance:\n  - our_paper\n", encoding="utf-8")
+    with pytest.raises(HintsError, match="provenance"):
+        Hints.load(p)
+
+
+def test_hints_load_provenance_mapping_raises(tmp_path: Path) -> None:
+    """A YAML mapping for provenance must raise HintsError, not TypeError.
+
+    ``provenance`` is checked for set membership; an unhashable YAML value
+    (mapping) must not reach that check unguarded (issue #48 fix round 1).
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("provenance:\n  value: our_paper\n", encoding="utf-8")
+    with pytest.raises(HintsError, match="provenance"):
+        Hints.load(p)
+
+
+def test_hints_load_provenance_valid_values_accepted(tmp_path: Path) -> None:
+    """Both documented provenance values continue to load without error."""
+    for value in ("our_paper", "counterparty_paper"):
+        p = tmp_path / "hints.yaml"
+        p.write_text(f"provenance: {value}\n", encoding="utf-8")
+        hints = Hints.load(p)
+        assert hints.provenance == value
+
+
+def test_hints_load_non_mapping_timestamps_raises(tmp_path: Path) -> None:
+    """timestamps must be a mapping of str -> str; anything else (e.g. a
+    list, or a mapping with non-string values) must raise HintsError rather
+    than escaping later as a TypeError in _merge_hints/_hint_score."""
+    p = tmp_path / "hints.yaml"
+    p.write_text("timestamps:\n  - v1\n  - v2\n", encoding="utf-8")
+    with pytest.raises(HintsError, match="timestamps"):
+        Hints.load(p)
+
+
+def test_hints_load_non_string_timestamp_value_raises(tmp_path: Path) -> None:
+    """A timestamps mapping with a non-string value (e.g. a YAML-parsed
+    bare date) must also raise HintsError."""
+    p = tmp_path / "hints.yaml"
+    p.write_text("timestamps:\n  v1: 2025-01-01\n", encoding="utf-8")
+    with pytest.raises(HintsError, match="timestamps"):
+        Hints.load(p)
+
+
 def test_hints_load_empty_file_returns_empty_hints(tmp_path: Path) -> None:
     """An existing-but-empty hints.yaml (yaml.safe_load returns None) is not
     malformed — it's a valid, empty document — so it must return empty Hints,

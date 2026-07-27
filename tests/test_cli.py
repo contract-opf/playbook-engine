@@ -487,6 +487,53 @@ def test_mine_writes_all_intermediates(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# mine command: malformed hints.yaml quarantines only the offending document
+# (issue #48) — a typo like 'provenance: our-paper' must not abort the
+# entire corpus run with a raw traceback.
+# ---------------------------------------------------------------------------
+
+
+def test_mine_bad_hints_provenance_quarantines_only_that_document(tmp_path: Path) -> None:
+    """A hints.yaml with an invalid 'provenance' value quarantines just that
+    document — the rest of the corpus still mines and observations.jsonl is
+    still written for the unaffected document.
+
+    Regression guard: previously Hints.load passed provenance through
+    unvalidated, pipeline.py fed it straight into ProvenanceResult (whose
+    __post_init__ raises a bare ValueError), and mine_corpus's quarantine
+    tuple only catches (SegmentationQAError, NormalizeTrailError,
+    HintsError) — so the ValueError escaped and aborted the whole mine run.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+    (corpus_dir / "deal-001" / "hints.yaml").write_text("provenance: our-paper\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "mine",
+            str(corpus_dir),
+            "--config",
+            str(config_path),
+            "--out",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, f"mine must not abort the whole run:\n{result.output}"
+
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    entries = {q["document_id"]: q for q in quarantine}
+    assert "deal-001" in entries, f"expected deal-001 quarantined, got {quarantine}"
+    assert "hints.yaml" in entries["deal-001"]["reason"]
+
+    # deal-002 (unaffected) still mined cleanly.
+    assert (out_dir / "observations.jsonl").exists()
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    assert "deal-002" in {d["document_id"] for d in manifest}
+    assert "deal-001" not in {d["document_id"] for d in manifest}
+
+
+# ---------------------------------------------------------------------------
 # mine command: store-backed scope judge wiring — issue #87
 # ---------------------------------------------------------------------------
 
