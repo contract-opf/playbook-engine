@@ -964,16 +964,60 @@ def _pseudonymize_observations(
 def _pseudonymize_trail(
     trail: dict[str, Any], known_entities: list[str], registry: EntityRegistry
 ) -> dict[str, Any]:
-    """Return a copy of *trail* with its ``document_id`` aliased (issue #182).
+    """Return a copy of *trail* with every raw counterparty name aliased (issue #182, #34).
 
-    Mirrors ``_pseudonymize_observations`` for the trail store so trail
-    ``document_id`` matches the aliased ``citation.document_id`` that
-    ``inspect`` joins on, and so the trail carries no raw counterparty name.
+    Mirrors ``_pseudonymize_observations``/``_pseudonymize_corpus_documents``
+    for the trail store: ``document_id`` matches the aliased
+    ``citation.document_id`` that ``inspect`` joins on, and ``ordered_versions``,
+    ``signed_version``, and ``pairwise_distances[].from``/``to`` (spread in
+    from ``version_order.to_dict()``, all staged filename stems) are aliased
+    the same way ``version_ingest``/``signed_version`` are for the manifest.
+    ``reversals`` entries (``ReversalRecord.to_dict()``) carry the same raw
+    version stems in ``version_inserted``/``version_removed`` plus raw clause
+    text in ``proposed_text`` — both are aliased too, so no raw counterparty
+    name survives anywhere in the trail body.
     """
     if not trail.get("document_id"):
         return dict(trail)
     new = dict(trail)
     new["document_id"] = pseudonymize_document_id(trail["document_id"], known_entities, registry)
+    if isinstance(new.get("ordered_versions"), list):
+        new["ordered_versions"] = [
+            _alias_version_field(v, known_entities, registry) for v in new["ordered_versions"]
+        ]
+    if isinstance(new.get("signed_version"), str):
+        new["signed_version"] = _alias_version_field(
+            new["signed_version"], known_entities, registry
+        )
+    if isinstance(new.get("pairwise_distances"), list):
+        new["pairwise_distances"] = [
+            {
+                **pd,
+                "from": _alias_version_field(pd.get("from"), known_entities, registry),
+                "to": _alias_version_field(pd.get("to"), known_entities, registry),
+            }
+            if isinstance(pd, dict)
+            else pd
+            for pd in new["pairwise_distances"]
+        ]
+    if isinstance(new.get("reversals"), list):
+        new["reversals"] = [
+            {
+                **r,
+                "version_inserted": _alias_version_field(
+                    r.get("version_inserted"), known_entities, registry
+                ),
+                "version_removed": _alias_version_field(
+                    r.get("version_removed"), known_entities, registry
+                ),
+                "proposed_text": pseudonymize_text(r["proposed_text"], known_entities, registry)
+                if isinstance(r.get("proposed_text"), str)
+                else r.get("proposed_text"),
+            }
+            if isinstance(r, dict)
+            else r
+            for r in new["reversals"]
+        ]
     return new
 
 

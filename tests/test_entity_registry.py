@@ -391,3 +391,210 @@ def test_pseudonymize_trail_aliases_document_id(tmp_path: Path) -> None:
     assert "oglethorpe" not in out["document_id"].lower()
     # Matches the aliased citation.document_id form pseudonymize_document_id emits.
     assert out["document_id"] == pseudonymize_document_id(trail["document_id"], known, reg)
+
+
+def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) -> None:
+    """Issue #34: version_order fields AND reversals must be aliased too.
+
+    _pseudonymize_trail previously aliased only ``document_id``, but the
+    trail dict also spreads in ``version_order.to_dict()``
+    (``ordered_versions``, ``signed_version``, ``pairwise_distances[].from``/
+    ``to`` — all staged filename stems) and carries ``reversals`` entries
+    (``version_inserted``/``version_removed`` — same raw stems — plus raw
+    ``proposed_text`` clause text). This unit-level check exercises every one
+    of those fields directly against ``_pseudonymize_trail``.
+    """
+    from playbook_engine.pipeline import _pseudonymize_trail
+
+    reg = EntityRegistry.load(tmp_path / "reg.json")
+    known = ["Oglethorpe University"]
+    v1 = "01__Affiliation Agreement - Oglethorpe University 1.1.24"
+    v2 = "02__Affiliation Agreement - Oglethorpe University 1.5.24"
+    v3 = "03__Affiliation Agreement - Oglethorpe University 1.10.24"
+    trail = {
+        "document_id": "deal-001",
+        "ordered_versions": [v1, v2, v3],
+        "signed_version": v3,
+        "basis": "hints",
+        "total_distance": 1.5,
+        "pairwise_distances": [
+            {"from": v1, "to": v2, "distance": 0.5},
+            {"from": v2, "to": v3, "distance": 1.0},
+        ],
+        "shape": "linear",
+        "reversals": [
+            {
+                "taxonomy_id": "ind",
+                "clause_path": "1",
+                "version_inserted": v2,
+                "version_removed": v3,
+                "proposed_text": "Oglethorpe University shall retain audit rights.",
+                "char_span": [0, 10],
+            }
+        ],
+    }
+
+    out = _pseudonymize_trail(trail, known, reg)
+    serialized = json.dumps(out).lower()
+    assert "oglethorpe" not in serialized, f"raw counterparty name leaked into trail: {out}"
+
+    # Structure preserved: same number of entries, same non-name fields intact.
+    assert len(out["ordered_versions"]) == 3
+    assert out["signed_version"] == out["ordered_versions"][2]
+    assert len(out["pairwise_distances"]) == 2
+    assert out["pairwise_distances"][0]["distance"] == 0.5
+    assert out["pairwise_distances"][1]["from"] == out["ordered_versions"][1]
+    assert out["pairwise_distances"][1]["to"] == out["ordered_versions"][2]
+    assert len(out["reversals"]) == 1
+    rev = out["reversals"][0]
+    assert rev["version_inserted"] == out["ordered_versions"][1]
+    assert rev["version_removed"] == out["ordered_versions"][2]
+    assert rev["taxonomy_id"] == "ind"  # non-name field untouched
+    assert rev["char_span"] == [0, 10]
+
+
+# ---------------------------------------------------------------------------
+# Issue #34 (end-to-end): a mined corpus whose version filename stems AND
+# whose reversed clause text carry a known_entities name must leave no trace
+# of that name in any trail/*.json body.
+# ---------------------------------------------------------------------------
+
+_REV_BODY_V1 = (
+    r"1. Indemnification\par "
+    rf"Alpha Corp shall indemnify {_KNOWN_ENTITY} against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of California.\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+
+# v2 bundles two changes: a short audit-rights sentence proposed into the
+# Indemnification clause (later reversed) AND a substantially larger rewrite
+# of Governing Law + Term (which survives to signing). The larger surviving
+# rewrite is what the content-based orderer needs (v1<->v2 and v2<->v3 must
+# each individually cost less than v1<->v3) to naturally infer the
+# chronological chain v1 -> v2 -> v3 rather than short-circuiting through
+# the smaller v1<->v3 edit distance — see issue #34 verification notes.
+_REV_BODY_V2 = (
+    r"1. Indemnification\par "
+    rf"Alpha Corp shall indemnify {_KNOWN_ENTITY} against third-party claims "
+    rf"arising from the placement programme. {_KNOWN_ENTITY} shall retain the "
+    r"right to audit all placement records.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of Delaware, with "
+    r"additional dispute resolution provisions including mandatory binding "
+    r"arbitration administered by a neutral third-party arbitration body and "
+    r"a three year audit window for financial records retention.\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for "
+    r"eighteen months, with a renewal option subject to mutual written "
+    r"consent of both parties and thirty days advance written notice.\par "
+)
+
+# v3 (signed) keeps v2's Governing Law/Term rewrite but drops the
+# audit-rights sentence — the planted-insert-then-revert pattern
+# detect_reversals is built to catch.
+_REV_BODY_V3 = (
+    r"1. Indemnification\par "
+    rf"Alpha Corp shall indemnify {_KNOWN_ENTITY} against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of Delaware, with "
+    r"additional dispute resolution provisions including mandatory binding "
+    r"arbitration administered by a neutral third-party arbitration body and "
+    r"a three year audit window for financial records retention.\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for "
+    r"eighteen months, with a renewal option subject to mutual written "
+    r"consent of both parties and thirty days advance written notice.\par "
+)
+
+
+def test_pseudonymize_trail_end_to_end_no_raw_name_survives_mining(tmp_path: Path) -> None:
+    """Mine a corpus with reversals whose version stems carry a known entity
+    name; assert the raw name appears nowhere in any written trail/*.json.
+
+    Regression guard for issue #34: pre-fix, ``ordered_versions``,
+    ``signed_version``, ``pairwise_distances[].from``/``to``, and
+    ``reversals[].version_inserted``/``version_removed``/``proposed_text``
+    all carried the raw counterparty name straight through to the trail file
+    even with ``known_entities`` configured.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+
+    v1_name = f"01__Affiliation Agreement - {_KNOWN_ENTITY} 1.1.24.rtf"
+    v2_name = f"02__Affiliation Agreement - {_KNOWN_ENTITY} 1.5.24.rtf"
+    v3_name = f"03__Affiliation Agreement - {_KNOWN_ENTITY} 1.10.24.rtf"
+    _write_rtf(deal_dir / v1_name, _REV_BODY_V1)
+    _write_rtf(deal_dir / v2_name, _REV_BODY_V2)
+    _write_rtf(deal_dir / v3_name, _REV_BODY_V3)
+
+    # Pin signed_version explicitly (docs/CORPUS-LAYOUT.md's documented
+    # hints.yaml form, entries WITH extensions) — a hard override, so the
+    # signed anchor is deterministic. The chronological chain order itself
+    # falls out of content-based inference alone (v2's Governing Law/Term
+    # rewrite is deliberately the largest edit so v1<->v2 and v2<->v3 both
+    # cost less than the v1<->v3 shortcut — see _REV_BODY_V2 comment).
+    (deal_dir / "hints.yaml").write_text(
+        yaml.dump({"signed_version": v3_name}),
+        encoding="utf-8",
+    )
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {
+            "our_party_aliases": ["Alpha Corp"],
+            "known_entities": [_KNOWN_ENTITY],
+        },
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+    )
+
+    trail_dir = out_dir / "trail"
+    trail_files = list(trail_dir.glob("*.json"))
+    assert trail_files, "mine_corpus must have written at least one trail file"
+
+    found_reversal = False
+    for trail_path in trail_files:
+        raw_text = trail_path.read_text(encoding="utf-8")
+        assert _KNOWN_ENTITY.lower() not in raw_text.lower(), (
+            f"raw counterparty name leaked into {trail_path.name}: {raw_text}"
+        )
+        trail = json.loads(raw_text)
+        if trail.get("reversals"):
+            found_reversal = True
+            for rev in trail["reversals"]:
+                assert _KNOWN_ENTITY.lower() not in rev["version_inserted"].lower()
+                assert _KNOWN_ENTITY.lower() not in rev["version_removed"].lower()
+                assert _KNOWN_ENTITY.lower() not in rev["proposed_text"].lower()
+        for v in trail.get("ordered_versions", []):
+            assert _KNOWN_ENTITY.lower() not in v.lower()
+        if trail.get("signed_version"):
+            assert _KNOWN_ENTITY.lower() not in trail["signed_version"].lower()
+        for pd in trail.get("pairwise_distances", []):
+            assert _KNOWN_ENTITY.lower() not in pd["from"].lower()
+            assert _KNOWN_ENTITY.lower() not in pd["to"].lower()
+
+    assert found_reversal, (
+        "fixture must actually produce a reversal (planted insert-then-revert) "
+        "for this test to exercise the reversals-pseudonymization path"
+    )
