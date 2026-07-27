@@ -301,12 +301,21 @@ _ESIGN_LINE_RE = re.compile(
 #: case (so lowercase-hex content addresses (sha256) never match) AND at
 #: least one digit, so pure-alpha hyphenated legal terms ("Work-Made-For-
 #: Hire", "Most-Favored-Nation") never match while envelope ids/base64
-#: hashes (which always carry digits) still do. Strings beginning with
-#: "sha256:" are additionally exempted wholesale in the scrubber.
+#: hashes (which always carry digits) still do. Strings that are EXACTLY an
+#: identity hash (``_SHA256_ADDR_RE``) are additionally exempted wholesale in
+#: the scrubber and both identity gates.
 _OPAQUE_TOKEN_RE = re.compile(
     r"\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)"
     r"[A-Za-z0-9_-]{18,}\b"
 )
+
+#: Exact content-address shape guaranteed by canonicalize.py
+#: (``sha256:[0-9a-f]{64}``). Matched with ``re.fullmatch`` — never a prefix
+#: test — so only a string that IS a bare identity hash is exempt; a longer
+#: string that merely BEGINS with "sha256:" (e.g. a hash label followed by
+#: prose in an extracted security-schedule or e-signature block) is scrubbed
+#: and scanned normally.
+_SHA256_ADDR_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 #: Street-address spans: "123 Rose Garden Lane", "P.O. Box 6186",
 #: "Suite 400", and City, ST 12345 tails. Addresses in notice/signature
@@ -411,7 +420,7 @@ def _scrub_publication_noise(doc: dict[str, Any]) -> dict[str, Any]:
     """
 
     def scrub(text: str) -> str:
-        if text.startswith("sha256:"):
+        if _SHA256_ADDR_RE.fullmatch(text):
             return text  # content addresses are never publication noise
         lines_out = []
         for line in text.split("\n"):
@@ -658,7 +667,7 @@ def _institution_identity_hits(doc: dict[str, Any]) -> list[tuple[str, str, str]
     """
     hits: list[tuple[str, str, str]] = []
     for path, text in _walk_strings(doc):
-        if not text or text.startswith("sha256:"):
+        if not text or _SHA256_ADDR_RE.fullmatch(text):
             continue
         normalized = _normalize_for_scan(text)
         # Token-bearing rules: flag only when the distinctive token is a real
@@ -704,7 +713,7 @@ def _contact_identity_hits(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
             hits.append((path, matched, kind))
 
     for path, text in _walk_strings(doc):
-        if not text or text.startswith("sha256:"):
+        if not text or _SHA256_ADDR_RE.fullmatch(text):
             continue
         for match in _PHONE_RE.finditer(text):
             add(path, match.group(0), "phone")
