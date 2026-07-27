@@ -24,6 +24,7 @@ from playbook_engine.publisher import (
     DEFAULT_PARTY_LABEL,
     PublishError,
     _apply_redact_terms,
+    _scrub_publication_noise,
     publish_playbook,
 )
 from playbook_engine.validator import validate_document
@@ -1036,3 +1037,97 @@ def test_contact_gate_does_not_fire_on_clean_prose() -> None:
         published_at="2026-07-24T00:00:00Z",
     )
     assert report.doc is not None  # no PublishError
+
+
+# ---------------------------------------------------------------------------
+# Issue #49: the sha256 exemption in the scrub and both hard identity gates
+# was PREFIX-based (``str.startswith("sha256:")``), so any string that merely
+# BEGAN with that prefix — not just a bare content-address hash — was exempt
+# from scrubbing/scanning wholesale. A clause/exhibit block whose extracted
+# full_text opens with a hash label (security schedules, e-signature
+# certificates) could smuggle contact info and institution names past every
+# fail-closed gate. Only a string that IS EXACTLY "sha256:" + 64 hex chars
+# (canonicalize.py's guaranteed shape) may skip.
+# ---------------------------------------------------------------------------
+
+
+def test_sha256_prefix_does_not_exempt_trailing_leak_from_contact_gate() -> None:
+    """Pins the CONTACT GATE via a dict KEY — a surface the value-only scrub
+    never touches, so this exercises the gate itself, not the scrub. A hash
+    LABEL followed by contact info is not a bare content address; it must
+    still trip on the trailing digits/domain rather than ride the sha256
+    prefix to safety. (The security-schedule/e-sign VALUE shape from the bug
+    report, where the scrub runs first, is covered separately by
+    ``test_scrub_publication_noise_does_not_exempt_sha256_label_prefix``.)"""
+    doc = _make_doc()
+    leaking_key = (
+        f"sha256:{_FAKE_HASH} shall be delivered to security@westmoor.edu; call 919-555-1234"
+    )
+    doc["corpus"]["stats"]["observations_by_document"] = {leaking_key: 3}
+    with pytest.raises(PublishError, match="contact"):
+        publish_playbook(
+            doc,
+            redaction_judge=_CleanRedactionJudge(),
+            verify_judge=_CleanVerifyJudge(),
+            known_entity_names=[],
+            published_at="2026-07-27T00:00:00Z",
+        )
+
+
+def test_bare_sha256_hash_still_exempt_everywhere() -> None:
+    """The narrowed, fullmatch-based exemption still protects an EXACT content
+    address end-to-end — identity hashes are unaffected by the fix — while a
+    hash immediately followed by more text is no longer treated as bare."""
+    from playbook_engine.publisher import _contact_identity_hits, _institution_identity_hits
+
+    bare_hash = f"sha256:{_FAKE_HASH}"
+    assert _contact_identity_hits({"a": bare_hash}) == []
+    assert _institution_identity_hits({"a": bare_hash}) == []
+
+    # a hash immediately followed by more text (no separating space) is NOT a
+    # bare address: the institution gate must still see what comes after it.
+    trailing = {"b": f"{bare_hash} University of Westmoor"}
+    assert any(kind == "institution" for _p, _m, kind in _institution_identity_hits(trailing))
+
+    report = publish_playbook(
+        _make_doc(),
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-07-27T00:00:00Z",
+    )
+    assert report.doc is not None  # no PublishError; baseline sha256 untouched
+    assert report.doc["baseline"]["template_ref"]["sha256"] == bare_hash
+
+
+def test_scrub_publication_noise_does_not_exempt_sha256_label_prefix() -> None:
+    """The security-schedule/e-sign VALUE shape from the bug report: a
+    string that BEGINS with "sha256:" but is not a bare content address
+    (there's prose after the hash) must still go through the full scrub —
+    the e-sign audit line dropped and the contact spans redacted — rather
+    than riding the old prefix-based exemption to a byte-identical pass-
+    through. Exercises ``_scrub_publication_noise`` directly, not the
+    identity gates, since the scrub runs before either gate sees the text
+    and previously erased this evidence before the gates ever ran."""
+    leaking_text = (
+        f"sha256: {_FAKE_HASH} shall be delivered to security@westmoor.edu, "
+        "Regents of the University of Westmoor, call 919-555-1234\n"
+        "DocuSign Envelope ID: 9AB12CD3-4E56-7890-ABCD-EF1234567890"
+    )
+    doc = {"clause": {"full_text": leaking_text}}
+
+    scrubbed = _scrub_publication_noise(doc)
+
+    scrubbed_text = scrubbed["clause"]["full_text"]
+    assert "DocuSign Envelope ID" not in scrubbed_text
+    assert "security@westmoor.edu" not in scrubbed_text
+    assert "919-555-1234" not in scrubbed_text
+    assert (
+        scrubbed_text == f"sha256: {_FAKE_HASH} shall be delivered to [redacted], "
+        "Regents of the University of Westmoor, call [redacted]"
+    )
+
+    # Paired negative: a bare content address (no trailing text) still skips
+    # the scrub wholesale and passes through byte-identical.
+    bare_hash = f"sha256:{_FAKE_HASH}"
+    assert _scrub_publication_noise({"a": bare_hash})["a"] == bare_hash
