@@ -93,11 +93,25 @@ class EntityRegistry:
         return reg
 
     def save(self) -> None:
-        """Persist the registry to :attr:`path`, atomically."""
+        """Persist the registry to :attr:`path`, atomically and access-restricted.
+
+        The registry carries real entity names (``canonical``) keyed by
+        alias, so it is exactly as sensitive as the held-out map written by
+        :func:`write_holdout_map` — the tmp file's mode is enforced 0600
+        (owner read/write only) on the open file descriptor via
+        ``os.fchmod`` *before* any content is written, regardless of whether
+        the tmp path pre-existed (e.g. as a crash leftover with a looser
+        mode), and that mode travels with the inode across ``os.replace``
+        onto the final path, so there is no window where the registry (or a
+        crash-leftover tmp file) is world-readable.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         payload = {"aliases": self._aliases, "canonical": self._canonical}
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)  # enforce on the fd: O_CREAT's mode is ignored if tmp pre-existed
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2, sort_keys=True))
         os.replace(tmp, self.path)
 
     def alias_for(self, entity_name: str) -> str:
@@ -193,12 +207,21 @@ def write_holdout_map(path: Path, registry: EntityRegistry) -> None:
 
     This is the held-out, access-controlled sidecar the Goal describes: it
     lives OUTSIDE the OPF artifact (a caller must never embed its contents in
-    ``playbook.opf.json``) and is chmod'd ``0600`` (owner read/write only) —
+    ``playbook.opf.json``) and is created ``0600`` (owner read/write only) —
     once entity names are pseudonymized at ingest, this map is the sensitive
     asset that needs protecting, not the (now born-safe) OPF.
+
+    The tmp file's mode is enforced 0600 on the open file descriptor via
+    ``os.fchmod`` *before* any content is written (rather than chmod'd after
+    ``os.replace``), and this holds regardless of whether the tmp path
+    pre-existed (e.g. as a crash leftover with a looser mode), so there is no
+    window where the live path — or a crash-leftover tmp file — is
+    world-readable; the mode travels with the inode across the rename.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(registry.alias_map(), indent=2, sort_keys=True), encoding="utf-8")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)  # enforce on the fd: O_CREAT's mode is ignored if tmp pre-existed
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(registry.alias_map(), indent=2, sort_keys=True))
     os.replace(tmp, path)
-    os.chmod(path, 0o600)
