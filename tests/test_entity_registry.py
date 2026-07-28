@@ -7,6 +7,7 @@ counterparty name, not any real institution.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import stat
@@ -132,6 +133,73 @@ def test_alias_map_reverses_to_canonical_entity_name(tmp_path: Path) -> None:
     assert reg.alias_map() == {alias: _KNOWN_ENTITY}
 
 
+def test_save_writes_registry_access_restricted(tmp_path: Path) -> None:
+    """The registry itself carries real entity names (canonical) keyed by
+    alias, so it is exactly as sensitive as the held-out map — save() (called
+    write-through by alias_for on every new entity) must create it 0600, not
+    world-readable under a default umask (issue #75).
+    """
+    reg_path = tmp_path / "entity_registry.json"
+    reg = EntityRegistry.load(reg_path)
+    reg.alias_for(_KNOWN_ENTITY)  # triggers a write-through save()
+
+    mode = stat.S_IMODE(os.stat(reg_path).st_mode)
+    assert mode == 0o600, f"entity registry must be owner-only (0600); got {oct(mode)}"
+
+    # An explicit save() call must preserve the restriction too.
+    reg.save()
+    mode = stat.S_IMODE(os.stat(reg_path).st_mode)
+    assert mode == 0o600, f"entity registry must be owner-only (0600); got {oct(mode)}"
+
+
+def test_save_forces_0600_even_when_tmp_preexists_with_looser_mode(tmp_path: Path) -> None:
+    """A crash-leftover ``.tmp`` file at a looser mode (e.g. 0644) must not
+    leak that mode onto the final registry — ``O_CREAT``'s mode argument is
+    silently ignored when the target already exists, so the 0600 restriction
+    must be enforced on the open fd itself, not merely requested at create
+    time (issue #75).
+    """
+    reg_path = tmp_path / "entity_registry.json"
+    tmp_file = reg_path.with_suffix(reg_path.suffix + ".tmp")
+    tmp_file.write_text("{}", encoding="utf-8")
+    os.chmod(tmp_file, 0o644)
+
+    reg = EntityRegistry.load(reg_path)
+    reg.alias_for(_KNOWN_ENTITY)  # triggers a write-through save(), reusing the pre-existing tmp
+
+    mode = stat.S_IMODE(os.stat(reg_path).st_mode)
+    assert mode == 0o600, (
+        f"a pre-existing 0644 tmp file must not leak its mode onto the final registry; got {oct(mode)}"
+    )
+
+
+def test_save_tmp_file_is_never_world_readable_mid_write(tmp_path: Path, monkeypatch) -> None:
+    """End-to-end crash simulation: a pre-existing 0644 tmp file, then a
+    crash before the atomic rename (``os.replace`` patched to raise). The
+    leftover tmp file itself must never be world-readable at any point
+    during the write, not just the final registry path (issue #75).
+    """
+    reg_path = tmp_path / "entity_registry.json"
+    tmp_file = reg_path.with_suffix(reg_path.suffix + ".tmp")
+    tmp_file.write_text("{}", encoding="utf-8")
+    os.chmod(tmp_file, 0o644)
+
+    def _boom(src: object, dst: object) -> None:
+        raise RuntimeError("simulated crash before rename")
+
+    monkeypatch.setattr(os, "replace", _boom)
+
+    reg = EntityRegistry.load(reg_path)
+    reg._aliases["state university"] = "Counterparty-1"
+    reg._canonical["state university"] = _KNOWN_ENTITY
+    with contextlib.suppress(RuntimeError):
+        reg.save()
+
+    assert tmp_file.exists(), "expected the tmp file to be left behind by the simulated crash"
+    mode = stat.S_IMODE(os.stat(tmp_file).st_mode)
+    assert mode == 0o600, f"crash-leftover tmp file must be owner-only (0600); got {oct(mode)}"
+
+
 # ---------------------------------------------------------------------------
 # pseudonymize_text / pseudonymize_document_id unit tests
 # ---------------------------------------------------------------------------
@@ -202,6 +270,58 @@ def test_write_holdout_map_is_access_restricted_and_reverses_alias(tmp_path: Pat
 
     mode = stat.S_IMODE(os.stat(holdout_path).st_mode)
     assert mode == 0o600, f"held-out map must be owner-only (0600); got {oct(mode)}"
+
+
+def test_write_holdout_map_forces_0600_even_when_tmp_preexists_with_looser_mode(
+    tmp_path: Path,
+) -> None:
+    """A crash-leftover ``.tmp`` file at a looser mode (e.g. 0644) must not
+    leak that mode onto the final held-out map — ``O_CREAT``'s mode argument
+    is silently ignored when the target already exists, so the 0600
+    restriction must be enforced on the open fd itself, not merely requested
+    at create time (issue #75).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    reg.alias_for(_KNOWN_ENTITY)
+    holdout_path = tmp_path / "alias_map.json"
+    tmp_file = holdout_path.with_suffix(holdout_path.suffix + ".tmp")
+    tmp_file.write_text("{}", encoding="utf-8")
+    os.chmod(tmp_file, 0o644)
+
+    write_holdout_map(holdout_path, reg)
+
+    mode = stat.S_IMODE(os.stat(holdout_path).st_mode)
+    assert mode == 0o600, (
+        f"a pre-existing 0644 tmp file must not leak its mode onto the held-out map; got {oct(mode)}"
+    )
+
+
+def test_write_holdout_map_tmp_file_is_never_world_readable_mid_write(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """End-to-end crash simulation: a pre-existing 0644 tmp file, then a
+    crash before the atomic rename (``os.replace`` patched to raise). The
+    leftover tmp file itself must never be world-readable at any point
+    during the write, not just the final held-out map path (issue #75).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    reg.alias_for(_KNOWN_ENTITY)
+    holdout_path = tmp_path / "alias_map.json"
+    tmp_file = holdout_path.with_suffix(holdout_path.suffix + ".tmp")
+    tmp_file.write_text("{}", encoding="utf-8")
+    os.chmod(tmp_file, 0o644)
+
+    def _boom(src: object, dst: object) -> None:
+        raise RuntimeError("simulated crash before rename")
+
+    monkeypatch.setattr(os, "replace", _boom)
+
+    with contextlib.suppress(RuntimeError):
+        write_holdout_map(holdout_path, reg)
+
+    assert tmp_file.exists(), "expected the tmp file to be left behind by the simulated crash"
+    mode = stat.S_IMODE(os.stat(tmp_file).st_mode)
+    assert mode == 0o600, f"crash-leftover tmp file must be owner-only (0600); got {oct(mode)}"
 
 
 # ---------------------------------------------------------------------------
