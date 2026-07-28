@@ -16,7 +16,6 @@ from playbook_engine.config import ConfigError, load_config
 from playbook_engine.corpus_linter import lint_corpus
 from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.inspection_report import build_inspection_report, write_inspection_report
-from playbook_engine.natural_sort import natural_sort_key as _natural_sort_key
 from playbook_engine.pipeline import PipelineError, compile_corpus, mine_corpus, project_playbook
 from playbook_engine.playbook_assembler import AssemblyError
 from playbook_engine.posture import INTERVIEW_QUESTIONS, PostureError, apply_posture_interview
@@ -2057,6 +2056,7 @@ def induce_taxonomy_cmd(
         VersionCandidate,
         select_representative_version,
     )
+    from playbook_engine.pipeline import _discover_versions, _ingest_file
     from playbook_engine.taxonomy_inductor import (
         REPRESENTATION_THRESHOLD,
         emit_taxonomy_yaml,
@@ -2070,21 +2070,17 @@ def induce_taxonomy_cmd(
         else REPRESENTATION_THRESHOLD
     )
 
-    _SUPPORTED = frozenset({".docx", ".pdf", ".rtf"})
     trees: list[ClauseTree] = []
     corpus_resolved = corpus_dir.resolve()
     doc_dirs = sorted(
         d for d in corpus_resolved.iterdir() if d.is_dir() and not d.name.startswith(".")
     )
     for doc_dir in doc_dirs:
-        version_files = sorted(
-            (
-                p
-                for p in doc_dir.iterdir()
-                if p.is_file() and p.suffix.lower() in _SUPPORTED and p.stem.lower() != "hints"
-            ),
-            key=lambda p: _natural_sort_key(p.stem),
-        )
+        # Same discovery pipeline.py's ingest/compile path uses (issue #58) —
+        # a taxonomy induced from a different file set than the one later
+        # mined/compiled silently drifts. Order isn't load-bearing here:
+        # select_representative_version accepts candidates in any order.
+        version_files = _discover_versions(doc_dir)
         if not version_files:
             continue
         doc_id = doc_dir.name
@@ -2097,21 +2093,7 @@ def induce_taxonomy_cmd(
         for version_path in version_files:
             version = version_path.stem
             try:
-                ext = version_path.suffix.lower()
-                if ext == ".docx":
-                    from playbook_engine.docx_ingester import ingest_docx
-
-                    tree = ingest_docx(version_path, doc_id, version).tree
-                elif ext == ".rtf":
-                    from playbook_engine.rtf_ingester import ingest_rtf
-
-                    tree = ingest_rtf(version_path, doc_id, version).tree
-                elif ext == ".pdf":
-                    from playbook_engine.pdf_ingester import ingest_pdf
-
-                    tree = ingest_pdf(version_path, doc_id, version).tree
-                else:  # pragma: no cover - _SUPPORTED filters to these three
-                    continue
+                tree = _ingest_file(version_path, doc_id, version)
             except Exception as exc:  # noqa: BLE001
                 click.secho(
                     f"  WARN could not ingest {version_path.name}: {exc}", fg="yellow", err=True

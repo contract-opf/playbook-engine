@@ -705,11 +705,16 @@ def _make_corpus(tmp_path: Path) -> Path:
 
 
 def test_cli_induce_taxonomy_natural_sort_picks_highest_version(tmp_path: Path) -> None:
-    """B2 fix: v10 must sort after v2 (natural sort, not lexicographic)."""
-    from playbook_engine.cli import _natural_sort_key
+    """B2 fix: v10 must sort after v2 (natural sort, not lexicographic).
+
+    induce-taxonomy discovers versions via ``pipeline._discover_versions``
+    (issue #58), which sorts on this same ``natural_sort_key`` — exercised
+    directly here rather than through a cli.py re-export.
+    """
+    from playbook_engine.natural_sort import natural_sort_key
 
     stems = ["v1", "v10", "v2", "v9"]
-    sorted_stems = sorted(stems, key=_natural_sort_key)
+    sorted_stems = sorted(stems, key=natural_sort_key)
     assert sorted_stems == ["v1", "v2", "v9", "v10"]
 
 
@@ -792,6 +797,59 @@ def test_cli_induce_taxonomy_empty_corpus_exits_nonzero(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["induce-taxonomy", str(empty_corpus)])
     assert result.exit_code != 0
+
+
+def test_cli_induce_taxonomy_reuses_pipeline_discover_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #58: induce-taxonomy must discover versions via
+    ``pipeline._discover_versions`` — the same function ``segment_cmd`` (and
+    mine/compile, transitively) already use — not a hand-rolled duplicate
+    extension set/walk. Proven by stubbing that shared function to report no
+    versions and confirming induce-taxonomy then treats the corpus as empty,
+    even though real, ingestible agreement files sit on disk. Pre-fix, the
+    local hand-rolled walk ignored this stub entirely and the command still
+    succeeded.
+    """
+    import playbook_engine.pipeline as pipeline
+
+    corpus = _make_corpus(tmp_path)
+    monkeypatch.setattr(pipeline, "_discover_versions", lambda doc_dir: [])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["induce-taxonomy", str(corpus)])
+    assert result.exit_code != 0
+    assert "no documents could be ingested" in result.output
+
+
+def test_cli_induce_taxonomy_reuses_pipeline_ingest_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #58: every version discovered via ``pipeline._discover_versions``
+    must be ingested via ``pipeline._ingest_file`` — not a hand-rolled
+    docx/rtf/pdf if-chain. Proven by wrapping the shared dispatch function
+    with a call-recording stub (that still delegates to the real
+    implementation, so induction succeeds normally) and asserting every
+    discovered version file was routed through it. Pre-fix, the local
+    if-chain called the ingesters directly and never touched this stub, so
+    the recorded call count stayed at 0 instead of matching the corpus.
+    """
+    import playbook_engine.pipeline as pipeline
+
+    corpus = _make_corpus(tmp_path)
+    calls: list[tuple[Path, str, str]] = []
+    real_ingest_file = pipeline._ingest_file
+
+    def _tracking_ingest_file(path: Path, document_id: str, version: str) -> ClauseTree:
+        calls.append((path, document_id, version))
+        return real_ingest_file(path, document_id, version)
+
+    monkeypatch.setattr(pipeline, "_ingest_file", _tracking_ingest_file)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["induce-taxonomy", str(corpus)])
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2, f"expected both corpus versions routed through _ingest_file: {calls}"
+    doc_ids = {doc_id for _, doc_id, _ in calls}
+    assert doc_ids == {"deal-alpha", "deal-beta"}
 
 
 def test_cli_induce_taxonomy_representation_threshold_flag(tmp_path: Path) -> None:
