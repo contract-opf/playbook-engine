@@ -295,13 +295,12 @@ def _accepts_last_error(segment_fn: Callable[..., list[SegNode]]) -> bool:
     """Whether *segment_fn* opts into receiving the previous attempt's
     :class:`SegmentationQAError` as a third positional argument.
 
-    A repair-aware ``segment_fn`` declares a third parameter — positional
-    (with or without a default) or ``**kwargs`` — that
-    :func:`segment_verify_repair` fills with the previous attempt's failure
-    (``None`` on the first call). A ``segment_fn`` matching only the base
-    ``(canonical_text, blocks)`` shape is left untouched: it is never called
-    with a third argument, so existing two-argument fakes/closures keep
-    working unchanged.
+    A repair-aware ``segment_fn`` declares a third positional parameter
+    (with or without a default) that :func:`segment_verify_repair` fills
+    with the previous attempt's failure (``None`` on the first call). A
+    ``segment_fn`` matching only the base ``(canonical_text, blocks)`` shape
+    is left untouched: it is never called with a third argument, so
+    existing two-argument fakes/closures keep working unchanged.
 
     Checked once per :func:`segment_verify_repair` call (arity cannot change
     between attempts), not on every attempt.
@@ -314,9 +313,6 @@ def _accepts_last_error(segment_fn: Callable[..., list[SegNode]]) -> bool:
         return False
 
     params = list(sig.parameters.values())
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
-        return True
-
     callable_positionally = [
         p
         for p in params

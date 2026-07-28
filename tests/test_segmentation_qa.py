@@ -366,6 +366,29 @@ def test_repair_unaware_segment_fn_still_called_with_two_args() -> None:
     assert calls == [(text, blocks), (text, blocks)]
 
 
+def test_kwargs_only_segment_fn_treated_as_repair_unaware() -> None:
+    """A ``**kwargs``-only third parameter cannot receive a positional
+    argument, so such a callable must be classified as repair-unaware (base
+    two-argument call shape) rather than crash with a TypeError on the
+    first attempt."""
+    text, blocks = _stream(["Indemnification clause"])
+    calls: list[tuple] = []
+
+    def fake_segment_fn(canonical_text, blocks_arg, **kw):
+        calls.append((canonical_text, blocks_arg))
+        return _good_nodes()
+
+    result = segment_verify_repair(
+        text,
+        blocks,
+        taxonomy_ids=["indemnification"],
+        segment_fn=fake_segment_fn,
+        max_repairs=2,
+    )
+    assert calls == [(text, blocks)]
+    assert result.tree.nodes[0].text == "Indemnification clause"
+
+
 def test_default_max_repairs_is_two() -> None:
     text, blocks = _stream(["Indemnification clause"])
     calls: list[int] = []
