@@ -82,6 +82,7 @@ Config schema (YAML):
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -218,6 +219,78 @@ def _require(mapping: dict[str, Any], key: str, context: str) -> Any:
     return mapping[key]
 
 
+# ---------------------------------------------------------------------------
+# Known-key sets, for strict unknown-key rejection (issue #53).
+#
+# load_config validates the keys it KNOWS strictly, but before this fix never
+# rejected (or warned about) keys it doesn't know — a typo'd or renamed key
+# (e.g. top-level ``provenence`` for ``provenance``, or
+# ``segmentation.llm-first`` for ``segmentation.llm``) silently fell back to
+# that field's default with no warning. For security-relevant defaults like
+# ``provenance.known_entities`` (pseudonymization) or ``segmentation.llm``,
+# that silent fallback is dangerous: real counterparty names can flow into
+# stored artifacts while the user believes pseudonymization is on.
+#
+# Exported (not underscore-prefixed) so corpus_linter._lint_config can mirror
+# the SAME check with the SAME known-key sets, the same way it already reuses
+# resolve_taxonomy_path() for the ``builtin:`` scheme (issue #182) — a single
+# source of truth instead of two lists that can drift apart.
+# ---------------------------------------------------------------------------
+
+TOP_LEVEL_KEYS = frozenset(
+    {
+        "agreement_type",
+        "baseline",
+        "taxonomy",
+        "provenance",
+        "perspective",
+        "segmentation",
+        "classification",
+    }
+)
+AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
+BASELINE_KEYS = frozenset({"template"})
+PROVENANCE_KEYS = frozenset({"our_party_aliases", "known_entities", "min_evidence_n"})
+PERSPECTIVE_KEYS = frozenset({"party", "counterparty_type"})
+SEGMENTATION_KEYS = frozenset({"llm", "batch", "cache", "normalize_trail", "model", "agent"})
+CLASSIFICATION_KEYS = frozenset({"ambiguity_threshold", "auto_classify_threshold"})
+
+
+def unknown_key_message(
+    mapping: dict[str, Any], known: frozenset[str], context: str = ""
+) -> str | None:
+    """Return an error message if *mapping* has a key outside *known*, else None.
+
+    Reports the first unknown key (sorted, for determinism) and — via
+    ``difflib.get_close_matches`` — a "did you mean" suggestion when one of
+    the known keys is a close match (catches typos like ``provenence`` /
+    ``provenance``). *context* prefixes both the bad key and the suggestion
+    (e.g. ``"segmentation"`` -> ``segmentation.lm`` / ``segmentation.llm``);
+    pass ``""`` for the top-level mapping.
+
+    Pure (never raises) so both ``load_config`` (fail-closed: raises
+    :class:`ConfigError`) and ``corpus_linter._lint_config`` (reports a lint
+    error but keeps scanning) can share one implementation.
+    """
+    unknown = sorted(set(mapping) - known)
+    if not unknown:
+        return None
+    bad_key = unknown[0]
+    qualified = f"{context}.{bad_key}" if context else bad_key
+    suggestions = difflib.get_close_matches(bad_key, sorted(known), n=1)
+    if suggestions:
+        suggested = f"{context}.{suggestions[0]}" if context else suggestions[0]
+        return f"unknown config key(s): {qualified} — did you mean {suggested}?"
+    return f"unknown config key(s): {qualified}"
+
+
+def _check_unknown_keys(mapping: dict[str, Any], known: frozenset[str], context: str = "") -> None:
+    """Raise :class:`ConfigError` if *mapping* has a key outside *known*."""
+    msg = unknown_key_message(mapping, known, context)
+    if msg is not None:
+        raise ConfigError(msg)
+
+
 _BUILTIN_SCHEME = "builtin:"
 
 
@@ -288,12 +361,15 @@ def load_config(path: Path) -> EngineConfig:
     if not isinstance(raw, dict):
         raise ConfigError(f"Config file must be a YAML mapping, got {type(raw).__name__}")
 
+    _check_unknown_keys(raw, TOP_LEVEL_KEYS)
+
     base_dir = path.parent
 
     # --- agreement_type ---
     at_raw = _require(raw, "agreement_type", "config")
     if not isinstance(at_raw, dict):
         raise ConfigError("config.agreement_type must be a mapping")
+    _check_unknown_keys(at_raw, AGREEMENT_TYPE_KEYS, "agreement_type")
     at_id = _require(at_raw, "id", "agreement_type")
     at_name = _require(at_raw, "name", "agreement_type")
     if not isinstance(at_id, str) or not at_id:
@@ -317,6 +393,7 @@ def load_config(path: Path) -> EngineConfig:
     bl_raw = _require(raw, "baseline", "config")
     if not isinstance(bl_raw, dict):
         raise ConfigError("config.baseline must be a mapping")
+    _check_unknown_keys(bl_raw, BASELINE_KEYS, "baseline")
     template_val = bl_raw.get("template")
     if template_val is None:
         baseline = BaselineConfig(has_canonical_template=False, template_path=None)
@@ -336,6 +413,7 @@ def load_config(path: Path) -> EngineConfig:
     prov_raw = raw.get("provenance", {})
     if not isinstance(prov_raw, dict):
         raise ConfigError("config.provenance must be a mapping")
+    _check_unknown_keys(prov_raw, PROVENANCE_KEYS, "provenance")
     aliases_raw = prov_raw.get("our_party_aliases", [])
     if not isinstance(aliases_raw, list):
         raise ConfigError("provenance.our_party_aliases must be a list")
@@ -356,6 +434,7 @@ def load_config(path: Path) -> EngineConfig:
     persp_raw = raw.get("perspective", {})
     if not isinstance(persp_raw, dict):
         raise ConfigError("config.perspective must be a mapping")
+    _check_unknown_keys(persp_raw, PERSPECTIVE_KEYS, "perspective")
     persp_party_raw = persp_raw.get("party")
     if persp_party_raw is not None and (
         not isinstance(persp_party_raw, str) or not persp_party_raw
@@ -379,6 +458,7 @@ def load_config(path: Path) -> EngineConfig:
     seg_raw = raw.get("segmentation", {})
     if not isinstance(seg_raw, dict):
         raise ConfigError("config.segmentation must be a mapping")
+    _check_unknown_keys(seg_raw, SEGMENTATION_KEYS, "segmentation")
     model_val = seg_raw.get("model", DEFAULT_MODEL)
     if not isinstance(model_val, str) or not model_val:
         raise ConfigError("segmentation.model must be a non-empty string")
@@ -406,6 +486,7 @@ def load_config(path: Path) -> EngineConfig:
     cls_raw = raw.get("classification", {})
     if not isinstance(cls_raw, dict):
         raise ConfigError("config.classification must be a mapping")
+    _check_unknown_keys(cls_raw, CLASSIFICATION_KEYS, "classification")
 
     def _threshold(raw_val: Any, key: str) -> float:
         if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):

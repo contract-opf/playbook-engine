@@ -24,6 +24,16 @@ from typing import Any
 
 import yaml
 
+from playbook_engine.config import (
+    AGREEMENT_TYPE_KEYS,
+    BASELINE_KEYS,
+    CLASSIFICATION_KEYS,
+    PERSPECTIVE_KEYS,
+    PROVENANCE_KEYS,
+    SEGMENTATION_KEYS,
+    TOP_LEVEL_KEYS,
+    unknown_key_message,
+)
 from playbook_engine.pipeline import (
     _LEGACY_EXTENSIONS,
     _LEGACY_FORMAT_INSTRUCTION,
@@ -296,6 +306,32 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
         return
 
     report.add("ok", "CONFIG_VALID_YAML", f"Config file is valid YAML: {config_path}")
+
+    # Unknown/typo'd config keys (issue #53): load_config rejects these
+    # outright (fail-closed), but lint-corpus is the documented preflight
+    # tool, so it must catch them here too rather than let a typo like
+    # top-level `provenence:` (silently disabling pseudonymization) or
+    # `segmentation: {llm-first: true}` (silently disabling LLM segmentation)
+    # slip through as "OK — no errors". Mirrors load_config's checks using
+    # the SAME known-key sets (playbook_engine.config) so the two never
+    # drift apart — same pattern as resolve_taxonomy_path() reuse above.
+    top_level_unknown = unknown_key_message(raw, TOP_LEVEL_KEYS)
+    if top_level_unknown:
+        report.add("error", "CONFIG_UNKNOWN_KEY", top_level_unknown, config_path)
+    for section_key, known_keys in (
+        ("agreement_type", AGREEMENT_TYPE_KEYS),
+        ("baseline", BASELINE_KEYS),
+        ("provenance", PROVENANCE_KEYS),
+        ("perspective", PERSPECTIVE_KEYS),
+        ("segmentation", SEGMENTATION_KEYS),
+        ("classification", CLASSIFICATION_KEYS),
+    ):
+        section_raw = raw.get(section_key)
+        if not isinstance(section_raw, dict):
+            continue  # missing/malformed section is reported elsewhere
+        section_unknown = unknown_key_message(section_raw, known_keys, section_key)
+        if section_unknown:
+            report.add("error", "CONFIG_UNKNOWN_KEY", section_unknown, config_path)
 
     # agreement_type
     at = raw.get("agreement_type", {})
