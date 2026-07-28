@@ -351,7 +351,7 @@ def stage(
             f"{src_dir}: could not determine a known layout (no manifest.jsonl, "
             "no Versions/ nesting, no <agreement>/<version-files> subfolders). "
             "Run `playbook stage --plan-only` to write a staging_plan.json "
-            "proposal for review, then `playbook stage --plan staging_plan.json` "
+            "proposal for review, then `playbook stage --from-plan staging_plan.json` "
             "to execute it."
         )
 

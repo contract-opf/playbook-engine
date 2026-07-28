@@ -925,6 +925,59 @@ class TestStageCLI:
         assert "ERROR" in result.output
         assert not (src / "staging_plan.json").exists()
 
+    def test_stage_cmd_from_plan_behaves_identically_to_plan(self, tmp_path: Path) -> None:
+        """issue #76: `--from-plan` is the preferred spelling for the execute
+        option and must behave identically to the deprecated `--plan` alias
+        (same flag name as `judge --plan`, which means dry-run there — the
+        naming collision is confusing even though this option's semantics are
+        unchanged). Execute the same plan file via both spellings into
+        separate --out dirs and assert the resulting staged trees match."""
+        src = tmp_path / "unknown-corpus"
+        _scrambled_unknown_corpus(src)
+        plan_dir = tmp_path / "plan-only-out"
+        runner = CliRunner()
+
+        plan_only_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(plan_dir), "--plan-only"],
+        )
+        assert plan_only_result.exit_code == 0, plan_only_result.output
+        plan_file = plan_dir / "staging_plan.json"
+        assert plan_file.is_file()
+
+        out_from_plan = tmp_path / "out-from-plan"
+        from_plan_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out_from_plan), "--from-plan", str(plan_file)],
+        )
+        assert from_plan_result.exit_code == 0, from_plan_result.output
+        assert "OK" in from_plan_result.output
+
+        out_plan = tmp_path / "out-plan"
+        plan_result = runner.invoke(
+            cli,
+            ["stage", str(src), "--out", str(out_plan), "--plan", str(plan_file)],
+        )
+        assert plan_result.exit_code == 0, plan_result.output
+        assert "OK" in plan_result.output
+
+        def _agreement_files(out_dir: Path) -> list[str]:
+            agreement_dirs = [p for p in out_dir.iterdir() if p.is_dir()]
+            assert len(agreement_dirs) == 1
+            return sorted(p.name for p in agreement_dirs[0].glob("*__*"))
+
+        expected_files = ["01__doc_001.rtf", "02__doc_002.rtf"]
+        assert _agreement_files(out_from_plan) == expected_files
+        assert _agreement_files(out_plan) == expected_files
+
+    def test_stage_help_shows_from_plan_and_plan(self) -> None:
+        """issue #76: --help must document both the preferred `--from-plan`
+        spelling and the deprecated `--plan` alias."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["stage", "--help"])
+        assert result.exit_code == 0
+        assert "--from-plan, --plan" in result.output
+
 
 # ---------------------------------------------------------------------------
 # Default staging output path (issue #135)

@@ -329,7 +329,7 @@ as the LLM, arbitrates the low-confidence parts.
 
    ```bash
    make docker-run CORPUS=./raw-corpus OUT=~/.cache/playbook-engine/staging \
-     ARGS="stage /work/corpus --out /work/out --plan /work/out/staging_plan.json"
+     ARGS="stage /work/corpus --out /work/out --from-plan /work/out/staging_plan.json"
    ```
 
 Hard rules for this stage:
@@ -504,7 +504,7 @@ full-corpus pass.
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out --plan"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out --plan-only"
 ```
 
 Review the deduped counts by kind (classification, deviation, provenance),
@@ -750,7 +750,7 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out
   derivation outputs.
 - **Token efficiency.** Deduplicate clauses by content hash before judging;
   `playbook judge` does this automatically. Judge changed hunks, not full
-  documents. Use `--plan` to estimate before committing to a full-corpus pass.
+  documents. Use `--plan-only` to estimate before committing to a full-corpus pass.
 - **OPF v0.2 Posture/Floor** sections (historical stance, walk-away floor)
   require a GC interview and cannot be derived from the corpus alone. List
   them as human-input-dependent in the report.

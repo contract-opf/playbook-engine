@@ -132,6 +132,55 @@ def test_judge_plan_pending_counts_by_kind(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #76: --plan-only is the preferred alias for judge's dry-run flag
+# (the bare --plan name collides with `stage --plan`, which EXECUTES a plan
+# instead of previewing — same name, opposite risk profile on a sibling
+# subcommand). Both spellings must keep working and behave identically.
+# ---------------------------------------------------------------------------
+
+
+def test_judge_plan_only_alias_behaves_identically_to_plan(tmp_path: Path) -> None:
+    """judge --plan-only must report the same pending count as judge --plan."""
+    code_plan, output_plan = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(tmp_path / "via-plan"),
+        "--plan",
+    )
+    code_plan_only, output_plan_only = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(tmp_path / "via-plan-only"),
+        "--plan-only",
+    )
+    assert code_plan == 0
+    assert code_plan_only == 0
+    assert not (tmp_path / "via-plan-only" / "observations.jsonl").exists()
+
+    def _pending_count(output: str) -> int:
+        for line in output.splitlines():
+            if line.strip().startswith("Pending items:"):
+                return int(line.strip().split(":")[1].strip().split()[0])
+        pytest.fail(f"'Pending items:' not found in output:\n{output}")
+
+    assert _pending_count(output_plan) == _pending_count(output_plan_only)
+
+
+def test_judge_help_shows_plan_only_and_plan() -> None:
+    """issue #76: --help must document both the preferred `--plan-only`
+    spelling and the `--plan` alias."""
+    code, output = _invoke("judge", "--help")
+    assert code == 0
+    assert "--plan-only, --plan" in output
+
+
+# ---------------------------------------------------------------------------
 # Issue #134: --plan token estimate must scale with real payload size, and
 # must report a segmentation-cost line (previously the estimate was a flat
 # `total_items * 200` guess that ignored payload size entirely and never
