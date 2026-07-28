@@ -461,6 +461,53 @@ def test_cli_taxonomy_merge_writes_output(tmp_path: Path) -> None:
     assert merged.get("new_clause").status == "inactive"  # type: ignore[union-attr]
 
 
+def test_cli_write_taxonomy_stages_via_tmp_then_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cli._write_taxonomy`` must stage the write in a ``.tmp`` sibling and
+    replace, not clobber ``dest`` directly (issue #69).
+
+    Pre-fix, ``_write_taxonomy`` called ``dest.write_text(...)`` straight on
+    the curated taxonomy file, so a crash/SIGINT mid-write corrupted the
+    hand-curated source. We stub out the final ``Path.replace`` to freeze the
+    write at its intermediate state: post-fix, the new content must land in
+    a ``.tmp`` sibling while ``dest`` is untouched; pre-fix, ``dest`` would
+    already hold the new content and no ``.tmp`` file would exist at all.
+    """
+    from playbook_engine.cli import _write_taxonomy as write_taxonomy_yaml
+
+    dest = tmp_path / "curated.yaml"
+    original_content = "source: curated-v1\nentries: []\n"
+    dest.write_text(original_content, encoding="utf-8")
+
+    taxonomy = load_taxonomy(_minimal_taxonomy(tmp_path))
+
+    monkeypatch.setattr(Path, "replace", lambda self, target: None)
+
+    write_taxonomy_yaml(taxonomy, dest)
+
+    tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+    assert tmp_dest.exists(), "must stage the write in a .tmp sibling before replacing dest"
+    written = yaml.safe_load(tmp_dest.read_text(encoding="utf-8"))
+    assert written["entries"][0]["id"] == "indemnification"
+    # dest itself must be untouched until the (stubbed-out) replace runs.
+    assert dest.read_text(encoding="utf-8") == original_content
+
+
+def test_cli_write_taxonomy_no_tmp_left_after_success(tmp_path: Path) -> None:
+    """No ``.tmp`` file left behind after a successful write (issue #69)."""
+    from playbook_engine.cli import _write_taxonomy as write_taxonomy_yaml
+
+    dest = tmp_path / "curated.yaml"
+    dest.write_text("source: curated-v1\nentries: []\n", encoding="utf-8")
+    taxonomy = load_taxonomy(_minimal_taxonomy(tmp_path))
+
+    write_taxonomy_yaml(taxonomy, dest)
+
+    assert dest.exists()
+    assert not dest.with_suffix(dest.suffix + ".tmp").exists()
+
+
 # ---------------------------------------------------------------------------
 # merge_taxonomy — new_source parameter (issue #37 fix)
 # ---------------------------------------------------------------------------

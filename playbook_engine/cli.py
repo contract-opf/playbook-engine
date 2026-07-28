@@ -419,7 +419,9 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     rendered = render_prompt(doc)
     if out_file is not None:
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text(rendered, encoding="utf-8")
+        tmp = out_file.with_suffix(out_file.suffix + ".tmp")
+        tmp.write_text(rendered, encoding="utf-8")
+        tmp.replace(out_file)
         click.secho(f"wrote {out_file}", fg="green")
     else:
         click.echo(rendered)
@@ -696,7 +698,8 @@ def publish_cmd(
     import json  # noqa: PLC0415
 
     residue_path = out_file.parent / "residue_report.json"
-    residue_path.write_text(
+    residue_tmp = residue_path.with_suffix(residue_path.suffix + ".tmp")
+    residue_tmp.write_text(
         json.dumps(
             {"proper_noun_findings": [f.to_dict() for f in report.proper_noun_findings]},
             indent=2,
@@ -705,6 +708,7 @@ def publish_cmd(
         + "\n",
         encoding="utf-8",
     )
+    residue_tmp.replace(residue_path)
     n = len(report.proper_noun_findings)
     if n:
         click.secho(
@@ -827,7 +831,9 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
             for e in taxonomy.entries
         ],
     }
-    dest.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    tmp.replace(dest)
 
 
 @cli.command(name="compile")

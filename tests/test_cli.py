@@ -1712,3 +1712,124 @@ def test_publish_leaked_residue_warning_goes_to_stderr(
     assert "posture.system_prompt" in result.stderr
     assert "residue finding(s) published anyway" not in result.stdout
     assert f"wrote {out_path}" in result.stdout
+
+
+def test_publish_residue_report_written_atomically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """residue_report.json is staged via a ``.tmp`` sibling then replaced, not
+    written straight to its final path (issue #69) — a truncated write must
+    never leave a partial residue report next to a completed ``wrote <path>``.
+
+    Stubs out the final ``Path.replace`` to freeze the write at its
+    intermediate state: post-fix, the new content lands in a ``.tmp`` sibling
+    while the final ``residue_report.json`` never appears; pre-fix, the report
+    was written straight to its final path with no ``.tmp`` file involved at
+    all, so this would fail (the tmp sibling would never exist).
+    """
+    doc = _minimal_publishable_doc()
+    doc["posture"]["system_prompt"] += " Dana Ashland reviewed this deal."
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    monkeypatch.setattr(Path, "replace", lambda self, target: None)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    residue_path = out_path.parent / "residue_report.json"
+    residue_tmp = residue_path.with_suffix(residue_path.suffix + ".tmp")
+    assert residue_tmp.exists(), "must stage the write in a .tmp sibling before replacing"
+    assert not residue_path.exists(), "final path must not appear until the (stubbed) replace runs"
+    payload = json.loads(residue_tmp.read_text(encoding="utf-8"))
+    assert any("Dana Ashland" in f["text"] for f in payload["proper_noun_findings"])
+
+
+def test_publish_residue_report_no_tmp_left_after_success(tmp_path: Path) -> None:
+    """No ``.tmp`` file left behind after a successful publish (issue #69)."""
+    doc = _minimal_publishable_doc()
+    doc["posture"]["system_prompt"] += " Dana Ashland reviewed this deal."
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    residue_path = out_path.parent / "residue_report.json"
+    assert residue_path.exists()
+    assert not residue_path.with_suffix(residue_path.suffix + ".tmp").exists()
+
+
+# ---------------------------------------------------------------------------
+# render-prompt --out (issue #69: atomic write)
+# ---------------------------------------------------------------------------
+
+
+def test_render_prompt_out_written_atomically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``render-prompt --out`` stages via a ``.tmp`` sibling then replaces,
+    not a direct write to the final path (issue #69).
+
+    Stubs out the final ``Path.replace`` to freeze the write at its
+    intermediate state: post-fix, the rendered prompt lands in a ``.tmp``
+    sibling while the final path never appears; pre-fix, the file was
+    written straight to its final path with no ``.tmp`` file involved at
+    all, so this would fail (the tmp sibling would never exist).
+    """
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(_minimal_publishable_doc()), encoding="utf-8")
+    out_path = tmp_path / "prompt.md"
+
+    monkeypatch.setattr(Path, "replace", lambda self, target: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render-prompt", str(doc_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    tmp_out = out_path.with_suffix(out_path.suffix + ".tmp")
+    assert tmp_out.exists(), "must stage the write in a .tmp sibling before replacing"
+    assert not out_path.exists(), "final path must not appear until the (stubbed) replace runs"
+    assert len(tmp_out.read_text(encoding="utf-8")) > 0
+
+
+def test_render_prompt_out_no_tmp_left_after_success(tmp_path: Path) -> None:
+    """No ``.tmp`` file left behind after a successful render (issue #69)."""
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(_minimal_publishable_doc()), encoding="utf-8")
+    out_path = tmp_path / "prompt.md"
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render-prompt", str(doc_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    assert out_path.exists()
+    assert not out_path.with_suffix(out_path.suffix + ".tmp").exists()
