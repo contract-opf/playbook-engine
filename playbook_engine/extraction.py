@@ -198,23 +198,42 @@ class ExtractionCache:
         self._store = VerdictStore(cache_path)
 
     def get(self, path: Path) -> tuple[str, list[Block], str] | None:
-        """Return the cached ``(canonical_text, blocks, extractor)``, or ``None`` on a miss."""
+        """Return the cached ``(canonical_text, blocks, extractor)``, or ``None`` on a miss.
+
+        Per-block ``text`` is reconstructed from
+        ``canonical_text[char_span[0]:char_span[1]]`` (the documented
+        canonical_text/char_span invariant — module docstring) rather than
+        read back from the stored entry, since :meth:`put` no longer persists
+        it (issue #67). A ``b.get("text")`` fallback keeps pre-existing cache
+        entries (written before this fix, which still carry a per-block
+        ``"text"``) loading unchanged.
+        """
         cached = self._store.get(_extraction_cache_payload(path))
         if cached is None or "error" in cached:
             return None
+        canonical_text = cached["canonical_text"]
         blocks = [
             Block(
                 block_id=b["block_id"],
                 page=b["page"],
                 char_span=(b["char_span"][0], b["char_span"][1]),
-                text=b["text"],
+                text=b.get("text", canonical_text[b["char_span"][0] : b["char_span"][1]]),
             )
             for b in cached["blocks"]
         ]
-        return cached["canonical_text"], blocks, cached["extractor"]
+        return canonical_text, blocks, cached["extractor"]
 
     def put(self, path: Path, canonical_text: str, blocks: list[Block], extractor: str) -> None:
-        """Store *canonical_text*/*blocks*/*extractor* for *path*'s current content."""
+        """Store *canonical_text*/*blocks*/*extractor* for *path*'s current content.
+
+        Per-block ``text`` is deliberately NOT persisted: it is fully
+        determined by ``canonical_text[char_span[0]:char_span[1]]`` (the
+        canonical_text/char_span invariant — module docstring), so storing it
+        duplicated every document's text in the cache entry. ``get()``
+        reconstructs it from the span instead, halving on-disk entry size and
+        the in-memory footprint of ``VerdictStore``, which parses the whole
+        file at construction (issue #67).
+        """
         value: dict[str, Any] = {
             "canonical_text": canonical_text,
             "blocks": [
@@ -222,7 +241,6 @@ class ExtractionCache:
                     "block_id": b.block_id,
                     "page": b.page,
                     "char_span": list(b.char_span),
-                    "text": b.text,
                 }
                 for b in blocks
             ],
