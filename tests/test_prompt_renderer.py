@@ -110,3 +110,25 @@ def test_indefinite_article_agrees_with_agreement_name() -> None:
 
     doc["agreement_type"]["name"] = "Master Services Agreement"
     assert "reviewing a **Master Services Agreement**" in render_prompt(doc)
+
+
+def test_string_form_floor_invariants_render_without_crashing() -> None:
+    """Issue #73: document_renderer tolerates hand-authored bare-string
+    invariants (`invariants: ["No indemnity cap below $1M"]`), so
+    render-prompt must too — a GC's hand-edited playbook that works in
+    `view bundle` must not traceback in `render-prompt` (pre-fix: inv.get()
+    raised AttributeError on the plain str)."""
+    doc = _flagship()
+    doc["floor"] = {"invariants": ["No indemnity cap below $1M"]}
+    rendered = render_prompt(doc)
+    assert "- No indemnity cap below $1M" in rendered
+
+
+def test_none_floor_invariant_renders_without_crashing() -> None:
+    """The tolerance comment explicitly names JSON null as a shape a
+    hand-edited/foreign playbook may carry; a bare None must not crash
+    either (pre-fix: None.get() would raise the same AttributeError)."""
+    doc = _flagship()
+    doc["floor"] = {"invariants": [None]}
+    rendered = render_prompt(doc)
+    assert "- None" in rendered
