@@ -53,6 +53,26 @@ def test_validate_stub_exits_nonzero() -> None:
         os.unlink(path)
 
 
+def test_validate_blocking_error_goes_to_stderr_not_stdout(tmp_path: Path) -> None:
+    """Issue #62: validate must route each blocking ValidationError's line to
+    stderr (joining the FAIL summary there) and advisory warnings to stdout
+    (joining the OK output) — not the reverse."""
+    fixture_path = (
+        Path(__file__).parent.parent / "examples" / "fixtures" / "valid_v0_2_minimal.json"
+    )
+    doc = json.loads(fixture_path.read_text(encoding="utf-8"))
+    doc["evidence"]["clauses"][0]["our_standard"]["text"] = None
+    doc_path = tmp_path / "invalid.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["validate", str(doc_path)])
+
+    assert result.exit_code != 0
+    assert "our_standard.text is empty" in result.stderr
+    assert "our_standard.text is empty" not in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # Compile command fixture helpers
 # ---------------------------------------------------------------------------

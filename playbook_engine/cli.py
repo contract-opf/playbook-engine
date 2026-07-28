@@ -382,7 +382,7 @@ def validate(file: Path) -> None:
 
     for err in result.errors:
         color = "red" if err.blocking else "yellow"
-        click.secho(str(err), fg=color, err=not err.blocking)
+        click.secho(str(err), fg=color, err=err.blocking)
 
     if result.ok:
         click.secho(f"OK  {file}", fg="green")
