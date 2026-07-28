@@ -248,14 +248,22 @@ def _iter_blocks_in(container: Any) -> Any:
 def _flatten_table(tbl_elem: Any) -> str:
     """Flatten a table to pipe-separated cell text.
 
+    Only top-level rows/cells of ``tbl_elem`` are treated as this table's own
+    cells. Each cell's content is walked via ``_iter_blocks_in`` (the same
+    block iterator used for the document body), which descends into nested
+    ``w:tbl`` elements by recursing into ``_flatten_table`` itself. This
+    ensures a nested table's text is included exactly once — not also
+    re-collected by the enclosing cell (which previously used a ``.//w:p``
+    descendant search that double-counted paragraphs inside nested tables).
+
     Known gap: tracked changes inside table cells are not recorded in the
     TrackedChanges side-channel.
     """
     cell_texts: list[str] = []
-    for cell in tbl_elem.iter(qn("w:tc")):
+    for cell in tbl_elem.findall(f"{qn('w:tr')}/{qn('w:tc')}"):
         parts: list[str] = []
-        for p in cell.findall(f".//{qn('w:p')}"):
-            text, _ = _extract_para_text(p)
+        for block in _iter_blocks_in(cell):
+            text = block if isinstance(block, str) else _extract_para_text(block)[0]
             if text.strip():
                 parts.append(text)
         if parts:
