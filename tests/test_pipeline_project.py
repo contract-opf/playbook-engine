@@ -1201,3 +1201,121 @@ def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_pat
     )
     # Sanity: the digest really is computed the same way canonicalize.py defines it.
     assert playbook_v2["identity"]["section_digests"] == compute_section_digests(playbook_v2)
+
+
+# ---------------------------------------------------------------------------
+# Issue #65: a removed clause's classification confidence must be looked up
+# in the version it was actually classified in, not the signed version's map.
+# ---------------------------------------------------------------------------
+
+_REMOVED_CLAUSE_V1_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify Beta University against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Insurance\par "
+    r"Alpha Corp shall maintain commercial general liability insurance.\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+
+# v2's clause 2 is a DIFFERENT clause (Confidentiality, not Insurance) that
+# merely lands at the same path number once Insurance is gone -- exactly the
+# renumbering-collision setup issue #65 describes. Its heading only
+# partially overlaps the "Confidentiality" taxonomy label (Jaccard 0.5,
+# below auto_classify_threshold), giving it a deterministic confidence
+# (0.5) distinct from Insurance's exact-match 1.0, so a wrong lookup is
+# unambiguously observable.
+_REMOVED_CLAUSE_V2_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify Beta University against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Confidentiality Requirements\par "
+    r"Each party shall keep the other's confidential information secret.\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+
+
+def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Path) -> None:
+    """A removed clause's observation must carry ITS OWN draft-version
+    classification confidence, never one borrowed from an unrelated clause
+    that happens to occupy the same renumbered path in the signed version —
+    regression guard for issue #65.
+
+    v1's clause path "2" ("Insurance", heading exact-matches the taxonomy
+    label -> confidence 1.0) is entirely absent from v2 (removed, not just
+    modified). v2's clause path "2" ("Confidentiality Requirements", a
+    partial heading match -> confidence 0.5) is a different, unrelated
+    clause that merely lands at the same path number after renumbering.
+
+    Before the fix, the confidence map (``cls_conf_by_path``) was built
+    ONLY from the signed version's (v2) classified clauses, so looking up
+    the removed clause's before-path "2" found v2's Confidentiality
+    classification instead of v1's own Insurance classification — silently
+    attaching confidence 0.5 to the Insurance observation instead of its
+    real 1.0.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+    _write_rtf(deal_dir / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+    )
+
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+
+    insurance_obs = [o for o in observations if o["taxonomy_id"] == "insurance"]
+    assert len(insurance_obs) == 1, (
+        f"expected exactly one 'insurance' observation (the removed v1 clause); "
+        f"got {len(insurance_obs)}: {insurance_obs}"
+    )
+    removed = insurance_obs[0]
+    assert removed["citation"]["version_id"] == "v1", (
+        "premise: the removed Insurance clause's citation must resolve to v1 "
+        f"(the version it actually came from); got {removed['citation']!r}"
+    )
+    assert removed["confidence"] == 1.0, (
+        "the removed clause's confidence must be its OWN v1 classification "
+        "(exact heading match -> 1.0), never a confidence borrowed from "
+        f"whatever clause occupies path 2 in the signed version; got "
+        f"{removed['confidence']!r}"
+    )
+
+    # The unrelated clause that legitimately occupies path "2" in the signed
+    # version must keep ITS OWN confidence -- confirms the fix is a correct
+    # per-version lookup, not just a hardcoded override in one direction.
+    signed_path_2 = [
+        o
+        for o in observations
+        if o["citation"]["version_id"] == "v2" and o["citation"]["clause_path"] == "2"
+    ]
+    assert len(signed_path_2) == 1, (
+        f"expected exactly one observation citing v2 clause_path 2; got {signed_path_2}"
+    )
+    assert signed_path_2[0]["confidence"] == 0.5, (
+        "the signed version's own clause at path 2 must keep its own "
+        f"confidence; got {signed_path_2[0]['confidence']!r}"
+    )
