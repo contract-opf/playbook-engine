@@ -2243,7 +2243,11 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
         click.secho(f"ERROR: playbook.opf.json not found in {resolved}", fg="red", err=True)
         raise SystemExit(1)
 
-    doc = _json.loads(opf_path.read_text(encoding="utf-8"))
+    try:
+        doc = _json.loads(opf_path.read_text(encoding="utf-8"))
+    except ValueError as exc:  # includes json.JSONDecodeError
+        click.secho(f"ERROR: could not parse {opf_path}: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
     digest = doc.get("digest") or build_digest(doc)
     dest = digest_path.resolve() if digest_path else resolved / "playbook.digest.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -2311,6 +2315,11 @@ def view_render_cmd(out_dir: Path, out_file: Path | None, alias_map_file: Path |
         render_review_html(resolved, out_file=dest, alias_map=alias_map)
     except FileNotFoundError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    except ValueError as exc:  # includes json.JSONDecodeError
+        click.secho(
+            f"ERROR: could not parse {resolved / 'playbook.opf.json'}: {exc}", fg="red", err=True
+        )
         raise SystemExit(1) from exc
 
     click.secho(f"OK  {dest}", fg="green")
@@ -2667,6 +2676,13 @@ def curate_cmd(
         result = apply_curate_commands(out_dir.resolve(), commands, pinned_by=pinned_by)
     except FileNotFoundError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    except ValueError as exc:  # includes json.JSONDecodeError
+        click.secho(
+            f"ERROR: could not parse {out_dir.resolve() / 'playbook.opf.json'}: {exc}",
+            fg="red",
+            err=True,
+        )
         raise SystemExit(1) from exc
 
     for outcome in result.outcomes:

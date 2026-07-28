@@ -1041,6 +1041,22 @@ def test_view_render_cmd_missing_opf_exits_nonzero(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["view", "render", str(out_dir)])
     assert result.exit_code != 0
+    assert "not found" in result.output
+    assert "could not parse" not in result.output
+
+
+def test_view_render_cmd_truncated_opf_reports_error_no_traceback(tmp_path: Path) -> None:
+    """A truncated/hand-edited playbook.opf.json fails cleanly (issue #57), not a traceback."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "playbook.opf.json").write_text('{"truncated":', encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "render", str(out_dir)])
+    assert result.exit_code == 1
+    assert "ERROR" in result.output
+    # A raw JSONDecodeError propagating uncaught would surface as some other
+    # exception type here; the handled path always exits via SystemExit(1).
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_view_render_html_contains_numbered_items(tmp_path: Path) -> None:
