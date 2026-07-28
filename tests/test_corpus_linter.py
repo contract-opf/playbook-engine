@@ -498,6 +498,23 @@ def test_config_segmentation_llm_false_never_requires_credentials(
     assert not any(i.code == "CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS" for i in report.errors())
 
 
+def test_config_segmentation_agent_true_no_credentials_no_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #68: ``segmentation: {llm: true, agent: true}`` is the key-free,
+    store-backed agent path (cli._llm_segmentation_kwargs checks ``agent``
+    before its ANTHROPIC_API_KEY gate) -- lint-corpus must not contradict the
+    command it preflights by demanding a key here too."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True, "agent": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS" for i in report.errors())
+
+
 def test_config_no_our_party_aliases_missing_provenance_warns(tmp_path: Path) -> None:
     """Issue #56: no ``provenance:`` section at all (the scaffold's own
     default before a first-timer fills anything in) must warn, not pass
