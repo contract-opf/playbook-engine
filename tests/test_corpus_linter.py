@@ -22,6 +22,9 @@ from playbook_engine.corpus_linter import LintItem, LintReport, lint_corpus
 # ---------------------------------------------------------------------------
 
 
+_UNSET = object()  # sentinel: distinguishes "provenance key omitted" from "provenance: null"
+
+
 def _write_docx_stub(path: Path) -> None:
     """Write a minimal PK-magic-bytes stub so the file has the right extension."""
     # A real .docx is a ZIP; we just need a non-empty file recognised by extension.
@@ -39,6 +42,7 @@ def _make_config(
     include_agreement_type: bool = True,
     include_taxonomy: bool = True,
     segmentation: dict | None = None,
+    provenance: object = _UNSET,
 ) -> Path:
     """Build a config YAML at tmp_path/config.yaml and return the path."""
     config_path = tmp_path / "playbook.config.yaml"
@@ -60,6 +64,8 @@ def _make_config(
         data["baseline"] = {"template": None}
     if segmentation is not None:
         data["segmentation"] = segmentation
+    if provenance is not _UNSET:
+        data["provenance"] = provenance
 
     config_path.write_text(yaml.dump(data), encoding="utf-8")
     return config_path
@@ -492,6 +498,100 @@ def test_config_segmentation_llm_false_never_requires_credentials(
     assert not any(i.code == "CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS" for i in report.errors())
 
 
+def test_config_no_our_party_aliases_missing_provenance_warns(tmp_path: Path) -> None:
+    """Issue #56: no ``provenance:`` section at all (the scaffold's own
+    default before a first-timer fills anything in) must warn, not pass
+    silently -- the scaffold marks our_party_aliases REQUIRED and claims
+    mine warns if none match, but nothing does today."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax)  # provenance omitted entirely
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not report.has_errors
+    assert any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_no_our_party_aliases_empty_list_warns(tmp_path: Path) -> None:
+    """Issue #56: the scaffolded ``our_party_aliases: []`` left unfilled by a
+    first-timer must warn -- every document will silently default to
+    counterparty_paper."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, provenance={"our_party_aliases": []})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not report.has_errors
+    assert any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_our_party_aliases_blank_only_still_warns(tmp_path: Path) -> None:
+    """A list of only empty strings is functionally empty and must still warn."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, provenance={"our_party_aliases": ["", ""]})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_our_party_aliases_present_no_warning(tmp_path: Path) -> None:
+    """A filled-in our_party_aliases list must NOT trigger the warning."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path, taxonomy_path=tax, provenance={"our_party_aliases": ["FixtureCorp"]}
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_provenance_null_reports_invalid_not_alias_warning(tmp_path: Path) -> None:
+    """Issue #56: a bare ``provenance:`` key (YAML null) is rejected outright
+    by load_config ("config.provenance must be a mapping"). lint-corpus must
+    report this as the CONFIG_PROVENANCE_INVALID ERROR -- not silently pass
+    it through to the milder CONFIG_NO_OUR_PARTY_ALIASES warning path, which
+    would print "OK" (well, "1 warning") about a config mine hard-fails on."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, provenance=None)
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_PROVENANCE_INVALID" for i in report.errors())
+    assert not any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_our_party_aliases_null_reports_aliases_invalid(tmp_path: Path) -> None:
+    """A bare ``our_party_aliases:`` key (YAML null) is rejected by
+    load_config ("provenance.our_party_aliases must be a list") -- must be a
+    lint ERROR, not the empty-list warning."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, provenance={"our_party_aliases": None})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_ALIASES_INVALID" for i in report.errors())
+    assert not any(i.code == "CONFIG_NO_OUR_PARTY_ALIASES" for i in report.warnings())
+
+
+def test_config_our_party_aliases_non_list_reports_aliases_invalid(tmp_path: Path) -> None:
+    """A scalar string instead of a list must be flagged as CONFIG_ALIASES_INVALID."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, provenance={"our_party_aliases": "FixtureCorp"})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_ALIASES_INVALID" for i in report.errors())
+
+
 def test_config_no_template_warns(tmp_path: Path) -> None:
     corpus = tmp_path / "corpus"
     (corpus / "deal-alice").mkdir(parents=True)
@@ -511,7 +611,12 @@ def test_config_valid_full_ok(tmp_path: Path) -> None:
     tax = _make_taxonomy(tmp_path)
     template = tmp_path / "template.docx"
     _write_docx_stub(template)
-    cfg = _make_config(tmp_path, taxonomy_path=tax, template_path=template)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        template_path=template,
+        provenance={"our_party_aliases": ["FixtureCorp"]},
+    )
     report = lint_corpus(corpus, config_path=cfg)
     assert not report.has_errors
     assert not report.has_warnings
