@@ -885,6 +885,43 @@ def _attribution_for_diff(
     return next((eh.enrichment for eh in enriched if eh.enrichment is not None), None)
 
 
+def _classification_confidence_for_diff(
+    clause_diff: ClauseDiff,
+    conf_by_version_path: dict[str, dict[str, float]],
+) -> float | None:
+    """Classification confidence for one net ``ClauseDiff`` (issue #65).
+
+    ``conf_by_version_path`` is ``{version_id: {clause_path: confidence}}``,
+    built from EVERY version's classified clauses (``classified_by_version``),
+    not just the signed version's. A removed clause's ``clause_path`` is a
+    BEFORE-side path read from an earlier draft (the net diff's base
+    version), not from the signed version — looking it up in a map built
+    only from the signed version's classified clauses either misses
+    (``None``) or, worse, collides with an unrelated signed clause that
+    happens to occupy the same path number after renumbering, silently
+    attaching that clause's confidence to the removed clause's observation.
+    That collision can suppress (or spuriously add) ``aar.py``'s
+    low-confidence review flag for a genuinely uncertain removed-clause
+    observation.
+
+    Selects the side (after, else before) the same way
+    ``observation_builder.build_observations`` already selects
+    ``citation.version_id``/``char_span`` — a removed clause's citation
+    comes from the before side, so its confidence must be read from that
+    same side's version, never the signed/last version this diff batch is
+    filed under.
+    """
+    vid: str | None
+    path: str | None
+    if clause_diff.clause_path_after is not None:
+        vid, path = clause_diff.clause_version_after, clause_diff.clause_path_after
+    else:
+        vid, path = clause_diff.clause_version_before, clause_diff.clause_path_before
+    if vid is None or path is None:
+        return None
+    return conf_by_version_path.get(vid, {}).get(path)
+
+
 def _atomic_json_write(data: Any, path: Path) -> None:
     """Atomically write *data* as JSON to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1647,12 +1684,15 @@ def _compute_doc_result(
             net_diffs, template_std_by_tid, _dev_judge, document_id=doc_id
         )
 
-        signed_classified = classified_by_version[signed_vid]
-        cls_conf_by_path: dict[str, float] = {
-            (cc.node.clause_path or "?"): cc.classification.confidence for cc in signed_classified
+        # Per-version confidence map (issue #65) — see
+        # _classification_confidence_for_diff for why a removed clause's
+        # confidence must come from ITS version, not the signed version's.
+        cls_conf_by_version_path: dict[str, dict[str, float]] = {
+            vid: {(cc.node.clause_path or "?"): cc.classification.confidence for cc in classified}
+            for vid, classified in classified_by_version.items()
         }
         classification_confidences = [
-            cls_conf_by_path.get(cd.clause_path_after or cd.clause_path_before or "?")
+            _classification_confidence_for_diff(cd, cls_conf_by_version_path)
             for cd, _ in deviation_results
         ]
 
