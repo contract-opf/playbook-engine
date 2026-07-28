@@ -101,6 +101,27 @@ def _table_docx(tmp_path: Path) -> Path:
     return path
 
 
+def _nested_table_docx(tmp_path: Path) -> Path:
+    """Table with a nested table — regression fixture for issue #64.
+
+    The outer table has one cell whose own text is "OUTER"; nested inside
+    that same cell is a one-cell table whose text is "INNER". Before the
+    fix, ``_flatten_table`` visited the inner cell twice: once via the outer
+    table's descendant ``.iter(w:tc)``/``.//w:p`` search (which reaches into
+    nested tables), and again as the nested table's own top-level cell.
+    """
+    doc = Document()
+    doc.add_heading("Fee Schedule", level=1)
+    tbl = doc.add_table(rows=1, cols=1)
+    cell = tbl.rows[0].cells[0]
+    cell.text = "OUTER"
+    nested = cell.add_table(rows=1, cols=1)
+    nested.rows[0].cells[0].text = "INNER"
+    path = tmp_path / "nested_table.docx"
+    doc.save(str(path))
+    return path
+
+
 def _tracked_docx(tmp_path: Path) -> Path:
     """Document with tracked changes injected via raw XML."""
     doc = Document()
@@ -422,6 +443,19 @@ def test_table_does_not_create_heading_nodes(tmp_path: Path) -> None:
         (n for n in result.tree.nodes if n.heading and "Fee" in (n.heading or "")), None
     )
     assert fee_schedule is not None, "Fee Schedule heading not found"
+
+
+def test_nested_table_cell_text_not_duplicated(tmp_path: Path) -> None:
+    """Regression for issue #64: a nested table's cell text must be flattened
+    exactly once, not once as part of the outer cell and again as the nested
+    table's own cell.
+    """
+    path = _nested_table_docx(tmp_path)
+    result = ingest_docx(path, "d", "v1")
+    all_text = " ".join(n.text for n in result.tree.all_nodes())
+    assert all_text.count("INNER") == 1, (
+        f"'INNER' should appear exactly once in flattened body, got: {all_text!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
