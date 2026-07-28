@@ -399,6 +399,57 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
             "Add baseline.template if you have a canonical template.",
         )
 
+    # provenance section (issue #56): the scaffold (staging.py) marks
+    # our_party_aliases "REQUIRED for provenance" and claims "mine warns if
+    # none match", but mine's alias sanity check (pipeline.py) only fires
+    # when aliases are configured-but-unmatched, and provenance_detector.py
+    # silently defaults every document to
+    # counterparty_paper/basis=no_aliases_configured when the list is empty
+    # -- with no warning anywhere else in the pipeline. lint-corpus is the
+    # documented preflight tool, so it must catch both: (1) a malformed
+    # provenance section (mirroring load_config's own checks in config.py,
+    # so lint-corpus never says "OK" about a config that ``mine`` will
+    # refuse to load), reported as an ERROR since it is fatal; and (2) a
+    # present-but-empty our_party_aliases list, reported as a WARNING since
+    # the pipeline runs safely (just with degraded provenance) without it.
+    prov = raw.get("provenance", {})
+    if not isinstance(prov, dict):
+        # A bare `provenance:` key (present but null, or any other
+        # non-mapping scalar) parses fine as YAML but load_config rejects it
+        # outright ("config.provenance must be a mapping"). Report it as an
+        # ERROR here -- not the milder CONFIG_NO_OUR_PARTY_ALIASES warning
+        # below -- so this doesn't silently pass as "OK — no errors" for a
+        # config mine will hard-fail on.
+        report.add(
+            "error",
+            "CONFIG_PROVENANCE_INVALID",
+            f"provenance must be a mapping, got {type(prov).__name__}.",
+            config_path,
+        )
+    else:
+        aliases_raw = prov.get("our_party_aliases", [])
+        if not isinstance(aliases_raw, list):
+            # Same reasoning as above: load_config raises
+            # "provenance.our_party_aliases must be a list" for this shape
+            # (e.g. a bare `our_party_aliases:` key, or a string instead of
+            # a list) -- fatal, so it's an ERROR, not a warning.
+            report.add(
+                "error",
+                "CONFIG_ALIASES_INVALID",
+                f"provenance.our_party_aliases must be a list, got {type(aliases_raw).__name__}.",
+                config_path,
+            )
+        elif not [a for a in aliases_raw if a]:
+            report.add(
+                "warning",
+                "CONFIG_NO_OUR_PARTY_ALIASES",
+                "provenance.our_party_aliases is empty — every document will "
+                "default to counterparty_paper (provenance cannot be "
+                "determined); list every form of your own party's name from "
+                "the recitals.",
+                config_path,
+            )
+
     # segmentation.llm credentials (issue #131): lint-corpus is the documented
     # preflight tool, so it must catch a missing ANTHROPIC_API_KEY here rather
     # than let a user discover it only when ``mine``/``compile``/``judge``
