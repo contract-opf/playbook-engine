@@ -641,6 +641,42 @@ def _validate_plan(plan: dict[str, Any], src_dir: Path) -> None:
                 )
 
 
+def _check_plan_files_exist(plan: dict[str, Any], src_dir: Path) -> None:
+    """Raise if any plan file ``path`` doesn't resolve to a real file under *src_dir*.
+
+    Checked before ``_recreate_out_dir`` wipes anything — same ordering
+    rationale as :func:`_validate_plan`. Without this, a hand-edited plan
+    with a typo'd path (or one run against the wrong ``src_dir``) reaches
+    ``_place``, which in symlink mode (the default) happily creates a
+    dangling symlink via ``os.symlink``; ``_discover_versions`` then drops
+    that version silently (``p.is_file()`` is ``False`` for a dangling
+    link), and ``stage --plan`` reports "staged : N version(s) ... OK" as if
+    nothing were wrong (issue #52). In ``--copy`` mode the same typo instead
+    raises an unhandled ``FileNotFoundError`` from ``shutil.copy2`` — this
+    check replaces that traceback with a clean, located error too.
+
+    Args:
+        plan:    The plan dict, already shape-validated by :func:`_validate_plan`.
+        src_dir: Corpus root ``path`` entries are relative to.
+
+    Raises:
+        ValueError: lists every missing ``deal_id``/``path`` pair found (not
+            just the first), mirroring ``StagingResult.missing`` for the
+            manifest layout so a plan with several typos is fixed in one pass.
+    """
+    missing: list[str] = []
+    for deal in plan.get("deals", []):
+        deal_id = deal["deal_id"]
+        for f in deal["files"]:
+            src = src_dir / f["path"]
+            if not src.is_file():
+                missing.append(f"{deal_id}/{f['path']}")
+    if missing:
+        raise ValueError(
+            f"{len(missing)} plan file(s) not found under {src_dir}: " + ", ".join(missing)
+        )
+
+
 def execute_staging_plan(
     plan: dict[str, Any],
     src_dir: Path,
@@ -672,14 +708,17 @@ def execute_staging_plan(
 
     Raises:
         ValueError: *plan* is malformed (issue #45) — see
-            :func:`_validate_plan` — or *out_dir* overlaps *src_dir*, or
-            *out_dir* exists, is non-empty, and is not itself a previous
-            staging output (see ``staging._recreate_out_dir``). Does not
-            touch *out_dir* in any of these cases.
+            :func:`_validate_plan` — a plan file path doesn't exist under
+            *src_dir* (issue #52) — see :func:`_check_plan_files_exist` — or
+            *out_dir* overlaps *src_dir*, or *out_dir* exists, is non-empty,
+            and is not itself a previous staging output (see
+            ``staging._recreate_out_dir``). Does not touch *out_dir* in any
+            of these cases.
     """
     from playbook_engine.staging import StagingResult  # noqa: PLC0415
 
     _validate_plan(plan, src_dir)
+    _check_plan_files_exist(plan, src_dir)
     _recreate_out_dir(src_dir, out_dir)
 
     staged = 0

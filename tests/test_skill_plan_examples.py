@@ -6,9 +6,10 @@ Extracts every fenced ```json code block in SKILL.md that looks like a
 staging plan (parses as JSON and carries the plan's ``deals`` key), and
 confirms each one is accepted by ``execute_staging_plan`` without error —
 this is the "dry-parse" the issue asks for, using ``execute_staging_plan``'s
-default symlink placement (issue #186), which does not require the example's
-referenced file paths to exist on disk (a dangling symlink is still a valid
-symlink) so the doc's illustrative filenames need no matching fixture files.
+default symlink placement (issue #186). ``execute_staging_plan`` now requires
+every ``files[].path`` to exist under ``src_dir`` (issue #52), so this test
+materializes an empty placeholder file for each of the doc's illustrative
+paths rather than fabricating real fixture content.
 
 Keeps the doc's `staging_plan.json` examples from rotting as intake_plan.py
 evolves — the companion doc-drift pattern to
@@ -65,15 +66,23 @@ def test_skill_md_has_at_least_one_staging_plan_example() -> None:
 def test_staging_plan_example_dry_parses(index: int, tmp_path: Path) -> None:
     """Each staging_plan.json example must dry-parse via execute_staging_plan.
 
-    Uses the default symlink placement (not --copy), which only needs the
-    *directory structure* to be valid — not the example's illustrative file
-    paths to exist — matching how a skill/human would edit a real
-    staging_plan.json without fabricating fixture files for a doc example.
+    Uses the default symlink placement (not --copy). ``execute_staging_plan``
+    now requires every ``files[].path`` to exist under ``src_dir`` (issue
+    #52 — a typo'd or stale plan path used to silently produce a dangling
+    symlink instead of a clean error), so this test creates an empty
+    placeholder file for each of the example's illustrative paths rather
+    than fabricating real fixture *content* for a doc example.
     """
     plan = _staging_plan_examples()[index]
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     out_dir = tmp_path / "out"
+
+    for deal in plan["deals"]:
+        for f in deal["files"]:
+            placeholder = src_dir / f["path"]
+            placeholder.parent.mkdir(parents=True, exist_ok=True)
+            placeholder.write_text("", encoding="utf-8")
 
     result = execute_staging_plan(plan, src_dir, out_dir)
 
