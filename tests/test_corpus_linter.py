@@ -714,6 +714,27 @@ def test_lint_corpus_cmd_exits_zero_with_warnings(tmp_path: Path) -> None:
     assert "WARN" in result.output
 
 
+def test_lint_corpus_cmd_warn_lines_go_to_stderr(tmp_path: Path) -> None:
+    """WARN lines must land on stderr, not stdout (issue #60).
+
+    Pre-fix, ``lint-corpus`` printed WARN (and OK) lines to stdout while ERR
+    lines and the failure summary went to stderr — a scripted caller doing
+    ``lint-corpus ... 2>err.log`` would miss every warning. WARN is a
+    diagnostic and belongs on stderr; the closing ``OK`` summary line stays
+    a result on stdout.
+    """
+    corpus = tmp_path / "corpus"
+    deal = corpus / "deal-alice"
+    deal.mkdir(parents=True)
+    _write_docx_stub(deal / "v1.docx")  # single version → WARN
+    runner = CliRunner()
+    result = runner.invoke(cli, ["lint-corpus", str(corpus)])
+    assert result.exit_code == 0
+    assert "WARN" in result.stderr
+    assert "WARN" not in result.stdout
+    assert "OK — no errors" in result.stdout
+
+
 def test_lint_corpus_cmd_exits_nonzero_on_empty_corpus(tmp_path: Path) -> None:
     corpus = tmp_path / "corpus"
     corpus.mkdir()
