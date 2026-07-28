@@ -348,6 +348,84 @@ def test_no_known_entities_configured_is_a_no_op(tmp_path: Path) -> None:
     )
 
 
+def test_stale_trail_file_pruned_when_known_entities_added_later(tmp_path: Path) -> None:
+    """A raw run (no known_entities) writes trail/<raw-doc-id>.json. Re-running
+    mine_corpus over the SAME out_dir after known_entities is configured must
+    prune that stale raw-named file, not merely add the aliased one alongside
+    it (issue #51).
+
+    The corpus document_id is the deal directory name (docs/CORPUS-LAYOUT.md
+    convention), so a directory literally named after the known entity
+    reproduces the exact residue class the ticket describes: the raw
+    counterparty name surviving in both the trail filename and its body.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / _KNOWN_ENTITY
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _BODY_DEAL_1)
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    out_dir = tmp_path / "out"
+    registry_path = tmp_path / "entity_registry.json"
+
+    cfg_raw = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path_raw = tmp_path / "playbook.config.raw.yaml"
+    config_path_raw.write_text(yaml.dump(cfg_raw), encoding="utf-8")
+
+    # Pass 1: mine BEFORE known_entities is configured.
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(config_path_raw),
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=registry_path,
+    )
+
+    trail_dir = out_dir / "trail"
+    raw_trail_path = trail_dir / f"{_KNOWN_ENTITY}.json"
+    assert raw_trail_path.exists(), "sanity: the raw run must write a raw-named trail file"
+    assert _KNOWN_ENTITY in raw_trail_path.read_text(encoding="utf-8")
+
+    # Pass 2: known_entities is configured; re-run over the SAME out_dir.
+    cfg_aliased = {
+        **cfg_raw,
+        "provenance": {
+            "our_party_aliases": ["Alpha Corp"],
+            "known_entities": [_KNOWN_ENTITY],
+        },
+    }
+    config_path_aliased = tmp_path / "playbook.config.aliased.yaml"
+    config_path_aliased.write_text(yaml.dump(cfg_aliased), encoding="utf-8")
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(config_path_aliased),
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=registry_path,
+    )
+
+    assert not raw_trail_path.exists(), (
+        "stale raw-named trail file from the pre-known_entities run must be pruned"
+    )
+    trail_files = list(trail_dir.glob("*.json"))
+    assert len(trail_files) == 1, f"expected exactly one (aliased) trail file, got {trail_files}"
+    aliased_path = trail_files[0]
+    assert _KNOWN_ENTITY.lower() not in aliased_path.name.lower()
+    aliased_text = aliased_path.read_text(encoding="utf-8")
+    assert _KNOWN_ENTITY.lower() not in aliased_text.lower(), (
+        f"raw counterparty name leaked into {aliased_path.name}: {aliased_text}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Born-safe id/version consistency (issue #182)
 # ---------------------------------------------------------------------------

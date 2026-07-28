@@ -2438,6 +2438,16 @@ def mine_corpus(
     # citation.document_id that `inspect` joins on.
     trail_dir = out_dir / "trail"
     trail_dir.mkdir(parents=True, exist_ok=True)
+    # Clear stale entries first (issue #51): the loop below rewrites every
+    # current trail, so this is a full-rewrite of the directory — mirroring
+    # observations.jsonl/corpus_manifest.json semantics. Without this, a
+    # document removed/renamed in the corpus leaves a phantom trail/<doc>.json,
+    # and — more seriously — a raw-named trail/<RawCounterpartyName>.json from
+    # a run BEFORE known_entities was configured survives beside the
+    # born-safe aliased file written by a later run, leaking the raw name in
+    # both filename and content.
+    for stale_trail in trail_dir.glob("*.json"):
+        stale_trail.unlink()
     for raw_doc_id, trail in all_trails:
         if entity_registry is not None:
             trail = _pseudonymize_trail(trail, known_entities, entity_registry)
