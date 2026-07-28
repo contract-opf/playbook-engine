@@ -2122,7 +2122,39 @@ def mine_corpus(
     all_trails: list[tuple[str, dict[str, Any]]] = []
 
     scope_log = ScopeLog(agreement_type_id=config.agreement_type.id)
-    doc_dirs = sorted(d for d in corpus_dir.iterdir() if d.is_dir())
+    # Match corpus_linter.lint_corpus and cli.segment_cmd: dot-directories
+    # (.cache, .git, .DS_Store, an `out` dir accidentally nested inside the
+    # corpus) are never agreement folders. Without this filter mine_corpus
+    # disagreed with the linter's document count and emitted a spurious
+    # "no supported files — skipping" line for every dot-directory (issue #54,
+    # merged finding).
+    doc_dirs = sorted(d for d in corpus_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
+
+    # Fail loud on a corpus with zero minable documents (issue #54): without
+    # this guard mine_corpus wrote an empty observation store and exited 0
+    # with a green "OK", and the failure only surfaced later at project/
+    # compile time with a message that misleadingly says to (re-)run mine
+    # even when compile just did. This must trigger only when NO doc_dir
+    # yields any supported version file — a doc_dir that yields versions but
+    # is later quarantined (failed extraction, QA gate) is a different,
+    # already-fail-loud failure mode and must not be conflated with this one.
+    if not any(_discover_versions(d) for d in doc_dirs):
+        loose_files = sorted(
+            p
+            for p in corpus_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS
+        )
+        loose_hint = (
+            f" — {len(loose_files)} supported file(s) sit directly in the corpus root; "
+            "run 'playbook stage' to lay them out, or move each agreement into its own folder"
+            if loose_files
+            else ""
+        )
+        raise PipelineError(
+            f"no agreement documents found under {corpus_dir}: the engine expects one "
+            f"subfolder per agreement containing .docx/.pdf/.rtf files{loose_hint}; "
+            "run 'playbook lint-corpus' for details"
+        )
 
     # -------------------------------------------------------------------
     # Batch-segmentation pre-pass (opt-in, issue #76): extract every
