@@ -97,7 +97,15 @@ def _path_str(path: list[str | int]) -> str:
 
 
 def _corpus_docs(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {d["document_id"]: d for d in doc.get("corpus", {}).get("documents", [])}
+    # A hand-edited/foreign corpus document may omit document_id entirely (or
+    # carry a non-string one) — skip it rather than KeyError; the schema pass
+    # already reports the missing/invalid field, and a document that can't be
+    # keyed can't be cited by document_id anyway (see issue #72).
+    return {
+        d["document_id"]: d
+        for d in doc.get("corpus", {}).get("documents", [])
+        if isinstance(d.get("document_id"), str)
+    }
 
 
 def _check_opf_version(doc: dict[str, Any], result: ValidationResult) -> bool:
@@ -182,8 +190,12 @@ def _check_citation_ref(
         result.add("missing citation — violates OPF §4", path=path)
         return
 
-    doc_id = ref.get("document_id", "")
-    if not doc_id.strip():
+    # document_id may be JSON null (hand-edited/foreign document) or, in
+    # principle, any non-string type — guard the type before .strip() rather
+    # than assuming the schema already rejected it (issue #72: normative
+    # checks run even when schema validation already found errors).
+    doc_id = ref.get("document_id") or ""
+    if not isinstance(doc_id, str) or not doc_id.strip():
         result.add(
             "citation document_id is empty — citation is unresolvable, violates OPF §4",
             path=f"{path}.document_id",
@@ -235,7 +247,10 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
     for i, clause in enumerate(doc.get("clauses", [])):
         if clause.get("our_standard") is not None:
             std = clause["our_standard"]
-            if not std.get("text", "").strip():
+            # text may be JSON null on a hand-edited document — guard the
+            # type before .strip() (issue #72).
+            text = std.get("text") or ""
+            if not isinstance(text, str) or not text.strip():
                 result.add(
                     "our_standard.text is empty",
                     path=f"clauses[{i}].our_standard.text",
@@ -375,7 +390,10 @@ def _check_citations_v2(doc: dict[str, Any], result: ValidationResult) -> None:
     for i, clause in enumerate(doc.get("evidence", {}).get("clauses", [])):
         if clause.get("our_standard") is not None:
             std = clause["our_standard"]
-            if not std.get("text", "").strip():
+            # text may be JSON null on a hand-edited document — guard the
+            # type before .strip() (issue #72).
+            text = std.get("text") or ""
+            if not isinstance(text, str) or not text.strip():
                 result.add(
                     "our_standard.text is empty",
                     path=f"evidence.clauses[{i}].our_standard.text",
