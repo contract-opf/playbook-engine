@@ -455,8 +455,21 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
     # than let a user discover it only when ``mine``/``compile``/``judge``
     # itself refuses to run (or, before that fix, after docling had already
     # ground through extraction).
+    #
+    # Agent-as-segmenter (issue #191) is a key-free path: cli._llm_segmentation_kwargs
+    # checks segmentation.agent BEFORE this same ANTHROPIC_API_KEY gate and returns
+    # early (store-backed, no live call) when it's set -- that gate is only for the
+    # live-LLM path. A config that sets both llm and agent (equivalent to the engine;
+    # see config.py's SegmentationConfig construction) must mirror that precedence
+    # here, or this preflight check contradicts the very command it precedes (issue
+    # #286 / public #68).
     seg = raw.get("segmentation", {})
-    if isinstance(seg, dict) and seg.get("llm") and not os.environ.get("ANTHROPIC_API_KEY"):
+    if (
+        isinstance(seg, dict)
+        and seg.get("llm")
+        and not seg.get("agent")
+        and not os.environ.get("ANTHROPIC_API_KEY")
+    ):
         report.add(
             "error",
             "CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS",
