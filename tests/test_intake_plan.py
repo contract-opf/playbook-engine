@@ -546,6 +546,97 @@ class TestExecuteStagingPlanShapeValidation:
         assert not out_dir.exists()
 
 
+# ---------------------------------------------------------------------------
+# 6. execute_staging_plan missing-file check (issue #52) — a plan ``path``
+#    that doesn't resolve to a real file under src_dir (typo, or --plan run
+#    against the wrong src_dir) must be rejected up front, before out_dir is
+#    wiped, rather than reaching _place — which in symlink mode (the
+#    default) happily creates a dangling symlink and reports success.
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteStagingPlanMissingFiles:
+    def test_missing_file_raises_before_wipe(self, tmp_path: Path) -> None:
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+        deal_id = plan["deals"][0]["deal_id"]
+        plan["deals"][0]["files"][0]["path"] = "doc_TYPO.rtf"
+
+        out = tmp_path / "out"
+        out.mkdir()
+        marker = out / "pre-existing.txt"
+        marker.write_text("keep me", encoding="utf-8")
+
+        with pytest.raises(
+            ValueError,
+            match=rf"1 plan file\(s\) not found under {scrambled}: {deal_id}/doc_TYPO\.rtf",
+        ):
+            execute_staging_plan(plan, scrambled, out)
+
+        # out_dir must be untouched — the missing-file error fires before
+        # _recreate_out_dir ever runs.
+        assert marker.read_text(encoding="utf-8") == "keep me"
+        # And no dangling symlink (or anything else) was ever created in
+        # out_dir for the typo'd entry.
+        assert [p.name for p in out.iterdir()] == ["pre-existing.txt"]
+
+    def test_multiple_missing_files_collected_together(self, tmp_path: Path) -> None:
+        """A plan with several typos is fixed in one pass — all missing
+        entries are reported together, not just the first (mirrors
+        StagingResult.missing for the manifest layout)."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+        assert len(plan["deals"]) >= 2
+        plan["deals"][0]["files"][0]["path"] = "doc_TYPO_1.rtf"
+        plan["deals"][1]["files"][0]["path"] = "doc_TYPO_2.rtf"
+
+        with pytest.raises(ValueError, match=r"2 plan file\(s\) not found") as exc_info:
+            execute_staging_plan(plan, scrambled, tmp_path / "out")
+
+        message = str(exc_info.value)
+        assert "doc_TYPO_1.rtf" in message
+        assert "doc_TYPO_2.rtf" in message
+
+    def test_missing_file_raises_in_copy_mode_too(self, tmp_path: Path) -> None:
+        """The check runs regardless of placement mode — copy_files=True must
+        not bypass it and fall through to shutil.copy2's unhandled
+        FileNotFoundError."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+        plan["deals"][0]["files"][0]["path"] = "doc_TYPO.rtf"
+
+        with pytest.raises(ValueError, match=r"1 plan file\(s\) not found"):
+            execute_staging_plan(plan, scrambled, tmp_path / "out", copy_files=True)
+
+    def test_dangling_symlink_path_treated_as_missing(self, tmp_path: Path) -> None:
+        """A path that IS present in src_dir but is itself a dangling symlink
+        (broken --plan re-run after the underlying file moved/was deleted)
+        must be treated the same as a typo — is_file() is False for it."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+        target_name = plan["deals"][0]["files"][0]["path"]
+        target = scrambled / target_name
+        target.unlink()
+        target.symlink_to(scrambled / "does-not-exist.rtf")
+
+        with pytest.raises(ValueError, match=r"1 plan file\(s\) not found"):
+            execute_staging_plan(plan, scrambled, tmp_path / "out")
+
+    def test_valid_plan_unaffected_by_missing_file_check(self, tmp_path: Path) -> None:
+        """Sanity check: the new check doesn't reject well-formed plans."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        plan = build_staging_plan(scrambled)
+
+        result = execute_staging_plan(plan, scrambled, tmp_path / "out")
+        assert result.agreement_count == 2
+        assert result.staged_count == 3
+
+
 class TestStagePlanCliErrors:
     """Required verification (issue #45): `stage --plan` on a malformed plan
     exits 1 with a human-readable ERROR line on stderr, no unhandled
@@ -579,6 +670,13 @@ class TestStagePlanCliErrors:
         assert (out / "deal-prior" / "01__prior.rtf").read_text(
             encoding="utf-8"
         ) == "prior staged content"
+        # No new entries (e.g. a deal directory for a typo'd plan path) were
+        # added to out_dir by the failed run.
+        assert {p.name for p in out.iterdir()} == {
+            _STAGING_MARKER,
+            "staging_plan.json",
+            "deal-prior",
+        }
 
     def _assert_no_unhandled_exception(self, result: Result) -> None:
         # CliRunner.invoke stores whatever exception propagated out of the
@@ -708,3 +806,31 @@ class TestStagePlanCliErrors:
         assert (out / "deal-prior" / "01__prior.rtf").read_text(
             encoding="utf-8"
         ) == "prior staged content"
+
+    def test_typo_path_exits_cleanly_no_dangling_symlink(self, tmp_path: Path) -> None:
+        """Required verification (issue #52): a typo'd plan path must exit 1
+        with a located ERROR, never print 'staged : N version(s)', and must
+        not leave a dangling symlink or partially-staged out_dir behind."""
+        scrambled = tmp_path / "scrambled"
+        _scrambled_corpus(scrambled)
+        out = self._preexisting_staging_out(tmp_path)
+
+        plan = build_staging_plan(scrambled)
+        deal_id = plan["deals"][0]["deal_id"]
+        plan["deals"][0]["files"][0]["path"] = "doc_TYPO.rtf"
+        bad_plan = tmp_path / "bad.json"
+        bad_plan.write_text(json.dumps(plan), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["stage", str(scrambled), "--out", str(out), "--plan", str(bad_plan)]
+        )
+
+        assert result.exit_code == 1, result.output
+        self._assert_no_unhandled_exception(result)
+        assert "ERROR" in result.stderr
+        assert "not found under" in result.stderr
+        assert deal_id in result.stderr
+        assert "doc_TYPO.rtf" in result.stderr
+        assert "staged :" not in result.output
+        self._assert_untouched(out)
