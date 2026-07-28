@@ -470,6 +470,26 @@ taxonomy: taxonomy.yaml
         load_config(path)
 
 
+def test_template_non_string_raises_config_error(tmp_path: Path) -> None:
+    """Issue #74: a YAML scalar (e.g. an int) for baseline.template must raise
+    ConfigError, not a raw TypeError from the Path join."""
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test"
+baseline:
+  template: 2023
+taxonomy: taxonomy.yaml
+""",
+    )
+    with pytest.raises(ConfigError, match="baseline.template must be a path string or null"):
+        load_config(path)
+
+
 def test_agreement_type_not_mapping_raises(tmp_path: Path) -> None:
     """NB-3: agreement_type must be a mapping."""
     tax = tmp_path / "taxonomy.yaml"

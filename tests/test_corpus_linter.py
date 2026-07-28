@@ -426,6 +426,28 @@ def test_config_template_not_found_returns_error(tmp_path: Path) -> None:
     assert any(i.code == "CONFIG_TEMPLATE_NOT_FOUND" for i in report.errors())
 
 
+def test_config_template_non_string_returns_error(tmp_path: Path) -> None:
+    """Issue #74: a YAML scalar (e.g. an int) for baseline.template must be
+    reported as a diagnostic, not crash the linter with a raw TypeError."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg_path = tmp_path / "playbook.config.yaml"
+    cfg_path.write_text(
+        yaml.dump(
+            {
+                "agreement_type": {"id": "fictional-agreement", "name": "Fictional Agreement"},
+                "taxonomy": str(tax),
+                "baseline": {"template": 2023},
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = lint_corpus(corpus, config_path=cfg_path)
+    assert any(i.code == "CONFIG_TEMPLATE_INVALID" for i in report.errors())
+
+
 def test_config_segmentation_llm_no_credentials_returns_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -398,6 +398,8 @@ def load_config(path: Path) -> EngineConfig:
     if template_val is None:
         baseline = BaselineConfig(has_canonical_template=False, template_path=None)
     else:
+        if not isinstance(template_val, str) or not template_val:
+            raise ConfigError("baseline.template must be a path string or null")
         tpl_path = (base_dir / template_val).resolve()
         if not tpl_path.is_file():
             raise ConfigError(f"baseline.template not found (or is not a file): {tpl_path}")

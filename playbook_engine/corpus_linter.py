@@ -369,7 +369,14 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
     # baseline template (optional)
     bl = raw.get("baseline", {})
     template_val = bl.get("template") if isinstance(bl, dict) else None
-    if template_val:
+    if template_val and not isinstance(template_val, str):
+        report.add(
+            "error",
+            "CONFIG_TEMPLATE_INVALID",
+            f"baseline.template must be a path string or null, got {type(template_val).__name__}",
+            config_path,
+        )
+    elif template_val:
         tpl_path = (config_path.parent / template_val).resolve()
         if not tpl_path.is_file():
             report.add(
