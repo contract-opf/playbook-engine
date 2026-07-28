@@ -177,9 +177,12 @@ def render_prompt(doc: dict[str, Any]) -> str:
         )
         out.append("")
         for inv in invariants:
-            rationale = inv.get("rationale")
-            suffix = f" ({rationale})" if rationale else ""
-            out.append(f"- [{inv.get('id', '?')}] {inv.get('statement', '?')}{suffix}")
+            if isinstance(inv, dict):
+                rationale = inv.get("rationale")
+                suffix = f" ({rationale})" if rationale else ""
+                out.append(f"- [{inv.get('id', '?')}] {inv.get('statement', '?')}{suffix}")
+            else:
+                out.append(f"- {inv}")
     else:
         out.append(_NO_INVARIANTS_MARKER)
     out.append("")
