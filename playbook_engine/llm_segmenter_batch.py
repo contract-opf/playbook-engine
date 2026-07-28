@@ -251,6 +251,7 @@ def _build_batch_request(
     taxonomy_ids: list[str],
     model: str,
     max_tokens: int,
+    effort: str,
 ) -> dict[str, Any]:
     """Build one ``Request(custom_id=..., params=...)`` dict for the batch.
 
@@ -270,7 +271,7 @@ def _build_batch_request(
             "max_tokens": max_tokens,
             "thinking": {"type": "adaptive"},
             "output_config": {
-                "effort": "high",
+                "effort": effort,
                 "format": {"type": "json_schema", "schema": schema},
             },
             "system": [
@@ -406,7 +407,13 @@ def segment_documents_batch(
         return resolved
 
     requests = [
-        _build_batch_request(item, taxonomy_ids=taxonomy_ids, model=model, max_tokens=max_tokens)
+        _build_batch_request(
+            item,
+            taxonomy_ids=taxonomy_ids,
+            model=model,
+            max_tokens=max_tokens,
+            effort=effort,
+        )
         for item in to_submit
     ]
     batch = client.messages.batches.create(requests=requests)

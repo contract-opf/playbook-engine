@@ -302,6 +302,25 @@ class TestSegmentDocumentsBatch:
         assert params["output_config"]["format"]["type"] == "json_schema"
         assert "[a0] Indemnification heading" in params["messages"][0]["content"]
 
+    def test_request_effort_matches_argument_not_hardcoded(self) -> None:
+        """issue #61: output_config.effort must reflect the caller's `effort`
+        argument (it's already part of the cache key — see AC-2 above), not a
+        hardcoded "high" regardless of what's requested."""
+        batches = _FakeBatchesResource({"doc-a": _seg_response_text()})
+        client = _FakeClient(batches)
+        items = [SegmentationBatchItem("doc-a", "text a", _blocks("a"))]
+
+        segment_documents_batch(
+            items,
+            taxonomy_ids=["indemnification"],
+            client=client,
+            effort="medium",
+            poll_interval_s=0,
+        )
+
+        requests = batches.create_calls[0]["requests"]
+        assert requests[0]["params"]["output_config"]["effort"] == "medium"
+
     def test_non_succeeded_result_raises(self) -> None:
         batches = _FakeBatchesResource({"doc-a": ("errored", "rate limited")})
         client = _FakeClient(batches)
