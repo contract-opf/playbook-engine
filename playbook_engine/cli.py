@@ -1212,13 +1212,18 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     ),
 )
 @click.option(
+    "--from-plan",
     "--plan",
     "plan_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
     help=(
         "Execute a staging_plan.json previously written by --plan-only "
-        "(optionally hand/skill-edited) instead of detecting the layout."
+        "(optionally hand/skill-edited) instead of detecting the layout. "
+        "Preferred spelling is --from-plan; --plan is accepted as a "
+        "deprecated alias for one release (issue #76 — on `judge`, --plan "
+        "means dry-run/preview instead, so the same flag name carried "
+        "opposite risk profiles on sibling subcommands)."
     ),
 )
 def stage_cmd(
@@ -1240,7 +1245,8 @@ def stage_cmd(
     trees, no per-agreement subfolders) staging refuses to guess; run with
     ``--plan-only`` first to assemble a ``staging_plan.json`` proposal from
     file contents/metadata (issue #186), review/edit it, then re-run with
-    ``--plan staging_plan.json`` to execute it.
+    ``--from-plan staging_plan.json`` (``--plan`` also accepted, deprecated)
+    to execute it.
 
     Writes only to the output directory (default:
     ~/.cache/playbook-engine/staging/<name>, a user-owned cache dir rather
@@ -1307,7 +1313,8 @@ def stage_cmd(
             f"{len(plan['unassigned'])} unassigned file(s)"
         )
         click.secho(
-            f"OK  wrote {plan_file} — review/edit, then run `playbook stage --plan {plan_file}`",
+            f"OK  wrote {plan_file} — review/edit, then run "
+            f"`playbook stage --from-plan {plan_file}`",
             fg="green",
         )
         return
@@ -1350,13 +1357,16 @@ def stage_cmd(
     help="Output directory (default: <corpus_dir>/../out).",
 )
 @click.option(
+    "--plan-only",
     "--plan",
     "plan_only",
     is_flag=True,
     default=False,
     help=(
         "Print deduped pending counts by kind and a rough token estimate, then exit "
-        "without writing observations.jsonl."
+        "without writing observations.jsonl. Preferred spelling is --plan-only "
+        "(matches `stage --plan-only`'s preview meaning); --plan is accepted as "
+        "an alias (issue #76)."
     ),
 )
 @click.option(

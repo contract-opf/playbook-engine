@@ -57,7 +57,7 @@ Before spending any judgment budget:
 ## Phase B — execute
 
 Carry out the plan from Phase A. Checkpoint after `mine` and report backbone
-health before spending judgment effort. Use `playbook judge --plan` to
+health before spending judgment effort. Use `playbook judge --plan-only` to
 estimate token cost and get human go/no-go before a full-corpus judgment pass;
 consider a `--subset` trial first. Produce the final playbook, run `playbook
 validate`, and render the inspection/report outputs for human review.

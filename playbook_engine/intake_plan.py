@@ -603,7 +603,7 @@ def _validate_plan(plan: dict[str, Any], src_dir: Path) -> None:
         if deal_id in _RESERVED_OUT_DIR_NAMES:
             raise ValueError(
                 f"deal {i}: 'deal_id' {deal_id!r} collides with a reserved output "
-                f"filename ({sorted(_RESERVED_OUT_DIR_NAMES)!r}) that stage --plan "
+                f"filename ({sorted(_RESERVED_OUT_DIR_NAMES)!r}) that stage --from-plan "
                 "writes directly into out_dir"
             )
         if deal_id in seen_deal_ids:
