@@ -8,6 +8,7 @@ fictitious identifiers ("Alpha Corp", "Beta Ltd") only.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -639,6 +640,66 @@ def test_extraction_cache_miss_for_changed_content(tmp_path: Path) -> None:
     assert cache.get(path) is None, "changed content must not replay the old entry"
     second_text, _, _ = extract_blocks(path, cache=cache)
     assert second_text != first_text
+
+
+def test_extraction_cache_put_omits_per_block_text(tmp_path: Path) -> None:
+    """``put()`` must not persist per-block ``"text"`` (issue #67): it is fully
+    determined by ``canonical_text[char_span]``, so storing it duplicated every
+    document's text in the cache entry. ``get()`` must still round-trip the
+    original block text, reconstructed from canonical_text/char_span."""
+    path = _simple_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    canonical_text, blocks, extractor = extract_blocks(path, cache=cache)
+
+    record = json.loads(cache_path.read_text().splitlines()[0])
+    stored_blocks = record["verdict"]["blocks"]
+    assert stored_blocks, "fixture must produce at least one block"
+    for b in stored_blocks:
+        assert "text" not in b, "per-block text must not be serialized (issue #67)"
+
+    cached = cache.get(path)
+    assert cached is not None
+    cached_text, cached_blocks, cached_extractor = cached
+    assert cached_text == canonical_text
+    assert cached_extractor == extractor
+    assert [b.text for b in cached_blocks] == [b.text for b in blocks]
+    assert [b.char_span for b in cached_blocks] == [b.char_span for b in blocks]
+
+
+def test_extraction_cache_get_honors_stored_text_for_pre_fix_entries(tmp_path: Path) -> None:
+    """A cache entry written by the pre-#67 ``put()`` (per-block ``"text"``
+    present) must still load via the ``b.get("text")`` fallback.
+
+    The stored ``"text"`` is deliberately made to differ from what
+    ``canonical_text[char_span]`` would produce, so this test fails if a
+    future change drops the fallback and always reconstructs from the span
+    instead of preferring an already-stored value.
+    """
+    path = _simple_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    canonical_text = "Alpha Corp shall indemnify Beta Ltd for direct damages."
+    legacy_value = {
+        "canonical_text": canonical_text,
+        "blocks": [
+            {
+                "block_id": "b0",
+                "page": 0,
+                "char_span": [0, len(canonical_text)],
+                "text": "STORED LEGACY TEXT",  # deliberately != canonical_text[0:len]
+            }
+        ],
+        "extractor": "legacy",
+    }
+    cache._store.put(extraction._extraction_cache_payload(path), legacy_value)
+
+    cached = cache.get(path)
+    assert cached is not None
+    _, cached_blocks, _ = cached
+    assert cached_blocks[0].text == "STORED LEGACY TEXT"
 
 
 # ---------------------------------------------------------------------------
