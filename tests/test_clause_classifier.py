@@ -15,6 +15,9 @@ from playbook_engine.clause_classifier import (
     ClassificationHint,
     ClassificationJudge,
     ClauseClassification,
+    _build_label_index,
+    _build_label_tokens,
+    _fast_classify,
     classify_tree,
 )
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
@@ -655,3 +658,102 @@ def test_above_auto_classify_threshold_not_sent_to_judge() -> None:
     assert results[0].classification.taxonomy_id == "limitation_of_liability"
     assert results[0].classification.basis in ("exact_match", "heading_similarity")
     assert results[0].classification.confidence >= AUTO_CLASSIFY_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# Issue #66: precompute taxonomy-label token sets in the classify_tree fast path
+#
+# _fast_classify's Jaccard loop used to call _tokens(entry.label) once per
+# (node, entry) pair even though entry labels never change within a run.
+# classify_tree now precomputes label_tokens once and threads it through.
+# ---------------------------------------------------------------------------
+
+
+def test_fast_classify_direct_call_without_label_tokens_still_works() -> None:
+    """Direct callers that invoke _fast_classify without the new label_tokens
+    kwarg (e.g. pre-#66 test code) must still get correct results via the
+    lazy-compute fallback."""
+    taxonomy = _taxonomy(_entry("limitation_of_liability", "Limitation of Liability"))
+    eligible = [e for e in taxonomy.entries if e.is_classifier_eligible]
+    label_index = _build_label_index(eligible)
+    node = _node("1", "Limitation on Liability", "Cap on damages.")
+
+    cls, hint = _fast_classify(node, eligible, label_index)
+
+    assert cls is not None
+    assert cls.taxonomy_id == "limitation_of_liability"
+    assert cls.basis == "heading_similarity"
+    assert hint is None
+
+
+def test_fast_classify_with_precomputed_label_tokens_matches_lazy_path() -> None:
+    """Passing precomputed label_tokens must produce byte-identical results to
+    the lazy fallback — the precompute is purely a performance change."""
+    taxonomy = _taxonomy(_entry("limitation_of_liability", "Limitation of Liability"))
+    eligible = [e for e in taxonomy.entries if e.is_classifier_eligible]
+    label_index = _build_label_index(eligible)
+    label_tokens = _build_label_tokens(eligible)
+    node = _node("1", "Limitation on Liability", "Cap on damages.")
+
+    cls_lazy, hint_lazy = _fast_classify(node, eligible, label_index)
+    cls_precomputed, hint_precomputed = _fast_classify(
+        node, eligible, label_index, label_tokens=label_tokens
+    )
+
+    assert cls_precomputed == cls_lazy
+    assert hint_precomputed == hint_lazy
+
+
+def test_label_tokens_precomputed_once_per_classify_tree_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for issue #66: entry.label must be tokenized once per
+    classify_tree call, not once per (node, entry) pair.
+
+    Before the fix, _fast_classify called _tokens(entry.label) inside its
+    per-node Jaccard loop, so the number of calls scaled with
+    nodes x entries. After the fix, classify_tree precomputes label_tokens
+    once via _build_label_tokens and threads it through every _fast_classify
+    call, so entry-label tokenization no longer scales with node count.
+    """
+    import playbook_engine.clause_classifier as cc
+
+    real_tokens = cc._tokens
+    call_count = 0
+
+    def counting_tokens(text: str) -> frozenset[str]:
+        nonlocal call_count
+        call_count += 1
+        return real_tokens(text)
+
+    monkeypatch.setattr(cc, "_tokens", counting_tokens)
+
+    # Disjoint vocabularies (entryword* vs headword*, distinct index per
+    # entry/node) guarantee zero token overlap for every (node, entry) pair,
+    # so every node reaches the Jaccard loop and lands on "unclassified"
+    # (best_sim = 0.0 < AMBIGUITY_THRESHOLD) without needing the judge.
+    n_entries = 5
+    n_nodes = 4
+    taxonomy = _taxonomy(
+        *[_entry(f"tax_{i}", f"entryword{i}a entryword{i}b") for i in range(n_entries)]
+    )
+    tree = _tree(*[_node(str(i), f"headword{i}a headword{i}b", "text") for i in range(n_nodes)])
+
+    results = classify_tree(tree, taxonomy, MockClassificationJudge())
+
+    # Sanity: confirm every node actually reached (and exited) the Jaccard
+    # loop rather than short-circuiting before it.
+    assert len(results) == n_nodes
+    for r in results:
+        assert r.classification.basis == "unclassified"
+        assert r.classification.taxonomy_id is None
+
+    # Entry labels tokenized once total (by _build_label_tokens, called once
+    # from classify_tree), plus once per node heading (h_tokens) — NOT once
+    # per (node, entry) pair. Pre-fix this would be n_nodes + n_nodes *
+    # n_entries = 4 + 20 = 24; post-fix it is n_entries + n_nodes = 9.
+    assert call_count == n_entries + n_nodes, (
+        f"expected {n_entries + n_nodes} _tokens calls (label tokenized once "
+        f"each + heading tokenized once per node), got {call_count} — "
+        "entry.label is likely being re-tokenized per node again"
+    )

@@ -282,6 +282,7 @@ def classify_tree(
     eligible = _eligible_entries(taxonomy)
     eligible_by_id = {e.id: e for e in eligible}
     label_index = _build_label_index(eligible)
+    label_tokens = _build_label_tokens(eligible)
 
     nodes = list(tree.all_nodes())
     results: list[ClassifiedClause | None] = [None] * len(nodes)
@@ -297,6 +298,7 @@ def classify_tree(
             label_index,
             ambiguity_threshold=ambiguity_threshold,
             auto_classify_threshold=auto_classify_threshold,
+            label_tokens=label_tokens,
         )
         if cls is not None:
             results[i] = ClassifiedClause(node=node, classification=cls)
@@ -368,6 +370,20 @@ def _build_label_index(
     return {_normalize(e.label): e.id for e in entries}
 
 
+def _build_label_tokens(
+    entries: list[TaxonomyEntry],
+) -> list[tuple[TaxonomyEntry, frozenset[str]]]:
+    """Precompute ``(entry, _tokens(entry.label))`` pairs once per classify_tree
+    call (issue #66).
+
+    ``entry.label`` is constant for the entire run, so re-tokenizing it (two
+    regex passes + split + frozenset) inside the per-node Jaccard loop in
+    ``_fast_classify`` is pure waste: 400 headed nodes x 41 entries x 100
+    versions measured at ~14s of avoidable work per mine.
+    """
+    return [(e, _tokens(e.label)) for e in entries]
+
+
 def _normalize(text: str) -> str:
     """Lowercase, strip punctuation, collapse whitespace."""
     s = text.lower()
@@ -395,6 +411,7 @@ def _fast_classify(
     *,
     ambiguity_threshold: float = AMBIGUITY_THRESHOLD,
     auto_classify_threshold: float = AUTO_CLASSIFY_THRESHOLD,
+    label_tokens: list[tuple[TaxonomyEntry, frozenset[str]]] | None = None,
 ) -> tuple[ClauseClassification | None, ClassificationHint | None]:
     """Attempt deterministic classification.
 
@@ -404,6 +421,14 @@ def _fast_classify(
     - ``(None, ClassificationHint)``  — in ambiguity band; queue for judge with hint.
     - ``(None, None)``                — no heading tokens or text-only; queue for judge
                                         without a hint (Jaccard not applicable).
+
+    Args:
+        label_tokens: Precomputed ``(entry, _tokens(entry.label))`` pairs for
+                      *eligible*, built once per ``classify_tree`` call so the
+                      Jaccard loop below never re-tokenizes a taxonomy label
+                      (issue #66). Computed lazily from *eligible* when not
+                      supplied, so direct callers (e.g. tests) keep working
+                      unchanged.
     """
     heading = (node.heading or "").strip()
     text = (node.text or "").strip()
@@ -439,10 +464,13 @@ def _fast_classify(
     if not h_tokens:
         return (None, None)
 
+    if label_tokens is None:
+        label_tokens = _build_label_tokens(eligible)
+
     best_id: str | None = None
     best_sim: float = 0.0
-    for entry in eligible:
-        sim = _jaccard(h_tokens, _tokens(entry.label))
+    for entry, entry_tokens in label_tokens:
+        sim = _jaccard(h_tokens, entry_tokens)
         if sim > best_sim:
             best_sim = sim
             best_id = entry.id
