@@ -837,6 +837,26 @@ def test_backstop_and_redaction_cover_dict_keys() -> None:
     assert keys == ["deal-somewhere-[redacted]-773a"]
 
 
+def test_redact_terms_key_collision_raises_instead_of_dropping_entry() -> None:
+    """Two document_id-slug keys that both fully redact to '[redacted]' must
+    not silently collapse into one entry with a lost count (issue #71)."""
+    doc = _make_doc()
+    doc["corpus"]["stats"] = {
+        "observations_by_document": {"acme-msa": 3, "acme-nda": 2},
+    }
+
+    with pytest.raises(PublishError, match="acme-msa") as exc_info:
+        publish_playbook(
+            doc,
+            redaction_judge=_NeverCallJudge(),
+            verify_judge=_NeverCallJudge(),
+            known_entity_names=[],
+            published_at="2026-07-27T00:00:00Z",
+            redact_terms=["acme-msa", "acme-nda"],
+        )
+    assert "acme-nda" in str(exc_info.value)
+
+
 def test_redact_terms_with_punctuation_match_normalized_text() -> None:
     """A term written with punctuation ('Kansas City, Missouri') must match
     however the extraction rendered it (double spaces, no comma, case)."""

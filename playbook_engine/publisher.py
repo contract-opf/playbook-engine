@@ -407,12 +407,22 @@ def _transform_all_strings(node: Any, fn: Any, *, include_keys: bool = False) ->
     if isinstance(node, str):
         return fn(node)
     if isinstance(node, dict):
-        return {
-            (fn(k) if include_keys and isinstance(k, str) else k): _transform_all_strings(
-                v, fn, include_keys=include_keys
-            )
-            for k, v in node.items()
-        }
+        out: dict[Any, Any] = {}
+        originals: dict[Any, Any] = {}
+        for k, v in node.items():
+            new_key = fn(k) if include_keys and isinstance(k, str) else k
+            if new_key in originals and originals[new_key] != k:
+                prior_original = originals[new_key]
+                raise PublishError(
+                    "publish blocked: redact-term rewriting collapsed distinct keys "
+                    f"{prior_original!r} and {k!r} onto the same transformed key "
+                    f"{new_key!r} — this would silently drop the {prior_original!r} "
+                    "entry from the published document. Use distinct redact terms/"
+                    "placeholders for each, or register the entities instead."
+                )
+            out[new_key] = _transform_all_strings(v, fn, include_keys=include_keys)
+            originals[new_key] = k
+        return out
     if isinstance(node, list):
         return [_transform_all_strings(item, fn, include_keys=include_keys) for item in node]
     return node
