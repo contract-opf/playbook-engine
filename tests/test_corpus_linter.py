@@ -495,6 +495,44 @@ def test_config_valid_full_ok(tmp_path: Path) -> None:
     assert not report.has_warnings
 
 
+def test_config_typoed_provenance_key_flagged(tmp_path: Path) -> None:
+    """A misspelled top-level ``provenence:`` (issue #53) must be flagged as
+    a lint error, not reported as "OK" while pseudonymization is silently
+    disabled.
+    """
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax)
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    data["provenence"] = {
+        "our_party_aliases": ["FixtureCorp"],
+        "known_entities": ["State University"],
+    }
+    cfg.write_text(yaml.dump(data), encoding="utf-8")
+    report = lint_corpus(corpus, config_path=cfg)
+    unknown_key_items = [i for i in report.errors() if i.code == "CONFIG_UNKNOWN_KEY"]
+    assert unknown_key_items
+    assert "provenence" in unknown_key_items[0].message
+    assert "provenance" in unknown_key_items[0].message
+
+
+def test_config_typoed_segmentation_key_flagged(tmp_path: Path) -> None:
+    """A misspelled ``segmentation:`` sub-key must be flagged rather than
+    silently leaving ``llm`` at its False default."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"lm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    unknown_key_items = [i for i in report.errors() if i.code == "CONFIG_UNKNOWN_KEY"]
+    assert unknown_key_items
+    assert "segmentation.lm" in unknown_key_items[0].message
+    assert "segmentation.llm" in unknown_key_items[0].message
+
+
 def test_no_config_path_skips_config_checks(tmp_path: Path) -> None:
     """When config_path is None, no CONFIG_* items are produced."""
     corpus = tmp_path / "corpus"

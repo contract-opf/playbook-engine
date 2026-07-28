@@ -560,3 +560,104 @@ def test_shipped_affiliation_config_survives_being_copied_elsewhere(tmp_path: Pa
 
     assert cfg.taxonomy_path.exists()
     assert cfg.taxonomy_path == TAXONOMY_PATH.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Unknown/typo'd config keys (issue #53)
+# ---------------------------------------------------------------------------
+
+
+def test_typoed_top_level_provenance_key_raises(tmp_path: Path) -> None:
+    """A misspelled top-level ``provenence:`` (typo for ``provenance``) must
+    be rejected outright, not silently ignored — silently ignoring it would
+    leave known_entities=[] and disable pseudonymization with no warning.
+    """
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+provenence:
+  our_party_aliases: ["FixtureCorp"]
+  known_entities: ["State University"]
+""",
+    )
+    with pytest.raises(ConfigError, match="provenence.*did you mean provenance"):
+        load_config(path)
+
+
+def test_typoed_segmentation_llm_key_raises(tmp_path: Path) -> None:
+    """A renamed/typo'd ``segmentation.llm-first`` (or similar) must be
+    rejected rather than silently leaving ``llm`` at its False default.
+    """
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+segmentation:
+  lm: true
+""",
+    )
+    with pytest.raises(ConfigError, match="llm"):
+        load_config(path)
+
+
+def test_unknown_top_level_key_raises(tmp_path: Path) -> None:
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+totally_unrelated_key: true
+""",
+    )
+    with pytest.raises(ConfigError, match="unknown config key"):
+        load_config(path)
+
+
+def test_unknown_nested_key_in_classification_raises(tmp_path: Path) -> None:
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+classification:
+  ambiguity_thresholds: 0.5
+""",
+    )
+    with pytest.raises(
+        ConfigError, match="classification.ambiguity_thresholds.*classification.ambiguity_threshold"
+    ):
+        load_config(path)
+
+
+def test_existing_fixture_configs_still_load_with_strict_key_checking() -> None:
+    """The shipped example configs (every key they use is a known key) must
+    keep loading cleanly now that unknown keys are rejected."""
+    cfg = load_config(AFFILIATION_CONFIG)
+    assert isinstance(cfg, EngineConfig)
