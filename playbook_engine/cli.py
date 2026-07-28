@@ -685,9 +685,10 @@ def publish_cmd(
             f"WARNING: {len(report.leaked)} residue finding(s) published anyway "
             "(--accept-residue-risk):",
             fg="yellow",
+            err=True,
         )
         for finding in report.leaked:
-            click.echo(f"  {finding.path}: {finding.rationale}")
+            click.echo(f"  {finding.path}: {finding.rationale}", err=True)
 
     # Proper-noun residue report (issue #211): the reviewer's checkable list of
     # every name-shaped string surviving in the output. Advisory — written
@@ -710,11 +711,12 @@ def publish_cmd(
             f"residue report: {n} proper-noun-like string(s) remain — review "
             f"{residue_path} before publishing (confirm none is a counterparty).",
             fg="yellow",
+            err=True,
         )
         for pn in report.proper_noun_findings[:10]:
-            click.echo(f"  {pn.text}  (×{pn.count})")
+            click.echo(f"  {pn.text}  (×{pn.count})", err=True)
         if n > 10:
-            click.echo(f"  … and {n - 10} more in {residue_path.name}")
+            click.echo(f"  … and {n - 10} more in {residue_path.name}", err=True)
     else:
         click.secho(
             f"residue report: no proper-noun-like strings remain (see {residue_path}).",
@@ -1123,7 +1125,7 @@ def lint_corpus_cmd(corpus_dir: Path, config_path: Path | None) -> None:
         if item.level == "ok":
             click.secho(f"  OK   {item.message}", fg="green")
         elif item.level == "warning":
-            click.secho(f"  WARN {item.message}", fg="yellow")
+            click.secho(f"  WARN {item.message}", fg="yellow", err=True)
         else:
             click.secho(f"  ERR  {item.message}", fg="red", err=True)
 
@@ -1624,6 +1626,7 @@ def judge_cmd(
                 "the same verdict will loop forever; fix the verdict (see "
                 "REFERENCE.md enum values) and judge-apply again",
                 fg="yellow",
+                err=True,
             )
     else:
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
@@ -1848,6 +1851,7 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
                 click.secho(
                     f"  WARNING: {doc_dir.name}/{path.name}: extraction failed ({exc}) — skipped",
                     fg="yellow",
+                    err=True,
                 )
                 continue
             if cache.get(canonical_text, model=AGENT_SEGMENTER_MODEL) is not None:
@@ -2245,6 +2249,7 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
             "  WARNING: digest exceeds the ~40K-token target — consumers may "
             "need to trim before prompting",
             fg="yellow",
+            err=True,
         )
 
 

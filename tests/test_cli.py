@@ -1588,3 +1588,107 @@ def test_publish_generates_second_precision_published_at(tmp_path: Path) -> None
     assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$", published_at), (
         f"published_at must have second precision, no microseconds: {published_at!r}"
     )
+
+
+def test_publish_proper_noun_residue_warning_goes_to_stderr(tmp_path: Path) -> None:
+    """The 'residue report ... review before publishing' warning must land on
+    stderr, not stdout (issue #60) — a scripted caller capturing stderr for
+    problems would otherwise miss it entirely while `wrote <path>` prints
+    happily to stdout.
+
+    Uses a real (unknown, non-institution) personal name-shaped string in
+    free text, exactly like ``test_publish_report_carries_proper_noun_findings``
+    in test_publish.py — advisory, does not block, no LLM/monkeypatch needed.
+    """
+    doc = _minimal_publishable_doc()
+    doc["posture"]["system_prompt"] += " Dana Ashland reviewed this deal."
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    assert "Dana Ashland" in result.stderr
+    assert "residue report" in result.stderr
+    assert "review" in result.stderr
+    assert "residue report" not in result.stdout
+    assert f"wrote {out_path}" in result.stdout
+
+
+def test_publish_leaked_residue_warning_goes_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The '--accept-residue-risk' 'N residue finding(s) published anyway'
+    warning must land on stderr, not stdout (issue #60), while the `OK
+    <path>`-style result line stays on stdout.
+
+    ``publish``'s CLI command always wires stub judges (no LLM configured),
+    so a non-empty ``report.leaked`` can never occur through the real
+    judgment path — monkeypatch ``publish_playbook`` itself to return a
+    report with a leaked finding, isolating the assertion to the CLI's
+    stream-routing behavior (already covered elsewhere: the residue
+    detection logic itself, and accept_residue_risk gating, are tested in
+    test_publish.py without any CLI involvement).
+    """
+    import playbook_engine.publisher as publisher_module
+    from playbook_engine.export_profile import VerifyFinding
+    from playbook_engine.publisher import PublishReport
+
+    doc_path = _write_publishable_doc(tmp_path)
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    real_publish_playbook = publisher_module.publish_playbook
+
+    def _fake_publish_playbook(doc: dict, **kwargs: Any) -> PublishReport:
+        report = real_publish_playbook(doc, **kwargs)
+        leaked_finding = VerifyFinding(
+            path="posture.system_prompt",
+            leaked=True,
+            rationale="Synthetic leaked finding for stream-routing test.",
+            basis="stub",
+        )
+        return PublishReport(
+            doc=report.doc,
+            redaction_findings=report.redaction_findings,
+            verify_findings=(*report.verify_findings, leaked_finding),
+            leaked=(leaked_finding,),
+            proper_noun_findings=report.proper_noun_findings,
+        )
+
+    monkeypatch.setattr(publisher_module, "publish_playbook", _fake_publish_playbook)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+            "--accept-residue-risk",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    assert "residue finding(s) published anyway" in result.stderr
+    assert "posture.system_prompt" in result.stderr
+    assert "residue finding(s) published anyway" not in result.stdout
+    assert f"wrote {out_path}" in result.stdout
