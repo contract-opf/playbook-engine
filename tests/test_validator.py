@@ -290,6 +290,45 @@ def test_rollup_fallback_missing_citation_fails() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #72 regression — malformed (hand-edited/foreign) documents must
+# produce a ValidationResult with blocking errors, never raise.
+# ---------------------------------------------------------------------------
+
+
+def test_null_document_id_citation_and_missing_corpus_document_id_does_not_crash() -> None:
+    """A citation whose document_id is JSON null (not merely absent), combined
+    with a corpus document that itself lacks document_id, used to raise
+    AttributeError (ref.get("document_id", "").strip() on None) or KeyError
+    (_corpus_docs' d["document_id"]) instead of returning a ValidationResult."""
+    doc = _load("minimal_valid.json")
+    doc["clauses"][0]["observed_positions"][0]["example_ref"]["document_id"] = None
+    doc["corpus"]["documents"].append({})
+    result = validate_document(doc)
+    assert not result.ok
+    assert any(e.blocking for e in result.errors)
+
+
+def test_null_our_standard_text_does_not_crash() -> None:
+    """our_standard.text = null used to raise AttributeError on
+    std.get("text", "").strip() instead of reporting a blocking error."""
+    doc = _load("minimal_valid.json")
+    doc["clauses"][0]["our_standard"]["text"] = None
+    result = validate_document(doc)
+    assert not result.ok
+    assert any(e.blocking for e in result.errors)
+
+
+def test_v0_2_null_our_standard_text_does_not_crash() -> None:
+    """Same defect in the v0.2 evidence-wrapped citation walker
+    (_check_citations_v2)."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["evidence"]["clauses"][0]["our_standard"]["text"] = None
+    result = validate_document(doc)
+    assert not result.ok
+    assert any(e.blocking for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
 # OPF v0.2 — schema + validator dispatch on opf_version
 # ---------------------------------------------------------------------------
 
