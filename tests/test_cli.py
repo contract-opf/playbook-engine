@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -1557,3 +1558,33 @@ def test_publish_empty_registry_allowed_with_explicit_flag(tmp_path: Path) -> No
     assert result.exit_code == 0, f"expected success with explicit opt-out:\n{result.output}"
     assert "backstop is a NO-OP" in result.output
     assert out_path.exists()
+
+
+def test_publish_generates_second_precision_published_at(tmp_path: Path) -> None:
+    """publish's CLI-generated published_at matches the other engine timestamps
+    (posture interview, pipeline generated_at, curation pins), which all use
+    timespec="seconds" — no fractional-second component (issue #59)."""
+    doc_path = _write_publishable_doc(tmp_path)
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    published_doc = json.loads(out_path.read_text(encoding="utf-8"))
+    published_at = published_doc["x_publication"]["published_at"]
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$", published_at), (
+        f"published_at must have second precision, no microseconds: {published_at!r}"
+    )

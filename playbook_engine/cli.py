@@ -667,7 +667,7 @@ def publish_cmd(
             redaction_judge=_StubRedactionJudge(),
             verify_judge=_StubVerifyJudge(),
             known_entity_names=known_entity_names,
-            published_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            published_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
             party_label=party_label,
             counterparty_label=counterparty_label,
             keep_dates=keep_dates,
