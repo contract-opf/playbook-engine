@@ -20,9 +20,14 @@ This node never matches a numbered section but is preserved so no text is lost.
 
 char_span contract:
   ClauseNode.char_span and TrackedChange.char_span both use **document-level**
-  offsets: character positions in the document's full normalized text (all
-  paragraph texts joined with ``"\\n"``).  Deleted text is absent from the
-  normalized text, so TrackedChange.char_span is None for deletions.
+  offsets: character positions in the document's full normalized text — the
+  *kept* (non-blank) paragraph/table units, each stripped of leading and
+  trailing whitespace, joined with ``"\\n"``.  Blank paragraphs contribute
+  nothing (same convention as the PDF/RTF ingesters): they are excluded from
+  node.text, so they must also be excluded from the offset stream, or every
+  span after a blank paragraph would drift ahead by one character per blank
+  paragraph.  Deleted text is absent from the normalized text, so
+  TrackedChange.char_span is None for deletions.
 
 Tracked changes (side-channel — consumed by the tracked-changes overlay stage):
   - ``w:ins``: inserted text recorded with author, date, and char_span in the
@@ -107,12 +112,39 @@ class DocxIngesterError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+def _convert_tracked_span(
+    raw_span: tuple[int, int] | None,
+    strip_shift: int,
+    stripped_len: int,
+    doc_char_offset: int,
+) -> tuple[int, int] | None:
+    """Convert a paragraph-local tracked-change span to a document-absolute one.
+
+    ``raw_span`` is measured against the RAW paragraph text (including any
+    leading/trailing whitespace); the kept unit in the virtual normalized
+    text is ``para_text.strip()``, which is ``stripped_len`` characters long.
+    Shift the span left by ``strip_shift`` (the stripped leading whitespace)
+    and then clamp both ends to ``[0, stripped_len]`` so a tracked change
+    that runs into (or entirely within) trailing whitespace that was
+    stripped off never produces a span past the end of the kept unit —
+    which would otherwise send ``ClauseTree.resolve_span`` out of bounds.
+    """
+    if raw_span is None:
+        return None
+    start = raw_span[0] - strip_shift
+    end = raw_span[1] - strip_shift
+    end = max(0, min(end, stripped_len))
+    start = max(0, min(start, end))
+    return (doc_char_offset + start, doc_char_offset + end)
+
+
 def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
     """Parse a DOCX file into a ClauseTree + TrackedChanges side-channel.
 
     All char_span values (on both ClauseNode and TrackedChange) use
     document-level offsets: positions in the concatenated normalized text
-    (paragraphs joined with ``"\\n"``).
+    (kept, stripped paragraphs joined with ``"\\n"``; see the module
+    docstring's char_span contract for the full convention).
     """
     if not path.is_file():
         raise DocxIngesterError(f"DOCX file not found: {path}")
@@ -127,27 +159,48 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
 
     for block in _iter_body_blocks(doc):
         if isinstance(block, str):
-            # Flattened table text — treat as body
-            if block.strip():
-                builder.add_body(block, doc_char_offset)
-            doc_char_offset += len(block) + 1
+            # Flattened table text — treat as body. Empty/blank table blocks
+            # are excluded from the virtual normalized text entirely (see
+            # blank-paragraph handling below for why this matters).
+            stripped_block = block.strip()
+            if not stripped_block:
+                continue
+            builder.add_body(stripped_block, doc_char_offset)
+            doc_char_offset += len(stripped_block) + 1
             continue
 
         # Paragraph XML element
         p_elem = block
         para_text, para_raw_tracked = _extract_para_text(p_elem)
+        stripped_text = para_text.strip()
         level = _para_level(p_elem)
 
         # Detect explicit numbered prefix ("1.", "1.2.3)") when no style-derived level.
         # Depth is inferred from the count of dot-separated components.
-        if level is None and para_text.strip():
-            m = _NUM_PREFIX.match(para_text.strip())
+        if level is None and stripped_text:
+            m = _NUM_PREFIX.match(stripped_text)
             if m:
                 level = len(m.group(1).split("."))
 
-        if level is not None and para_text.strip():
-            clause_path, heading = _parse_clause_number(para_text.strip(), level, builder)
-            span = (doc_char_offset, doc_char_offset + len(para_text))
+        if not stripped_text:
+            # Blank paragraph: it contributes nothing to node.text, so it must
+            # also contribute nothing to the virtual normalized text —
+            # otherwise doc_char_offset drifts ahead of every char_span that
+            # follows (one char per blank paragraph). This matches the
+            # PDF/RTF ingesters' convention: the virtual text is exactly the
+            # kept (non-blank) units joined by "\n".
+            continue
+
+        # _extract_para_text's tracked-change spans are paragraph-local
+        # against the RAW para_text (including any leading whitespace, e.g. a
+        # tab-indented "\t(a) ..." line). Since the kept unit is the
+        # *stripped* text, shift those spans left by the stripped-off leading
+        # whitespace so they still land on the right characters.
+        strip_shift = len(para_text) - len(para_text.lstrip())
+
+        if level is not None:
+            clause_path, heading = _parse_clause_number(stripped_text, level, builder)
+            span = (doc_char_offset, doc_char_offset + len(stripped_text))
             builder.start_clause(level, clause_path, heading=heading, char_span=span)
             for rc in para_raw_tracked:
                 raw_tracked.append(
@@ -157,19 +210,15 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
                         date=rc["date"],
                         text=rc["text"],
                         clause_path=clause_path,
-                        # Convert paragraph-local span to document-absolute.
-                        char_span=(
-                            (
-                                doc_char_offset + rc["char_span"][0],
-                                doc_char_offset + rc["char_span"][1],
-                            )
-                            if rc["char_span"] is not None
-                            else None
+                        # Convert paragraph-local span to document-absolute,
+                        # clamped to the stripped (kept) unit.
+                        char_span=_convert_tracked_span(
+                            rc["char_span"], strip_shift, len(stripped_text), doc_char_offset
                         ),
                     )
                 )
-        elif para_text.strip():
-            builder.add_body(para_text, doc_char_offset)
+        else:
+            builder.add_body(stripped_text, doc_char_offset)
             for rc in para_raw_tracked:
                 raw_tracked.append(
                     _RawChange(
@@ -178,18 +227,13 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
                         date=rc["date"],
                         text=rc["text"],
                         clause_path=builder.current_path(),
-                        char_span=(
-                            (
-                                doc_char_offset + rc["char_span"][0],
-                                doc_char_offset + rc["char_span"][1],
-                            )
-                            if rc["char_span"] is not None
-                            else None
+                        char_span=_convert_tracked_span(
+                            rc["char_span"], strip_shift, len(stripped_text), doc_char_offset
                         ),
                     )
                 )
 
-        doc_char_offset += len(para_text) + 1
+        doc_char_offset += len(stripped_text) + 1
 
     tree = ClauseTree(
         document_id=document_id,
@@ -500,9 +544,19 @@ class _ClauseBuilder:
         """Append body text to the current clause.
 
         If no heading has been seen yet, creates a synthetic root node with
-        ``clause_path="0"`` at stack level 0 to collect pre-heading text.
-        The "0" path will not conflict with any real numbered clause because
-        real clause numbers start at 1.
+        ``clause_path="0"`` and ``heading=None`` at stack level 0 to collect
+        pre-heading text. A genuine "0."-numbered clause (e.g. "0. Preamble",
+        or a bare "0."/"0)" paragraph with no heading text of its own) can
+        also produce ``clause_path="0"`` and ``heading=None``, so those two
+        conditions are **necessary but not sufficient** to identify the
+        synthetic node on their own — callers must not drop them, but must
+        also layer an additional disambiguator on top. That disambiguator is
+        structural: this synthetic node's ``char_span`` is set below to cover
+        exactly its own first line of body text, whereas a genuine heading
+        node's ``char_span`` covers only its heading line — a caller can
+        narrow further, on top of ``clause_path == "0"`` and
+        ``heading is None``, by checking whether
+        ``char_span[1] - char_span[0] == len(text.split("\n", 1)[0])``.
         """
         if not self._stack:
             node = ClauseNode(

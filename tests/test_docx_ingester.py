@@ -11,6 +11,7 @@ authors (e.g. "Alice", "Bob") only.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from docx import Document
@@ -711,4 +712,122 @@ def test_char_span_length_matches_insertion_text(tmp_path: Path) -> None:
     start, end = carol_ins.char_span
     assert end - start == len(carol_ins.text), (
         f"char_span length {end - start} != text length {len(carol_ins.text)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #39 regression: TrackedChange.char_span against the virtual-text
+# contract (kept, stripped units joined by "\n")
+# ---------------------------------------------------------------------------
+
+
+def _insert_tracked_run(p: Any, *, author: str, date: str, text: str) -> None:
+    """Append a ``w:ins`` element (a tracked insertion run) to paragraph ``p``."""
+    ins_elem = etree.SubElement(p._p, _w("ins"))
+    ins_elem.set(_w("id"), "1")
+    ins_elem.set(_w("author"), author)
+    ins_elem.set(_w("date"), date)
+    r_ins = etree.SubElement(ins_elem, _w("r"))
+    t_ins = etree.SubElement(r_ins, _w("t"))
+    t_ins.text = text
+
+
+def test_tracked_span_after_blank_paragraph_resolves_correctly(tmp_path: Path) -> None:
+    """A blank paragraph preceding a tracked-change paragraph must not shift
+    that paragraph's tracked-change char_span (issue #39, finding 3a)."""
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph("")  # blank paragraph — contributes nothing to virtual text
+    p = doc.add_paragraph()
+    p.add_run("Party A shall deliver ")
+    _insert_tracked_run(p, author="Alice", date="2024-03-15T10:00:00Z", text="promptly")
+    path = tmp_path / "blank_then_tracked.docx"
+    doc.save(str(path))
+
+    result = ingest_docx(path, "d", "v1")
+    virtual_text = "Obligations" + "\n" + "Party A shall deliver promptly"
+    ins = next(c for c in result.tracked.changes if c.change_type == "insertion")
+    assert ins.char_span is not None
+    resolved = ClauseTree.resolve_span(virtual_text, ins.char_span)
+    assert resolved == ins.text, (
+        f"resolve_span returned {resolved!r} but insertion text is {ins.text!r}"
+    )
+
+
+def test_tracked_span_in_leading_whitespace_paragraph_resolves_correctly(
+    tmp_path: Path,
+) -> None:
+    """A leading-whitespace-indented tracked-change paragraph must have its
+    span shifted to match the stripped (kept) unit (issue #39, finding 3b)."""
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    p = doc.add_paragraph()
+    p.add_run("   Party A shall deliver ")
+    _insert_tracked_run(p, author="Alice", date="2024-03-15T10:00:00Z", text="promptly")
+    path = tmp_path / "indented_tracked.docx"
+    doc.save(str(path))
+
+    result = ingest_docx(path, "d", "v1")
+    virtual_text = "Obligations" + "\n" + "Party A shall deliver promptly"
+    ins = next(c for c in result.tracked.changes if c.change_type == "insertion")
+    assert ins.char_span is not None
+    resolved = ClauseTree.resolve_span(virtual_text, ins.char_span)
+    assert resolved == ins.text, (
+        f"resolve_span returned {resolved!r} but insertion text is {ins.text!r}"
+    )
+
+
+def test_tracked_span_with_trailing_whitespace_does_not_overrun_stripped_text(
+    tmp_path: Path,
+) -> None:
+    """An insertion with trailing whitespace at paragraph end must have its
+    span clamped to the stripped (kept) unit, not overrun it (issue #39,
+    finding 2). Before the fix, this span landed out of bounds for the
+    virtual text and ClauseTree.resolve_span() raised ClauseTreeError."""
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    p = doc.add_paragraph()
+    p.add_run("Party A shall deliver")
+    _insert_tracked_run(p, author="Alice", date="2024-03-15T10:00:00Z", text=" promptly   ")
+    path = tmp_path / "trailing_whitespace_tracked.docx"
+    doc.save(str(path))
+
+    result = ingest_docx(path, "d", "v1")
+    virtual_text = "Obligations" + "\n" + "Party A shall deliver promptly"
+    ins = next(c for c in result.tracked.changes if c.change_type == "insertion")
+    assert ins.char_span is not None
+    start, end = ins.char_span
+    assert end <= len(virtual_text), (
+        f"char_span end {end} overruns virtual text of length {len(virtual_text)}"
+    )
+    resolved = ClauseTree.resolve_span(virtual_text, ins.char_span)  # must not raise
+    assert resolved == ins.text.rstrip(), (
+        f"resolve_span returned {resolved!r} but expected the stripped insertion "
+        f"text {ins.text.rstrip()!r}"
+    )
+
+
+def test_tracked_span_after_empty_flattened_table_resolves_correctly(
+    tmp_path: Path,
+) -> None:
+    """An empty flattened table in the block stream must contribute nothing
+    to doc_char_offset, so a tracked-change span in a later paragraph still
+    resolves correctly (issue #39, finding 3d)."""
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    tbl = doc.add_table(rows=1, cols=1)
+    tbl.rows[0].cells[0].text = ""  # empty cell -> empty flattened table string
+    p = doc.add_paragraph()
+    p.add_run("Party A shall deliver ")
+    _insert_tracked_run(p, author="Alice", date="2024-03-15T10:00:00Z", text="promptly")
+    path = tmp_path / "empty_table_then_tracked.docx"
+    doc.save(str(path))
+
+    result = ingest_docx(path, "d", "v1")
+    virtual_text = "Obligations" + "\n" + "Party A shall deliver promptly"
+    ins = next(c for c in result.tracked.changes if c.change_type == "insertion")
+    assert ins.char_span is not None
+    resolved = ClauseTree.resolve_span(virtual_text, ins.char_span)
+    assert resolved == ins.text, (
+        f"resolve_span returned {resolved!r} but insertion text is {ins.text!r}"
     )
