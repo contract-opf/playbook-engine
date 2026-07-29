@@ -31,6 +31,7 @@ with canned judgments, from fresh clone to a validating playbook:
 ```sh
 python3 -m venv .venv && source .venv/bin/activate && make install
 playbook lint-corpus examples/judge-fixture/corpus --config examples/judge-fixture/config.yaml
+mkdir -p out/quickstart-demo
 playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canned-verdicts.jsonl
 playbook mine examples/judge-fixture/corpus --config examples/judge-fixture/config.yaml --out out/quickstart-demo
 playbook project out/quickstart-demo --config examples/judge-fixture/config.yaml

@@ -270,6 +270,44 @@ def test_segment_apply_rejects_malformed_line(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #55: segment-apply against a typo'd/nonexistent OUT_DIR must fail
+# fast instead of silently creating a fresh, unreachable cache there.
+# ---------------------------------------------------------------------------
+
+
+def test_segment_apply_nonexistent_out_dir_exits_nonzero(tmp_path: Path) -> None:
+    missing_dir = tmp_path / "totally-nonexistent-dir"
+    verdicts = tmp_path / "seg-verdicts.jsonl"
+    verdicts.write_text(
+        json.dumps({"canonical_text": "Clause one.", "nodes": []}) + "\n", encoding="utf-8"
+    )
+    result = CliRunner().invoke(
+        cli, ["segment-apply", str(missing_dir), "--verdicts", str(verdicts)]
+    )
+    assert result.exit_code == 1, result.output
+    assert "ERROR" in result.output
+    assert "does not exist" in result.output
+    assert not missing_dir.exists(), (
+        "segment-apply must not create OUT_DIR when it is missing (issue #55)"
+    )
+
+
+def test_segment_apply_preseeded_out_dir_still_succeeds(tmp_path: Path) -> None:
+    """A fresh OUT_DIR with no segment/ subdir yet (pre-seeding) still works."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    assert not (out_dir / "segment").exists()
+    canonical = "Clause one."
+    verdicts = tmp_path / "seg-verdicts.jsonl"
+    verdicts.write_text(
+        json.dumps({"canonical_text": canonical, "nodes": []}) + "\n", encoding="utf-8"
+    )
+    result = CliRunner().invoke(cli, ["segment-apply", str(out_dir), "--verdicts", str(verdicts)])
+    assert result.exit_code == 0, result.output
+    assert (out_dir / "segment" / "cache.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
 # segment-apply QA gating (pre-derivation QA): a bad partition must be
 # rejected at apply time, never cached (a cached-bad partition wedges the
 # document — `segment` reports it cached while every mine round quarantines it)
