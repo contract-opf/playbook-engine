@@ -63,6 +63,7 @@ template configured, and `deal-beta` has only one version on file.)
 ### 2. Load the canned verdicts
 
 ```sh
+mkdir -p out/quickstart-demo
 playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canned-verdicts.jsonl
 ```
 

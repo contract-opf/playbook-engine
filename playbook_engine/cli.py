@@ -1671,6 +1671,16 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     )
 
     out_dir_resolved = out_dir.resolve()
+    if not out_dir_resolved.is_dir():
+        click.secho(
+            f"ERROR: {out_dir_resolved} does not exist — is the path right? "
+            "(the judge/ subdirectory is created automatically on first write, "
+            "so this only rejects a missing OUT_DIR itself, not a fresh "
+            "pre-seeded one)",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
     verdicts_store_path = out_dir_resolved / "judge" / "verdicts.jsonl"
 
     # Kind lookup for semantic validation: pending.jsonl (when present) maps
@@ -1924,6 +1934,16 @@ def segment_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     from playbook_engine.segmentation_qa import SegmentationQAError, run_gates  # noqa: PLC0415
 
     out_resolved = out_dir.resolve()
+    if not out_resolved.is_dir():
+        click.secho(
+            f"ERROR: {out_resolved} does not exist — is the path right? "
+            "(the segment/ subdirectory is created automatically on first "
+            "write, so this only rejects a missing OUT_DIR itself, not a "
+            "fresh pre-seeded one)",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
     cache_path = out_resolved / "segment" / "cache.jsonl"
 
     # Pending payloads carry the block stream + allowed taxonomy ids for each

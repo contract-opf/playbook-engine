@@ -474,6 +474,39 @@ def test_judge_apply_missing_verdicts_flag(tmp_path: Path) -> None:
     assert code != 0
 
 
+# ---------------------------------------------------------------------------
+# Issue #55: judge-apply against a typo'd/nonexistent OUT_DIR must fail fast
+# instead of silently creating a fresh, unreachable verdict store there.
+# ---------------------------------------------------------------------------
+
+
+def test_judge_apply_nonexistent_out_dir_exits_nonzero(tmp_path: Path) -> None:
+    """judge-apply against a nonexistent OUT_DIR exits 1 and creates nothing."""
+    missing_dir = tmp_path / "totally-nonexistent-dir"
+    code, output = _invoke("judge-apply", str(missing_dir), "--verdicts", str(_CANNED_VERDICTS))
+    assert code == 1, f"expected exit 1 for missing OUT_DIR; got {code}:\n{output}"
+    assert "ERROR" in output
+    assert "does not exist" in output
+    assert not missing_dir.exists(), (
+        "judge-apply must not create OUT_DIR when it is missing (issue #55)"
+    )
+
+
+def test_judge_apply_preseeded_out_dir_still_succeeds(tmp_path: Path) -> None:
+    """A fresh OUT_DIR with no judge/ subdir yet (pre-seeding workflow) still works.
+
+    The guard must reject a missing OUT_DIR itself, not the judge/ subdir —
+    otherwise it would block copying verdicts.jsonl into a fresh out dir
+    before any `playbook judge` round has run (see _verdict_store_kwargs).
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    assert not (out_dir / "judge").exists()
+    code, output = _invoke("judge-apply", str(out_dir), "--verdicts", str(_CANNED_VERDICTS))
+    assert code == 0, f"judge-apply on a pre-seeded fresh OUT_DIR failed:\n{output}"
+    assert (out_dir / "judge" / "verdicts.jsonl").exists()
+
+
 def test_judge_apply_invalid_json_exits_nonzero(tmp_path: Path) -> None:
     """judge-apply with an invalid JSONL file exits non-zero."""
     bad_file = tmp_path / "bad.jsonl"
