@@ -18,6 +18,7 @@ import jsonschema
 import yaml
 
 from playbook_engine.clause_position_compiler import MIN_EVIDENCE_N
+from playbook_engine.opf_accessors import playbook_clause_library, playbook_clauses
 
 # ``playbook publish`` (issue #188) coarsens ``observed_at`` from an ISO-8601
 # date to ``YYYY-Qn`` (exact dates can identify a counterparty). A published
@@ -573,6 +574,127 @@ def _check_invisible_chars(doc: dict[str, Any], result: ValidationResult) -> Non
     walk(doc, "")
 
 
+def _check_duplicate_ids(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Blocking error for duplicate clause/clause_library/invariant/document ids (issue #70).
+
+    Nothing else enforces uniqueness here — the JSON Schema cannot express
+    "unique across siblings" for these ids, and no other normative check
+    catches it. A foreign or producer-bugged OPF doc carrying two clauses
+    (or two clause_library entries, floor invariants, or corpus documents)
+    with the same id makes :mod:`playbook_engine.export_profile`'s
+    path-keyed sample/location maps silently collapse: a judge-flagged
+    residue rewrite lands on only the LAST duplicate, shipping the first
+    duplicate's flagged text unmodified (and the corresponding setter
+    rewrites the wrong entry). Engine-generated docs never carry duplicate
+    ids (they derive from unique taxonomy keys), so this only fires on
+    hand-edited/foreign input — but it must fail loud there rather than
+    silently mis-redact.
+
+    Version-agnostic: uses :func:`playbook_clauses`/:func:`playbook_clause_library`
+    so it applies to v0.1's top-level ``clauses``/``clause_library`` and
+    v0.2/v0.3's ``evidence.clauses``/``evidence.clause_library`` alike, and
+    ``floor.invariants``/``corpus.documents`` are identical in shape across
+    all versions.
+    """
+    # Mirror playbook_clauses'/playbook_clause_library's own v0.2-precedence
+    # condition exactly, so the reported path always points at the shape the
+    # id actually came from (v0.1/hand-authored top-level vs. v0.2/v0.3
+    # ``evidence.*``) instead of unconditionally naming the v0.1 shape, which
+    # does not exist on a v0.2/v0.3 doc.
+    evidence = doc.get("evidence")
+    clause_prefix = (
+        "evidence.clauses" if isinstance(evidence, dict) and "clauses" in evidence else "clauses"
+    )
+    clause_library_prefix = (
+        "evidence.clause_library"
+        if isinstance(evidence, dict) and "clause_library" in evidence
+        else "clause_library"
+    )
+
+    seen_clause_ids: dict[str, int] = {}
+    for i, clause in enumerate(playbook_clauses(doc)):
+        if not isinstance(clause, dict):
+            continue
+        clause_id = clause.get("id")
+        if not isinstance(clause_id, str):
+            continue
+        first_index = seen_clause_ids.get(clause_id)
+        if first_index is not None:
+            result.add(
+                f"duplicate clause id {clause_id!r} (first seen at {clause_prefix}[{first_index}])",
+                path=f"{clause_prefix}[{i}].id",
+            )
+        else:
+            seen_clause_ids[clause_id] = i
+
+    seen_concept_ids: dict[str, int] = {}
+    for i, concept in enumerate(playbook_clause_library(doc)):
+        if not isinstance(concept, dict):
+            continue
+        concept_id = concept.get("concept_id")
+        if not isinstance(concept_id, str):
+            continue
+        first_index = seen_concept_ids.get(concept_id)
+        if first_index is not None:
+            result.add(
+                f"duplicate clause_library concept_id {concept_id!r} "
+                f"(first seen at {clause_library_prefix}[{first_index}])",
+                path=f"{clause_library_prefix}[{i}].concept_id",
+            )
+        else:
+            seen_concept_ids[concept_id] = i
+
+    seen_invariant_ids: dict[str, int] = {}
+    floor_section = doc.get("floor")
+    invariants = floor_section.get("invariants") if isinstance(floor_section, dict) else None
+    if not isinstance(invariants, list):
+        # Hand-authored YAML can spell `floor:\n  invariants:` (a valueless
+        # key, i.e. None) or `floor: {invariants: "x"}` — neither is a list,
+        # but both must fall through to the schema check below rather than
+        # raise here (issue #70 round 2).
+        invariants = []
+    for i, invariant in enumerate(invariants):
+        if not isinstance(invariant, dict):
+            continue
+        invariant_id = invariant.get("id")
+        if not isinstance(invariant_id, str):
+            continue
+        first_index = seen_invariant_ids.get(invariant_id)
+        if first_index is not None:
+            result.add(
+                f"duplicate floor invariant id {invariant_id!r} "
+                f"(first seen at floor.invariants[{first_index}])",
+                path=f"floor.invariants[{i}].id",
+            )
+        else:
+            seen_invariant_ids[invariant_id] = i
+
+    seen_document_ids: dict[str, int] = {}
+    corpus_section = doc.get("corpus")
+    corpus_documents = corpus_section.get("documents") if isinstance(corpus_section, dict) else None
+    if not isinstance(corpus_documents, list):
+        # Same discipline as `invariants` above (`corpus: null`, `corpus: []`,
+        # or a non-dict document entry) — this is the first check
+        # `validate_document` runs, so it must not widen the crash surface
+        # `_corpus_docs` already tolerates elsewhere in this module.
+        corpus_documents = []
+    for i, corpus_doc in enumerate(corpus_documents):
+        if not isinstance(corpus_doc, dict):
+            continue
+        document_id = corpus_doc.get("document_id")
+        if not isinstance(document_id, str):
+            continue
+        first_index = seen_document_ids.get(document_id)
+        if first_index is not None:
+            result.add(
+                f"duplicate corpus document_id {document_id!r} "
+                f"(first seen at corpus.documents[{first_index}])",
+                path=f"corpus.documents[{i}].document_id",
+            )
+        else:
+            seen_document_ids[document_id] = i
+
+
 def _check_digest_v3(doc: dict[str, Any], result: ValidationResult) -> None:
     """OPF 0.3 digest consistency (normative, beyond the schema).
 
@@ -635,6 +757,7 @@ def validate_document(
     """
     result = ValidationResult()
     _check_invisible_chars(doc, result)
+    _check_duplicate_ids(doc, result)
     opf_version = doc.get("opf_version")
     schema = _load_schema(opf_version)
 
