@@ -492,7 +492,7 @@ def test_keep_dates_flag() -> None:
 
 def test_residue_finding_blocks_without_flag() -> None:
     doc = _make_doc()
-    leak_path = "clauses[clause.indemnification].observed_positions[0].text_summary"
+    leak_path = "clauses[0:clause.indemnification].observed_positions[0].text_summary"
 
     with pytest.raises(PublishError, match="leaking semantic"):
         publish_playbook(

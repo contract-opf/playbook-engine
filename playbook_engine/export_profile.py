@@ -100,9 +100,14 @@ class TextSample:
 
     Attributes:
         path: Stable locator back into the doc, e.g.
-              ``"clauses[clause.indemnification].observed_positions[0].text_summary"``.
-              Opaque to callers — only used to match a judge's findings back
-              to the sample it answers for and to apply a rewrite in place.
+              ``"clauses[0:clause.indemnification].observed_positions[0].text_summary"``.
+              The leading ``{index}:{id}`` tag on clause/document/
+              clause_library/floor.invariants-scoped paths keeps the path
+              positionally unique even when the id is not (issue #70) —
+              nothing enforces id uniqueness on any of these across a
+              foreign or hand-edited OPF doc. Opaque to callers otherwise —
+              only used to match a judge's findings back to the sample it
+              answers for and to apply a rewrite in place.
         text: The text content to judge.
     """
 
@@ -153,20 +158,28 @@ def _extract_text_samples(
     locations: dict[str, _ClauseLocation | _Setter] = {}
 
     for ci, clause in enumerate(playbook_clauses(doc)):
+        # Include the clause INDEX in the path, not just clause.get("id") —
+        # nothing enforces clause id uniqueness on a foreign/hand-edited OPF
+        # doc (see validator._check_duplicate_ids), and a path keyed on id
+        # alone collapses two clauses sharing an id onto the same dict key:
+        # the last duplicate's location silently overwrites the first's,
+        # both in the coverage-check path set and in `locations`, so a
+        # judge-flagged rewrite lands on the wrong clause (issue #70).
         clause_id = clause.get("id", str(ci))
+        clause_tag = f"{ci}:{clause_id}"
         for oi, obs in enumerate(clause.get("observed_positions", [])):
             for field_name in _FREE_TEXT_FIELDS:
                 text = obs.get(field_name, "")
                 if not text:
                     continue
-                path = f"clauses[{clause_id}].observed_positions[{oi}].{field_name}"
+                path = f"clauses[{clause_tag}].observed_positions[{oi}].{field_name}"
                 samples.append(TextSample(path=path, text=text))
                 locations[path] = (ci, "observed_positions", oi, field_name)
         for ti, entry in enumerate(clause.get("negotiation_trail", [])):
             text = entry.get("change_summary", "")
             if not text:
                 continue
-            path = f"clauses[{clause_id}].negotiation_trail[{ti}].change_summary"
+            path = f"clauses[{clause_tag}].negotiation_trail[{ti}].change_summary"
             samples.append(TextSample(path=path, text=text))
             locations[path] = (ci, "negotiation_trail", ti, "change_summary")
 
@@ -174,17 +187,20 @@ def _extract_text_samples(
         if isinstance(our_standard, dict):
             text = our_standard.get("text", "")
             if text:
-                path = f"clauses[{clause_id}].our_standard.text"
+                path = f"clauses[{clause_tag}].our_standard.text"
                 samples.append(TextSample(path=path, text=text))
                 locations[path] = _clause_our_standard_setter(ci)
 
     for li, concept in enumerate(playbook_clause_library(doc)):
         concept_id = concept.get("concept_id", str(li))
+        # Same collision class as clauses/corpus documents above: include
+        # the index so two clause_library entries sharing a concept_id don't
+        # collapse onto one path (issue #70).
         for field_name in _CLAUSE_CONCEPT_TEXT_FIELDS:
             text = concept.get(field_name, "")
             if not text:
                 continue
-            path = f"clause_library[{concept_id}].{field_name}"
+            path = f"clause_library[{li}:{concept_id}].{field_name}"
             samples.append(TextSample(path=path, text=text))
             locations[path] = _clause_library_setter(li, field_name)
 
@@ -209,11 +225,14 @@ def _extract_text_samples(
     if isinstance(floor, dict):
         for fi, invariant in enumerate(floor.get("invariants", [])):
             invariant_id = invariant.get("id", str(fi))
+            # Same collision class as clauses/corpus documents above: include
+            # the index so two floor.invariants entries sharing an id don't
+            # collapse onto one path (issue #70).
             for field_name in _INVARIANT_TEXT_FIELDS:
                 text = invariant.get(field_name, "")
                 if not text:
                     continue
-                path = f"floor.invariants[{invariant_id}].{field_name}"
+                path = f"floor.invariants[{fi}:{invariant_id}].{field_name}"
                 samples.append(TextSample(path=path, text=text))
                 locations[path] = _invariant_setter(fi, field_name)
 
@@ -233,8 +252,11 @@ def _extract_text_samples(
             text = document.get("title", "")
             if not text:
                 continue
+            # Same collision class as clauses above: include the index so
+            # two corpus documents sharing a document_id don't collapse onto
+            # one path (issue #70).
             document_id = document.get("document_id", str(di))
-            path = f"corpus.documents[{document_id}].title"
+            path = f"corpus.documents[{di}:{document_id}].title"
             samples.append(TextSample(path=path, text=text))
             locations[path] = _corpus_document_title_setter(di)
 

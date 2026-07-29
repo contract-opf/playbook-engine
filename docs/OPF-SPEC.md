@@ -538,6 +538,25 @@ with `</` escaped as `<\/`; JSON parsing restores the value). The bare
 `playbook.opf.json` remains the canonical artifact — a consumer extracts the
 block and verifies `identity.content_hash` over the canonical serialization.
 
+### 3.13 Identifier uniqueness (normative, effective 2026-07-29)
+
+Every sibling-scoped id below MUST be **unique among its siblings** — this
+applies to every OPF version (0.1's top-level `clauses`/`clause_library` and
+0.2/0.3's `evidence.clauses`/`evidence.clause_library` alike), not just 0.3:
+
+- `evidence.clauses[].id` (v0.1: `clauses[].id`) — unique across the clause list.
+- `evidence.clause_library[].concept_id` (v0.1: `clause_library[].concept_id`) — unique across the clause-concept library.
+- `floor.invariants[].id` — unique across the Floor's invariant list.
+- `corpus.documents[].document_id` — unique across the corpus.
+
+The JSON Schema cannot express "unique across siblings," so this is enforced
+only by a conformant validator, the same way §3.12's digest-consistency rule
+is: **a conformant validator MUST reject a document containing a duplicate
+sibling id** (fail-closed). Two siblings sharing an id make citation
+resolution (§4) and any id-keyed export/digest projection genuinely
+ambiguous — a consumer (or the compact `digest` of §3.12) keying off that id
+alone cannot tell the siblings apart.
+
 ## 4. Citations
 
 Every asserted clause text MUST be traceable.

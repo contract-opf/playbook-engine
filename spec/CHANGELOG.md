@@ -32,6 +32,19 @@ Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
 
+### 2026-07-29 — sibling-id uniqueness is now a blocking normative rule (issue #70)
+
+OPF-SPEC §3.13 (new): `evidence.clauses[].id`, `evidence.clause_library[].concept_id`,
+`floor.invariants[].id`, and `corpus.documents[].document_id` MUST be unique
+among their siblings, in every OPF version (0.1's top-level `clauses`/
+`clause_library` shape included). Not schema-expressible, so enforced only by
+`validator.validate_document` (`_check_duplicate_ids`, fail-closed) — a
+duplicate sibling id made `export_profile`'s id-keyed sample/rewrite paths
+collapse two entries onto one, silently shipping the first duplicate's
+flagged text unmodified. No schema or `opf_version`/`digest_version` bump —
+purely a new normative validator rule, same category as the digest
+consistency check (§3.12).
+
 ### 2026-07-16 — OPF 0.3 FROZEN (at digest_version 2, engine PR #230)
 
 `opf_version` 0.3 and `digest_version` 2 are frozen as of this entry. Any

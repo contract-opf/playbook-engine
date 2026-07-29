@@ -201,7 +201,7 @@ def test_flagged_residual_leak_is_surfaced_not_silently_emitted() -> None:
     # Independently flag the REWRITTEN text_summary as still leaking, even
     # though the redaction pass "fixed" it — proving the two passes are
     # decoupled.
-    rewritten_path = "clauses[clause.indemnification].observed_positions[1].text_summary"
+    rewritten_path = "clauses[0:clause.indemnification].observed_positions[1].text_summary"
     verify = _FlaggingVerifyJudge(leak_path=rewritten_path)
 
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
@@ -219,7 +219,7 @@ def test_export_profile_does_not_raise_on_a_leaked_verdict() -> None:
     """A "leak found" verdict is a SUCCESSFUL evaluation, not a judge failure."""
     doc = _make_doc()
     redaction = _FakeRedactionJudge(flag_marker=None)
-    leak_path = "clauses[clause.indemnification].observed_positions[0].text_summary"
+    leak_path = "clauses[0:clause.indemnification].observed_positions[0].text_summary"
     verify = _FlaggingVerifyJudge(leak_path=leak_path)
 
     # Must not raise.
@@ -271,6 +271,176 @@ def test_export_preserves_clause_structure_and_only_rewrites_flagged_text() -> N
     )
     # The input doc itself is never mutated.
     assert doc == original
+
+
+# ---------------------------------------------------------------------------
+# Duplicate clause ids must not collapse rewrites onto the last duplicate
+# (issue #70) — a foreign/hand-edited doc may carry two clauses sharing an
+# id (nothing in the schema or validator.py enforces uniqueness pre-#70).
+# ---------------------------------------------------------------------------
+
+
+def _make_duplicate_clause_id_doc() -> dict:
+    """Two clauses sharing id 'clause.x', each with distinct residue-bearing text."""
+    return {
+        "opf_version": "0.2",
+        "clauses": [
+            {
+                "id": "clause.x",
+                "taxonomy_id": "indemnification",
+                "title": "Indemnification",
+                "observed_positions": [
+                    {
+                        "text_summary": "Northwind State University demanded a carve-out.",
+                        "full_text": "Northwind State University demanded a carve-out.",
+                        "deviation": "substantive",
+                        "risk_delta": {"direction": "worse", "magnitude": "minor"},
+                        "provenance": "counterparty_paper",
+                        "outcome": "signed",
+                        "precedent_count": 3,
+                    }
+                ],
+                "rollup": {
+                    "position": "negotiable",
+                    "confidence": {"score": 0.5, "n_our_paper": 0, "n_counterparty_paper": 3},
+                },
+            },
+            {
+                "id": "clause.x",
+                "taxonomy_id": "confidentiality",
+                "title": "Confidentiality",
+                "observed_positions": [
+                    {
+                        "text_summary": "Southridge Regional Medical Center capped liability.",
+                        "full_text": "Southridge Regional Medical Center capped liability.",
+                        "deviation": "none",
+                        "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                        "provenance": "our_paper",
+                        "outcome": "signed",
+                        "precedent_count": 5,
+                    }
+                ],
+                "rollup": {
+                    "position": "standard",
+                    "confidence": {"score": 0.9, "n_our_paper": 5, "n_counterparty_paper": 0},
+                },
+            },
+        ],
+    }
+
+
+class _FlagAllRedactionJudge:
+    """Flags and rewrites every sample it is handed, unconditionally."""
+
+    def evaluate_batch(self, samples):  # noqa: ANN001
+        return [
+            RedactionFinding(
+                path=s.path,
+                has_residue=True,
+                rationale="Flagged for rewrite.",
+                rewritten_text="A counterparty raised concerns about this clause.",
+            )
+            for s in samples
+        ]
+
+
+def test_duplicate_clause_ids_both_get_rewritten_not_just_the_last() -> None:
+    doc = _make_duplicate_clause_id_doc()
+    # Flag every sample and rewrite it — a judge that flags+rewrites
+    # everything it is handed.
+    redaction = _FlagAllRedactionJudge()
+    verify = _CleanVerifyJudge()
+
+    report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
+
+    exported_texts = [
+        obs["text_summary"]
+        for clause in report.doc["clauses"]
+        for obs in clause["observed_positions"]
+    ]
+    # Pre-#70 bug: the two clauses' identical clause-id-keyed paths collided,
+    # so only the LAST clause's location survived in `locations` — the first
+    # clause's flagged text_summary shipped unmodified despite being flagged.
+    assert "Northwind State University" not in " ".join(exported_texts)
+    assert "Southridge Regional Medical Center" not in " ".join(exported_texts)
+    # Both clauses were independently sampled (positionally-unique paths).
+    sample_paths = {f.path for f in report.redaction_findings}
+    assert "clauses[0:clause.x].observed_positions[0].text_summary" in sample_paths
+    assert "clauses[1:clause.x].observed_positions[0].text_summary" in sample_paths
+
+
+def _make_duplicate_other_sections_doc() -> dict:
+    """Two entries sharing an id in each of clause_library/floor/corpus,
+    each with distinct residue-bearing text (issue #70 round 2 — the same
+    collision class as clauses, but for the other three path families
+    export_profile.py touches)."""
+    return {
+        "opf_version": "0.2",
+        "clauses": [],
+        "clause_library": [
+            {
+                "concept_id": "concept.dup",
+                "title": "Indemnification",
+                "description": "Ridgeline Regional Utility pushed for a mutual carve-out.",
+            },
+            {
+                "concept_id": "concept.dup",
+                "title": "Confidentiality",
+                "description": "Ashgrove Municipal Water District required a longer term.",
+            },
+        ],
+        "floor": {
+            "invariants": [
+                {
+                    "id": "invariant.dup",
+                    "statement": "Brookhaven Transit Authority never accepts uncapped liability.",
+                },
+                {
+                    "id": "invariant.dup",
+                    "statement": "Fernwood County Hospital never waives audit rights.",
+                },
+            ]
+        },
+        "corpus": {
+            "documents": [
+                {"document_id": "doc.dup", "title": "Contract with Lakeside School District"},
+                {"document_id": "doc.dup", "title": "Contract with Pinehollow Water Co-op"},
+            ]
+        },
+    }
+
+
+def test_duplicate_ids_in_other_sections_both_get_rewritten_not_just_the_last() -> None:
+    # Sibling of test_duplicate_clause_ids_both_get_rewritten_not_just_the_last
+    # covering the other three path families this issue changed:
+    # clause_library[{li}:{concept_id}], floor.invariants[{fi}:{invariant_id}],
+    # corpus.documents[{di}:{document_id}]. Without the index tag, the two
+    # duplicates in each section collapse onto one `locations` key and only
+    # the last one's flagged text gets rewritten.
+    doc = _make_duplicate_other_sections_doc()
+    redaction = _FlagAllRedactionJudge()
+    verify = _CleanVerifyJudge()
+
+    report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
+
+    exported_descriptions = [c["description"] for c in report.doc["clause_library"]]
+    exported_statements = [inv["statement"] for inv in report.doc["floor"]["invariants"]]
+    exported_titles = [d["title"] for d in report.doc["corpus"]["documents"]]
+
+    assert "Ridgeline Regional Utility" not in " ".join(exported_descriptions)
+    assert "Ashgrove Municipal Water District" not in " ".join(exported_descriptions)
+    assert "Brookhaven Transit Authority" not in " ".join(exported_statements)
+    assert "Fernwood County Hospital" not in " ".join(exported_statements)
+    assert "Lakeside School District" not in " ".join(exported_titles)
+    assert "Pinehollow Water Co-op" not in " ".join(exported_titles)
+
+    sample_paths = {f.path for f in report.redaction_findings}
+    assert "clause_library[0:concept.dup].description" in sample_paths
+    assert "clause_library[1:concept.dup].description" in sample_paths
+    assert "floor.invariants[0:invariant.dup].statement" in sample_paths
+    assert "floor.invariants[1:invariant.dup].statement" in sample_paths
+    assert "corpus.documents[0:doc.dup].title" in sample_paths
+    assert "corpus.documents[1:doc.dup].title" in sample_paths
 
 
 # ---------------------------------------------------------------------------
