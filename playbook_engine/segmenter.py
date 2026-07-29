@@ -30,6 +30,19 @@ char_span for promoted nodes:
   a char_span computed as:
   ``(heading_end + 1 + start_offset_in_body, heading_end + 1 + end_offset)``
   where offsets are byte offsets within the parent's ``.text`` field.
+  Exception: the synthetic ``clause_path="0"`` node (pre-heading body text)
+  has no heading line of its own — its ``char_span`` covers its body text
+  directly, so its children's offsets are computed from ``char_span[0]``
+  instead of ``char_span[1] + 1``. ``clause_path == "0"`` and
+  ``heading is None`` are **necessary but not sufficient** to identify this
+  synthetic node: a genuine "0."-numbered clause with empty heading text
+  (e.g. a paragraph that is exactly "0." or "0)") also has clause_path "0"
+  and heading None. The additional disambiguator layered on top of those two
+  conditions — not a replacement for them — is structural: the synthetic
+  node's ``char_span`` covers exactly the first line of its own ``.text``
+  (i.e. ``char_span[1] - char_span[0] == len(text.split("\n", 1)[0])``),
+  whereas a genuine heading node's ``char_span`` covers its heading line,
+  which is separate from its body text.
 
 clause_path for promoted nodes:
   Parent path ``"3.2"`` → lettered children ``"3.2.a"``, ``"3.2.b"`` …
@@ -103,8 +116,34 @@ def _segment_node(node: ClauseNode) -> ClauseNode:
             children=segmented_children,
         )
 
-    # The body text starts at heading_end + 1 in the virtual normalized text.
-    body_start = node.char_span[1] + 1
+    # The body text starts at heading_end + 1 in the virtual normalized text —
+    # except for the synthetic pre-heading node (pre-heading body text,
+    # produced by the DOCX/PDF/RTF ingesters), which has no separate heading
+    # line: its char_span covers the body text itself, so the text already
+    # starts at char_span[0]. The synthetic node always has clause_path "0"
+    # (it is created only by _ClauseBuilder.add_body), but that condition is
+    # NECESSARY, NOT SUFFICIENT: a genuine "0."-numbered clause with no
+    # heading text (e.g. a paragraph that is exactly "0." or "0)") also has
+    # clause_path "0" and heading is None, yet — like every other genuine
+    # heading node — its char_span covers only its own heading line, not its
+    # body text. So clause_path == "0" and heading is None are kept as
+    # necessary conjuncts, and the structural length check is layered on top
+    # as an additional disambiguator (not a replacement for them): the
+    # synthetic node's char_span spans exactly its own first line of body
+    # text (the length recorded when add_body() first created it), i.e.
+    # ``char_span[1] - char_span[0] == len(node.text.split("\n", 1)[0])``.
+    # Keeping clause_path == "0" costs nothing (the synthetic node always
+    # satisfies it) and strictly narrows the predicate: without it, a
+    # non-"0" heading whose line happens to be exactly as long as its first
+    # body line would misfire (e.g. DOCX paragraphs "10.1." / "(a) A" /
+    # "(b) B" — both the heading and the first body line are 5 characters).
+    body_start = (
+        node.char_span[0]
+        if node.clause_path == "0"
+        and node.heading is None
+        and node.char_span[1] - node.char_span[0] == len(node.text.split("\n", 1)[0])
+        else node.char_span[1] + 1
+    )
 
     # Split on lettered items.
     lettered = _split_lettered(node.text)

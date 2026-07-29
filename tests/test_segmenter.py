@@ -12,8 +12,11 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
+from docx import Document
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
+from playbook_engine.docx_ingester import ingest_docx
 from playbook_engine.segmenter import _split_lettered, _split_roman, segment
 
 SCHEMA_PATH = Path(__file__).parent.parent / "spec" / "clause-tree.schema.json"
@@ -506,3 +509,274 @@ def test_no_duplicate_when_ingester_child_collides() -> None:
     assert n1 is not None
     paths_1a = [c for c in n1.children if c.clause_path == "1.a"]
     assert len(paths_1a) == 1, "Expected exactly one '1.a' child"
+
+
+# ---------------------------------------------------------------------------
+# Issue #39 regression: DOCX blank paragraph must not drift promoted spans
+# ---------------------------------------------------------------------------
+
+
+def test_docx_blank_paragraph_after_heading_does_not_drift_child_spans(
+    tmp_path: Path,
+) -> None:
+    """A blank paragraph before a DOCX heading must not shift that heading's
+    promoted (a)/(b) child char_spans.
+
+    Before the fix, docx_ingester advanced doc_char_offset for every blank
+    paragraph even though blank paragraphs are excluded from node.text, so a
+    blank paragraph anywhere before a heading shifted that heading's own
+    char_span right by one character per blank paragraph — and every
+    promoted child computed from ``heading.char_span[1] + 1`` drifted with
+    it. (A blank paragraph strictly between a heading and its own body text
+    does not surface the bug, because add_body() ignores its doc_offset
+    argument once a heading is already open — hence the second heading here,
+    which receives a fresh char_span computed from the drifted offset.)
+    """
+    doc = Document()
+    doc.add_heading("Term", level=1)
+    doc.add_paragraph("")  # blank paragraph before the second heading
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph("(a) Alpha Corp shall deliver.")
+    doc.add_paragraph("(b) Beta Ltd shall pay.")
+    path = tmp_path / "blank_para.docx"
+    doc.save(str(path))
+
+    ingested = ingest_docx(path, "d", "v1")
+    segmented = segment(ingested.tree)
+
+    obligations = next(n for n in segmented.nodes if n.heading == "Obligations")
+    promoted = [c for c in obligations.children if c.clause_path.split(".")[-1] in ("a", "b")]
+    assert len(promoted) == 2, "Expected both (a) and (b) to be promoted"
+
+    # Virtual normalized text per the docx_ingester's char_span contract:
+    # kept (non-blank, stripped) units joined by "\n". The blank paragraph
+    # contributes nothing.
+    virtual_text = (
+        "Term"
+        + "\n"
+        + "Obligations"
+        + "\n"
+        + "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
+    )
+
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+def test_synthetic_zero_node_body_start_uses_char_span_start() -> None:
+    """The synthetic clause_path='0' node (pre-heading body text) has no
+    heading line of its own — its char_span covers the body text directly.
+
+    Before the fix, body_start was computed as char_span[1] + 1 for every
+    node (including '0'), overshooting by len(first_paragraph) + 1.
+
+    Per the structural discriminator (segmenter.py), the synthetic node's
+    char_span covers exactly its own first line of text — mirroring what
+    ``_ClauseBuilder.add_body`` actually records — not the full multi-line
+    accumulated text, so the fixture's char_span is built from the first
+    line only.
+    """
+    body_text = "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
+    first_line = body_text.split("\n", 1)[0]
+    node = ClauseNode(
+        clause_path="0",
+        heading=None,
+        text=body_text,
+        char_span=(0, len(first_line)),
+    )
+    tree = _tree_from_nodes(node)
+    result = segment(tree)
+
+    zero = result.resolve_path("0")
+    assert zero is not None
+    n_a = result.resolve_path("0.a")
+    n_b = result.resolve_path("0.b")
+    assert n_a is not None
+    assert n_b is not None
+
+    # The virtual text for the "0" node IS its own body_text — there is no
+    # preceding heading line.
+    for child in (n_a, n_b):
+        resolved = ClauseTree.resolve_span(body_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+def test_docx_tab_indented_body_line_does_not_shift_child_span(tmp_path: Path) -> None:
+    """A tab/space-indented DOCX body paragraph must not desync content_offset.
+
+    Before the fix, add_body() received the raw (unstripped) paragraph text,
+    so a leading-whitespace-indented "(a) ..." line broke the segmenter's
+    'stripped == line' assumption and made content_offset short by the
+    leading-whitespace length.
+    """
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph("   (a) Alpha Corp shall deliver.")
+    doc.add_paragraph("(b) Beta Ltd shall pay.")
+    path = tmp_path / "indented.docx"
+    doc.save(str(path))
+
+    ingested = ingest_docx(path, "d", "v1")
+    segmented = segment(ingested.tree)
+
+    obligations = next(n for n in segmented.nodes if n.heading == "Obligations")
+    assert not obligations.text.startswith(" "), (
+        "Ingester body text must be stripped before accumulation"
+    )
+
+    virtual_text = "Obligations" + "\n" + "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
+    promoted = [c for c in obligations.children if c.clause_path.split(".")[-1] in ("a", "b")]
+    assert len(promoted) == 2
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+def test_docx_genuine_zero_numbered_heading_does_not_shift_child_spans(
+    tmp_path: Path,
+) -> None:
+    """A REAL '0.'-numbered heading (e.g. '0. Preamble') must be segmented
+    using the heading-relative body_start (char_span[1] + 1), not the
+    synthetic-pre-heading-node's body_start (char_span[0]).
+
+    Both the genuine "0." clause and the synthetic pre-heading node share
+    clause_path == "0" and (when the heading text is empty) heading is None
+    too, so clause_path and heading cannot discriminate the synthetic node
+    even together — see test_docx_bare_zero_numbered_heading_does_not_shift_child_spans
+    for the empty-heading-text case that clause_path/heading alone would
+    misclassify. The real discriminator is structural (see segmenter.py).
+    Before the fix, discriminating on clause_path == "0" alone caused every
+    promoted child under a genuine "0." heading to have its span shifted
+    left by the whole heading line's length + 1.
+    """
+    doc = Document()
+    doc.add_paragraph("0. Preamble")
+    doc.add_paragraph("(a) Alpha Corp shall deliver.")
+    doc.add_paragraph("(b) Beta Ltd shall pay.")
+    path = tmp_path / "zero_heading.docx"
+    doc.save(str(path))
+
+    ingested = ingest_docx(path, "d", "v1")
+    segmented = segment(ingested.tree)
+
+    root = segmented.nodes[0]
+    assert root.clause_path == "0"
+    assert root.heading == "Preamble"
+
+    virtual_text = "0. Preamble" + "\n" + "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
+    promoted = [c for c in root.children if c.clause_path.split(".")[-1] in ("a", "b")]
+    assert len(promoted) == 2, "Expected both (a) and (b) to be promoted"
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+@pytest.mark.parametrize("heading_line", ["0.", "0)"])
+def test_docx_bare_zero_numbered_heading_does_not_shift_child_spans(
+    tmp_path: Path,
+    heading_line: str,
+) -> None:
+    """A REAL '0.'-numbered heading whose heading text is EMPTY (the
+    paragraph is exactly "0." or "0)", so heading is None) must still be
+    segmented using the heading-relative body_start (char_span[1] + 1), not
+    the synthetic-pre-heading-node's body_start (char_span[0]).
+
+    This is the case that clause_path == "0" and heading is None cannot
+    discriminate even together, since the genuine node and the synthetic
+    pre-heading node both satisfy both conditions. Before the segmenter fix,
+    this case misfired and shifted every promoted child's span left by the
+    whole heading line's length + 1 (issue #39, finding 1, fix round 2).
+    """
+    doc = Document()
+    doc.add_paragraph(heading_line)
+    doc.add_paragraph("(a) Alpha Corp shall deliver.")
+    doc.add_paragraph("(b) Beta Ltd shall pay.")
+    path = tmp_path / "bare_zero_heading.docx"
+    doc.save(str(path))
+
+    ingested = ingest_docx(path, "d", "v1")
+    segmented = segment(ingested.tree)
+
+    root = segmented.nodes[0]
+    assert root.clause_path == "0"
+    assert root.heading is None
+
+    virtual_text = heading_line + "\n" + "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
+    promoted = [c for c in root.children if c.clause_path.split(".")[-1] in ("a", "b")]
+    assert len(promoted) == 2, "Expected both (a) and (b) to be promoted"
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+def test_docx_non_zero_heading_length_coincidence_does_not_shift_child_spans(
+    tmp_path: Path,
+) -> None:
+    """A genuine NON-"0" bare-numbered heading whose heading line happens to
+    be the same length as its first body line must still be segmented using
+    the heading-relative body_start (char_span[1] + 1), not the
+    synthetic-pre-heading-node's body_start (char_span[0]).
+
+    This is the false-positive class the length-only discriminator (with the
+    ``clause_path == "0"`` conjunct dropped) opens up: heading "10.1." is 5
+    characters and first body line "(a) A" is also 5 characters, so
+    ``char_span[1] - char_span[0] == len(text.split("\\n", 1)[0])`` holds even
+    though this is an ordinary "10.1" clause, not the synthetic pre-heading
+    node. ``clause_path == "0"`` rules this node out (its clause_path is
+    "10.1"), which is exactly why that conjunct must be kept rather than
+    replaced by the length check alone. Without the conjunct, body_start
+    would be miscomputed as char_span[0]=0 instead of char_span[1]+1=6,
+    shifting every promoted child's span left by 6 characters (reproduced
+    end-to-end: resolve_span('10.1.a') would return '.' instead of 'A').
+    """
+    doc = Document()
+    doc.add_paragraph("10.1.")
+    doc.add_paragraph("(a) A")
+    doc.add_paragraph("(b) B")
+    path = tmp_path / "length_coincidence.docx"
+    doc.save(str(path))
+
+    ingested = ingest_docx(path, "d", "v1")
+
+    pre_segment_root = ingested.tree.nodes[0]
+    assert pre_segment_root.clause_path == "10.1"
+    assert pre_segment_root.heading is None
+    # Sanity-check the length coincidence this test depends on, against the
+    # pre-segmentation node (post-segmentation text is just the preamble,
+    # which is empty here since every body line is consumed as a lettered
+    # item).
+    assert pre_segment_root.char_span[1] - pre_segment_root.char_span[0] == len(
+        pre_segment_root.text.split("\n", 1)[0]
+    )
+
+    segmented = segment(ingested.tree)
+
+    root = segmented.nodes[0]
+    assert root.clause_path == "10.1"
+    assert root.heading is None
+
+    virtual_text = "10.1." + "\n" + "(a) A\n(b) B"
+    promoted = [c for c in root.children if c.clause_path.split(".")[-1] in ("a", "b")]
+    assert len(promoted) == 2, "Expected both (a) and (b) to be promoted"
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
