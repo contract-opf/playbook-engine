@@ -2595,7 +2595,7 @@ def floor_propose_cmd(out_dir: Path) -> None:
     """Derive Floor candidates from reversals + the Posture interview's Q4 answer.
 
     Reads OUT_DIR/observations.jsonl (every ``outcome: proposed_then_reversed``
-    observation is a candidate red line — OPF-SPEC.md §3.7 rule 4)
+    observation is a candidate hard line — OPF-SPEC.md §3.7 rule 4)
     and, if a Posture interview has been run, OUT_DIR/playbook.opf.json's
     ``posture.generation.interview`` Q4 ("sacred_clauses") answer. Writes
     OUT_DIR/floor.candidates.json and prints a summary table.

@@ -57,7 +57,7 @@ stochastic model at high-stakes legal work:
 |---|---|---|
 | **Evidence** | What the corpus shows: accepted variants, fallbacks, refusals, per-round negotiation trails, held-rates — all cited | **Advisory** — the model reasons over it |
 | **Posture** | Negotiation intent as prose, drafted from a short interview: risk appetite, what's sacred, what's flexible | **Soft** — shapes judgment, never a gate |
-| **Floor** | The red lines, as judge-checkable invariants ("never accept uncapped liability") | **Hard** — a violation forces the outcome; the model cannot override it |
+| **Floor** | The hard lines, as judge-checkable invariants ("never accept uncapped liability") | **Hard** — a violation forces the outcome; the model cannot override it |
 
 The knowledge is *descriptive, not prescriptive*: the format tells a
 reviewer what your history shows and what you intend — it never freezes a

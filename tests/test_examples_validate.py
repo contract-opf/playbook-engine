@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.validator import validate_document
 
 ROOT = Path(__file__).parent.parent
@@ -66,7 +67,19 @@ def test_v02_example_demonstrates_headline_sections() -> None:
     assert any(clause.get("negotiation_trail") for clause in clauses), (
         "flagship must demonstrate a negotiation_trail (§3.5.3)"
     )
-    assert doc.get("identity", {}).get("content_hash", "").startswith("sha256:")
+    # Recompute and compare — not just prefix-match — so a future prose edit
+    # to the flagship that forgets to regenerate identity can't silently ship
+    # a document that fails its own published integrity contract (issue #88
+    # fix round 1 finding 1; OPF-SPEC §3.4 rule 1 is fail-closed on mismatch).
+    identity = doc.get("identity", {})
+    assert identity.get("content_hash") == content_hash(doc), (
+        "flagship identity.content_hash is stale — regenerate with "
+        "playbook_engine.canonicalize.content_hash() after any content edit"
+    )
+    assert identity.get("section_digests") == compute_section_digests(doc), (
+        "flagship identity.section_digests is stale — regenerate with "
+        "playbook_engine.canonicalize.compute_section_digests() after any content edit"
+    )
 
 
 def test_v02_example_confidence_counts_consistent() -> None:

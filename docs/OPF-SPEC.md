@@ -20,7 +20,7 @@ A playbook is now **one document with three sections**, authored at different ti
 |---|---|---|---|
 | **Evidence** (§3.5) | What the corpus shows — accepted variants, concessions, rejections, each cited to precedent. *Descriptive, not prescriptive.* | Auto-derived by the compiler | **Advisory** — the model reasons over it |
 | **Posture** (§3.6) | Negotiation intent as a system-prompt-style prose block (rounds, leverage, risk appetite, what's sacred vs. flexible, output audience). | Compiler **drafts** from a short interview; a legal owner edits | **Soft** — shapes judgment, not a gate |
-| **Floor** (§3.7) | The red lines that must *never* slip: judge-evaluated natural-language invariants. | Legal owner authors (compiler may *propose* candidates) | **Hard** — deterministic coverage gate + forced consequence; the model cannot override |
+| **Floor** (§3.7) | The hard lines that must *never* slip: judge-evaluated natural-language invariants. | Legal owner authors (compiler may *propose* candidates) | **Hard** — deterministic coverage gate + forced consequence; the model cannot override |
 
 Plus one new top-level concern: **composition** (§3.4) — an OPF may declare *composed* external clause-intelligence modules (e.g. a privacy/DPA module) rather than re-encoding that knowledge itself: a pinned, validated dependency recorded for lineage under a fixed governance contract. (Behavior wiring is deferred — see §3.4's open note; today `composes` is declared and verified, not yet executed.)
 
@@ -32,7 +32,7 @@ This section summarizes the reframe.
 
 ## 1. Purpose and scope
 
-OPF is an open format for representing a **negotiation playbook** for a single agreement type, compiled from a corpus of real negotiated agreements. A playbook tells a reviewer — human or LLM — how to evaluate a clause in a new agreement: what the preferred position is, what the corpus shows we have accepted, conceded, and rejected, what our negotiation posture is, and what red lines must never be crossed — each factual claim grounded in cited precedent.
+OPF is an open format for representing a **negotiation playbook** for a single agreement type, compiled from a corpus of real negotiated agreements. A playbook tells a reviewer — human or LLM — how to evaluate a clause in a new agreement: what the preferred position is, what the corpus shows we have accepted, conceded, and rejected, what our negotiation posture is, and what hard lines must never be crossed — each factual claim grounded in cited precedent.
 
 OPF describes **what the playbook knows and intends**, not the review engine's internals (thresholds, retrieval, model policy). OPF is the interface between the corpus→playbook compiler and any downstream review engine.
 
@@ -43,7 +43,7 @@ OPF describes **what the playbook knows and intends**, not the review engine's i
 - OPF does not own the *runtime lifecycle* of an edited Posture. The OPF carries the **initial, compiler-generated** Posture (the genesis record); once a playbook is installed, the consuming app's release-bundle governance owns subsequent Posture versions (§8).
 
 > **OPF vs. the consuming app's release bundle:** OPF is the canonical
-> playbook format — knowledge, intent, red lines, perspective, and de
+> playbook format — knowledge, intent, hard lines, perspective, and de
 > minimis. The consuming app's release bundle wraps an
 > OPF document and owns model policy, the output/leakage contract, and
 > release (version/sign-off/activation/rollback). See
@@ -59,7 +59,7 @@ OPF describes **what the playbook knows and intends**, not the review engine's i
 | **Counterparty paper** | A document drafted on the other side's template. Clauses surviving here were *tolerated*, not necessarily *endorsed*. |
 | **Evidence** | The compiled, cited record of what the corpus shows. Descriptive. (§3.5) |
 | **Posture** | Forward-looking negotiation intent, as system-prompt-style prose. (§3.6) |
-| **Floor** | The deterministic red lines that must never slip. (§3.7) |
+| **Floor** | The deterministic hard lines that must never slip. (§3.7) |
 | **Composition** | A pinned dependency on an external clause-intelligence module. (§3.4) |
 | **Observation** | A single occurrence of a clause variant in the corpus, with its outcome and provenance. |
 | **Deviation** | How much an observed clause differs from our standard: `none` / `reworded_equivalent` / `substantive`. |
@@ -114,7 +114,7 @@ A playbook is a single JSON object:
     "clause_library": [ ClauseConcept ]   // concept-indexed (counterparty paper)
   },
   "posture": { ... },           // §3.6 — generated negotiation intent (NEW)
-  "floor": { ... },             // §3.7 — red lines: judged NL invariants (NEW)
+  "floor": { ... },             // §3.7 — hard lines: judged NL invariants (NEW)
   "corpus": { ... },            // §3.8 — provenance/audit + content addresses
   "compiler": { ... },          // §3.9 — generation metadata
   "identity": { ... },          // §3.10 — content hash + section digests (NEW)
@@ -189,8 +189,8 @@ An OPF MAY compose external modules so it does not re-encode clause knowledge th
 
 **Normative rules:**
 1. A composed module is **legal behavior**. Every entry MUST carry an exact `version` and an `integrity` hash. A consumer MUST refuse to load a module that is unpinned, or whose content does not match `integrity` (**fail-closed**) — never silently fall back to "latest". This is the same anti-drift discipline the consuming app applies to its own vendored code.
-2. A composed module MAY supply Evidence-equivalent guidance and Floor-equivalent red lines *for its `applies_to_taxonomy` scope only*. It MUST NOT widen scope beyond what the OPF declares.
-3. Where a composed module and the OPF's own Floor conflict, **the stricter rule wins** (a Floor is a one-way ratchet; composition can only add red lines, never relax them).
+2. A composed module MAY supply Evidence-equivalent guidance and Floor-equivalent hard lines *for its `applies_to_taxonomy` scope only*. It MUST NOT widen scope beyond what the OPF declares.
+3. Where a composed module and the OPF's own Floor conflict, **the stricter rule wins** (a Floor is a one-way ratchet; composition can only add hard lines, never relax them).
 
 > **Open (resolve before implementing composition):** the concrete interface a module exposes — does it hand back structured clause positions, a sub-prompt, a detector set, or all three? — is **not** fixed in 0.2. This section pins the *governance contract* (pin + fail-closed + scope + stricter-wins); the wiring is deferred to one investigation pass against the actual module structure. Until then, `composes` is a declared, validated dependency the runtime records on every review for lineage, even if it does not yet alter behavior.
 
@@ -333,14 +333,14 @@ The Posture is the "smart, system-prompt-style directions" layer: a prose block 
 **Normative rules:**
 1. `system_prompt` is **legal behavior**. The OPF carries the *initial, compiler-generated* version (the genesis record). A consumer that lets a human edit the Posture MUST treat each edit as a governed version bump (§8) — versioned, diffed, re-approved, rollback-able — never a free-text field that silently changes production behavior. The producer itself already versions its own genesis Posture: `version` starts at `1` and is incremented by 1 each time the compiler's interview (§7) is re-run against an existing Posture (issue #156) — this is the OPF-side half of "governed"; a consumer's edit-time versioning (§8) picks up from there.
 2. The `generation.interview` record is **provenance**: it lets an auditor see *why* the Posture says what it says. It MUST be retained.
-3. The Posture MUST NOT restate or contradict the Floor. The Floor is the authority on red lines; the Posture may *reference* it ("hold firm on X, see Floor") but a Floor invariant binds regardless of Posture text (§5). Per issue #156's decided direction (2026-07-10): a Posture that appears to soften language around a Floor-protected concept is a **SHOULD-warn** (judgment-first, non-blocking) that a conformant validator surfaces for human review — not a hard validation error.
+3. The Posture MUST NOT restate or contradict the Floor. The Floor is the authority on hard lines; the Posture may *reference* it ("hold firm on X, see Floor") but a Floor invariant binds regardless of Posture text (§5). Per issue #156's decided direction (2026-07-10): a Posture that appears to soften language around a Floor-protected concept is a **SHOULD-warn** (judgment-first, non-blocking) that a conformant validator surfaces for human review — not a hard validation error.
 4. The Posture is **soft** at runtime (§5): it shapes the model's judgment; it is not a gate and cannot, by itself, force or suppress a decision the way a Floor rule does.
 
-### 3.7 `floor` (NEW) — the red lines
+### 3.7 `floor` (NEW) — the hard lines
 
 The Floor is the small, explicit set of things that must **never** slip — un-overridable by the model under review and by the Posture. It absorbs what an earlier design split out as a separate "review-overlay"; here it is a section of the one knowledge artifact, authored by the legal owner.
 
-A Floor entry is a **natural-language invariant**: one checkable statement a judge can evaluate against a clause in isolation. There is no lexical detector grammar — an earlier draft's term-matching design was superseded (2026-07-09, #145) because real red lines ("never accept uncapped liability") are semantic, not lexical.
+A Floor entry is a **natural-language invariant**: one checkable statement a judge can evaluate against a clause in isolation. There is no lexical detector grammar — an earlier draft's term-matching design was superseded (2026-07-09, #145) because real hard lines ("never accept uncapped liability") are semantic, not lexical.
 
 ```jsonc
 "floor": {
@@ -363,7 +363,7 @@ A Floor entry is a **natural-language invariant**: one checkable statement a jud
 1. **Evaluation is judgment; coverage and consequence are deterministic.** A dedicated Floor judge — separate from the model doing the review — evaluates each invariant against the clause under review and returns `clear`, `violation`, or `needs_review`. The consumer's deterministic obligations are the **coverage gate** (every invariant present MUST be evaluated and logged on every review; an unevaluated invariant fails the run, fail-closed) and the **consequence rule** (a `violation` verdict forces the negotiation-unacceptable outcome; `needs_review` forces human escalation; the model under review and the Posture can override neither).
 2. One Floor, both paper contexts: the same invariants are judged whether reviewing our paper's diff or the counterparty paper's extracted clauses — not two modes.
 3. The invariants are OPTIONAL as a section (a corpus-only compile ships zero invariants) but never fabricated: the engine MUST NOT derive active invariants without sign-off.
-4. The compiler MAY **propose** Floor candidates (every `outcome: proposed_then_reversed` in the Evidence is a candidate red line). The legal owner finalizes and signs. A compiler MUST NOT auto-promote a candidate to an active invariant without sign-off.
+4. The compiler MAY **propose** Floor candidates (every `outcome: proposed_then_reversed` in the Evidence is a candidate hard line). The legal owner finalizes and signs. A compiler MUST NOT auto-promote a candidate to an active invariant without sign-off.
 
 #### 3.7.1 Floor admission test (keep the Floor minimal)
 

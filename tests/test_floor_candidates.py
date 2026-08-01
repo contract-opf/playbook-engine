@@ -3,7 +3,7 @@
 Acceptance criteria verified here (mirrors the issue's Required verification):
 
   - Every ``outcome: proposed_then_reversed`` observation in Evidence is a
-    candidate red line (OPF §3.7 rule 4), grouped by taxonomy_id, citing the
+    candidate hard line (OPF §3.7 rule 4), grouped by taxonomy_id, citing the
     contributing reversal observation(s).
   - The Posture interview's Q4 ("sacred_clauses") answer seeds candidates too
     (OPF §7).

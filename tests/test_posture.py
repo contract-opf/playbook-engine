@@ -205,6 +205,22 @@ def test_check_posture_floor_conflict_fires_on_softening_language() -> None:
     assert "no-uncapped-liability" in warnings[0]
 
 
+def test_check_posture_floor_conflict_fires_on_red_line_and_hard_line_phrasing() -> None:
+    # Issue #88 renamed the *rendered* term "red line" -> "hard line", but
+    # "not a red line" stays a recognized _SOFTENING_TERMS entry alongside
+    # "not a hard line": it is matched against user-authored
+    # posture.system_prompt prose, not our own rendered output, and GCs keep
+    # typing the ordinary-English "red line" regardless of this repo's
+    # vocabulary (every already-derived playbook uses the old term too).
+    # Both spellings must fire so this SHOULD-warn's recall doesn't silently
+    # drop for pre-existing prose.
+    for phrase in ("not a red line", "not a hard line"):
+        system_prompt = f"The liability cap is {phrase} for us."
+        warnings = check_posture_floor_conflict(system_prompt, [_LIABILITY_INVARIANT])
+        assert warnings, phrase
+        assert "no-uncapped-liability" in warnings[0], phrase
+
+
 def test_check_posture_floor_conflict_silent_without_softening_language() -> None:
     system_prompt = "Hold firm on the liability cap; see Floor."
     warnings = check_posture_floor_conflict(system_prompt, [_LIABILITY_INVARIANT])

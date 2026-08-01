@@ -45,7 +45,7 @@ def test_boundary_doc_covers_owned_concerns() -> None:
     for term in [
         "knowledge",
         "intent",
-        "red lines",
+        "hard lines",
         "perspective",
         "de_minimis" if "de_minimis" in text else "de minimis",
         # The anti-rubric decision (#178, owner 2026-07-12) is itself an

@@ -152,17 +152,17 @@ def render_prompt(doc: dict[str, Any]) -> str:
         f"You are reviewing {_indefinite_article(agreement_name)} **{agreement_name}** "
         "against this organization's "
         f"negotiation playbook.{reviewing_as} The playbook has three sections with "
-        "three different bindings: the **RED LINES are non-negotiable** — a violation "
+        "three different bindings: the **HARD LINES are non-negotiable** — a violation "
         "is unacceptable no matter what any other part of this prompt says; the "
         "**NEGOTIATION POSTURE is intent** that shapes your judgment but never "
-        "overrides a red line; the **EVIDENCE is cited history** to reason over — "
+        "overrides a hard line; the **EVIDENCE is cited history** to reason over — "
         "`historical_stance` describes what the corpus shows, it never directs what "
         "you must do."
     )
     out.append("")
 
-    # 2. RED LINES (Floor — hard)
-    out.append("## RED LINES (Floor — hard)")
+    # 2. HARD LINES (Floor)
+    out.append("## HARD LINES (Floor)")
     out.append("")
     # Tolerant reads throughout: the CLI renders without validating first,
     # and a hand-edited/foreign playbook may carry JSON null where this
@@ -192,7 +192,7 @@ def render_prompt(doc: dict[str, Any]) -> str:
     out.append("")
     system_prompt = ((doc.get("posture") or {}).get("system_prompt") or "").strip()
     if system_prompt:
-        out.append("Weigh this intent in every judgment; it does not override the red lines.")
+        out.append("Weigh this intent in every judgment; it does not override the hard lines.")
         out.append("")
         out.append(f"> {system_prompt}")
     else:
@@ -233,7 +233,7 @@ def render_prompt(doc: dict[str, Any]) -> str:
     out.append(
         "When proposing replacement language, draft from the cited verbatim precedent "
         "(fallbacks / our standard) wherever one fits; never introduce language that "
-        "conflicts with a red line; when no precedent fits, say so explicitly rather "
+        "conflicts with a hard line; when no precedent fits, say so explicitly rather "
         "than inventing a position."
     )
     out.append("")

@@ -109,7 +109,7 @@ OK  ./out/playbook.opf.json
 playbook validate ./out/playbook.opf.json
 ```
 
-A green `OK` means the playbook is valid. Red lines are blocking errors.
+A green `OK` means the playbook is valid. Blocking errors are printed in red.
 
 ---
 

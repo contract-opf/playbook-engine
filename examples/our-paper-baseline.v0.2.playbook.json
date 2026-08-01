@@ -501,7 +501,7 @@
     "clause_library": []
   },
   "posture": {
-    "system_prompt": "This is a generally low-risk agreement type for FixtureCorp; default toward ACCEPT and close quickly. We typically go two negotiation rounds before escalating. Hold firm on mutual indemnification and on the insurance minimums (see Floor for the red lines). Governing law is flexible to close — we have accepted the institution's home state before and can again when the rest of the paper is clean. Term, notice periods, and renewal mechanics are flexible. Write rationale tersely for a GC audience; cite precedent by document and version.",
+    "system_prompt": "This is a generally low-risk agreement type for FixtureCorp; default toward ACCEPT and close quickly. We typically go two negotiation rounds before escalating. Hold firm on mutual indemnification and on the insurance minimums (see Floor for the hard lines). Governing law is flexible to close — we have accepted the institution's home state before and can again when the rest of the paper is clean. Term, notice periods, and renewal mechanics are flexible. Write rationale tersely for a GC audience; cite precedent by document and version.",
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine v0.2.0",
@@ -703,10 +703,10 @@
     "id": "fixturecorp/educational-affiliation",
     "version": "2023.10",
     "supersedes": null,
-    "content_hash": "sha256:231b5acce96cbcea77bd853b8b02b5255978a387cc7b64a1973b1274cd547bf7",
+    "content_hash": "sha256:e5982ba317cdf005ce3ba2263e1a20c7e283a6241b78d3cfa2c77999fc3727ae",
     "section_digests": {
       "evidence": "sha256:32736a498d177c86817ffae8e3ac82b7dc8c496da337c39300396d095c2edf09",
-      "posture": "sha256:7bdda4cc31b92465a920c9277764c4b3d03d29c281656cc63a103f2b9991228c",
+      "posture": "sha256:2c27b8fe0da20f6957619320111051474efc54cb9b5b4682ebd1ed54e16eaf54",
       "floor": "sha256:9ef0cb0cb39cc46dd2285b74eb4e417c8129330c6096019471f9bcaf221290b9",
       "curation": "sha256:a475a8529daf0f57a3f596cc436082a1188c4752098dbee4498ac693d902d30d"
     }
