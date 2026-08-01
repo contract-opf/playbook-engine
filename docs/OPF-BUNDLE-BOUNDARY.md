@@ -31,7 +31,7 @@ agreement type. Concretely, OPF owns:
   `acceptable_if`, `fallbacks`, `rejected` (§3.5).
 - **Intent** — the negotiation posture: `posture.system_prompt`, generated
   from the compiler interview and grounded in Evidence (§3.6).
-- **Red lines** — the deterministic floor: `floor.invariants`, the
+- **Hard lines** — the deterministic floor: `floor.invariants`, the
   things that must never slip regardless of model judgment (§3.7).
 - **Perspective** — whose side the playbook is reviewed from: the
   top-level `perspective` object (`party`, `counterparty_type`).
@@ -79,7 +79,7 @@ drifted from this boundary.
 |---|---|---|
 | Corpus-derived evidence | OPF | `evidence` (§3.5) |
 | Negotiation intent | OPF | `posture.system_prompt` (§3.6) |
-| Red lines / hard rejections | OPF | `floor` (§3.7) |
+| Hard lines / hard rejections | OPF | `floor` (§3.7) |
 | Whose side we review from | OPF | `perspective` |
 | Accepted-even-if-novel changes | OPF | `de_minimis` |
 | Model / retrieval / threshold policy | Bundle | consumer's release governance |

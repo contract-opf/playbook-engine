@@ -26,7 +26,7 @@ FLAGSHIP = ROOT / "examples" / "our-paper-baseline.v0.2.playbook.json"
 SNAPSHOT = Path(__file__).parent / "snapshots" / "render_prompt_example.md"
 
 _SECTION_HEADERS = [
-    "## RED LINES (Floor — hard)",
+    "## HARD LINES (Floor)",
     "## NEGOTIATION POSTURE (soft)",
     "## EVIDENCE (advisory, cited)",
     "## DRAFTING RULES",

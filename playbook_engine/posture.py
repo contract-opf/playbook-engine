@@ -228,6 +228,7 @@ _SOFTENING_TERMS: tuple[str, ...] = (
     "happy to concede",
     "may waive",
     "open to waiving",
+    "not a hard line",
     "not a red line",
     "can be adjusted",
     "room to move",

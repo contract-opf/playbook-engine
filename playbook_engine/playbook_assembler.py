@@ -278,7 +278,7 @@ def assemble_playbook(
     # Posture/Floor (§3.6/§3.7): empty-but-present. No interview has been run
     # and no invariants have been authored/derived yet in this slice (#140
     # scope excludes Floor invariant content — see #145) — the engine must
-    # never fabricate negotiation intent or red lines, so both sections are
+    # never fabricate negotiation intent or hard lines, so both sections are
     # structurally present (satisfying every consumer's "the section exists"
     # expectation) but carry no content until a later slice populates them.
     playbook["posture"] = {}

@@ -115,7 +115,7 @@ what, and where it landed.
 
 - **Anywhere, today:** `playbook render-prompt` → paste into any chat LLM
   with the contract under review. The prompt encodes the determinism
-  boundary in plain language: red lines are non-negotiable, posture shapes
+  boundary in plain language: hard lines are non-negotiable, posture shapes
   judgment, evidence is cited history.
 - **In tooling:** consume `playbook.opf.json` directly — it's stable,
   schema-validated JSON with content-addressed citations. The
