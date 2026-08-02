@@ -28,6 +28,7 @@ __all__ = [
     "playbook_clause_library",
     "clause_stance",
     "clause_confidence",
+    "clause_is_thin",
     "observation_dynamics",
     "clause_trail",
 ]
@@ -134,6 +135,40 @@ def clause_confidence(clause: dict[str, Any]) -> dict[str, Any]:
         return confidence if isinstance(confidence, dict) else {}
 
     return {}
+
+
+def clause_is_thin(clause: dict[str, Any]) -> bool:
+    """Whether one clause's evidence is "thin" — the shared trigger issue
+    #91 (review-HTML attention sort) and issue #92 (prompt-renderer heading
+    marker) both key off.
+
+    ``True`` when ``confidence.evidence_sufficient`` is explicitly
+    ``False``, OR every ``observed_positions`` entry on record has
+    ``precedent_count == 1`` (nothing behind this clause has ever recurred
+    in the corpus). A clause with NO observed positions at all is not, by
+    the second branch alone, "thin" — that case is caught by the first
+    branch in any playbook the compiler itself produced, since the
+    compiler sets ``evidence_sufficient`` False whenever ``n_our_paper``
+    falls short of its configured minimum (``clause_position_compiler.py``).
+
+    Mirrors ``prompt_renderer._thin_marker``'s trigger condition exactly;
+    kept here as the version-agnostic, publicly reusable primitive so a
+    second consumer (issue #91) never has to re-derive or drift from the
+    same definition.
+
+    Args:
+        clause: One clause dict from ``playbook_clauses()``.
+
+    Returns:
+        ``True`` if the clause's evidence is thin by either trigger.
+    """
+    confidence = clause_confidence(clause)
+    positions = [p for p in (clause.get("observed_positions") or []) if isinstance(p, dict)]
+    evidence_insufficient = confidence.get("evidence_sufficient") is False
+    single_precedent_only = bool(positions) and all(
+        p.get("precedent_count") == 1 for p in positions
+    )
+    return evidence_insufficient or single_precedent_only
 
 
 def observation_dynamics(obs: dict[str, Any]) -> dict[str, Any]:

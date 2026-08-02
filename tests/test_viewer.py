@@ -2393,3 +2393,439 @@ def test_floor_checklist_round_trip_accept_reject_idempotent(tmp_path: Path) -> 
     assert second_apply.exit_code == 0, second_apply.output
     assert (out_dir / "playbook.opf.json").read_bytes() == opf_bytes
     assert (out_dir / "floor.candidates.json").read_bytes() == candidates_bytes
+
+
+# ---------------------------------------------------------------------------
+# opf_accessors.clause_is_thin — shared "thin evidence" trigger (issue #91)
+# ---------------------------------------------------------------------------
+
+
+def test_clause_is_thin_evidence_insufficient() -> None:
+    from playbook_engine.opf_accessors import clause_is_thin
+
+    clause = {
+        "observed_positions": [{"precedent_count": 4}],
+        "rollup": {"confidence": {"evidence_sufficient": False}},
+    }
+    assert clause_is_thin(clause) is True
+
+
+def test_clause_is_thin_single_precedent_only() -> None:
+    from playbook_engine.opf_accessors import clause_is_thin
+
+    clause = {
+        "observed_positions": [{"precedent_count": 1}, {"precedent_count": 1}],
+        "rollup": {"confidence": {"evidence_sufficient": True}},
+    }
+    assert clause_is_thin(clause) is True
+
+
+def test_clause_is_thin_false_when_recurring_and_sufficient() -> None:
+    """A clause with at least one recurring (precedent_count > 1) position
+    and evidence_sufficient not False is not thin, even though one of its
+    OTHER positions was seen only once."""
+    from playbook_engine.opf_accessors import clause_is_thin
+
+    clause = {
+        "observed_positions": [{"precedent_count": 4}, {"precedent_count": 1}],
+        "rollup": {"confidence": {"evidence_sufficient": True}},
+    }
+    assert clause_is_thin(clause) is False
+
+
+def test_clause_is_thin_false_when_no_positions_and_no_explicit_flag() -> None:
+    """Vacuous case: zero observed positions and no explicit
+    evidence_sufficient: false — not thin by this rule alone (a
+    compiler-produced playbook already sets evidence_sufficient False
+    whenever n_our_paper falls short; see clause_position_compiler.py)."""
+    from playbook_engine.opf_accessors import clause_is_thin
+
+    clause = {"observed_positions": [], "rollup": {"confidence": {"score": 0.9}}}
+    assert clause_is_thin(clause) is False
+
+
+def test_clause_is_thin_v02_summary_confidence_shape() -> None:
+    """clause_is_thin is version-agnostic like every other opf_accessors
+    helper — OPF v0.2's summary.confidence works the same as v0.1's
+    rollup.confidence."""
+    from playbook_engine.opf_accessors import clause_is_thin
+
+    clause = {
+        "observed_positions": [{"precedent_count": 1}],
+        "summary": {"confidence": {"evidence_sufficient": True}},
+    }
+    assert clause_is_thin(clause) is True
+
+
+# ---------------------------------------------------------------------------
+# Control-ladder restructure — triage header, decisions, audit (issue #91)
+# ---------------------------------------------------------------------------
+
+
+def _set_posture_version(tmp_path: Path, version: int) -> None:
+    """Mutate out/playbook.opf.json (already written by _make_opf) to carry
+    a posture.version — for triage-header fixtures."""
+    opf_path = tmp_path / "out" / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    doc["posture"] = {"system_prompt": "Test posture.", "version": version}
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_render_html_triage_header_present_with_zero_state(tmp_path: Path) -> None:
+    """Triage header renders even with no Floor/Posture state at all — real,
+    honest zero counts, not a hidden/absent section (default _make_opf
+    fixture: 2 clauses, neither thin, no floor.candidates.json, no posture)."""
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    assert 'id="triage-header"' in html
+    assert "Hard lines: 0 signed" in html
+    assert "0 proposed awaiting sign-off" in html
+    assert "Posture: not authored" in html
+    assert "Evidence: 2 clauses, 0 thin" in html
+    # The "no empty shell" rule for the checklist itself (issue #90) is
+    # unaffected: still no section when there are no candidates.
+    assert 'id="floor-candidates"' not in html
+
+
+def test_render_html_triage_header_counts_match_floor_and_posture_state(
+    tmp_path: Path,
+) -> None:
+    """Header counts computed from playbook.opf.json + floor.candidates.json:
+    1 candidate already signed (excluded from "proposed"), 2 still pending,
+    Posture v1 — verified by hand against the fixture JSON, matching the
+    ticket's acceptance criteria."""
+    _make_opf(tmp_path)
+    _set_posture_version(tmp_path, 1)
+    signed = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
+    pending_a = _floor_candidate(
+        id="cand-002", statement="Never accept broad non-compete.", citations=[]
+    )
+    pending_b = _floor_candidate(
+        id="cand-003", statement="Never accept unlimited indemnity.", citations=[]
+    )
+    _write_floor_candidates(tmp_path, [signed, pending_a, pending_b])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "never-accept-uncapped-liability",
+                "statement": "Never accept uncapped liability.",
+                "rationale": "Accepted via review feedback (floor candidate cand-001).",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Hard lines: 1 signed" in html
+    assert "2 proposed awaiting sign-off" in html
+    assert "Posture: v1" in html
+
+
+def test_render_html_triage_header_shows_three_ways_to_act(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    assert "~10 min" in html
+    assert "playbook posture interview" in html
+    assert "~minutes" in html
+    assert "sign proposed hard lines" in html
+    assert "optional, open-ended" in html
+    assert "audit the evidence record" in html
+
+
+def test_render_html_regions_render_header_then_decisions_then_audit(tmp_path: Path) -> None:
+    """The three page regions appear in order: triage header, then the
+    Proposed hard lines checklist, then the per-clause audit section."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    html = render_review_html(tmp_path / "out")
+
+    idx_header = html.index('id="triage-header"')
+    idx_decisions = html.index('id="floor-candidates"')
+    idx_audit = html.index('class="audit-section-header"')
+    idx_first_clause = html.index('<details class="clause"')
+
+    assert idx_header < idx_decisions < idx_audit < idx_first_clause
+
+
+def test_render_html_clauses_collapsed_by_default(tmp_path: Path) -> None:
+    """Every clause renders as a <details> with no `open` attribute — the
+    page must render fully collapsed, native-HTML, no JS required."""
+    import re
+
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    assert '<details class="clause" id="C1"' in html
+    assert '<details class="clause" id="C2"' in html
+    assert not re.search(r"<details\b[^>]*\bopen\b", html)
+
+
+_ATTENTION_SORT_CLAUSES = [
+    {
+        "id": "clause.alpha",
+        "taxonomy_id": "aaa_alpha",
+        "title": "Alpha Clean Clause",
+        "our_standard": None,
+        "observed_positions": [
+            {
+                "text_summary": "Alpha form, recurring.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 1,
+                    "clause_path": "1",
+                },
+                "deviation": "none",
+                "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 5,
+            },
+        ],
+        "rollup": {
+            "position": "standard",
+            "confidence": {
+                "score": 0.9,
+                "basis": "precedent_count",
+                "n_our_paper": 5,
+                "n_counterparty_paper": 0,
+                "evidence_sufficient": True,
+            },
+        },
+    },
+    {
+        "id": "clause.omega",
+        "taxonomy_id": "zzz_omega",
+        "title": "Omega Thin Clause",
+        "our_standard": None,
+        "observed_positions": [
+            {
+                "text_summary": "Omega form, seen once.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 1,
+                    "clause_path": "2",
+                },
+                "deviation": "none",
+                "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1,
+            },
+        ],
+        "rollup": {
+            "position": "standard",
+            "confidence": {
+                "score": 0.9,
+                "basis": "precedent_count",
+                "n_our_paper": 1,
+                "n_counterparty_paper": 0,
+                "evidence_sufficient": True,
+            },
+        },
+    },
+]
+
+
+def test_render_html_attention_first_sort_overrides_taxonomy_order(tmp_path: Path) -> None:
+    """A thin clause (Omega, taxonomy-sorted LAST -> numbered C2) must
+    render BEFORE a clean clause (Alpha, taxonomy-sorted FIRST -> numbered
+    C1) in the collapsed audit section — proving the attention-first sort
+    actually reorders rendering, not just coincides with taxonomy order.
+    Item numbering itself is untouched: Alpha is still C1, Omega still C2.
+    """
+    _make_opf(tmp_path, clauses=_ATTENTION_SORT_CLAUSES)
+    html = render_review_html(tmp_path / "out")
+
+    idx_c1_tag = html.index('<details class="clause" id="C1"')
+    idx_c2_tag = html.index('<details class="clause" id="C2"')
+    assert idx_c2_tag < idx_c1_tag, "thin clause C2 must render before clean clause C1"
+
+    # Confirm titles inside each <details> block, scoped to that block —
+    # NOT a bare html.index() on the title text, which would find the TOC's
+    # sidebar link first: the TOC intentionally still lists clauses in
+    # taxonomy order (issue #91 only reorders the audit section itself).
+    end_c2 = html.index("</details>", idx_c2_tag)
+    assert "Omega Thin Clause" in html[idx_c2_tag:end_c2]
+    end_c1 = html.index("</details>", idx_c1_tag)
+    assert "Alpha Clean Clause" in html[idx_c1_tag:end_c1]
+
+
+def test_render_html_attention_reason_visible_on_collapsed_summary_line(tmp_path: Path) -> None:
+    """The reason a clause wants attention is visible on its <summary> line
+    without expanding; a clean clause's summary says "no flags"."""
+    _make_opf(tmp_path, clauses=_ATTENTION_SORT_CLAUSES)
+    html = render_review_html(tmp_path / "out")
+
+    start_c2 = html.index('<details class="clause" id="C2"')
+    end_c2 = html.index("</summary>", start_c2)
+    assert "thin evidence" in html[start_c2:end_c2]
+
+    start_c1 = html.index('<details class="clause" id="C1"')
+    end_c1 = html.index("</summary>", start_c1)
+    assert "no flags" in html[start_c1:end_c1]
+
+
+def test_render_html_low_confidence_flags_attention(tmp_path: Path) -> None:
+    """confidence.score < 0.6 is its own independent attention trigger,
+    distinct from thin evidence — the default fixture's governing_law
+    clause (score 0.55, not thin: 1 observation with precedent_count=2)
+    demonstrates it in isolation."""
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    start = html.index('<details class="clause" id="C1"')  # governing_law, score 0.55
+    end = html.index("</summary>", start)
+    summary = html[start:end]
+    assert "low confidence (55%)" in summary
+    assert "thin evidence" not in summary
+
+
+_PIN_CONFLICT_CLAUSES = [
+    {
+        "id": "clause.alpha",
+        "taxonomy_id": "aaa_alpha",
+        "title": "Alpha Clean Clause",
+        "our_standard": None,
+        "observed_positions": [
+            {
+                "text_summary": "Alpha form, recurring.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 1,
+                    "clause_path": "1",
+                },
+                "deviation": "none",
+                "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 5,
+            },
+        ],
+        "rollup": {
+            "position": "standard",
+            "confidence": {
+                "score": 0.9,
+                "basis": "precedent_count",
+                "n_our_paper": 5,
+                "n_counterparty_paper": 0,
+                "evidence_sufficient": True,
+            },
+        },
+    },
+    {
+        "id": "clause.omega",
+        "taxonomy_id": "zzz_omega",
+        "title": "Omega Pinned Clause",
+        "our_standard": None,
+        "observed_positions": [
+            {
+                "text_summary": "Omega form, recurring too.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 1,
+                    "clause_path": "2",
+                },
+                "deviation": "none",
+                "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 4,
+            },
+        ],
+        "rollup": {
+            "position": "standard",
+            "confidence": {
+                "score": 0.95,
+                "basis": "precedent_count",
+                "n_our_paper": 4,
+                "n_counterparty_paper": 0,
+                "evidence_sufficient": True,
+            },
+        },
+    },
+]
+
+
+def test_render_html_pin_conflict_flags_attention_and_sorts_first(tmp_path: Path) -> None:
+    """A clause with NO thin/low-confidence trigger, but a curation pin
+    whose conflict is set, still sorts to the front and says why — neither
+    Alpha nor Omega is thin or low-confidence; only Omega's pin conflicts."""
+    _make_opf(tmp_path, clauses=_PIN_CONFLICT_CLAUSES)
+    opf_path = tmp_path / "out" / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    doc["curation"] = {
+        "pins": [
+            {
+                "clause_id": "clause.omega",
+                "item_id": "C2",
+                "position": "usually_conceded",
+                "baseline_stance": "standard",
+                "pinned_at": "2026-01-01T00:00:00+00:00",
+                "conflict": {
+                    "flagged_at": "2026-01-02T00:00:00+00:00",
+                    "recomputed_historical_stance": "usually_held",
+                    "reason": "historical_stance changed since this position was pinned",
+                },
+            }
+        ]
+    }
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    html = render_review_html(tmp_path / "out")
+
+    idx_c1 = html.index('<details class="clause" id="C1"')
+    idx_c2 = html.index('<details class="clause" id="C2"')
+    assert idx_c2 < idx_c1
+
+    summary_end = html.index("</summary>", idx_c2)
+    assert "pinned position conflicts with evidence" in html[idx_c2:summary_end]
+
+
+def test_control_ladder_restructure_preserves_clause_feedback_round_trip(tmp_path: Path) -> None:
+    """A comment + pin correction on a (now collapsed) clause still applies
+    correctly after the #91 restructure: the DOM wrapper changed
+    (div -> details) but the data-item/data-clause-id hooks the Export JS
+    and apply_feedback both depend on did not."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    html = render_review_html(out_dir)
+
+    assert 'data-item="C1"' in html
+    assert 'data-clause-id="clause.governing_law"' in html
+
+    feedback = {"C1": {"comment": "flag this", "override": "usually_conceded"}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.notes_written is True
+    assert result.pins_written == ["C1"]
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert doc["curation"]["pins"][0]["clause_id"] == "clause.governing_law"
+
+
+def test_review_html_guide_contains_ladder_framing(tmp_path: Path) -> None:
+    """The rewritten guide explains the ladder (light-touch vs. granular,
+    all optional) and states plainly that intent belongs in natural
+    language, not on this page (issue #91 acceptance criteria)."""
+    _make_opf(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "render", str(tmp_path / "out")])
+    assert result.exit_code == 0, result.output
+    html = (tmp_path / "out" / "playbook.review.html").read_text(encoding="utf-8")
+    normalized = " ".join(html.split())
+
+    assert "light-touch" in normalized
+    assert "granular" in normalized
+    assert "optional" in normalized
+    assert "natural language" in normalized
+    assert "signing proposals and correcting the record" in normalized
+    # Pre-existing, still-required guide content (unchanged assertions).
+    assert "preferred variations" in html
+    assert "unacceptable variations" in html
+
+
+def test_guide_html_is_under_half_its_pre_91_length() -> None:
+    """Acceptance criteria: "Keep it under half its current length." The
+    pre-#91 _GUIDE_HTML constant was 3643 characters."""
+    from playbook_engine.viewer import _GUIDE_HTML
+
+    assert len(_GUIDE_HTML) < 3643 / 2
