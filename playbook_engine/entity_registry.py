@@ -146,25 +146,66 @@ class EntityRegistry:
 # ---------------------------------------------------------------------------
 
 
+def _fuzzy_name_pattern(name: str) -> re.Pattern[str] | None:
+    """Compile a case/whitespace-tolerant whole-word pattern for *name*.
+
+    Mirrors ``publisher._normalize_for_scan``'s normalization (casefold +
+    whitespace collapse, issue #29) so a known name is matched the same way
+    at ingest as it is scanned for at publish time: ``re.IGNORECASE`` handles
+    casefold (an ALL-CAPS or mixed-case rendering matches, as it already
+    did), and joining the name's own space-delimited words with ``\\s+``
+    (rather than the literal whitespace ``re.escape`` would produce) makes
+    the match tolerant of doubled or irregular (tab/newline) extraction
+    whitespace between them — a single space in the registry name now
+    matches ANY run of whitespace in the source, not only an exact single
+    space, which was letting e.g. a double-spaced notices-clause rendering
+    of a counterparty's name slip through un-aliased.
+
+    Deliberately narrower than a full ``_normalize_for_scan`` mirror:
+    punctuation embedded IN or adjacent to a word (e.g. the trailing period
+    of "Acme Corp.") is left exactly as ``re.escape`` would match it, same as
+    before (see the boundary-lookaround note below) — treating punctuation
+    as an inter-word separator too, the way ``_normalize_for_scan`` does for
+    its whole-document scan, would let two unrelated, adjacent sentence
+    fragments (e.g. "...our vendor is Acme. Corp policy states...") collapse
+    into a single false match; a detection-only scan can afford that
+    over-triggering, but this function performs the actual substitution, so
+    it does not take on that risk.
+
+    Boundary-checked with ``(?<!\\w)``/``(?!\\w)`` lookarounds rather than
+    ``\\b`` — these are equivalent to ``\\b`` when the name starts/ends with a
+    word character, but (unlike ``\\b``) remain satisfied when it starts/ends
+    with punctuation (e.g. "Acme Corp." or "Acme, Inc."), so substring
+    protection is preserved without silently failing on the common case of
+    legal names ending in "Inc." or "Corp." Longest names are matched first
+    by the caller so a shorter known name that is a prefix/substring of a
+    longer one (e.g. "State" vs. "State University") never partially shadows
+    the longer, more specific match.
+
+    Returns ``None`` for a name with no word tokens (e.g. all whitespace) —
+    the caller must skip it rather than match on an empty, unbounded pattern.
+    """
+    words = [w for w in name.split() if w]
+    if not words:
+        return None
+    body = r"\s+".join(re.escape(w) for w in words)
+    return re.compile(r"(?<!\w)" + body + r"(?!\w)", re.IGNORECASE)
+
+
 def pseudonymize_text(text: str, known_entities: list[str], registry: EntityRegistry) -> str:
     """Replace every whole-word occurrence of a known entity name in *text* with its alias.
 
-    Longest names are matched first so a shorter known name that is a prefix/
-    substring of a longer one (e.g. "State" vs. "State University") never
-    partially shadows the longer, more specific match. Matching is
-    case-insensitive and boundary-checked with ``(?<!\\w)``/``(?!\\w)``
-    lookarounds rather than ``\\b`` — these are equivalent to ``\\b`` when the
-    name starts/ends with a word character, but (unlike ``\\b``) remain
-    satisfied when it starts/ends with punctuation (e.g. "Acme Corp." or
-    "Acme, Inc."), so substring protection is preserved without silently
-    failing on the common case of legal names ending in "Inc." or "Corp."
+    See :func:`_fuzzy_name_pattern` for the matching rules (case/whitespace
+    tolerance, boundary handling).
     """
     if not text or not known_entities:
         return text
     result = text
     for name in sorted((n for n in known_entities if n), key=len, reverse=True):
+        pattern = _fuzzy_name_pattern(name)
+        if pattern is None:
+            continue
         alias = registry.alias_for(name)
-        pattern = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)", re.IGNORECASE)
         result = pattern.sub(alias, result)
     return result
 
