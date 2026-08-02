@@ -34,6 +34,25 @@ candidate already present in ``floor.invariants``, an inert "already signed"
 row, and for one already recorded rejected in ``floor.candidates.json``, an
 inert "rejected" row. No candidates -> no section at all (no empty shell).
 
+``render_review_html`` also leads with a human-centric control ladder (issue
+#91), three regions in order:
+
+1. A triage header: a compact "state of control" line (hard lines signed vs.
+   still proposed, Posture version, Evidence clause/thin counts) plus the
+   three ways to act, from cheapest to most open-ended.
+2. The "Proposed hard lines" checklist above (unchanged, now directly under
+   the header).
+3. The per-clause audit surface: every clause collapsed by default
+   (``<details>``/``<summary>`` — no JS needed), sorted attention-first —
+   any clause that is thin (``opf_accessors.clause_is_thin``), low-confidence
+   (``summary.confidence.score < 0.6``), or carries a pinned position that
+   conflicts with freshly recomputed evidence (``curation.pins[].conflict``)
+   sorts above the rest; ties keep the existing taxonomy+id order. Item
+   numbering (``C1``, ``C1.1``, ...) is unaffected by this render order —
+   numbers still come from the canonical taxonomy+id sort in
+   :func:`_build_index`, so ``apply_feedback`` and a reviewer's muscle
+   memory both stay stable across a re-render.
+
 ``apply_feedback(out_dir, feedback_path) -> ApplyResult``
     Read *feedback_path* (a ``feedback.json`` produced by the HTML viewer) and
     translate corrections into:
@@ -134,7 +153,12 @@ from playbook_engine.floor_candidates import (
     candidate_q4_invariant_id,
     read_floor_candidates,
 )
-from playbook_engine.opf_accessors import clause_confidence, clause_stance, playbook_clauses
+from playbook_engine.opf_accessors import (
+    clause_confidence,
+    clause_is_thin,
+    clause_stance,
+    playbook_clauses,
+)
 from playbook_engine.playbook_assembler import write_playbook
 
 _log = logging.getLogger(__name__)
@@ -362,8 +386,21 @@ def _render_clause_section(
     cnum: str,
     obs_start: int,
     taxonomy_label: str,
+    attention_reasons: list[str] | None = None,
 ) -> str:
-    """Render one clause block with its observations."""
+    """Render one clause block with its observations.
+
+    Collapsed by default (issue #91): the outer element is a plain
+    ``<details>``/``<summary>`` pair (no JS — the page must stay a
+    self-contained, no-network single file), so the browser handles
+    show/hide natively. The ``<summary>`` carries exactly what the
+    pre-#91 always-visible header carried (item number, title, taxonomy
+    tag, stance chip) PLUS *attention_reasons* — why a reviewer might want
+    to open this one, or "no flags" when *attention_reasons* is empty/None
+    — visible without expanding. Everything else (confidence meta,
+    our_standard, the comment/pin controls, observations) is unchanged,
+    just nested inside the ``<details>`` body rather than a bare ``<div>``.
+    """
     lines: list[str] = []
     title = html_lib.escape(clause.get("title", ""))
     position = clause_stance(clause)
@@ -389,14 +426,22 @@ def _render_clause_section(
     needs_review = position in ("needs_review",) or (conf_score is not None and conf_score < 0.5)
     highlight_style = "border-left:4px solid #f59e0b;background:#fffbeb" if needs_review else ""
 
-    lines.append(f'<div class="clause" id="{html_lib.escape(cnum)}" style="{highlight_style}">')
+    reasons = attention_reasons or []
+    attention_html = (
+        f'<span class="attention-reason">{html_lib.escape("; ".join(reasons))}</span>'
+        if reasons
+        else '<span class="no-flags">no flags</span>'
+    )
+
+    lines.append(f'<details class="clause" id="{html_lib.escape(cnum)}" style="{highlight_style}">')
     lines.append(
-        f'<div class="clause-header">'
+        f'<summary class="clause-header">'
         f'<span class="item-num">{html_lib.escape(cnum)}</span> '
         f'<span class="clause-title">{title}</span> '
         f'<span class="taxonomy-tag">{html_lib.escape(taxonomy_label)}</span> '
-        f'<span style="color:{pos_color};font-weight:700">{html_lib.escape(position)}</span>'
-        f"</div>"
+        f'<span style="color:{pos_color};font-weight:700">{html_lib.escape(position)}</span> '
+        f"{attention_html}"
+        f"</summary>"
     )
     if conf_str:
         lines.append(f'<div class="clause-meta">{html_lib.escape(conf_str)}</div>')
@@ -468,8 +513,73 @@ def _render_clause_section(
             lines.append("</div>")  # .observation
         lines.append("</div>")  # .observations
 
-    lines.append("</div>")  # .clause
+    lines.append("</details>")  # .clause
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Attention-first audit sort (issue #91)
+# ---------------------------------------------------------------------------
+
+# Below this, a clause's stance/rollup confidence.score counts as "low
+# confidence" for attention-sort purposes. Deliberately independent of
+# _render_clause_section's own pre-#91 "needs_review" highlight threshold
+# (0.5) — that highlight is unchanged; this is the new, ticket-specified
+# trigger (#91) for sort order + the collapsed summary line's reason text.
+_LOW_CONFIDENCE_THRESHOLD = 0.6
+
+
+def _clause_attention_reasons(
+    clause: dict[str, Any], pin_conflict_clause_ids: set[str]
+) -> list[str]:
+    """Why *clause* sorts above the rest in the collapsed audit section.
+
+    Three independent, ticket-specified triggers: thin evidence
+    (:func:`opf_accessors.clause_is_thin`), low confidence
+    (``summary.confidence.score < 0.6``), and a pinned position that now
+    conflicts with freshly recomputed evidence (this clause's id present
+    in *pin_conflict_clause_ids* — derived by the caller from
+    ``curation.pins[].conflict``; see ``curation.merge_curation``). Returns
+    every applicable reason label, in this fixed order, for display on the
+    collapsed summary line without expanding; ``[]`` when none apply (the
+    caller renders "no flags" instead).
+    """
+    reasons: list[str] = []
+    if clause_is_thin(clause):
+        reasons.append("thin evidence")
+    score = clause_confidence(clause).get("score")
+    if isinstance(score, (int, float)) and score < _LOW_CONFIDENCE_THRESHOLD:
+        reasons.append(f"low confidence ({score:.0%})")
+    if clause.get("id") in pin_conflict_clause_ids:
+        reasons.append("pinned position conflicts with evidence")
+    return reasons
+
+
+def _sort_clauses_attention_first(
+    clause_entries: list[tuple[str, dict[str, Any]]],
+    pin_conflict_clause_ids: set[str],
+) -> list[tuple[str, dict[str, Any], list[str]]]:
+    """Attention-first sort for the collapsed audit section (issue #91).
+
+    *clause_entries* is ``(item_num, clause_payload)`` pairs already in the
+    canonical numbering order (taxonomy_id then id — see
+    :func:`_build_index`); that numbering order is NEVER changed by this
+    function, only the RENDER order derived from it. Any clause with at
+    least one :func:`_clause_attention_reasons` trigger sorts before every
+    clause with none; ``list.sort`` is stable, so ties within each of the
+    two groups keep *clause_entries*' own (i.e. the canonical) order — "within
+    each group keep current order" per the ticket.
+
+    Returns each entry with its computed reasons attached, so the caller
+    (which also needs the reasons for the summary-line text) never has to
+    recompute them.
+    """
+    with_reasons = [
+        (item_num, payload, _clause_attention_reasons(payload, pin_conflict_clause_ids))
+        for item_num, payload in clause_entries
+    ]
+    with_reasons.sort(key=lambda entry: 0 if entry[2] else 1)
+    return with_reasons
 
 
 # ---------------------------------------------------------------------------
@@ -550,13 +660,16 @@ def _render_floor_candidate_row(candidate: dict[str, Any], status: str | None) -
     return "\n".join(lines)
 
 
-def _render_floor_candidates_section(
+def _classify_floor_candidates(
     candidates: list[dict[str, Any]],
     invariant_ids: set[str],
     *,
     raw_candidates: list[dict[str, Any]] | None = None,
-) -> str:
-    """Render the "Proposed hard lines" accept/reject checklist (issue #90).
+) -> list[tuple[dict[str, Any], str | None]]:
+    """Classify each Floor candidate as ``"signed"``, ``"rejected"``, or
+    still pending (``None``) — the single ground-truth classification shared
+    by the "Proposed hard lines" checklist rows AND the triage header's
+    hard-line counts (issue #91), so the two can never disagree.
 
     *candidates* is ``floor.candidates.json``'s ``candidates`` list, already
     alias-resolved by the caller for DISPLAY (statement/rationale/source
@@ -586,15 +699,14 @@ def _render_floor_candidates_section(
     ``candidate_invariant_id`` alone can never match (issue #90 review
     finding 1).
 
-    Returns the empty string when there are no renderable rows — either
-    *candidates* itself is empty, or every entry in it is malformed (not a
-    dict) — the caller must not emit an empty section shell (acceptance
-    criteria; issue #90 review finding 5).
+    A malformed (non-dict) candidate is silently dropped from the result —
+    same as it always has been (issue #90 review finding 5's "no empty
+    shell" guard now lives in the caller, checking this list is empty).
     """
     if raw_candidates is None:
         raw_candidates = candidates
 
-    rows: list[str] = []
+    classified: list[tuple[dict[str, Any], str | None]] = []
     for candidate, raw_candidate in zip(candidates, raw_candidates, strict=True):
         if not isinstance(candidate, dict):
             continue
@@ -608,8 +720,27 @@ def _render_floor_candidates_section(
             status = "rejected"
         else:
             status = None
-        rows.append(_render_floor_candidate_row(candidate, status))
+        classified.append((candidate, status))
+    return classified
 
+
+def _render_floor_candidates_section(
+    classified_candidates: list[tuple[dict[str, Any], str | None]],
+) -> str:
+    """Render the "Proposed hard lines" accept/reject checklist (issue #90).
+
+    *classified_candidates* is :func:`_classify_floor_candidates`'s output —
+    each candidate (already alias-resolved for DISPLAY, same as everything
+    else on the page) paired with its status.
+
+    Returns the empty string when there are no renderable rows (the caller
+    must not emit an empty section shell — acceptance criteria; issue #90
+    review finding 5).
+    """
+    rows = [
+        _render_floor_candidate_row(candidate, status)
+        for candidate, status in classified_candidates
+    ]
     if not rows:
         return ""
 
@@ -619,11 +750,65 @@ def _render_floor_candidates_section(
         '<p class="floor-section-help">Machine-proposed Floor candidates, pending your '
         "sign-off — never auto-promoted (OPF-SPEC.md §3.7 rule 4). "
         "<b>Accept</b> promotes a candidate into the signed "
-        "<code>floor.invariants</code>, a categorical, judge-checkable red line. "
+        "<code>floor.invariants</code>, a categorical, judge-checkable hard line. "
         "<b>Reject</b> records that you looked at it and declined; it will not be "
         "re-proposed. Undecided candidates reappear on every render until you "
         "decide.</p>" + "\n".join(rows) + "</div>"
     )
+
+
+# ---------------------------------------------------------------------------
+# Triage header — state-of-control banner (issue #91)
+# ---------------------------------------------------------------------------
+
+
+def _render_triage_header(
+    *,
+    signed_count: int,
+    pending_count: int,
+    posture_version: int | None,
+    total_clauses: int,
+    thin_count: int,
+) -> str:
+    """The state-of-control banner (issue #91) — the first thing a reviewer
+    sees, above the "Proposed hard lines" checklist and the per-clause
+    audit surface. One compact status line plus the three ways to act,
+    cheapest first, so a reviewer immediately sees what minimal work buys
+    and that the granular audit below is optional.
+
+    Every count is computed by the caller from the loaded
+    ``playbook.opf.json`` + ``floor.candidates.json`` — see
+    ``render_review_html`` — never re-derived here, so this function is a
+    pure template.
+    """
+    posture_label = f"v{posture_version}" if isinstance(posture_version, int) else "not authored"
+    status_line = (
+        f"Hard lines: {signed_count} signed &middot; {pending_count} proposed awaiting "
+        f"sign-off | Posture: {html_lib.escape(posture_label)} | "
+        f"Evidence: {total_clauses} clauses, {thin_count} thin"
+    )
+    return (
+        '<div id="triage-header">'
+        f'<div class="triage-status">{status_line}</div>'
+        '<ul class="triage-actions">'
+        "<li><b>~10 min</b> — author intent: run the posture interview "
+        "(<code>playbook posture interview</code>)</li>"
+        "<li><b>~minutes</b> — sign proposed hard lines: checklist below</li>"
+        "<li><b>optional, open-ended</b> — audit the evidence record: "
+        "sections below</li>"
+        "</ul>"
+        "</div>"
+    )
+
+
+_AUDIT_SECTION_HEADER_HTML = (
+    '<div class="audit-section-header">'
+    "<h2>Evidence audit</h2>"
+    '<p class="audit-section-help">Every clause, collapsed by default. '
+    "Thin, low-confidence, or pin-conflicted clauses are listed first — "
+    "expand any clause for its citations, badges, and comment box.</p>"
+    "</div>"
+)
 
 
 _GUIDE_HTML = """
@@ -631,63 +816,28 @@ _GUIDE_HTML = """
  <div id="guide-panel">
   <button class="guide-close" onclick="toggleGuide(false)">&times;</button>
   <h2>How to use this page</h2>
-  <h3>What this is</h3>
-  <p>A review surface over the compiled negotiation playbook
-  (<code>playbook.opf.json</code>). Every numbered item is a clause concept or an
-  observed clause form mined from your signed corpus, with citations back to the
-  exact document, version, and clause span. Nothing here was invented: each
-  position traces to real text.</p>
-  <h3>Why review it</h3>
-  <p>The compiler and its judge are honest but not infallible: classifications,
-  provenance calls, and deviation/risk judgments can be wrong, and low-confidence
-  items are highlighted for exactly that reason. Your corrections are the
-  feedback loop — they persist across recompiles and make every future playbook
-  better.</p>
-  <h3>How to read it</h3>
-  <ul>
-   <li><b>Stance chip</b> (per clause): what the corpus showed —
-     <i>consistently/usually held</i> (we kept our language),
-     <i>mixed</i> (both concessions and successful pushbacks on record),
-     <i>usually conceded</i>, or <i>no signal</i> (insufficient evidence).</li>
-   <li><b>Deviation badge</b> (per observation): how the text differs from the
-     compared form — <i>none</i>, <i>reworded equivalent</i>, or
-     <i>substantive</i>.</li>
-   <li><b>Risk badge</b>: the judged risk shift from OUR perspective —
-     direction (worse = more risk for us) and magnitude (minor/material).</li>
-   <li><b>Outcome badge</b>: <i>signed</i> = survived to the signed copy;
-     <i>reversed</i> = proposed then successfully pushed back before signing.</li>
-   <li><b>Variation vocabulary</b> (used in the companion playbook document):
-     <i>preferred variations</i> = signed at neutral risk, take them;
-     <i>acceptable variations (concessions)</i> = signed historically but risk
-     moved against us; <i>unacceptable variations</i> = asks we reversed before
-     signing; <i>all signed forms</i> = the full evidence library these are
-     distilled from.</li>
-   <li>Hover any badge or section heading for its definition.</li>
-  </ul>
-  <h3>Proposed hard lines</h3>
-  <p>Above the clause list, if <code>playbook floor propose</code> has been
-  run, any machine-proposed Floor candidates appear as a short accept/reject
-  checklist. <b>Accept</b> promotes a candidate into the signed Floor
-  (<code>floor.invariants</code>) with your review recorded as its
-  attribution — never automatic (a candidate sits there until a human
-  decides). <b>Reject</b> records that you looked at it and declined; it
-  will not be re-proposed. Undecided candidates reappear on every render
-  until you decide. A candidate already signed, or already rejected, shows
-  as an inert status badge instead of a control.</p>
-  <h3>How to act on it</h3>
+  <p>A review ladder over the compiled playbook: light-touch at the top,
+  granular at the bottom, every rung optional. <b>Intent belongs in
+  natural language</b> — the posture interview and the consuming review
+  engine's own rules, not this page. This page is for signing proposals
+  and correcting the record.</p>
   <ol>
-   <li>Read each clause; open observations that look misclassified, misattributed
-     (provenance), or wrongly risk-scored.</li>
-   <li>Type a note in the item's comment box (e.g. "taxonomy should be
-     indemnification", "this is our paper", "risk is material, not minor").</li>
-   <li>Decide any proposed hard lines (accept/reject) at the top of the page.</li>
-   <li>Click <b>Export feedback</b> (top bar) — it downloads
-     <code>feedback.json</code>.</li>
-   <li>Hand that file back to the pipeline:
-     <code>playbook view apply &lt;out_dir&gt; feedback.json</code>, then re-run
-     judge &rarr; mine &rarr; project. Corrections are stored as hints and
-     verdict overrides that survive recompiles.</li>
+   <li><b>State of control</b> (banner) — hard lines signed vs. proposed,
+     Posture version, how much Evidence is thin.</li>
+   <li><b>Decisions</b> (~minutes) — accept/reject each proposed hard
+     line. Accept signs it into <code>floor.invariants</code>, never
+     automatic (OPF-SPEC.md &sect;3.7 rule 4); undecided ones keep
+     reappearing.</li>
+   <li><b>Audit</b> (optional) — every clause, collapsed. Thin,
+     low-confidence, or pin-conflicted clauses sort first and say why;
+     expand any clause for citations, badges, and a comment box.</li>
   </ol>
+  <p>Badges roll up into <i>preferred variations</i> (signed, neutral
+  risk), <i>acceptable variations</i> (concessions), and
+  <i>unacceptable variations</i> (asks we reversed) in the companion
+  document. Comment, pin, or decide, then <b>Export feedback</b> and hand
+  <code>feedback.json</code> to
+  <code>playbook view apply &lt;out_dir&gt; feedback.json</code>.</p>
  </div>
 </div>
 """
@@ -711,8 +861,17 @@ h1 { font-size: 1.4rem; margin: 0 0 0.5rem }
 #toc a:hover { color: #2563eb }
 #content { flex: 1; padding: 1.2rem; overflow-y: auto; max-width: 900px }
 .layout { display: flex; gap: 0 }
+#triage-header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 0.9rem 1.2rem }
+.triage-status { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem }
+.triage-actions { margin: 0; padding-left: 1.2rem; font-size: 0.85rem; color: #374151 }
+.triage-actions li { margin-bottom: 0.15rem }
+.audit-section-header { margin: 0 0 0.8rem }
+.audit-section-header h2 { margin: 0 0 0.2rem; font-size: 1.1rem }
+.audit-section-help { color: #6b7280; font-size: 0.85rem; margin: 0 }
 .clause { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 1rem; padding: 1rem 1.2rem }
-.clause-header { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem }
+.clause-header { font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; cursor: pointer }
+.attention-reason { color: #92400e; font-weight: 500; font-size: 0.78em; margin-left: 0.2rem }
+.no-flags { color: #9ca3af; font-weight: 500; font-size: 0.78em; margin-left: 0.2rem }
 .item-num { background: #1e293b; color: #f1f5f9; border-radius: 3px; padding: 1px 6px; font-size: 0.8rem; font-family: monospace }
 .obs-num { background: #6b7280 !important }
 .clause-title { font-size: 1.05rem }
@@ -847,7 +1006,10 @@ def render_review_html(
     ``feedback.json``. When ``out_dir/floor.candidates.json`` carries at
     least one candidate, also renders a "Proposed hard lines" accept/reject
     checklist above the clause sections (issue #90) — see the module
-    docstring.
+    docstring. Leads with a state-of-control triage header, then that
+    checklist, then the per-clause audit surface collapsed and sorted
+    attention-first (issue #91) — see the module docstring's control-ladder
+    paragraph.
 
     Args:
         out_dir:   Path to the directory containing ``playbook.opf.json``
@@ -919,19 +1081,34 @@ def render_review_html(
     toc_lines.append("</div>")
     toc_html = "\n".join(toc_lines)
 
-    # Build clause sections
+    # Build clause sections — collapsed by default, sorted attention-first
+    # (issue #91): thin / low-confidence / pin-conflicted clauses first,
+    # ties keeping the canonical taxonomy+id order (_build_index's order,
+    # unaffected by this — see _sort_clauses_attention_first). A clause's
+    # pinned position "conflicts with evidence" per curation.merge_curation:
+    # its curation.pins[] entry (keyed by clause_id) carries a non-null
+    # conflict.
+    pin_conflict_clause_ids: set[str] = {
+        clause_id
+        for pin in (render_doc.get("curation") or {}).get("pins") or []
+        if isinstance(pin, dict)
+        and pin.get("conflict") is not None
+        and isinstance(clause_id := pin.get("clause_id"), str)
+    }
+    clause_entries = [(item_num, payload) for item_num, kind, payload in index if kind == "clause"]
+    sorted_clause_entries = _sort_clauses_attention_first(clause_entries, pin_conflict_clause_ids)
+
     clause_sections: list[str] = []
-    clause_counter = 0
-    for item_num, kind, payload in index:
-        if kind != "clause":
-            continue
-        clause_counter += 1
+    for clause_counter, (item_num, payload, reasons) in enumerate(sorted_clause_entries, start=1):
         tid = payload.get("taxonomy_id", "")
         tax_label = tax_map.get(tid, tid)
-        section = _render_clause_section(payload, item_num, clause_counter, tax_label)
+        section = _render_clause_section(payload, item_num, clause_counter, tax_label, reasons)
         clause_sections.append(section)
 
-    clauses_html = "\n".join(clause_sections)
+    clauses_html = _AUDIT_SECTION_HEADER_HTML + "\n".join(clause_sections)
+
+    total_clauses = len(clause_entries)
+    thin_clause_count = sum(1 for _, payload in clause_entries if clause_is_thin(payload))
 
     # "Proposed hard lines" checklist (issue #90) — candidates get the same
     # alias resolution as everything else on the page (reversal candidates
@@ -949,13 +1126,34 @@ def render_review_html(
         if alias_map
         else floor_candidates
     )
+    floor_invariants = (render_doc.get("floor") or {}).get("invariants") or []
     invariant_ids: set[str] = {
         inv_id
-        for inv in (render_doc.get("floor") or {}).get("invariants") or []
+        for inv in floor_invariants
         if isinstance(inv, dict) and isinstance(inv_id := inv.get("id"), str)
     }
-    floor_section_html = _render_floor_candidates_section(
+    classified_candidates = _classify_floor_candidates(
         render_candidates, invariant_ids, raw_candidates=floor_candidates
+    )
+    floor_section_html = _render_floor_candidates_section(classified_candidates)
+
+    # Triage header (issue #91) — the state-of-control counts a reviewer
+    # sees first. Hard-line "signed" is EVERY active floor.invariants entry
+    # (hand-authored, Q4-promoted, or accepted from a candidate — the
+    # header reports what's actually locked in, not just candidate
+    # provenance); "proposed awaiting sign-off" is exactly the candidates
+    # _classify_floor_candidates left pending (status None) — the SAME
+    # classification the checklist rows below render, so the two can never
+    # disagree.
+    signed_floor_count = len(floor_invariants)
+    pending_floor_count = sum(1 for _, status in classified_candidates if status is None)
+    posture_version = (render_doc.get("posture") or {}).get("version")
+    triage_header_html = _render_triage_header(
+        signed_count=signed_floor_count,
+        pending_count=pending_floor_count,
+        posture_version=posture_version if isinstance(posture_version, int) else None,
+        total_clauses=total_clauses,
+        thin_count=thin_clause_count,
     )
 
     agreement_type = render_doc.get("agreement_type", {}).get("name", "Playbook Review")
@@ -977,6 +1175,7 @@ def render_review_html(
         '<button class="guide-btn" onclick="toggleGuide(true)">User guide</button>',
         "</div>",
         _GUIDE_HTML,
+        triage_header_html,
         '<div class="layout">',
         toc_html,
         f'<div id="content">{floor_section_html}{clauses_html}</div>',
