@@ -243,6 +243,118 @@ def test_pseudonymize_text_matches_name_ending_in_punctuation(tmp_path: Path) ->
     assert out2 == "CUNYA is unaffected."
 
 
+# ---------------------------------------------------------------------------
+# Issue #29: born-safe pseudonymization must catch case/spacing variants of
+# a known entity name, not just the exact registry spelling. The publish-side
+# backstop (publisher._normalize_for_scan) already casefolds and collapses
+# whitespace before comparing; pseudonymize_text must normalize the same way
+# BEFORE matching so the variant never reaches the internal artifact in the
+# first place, replacing the matched ORIGINAL span (not a normalized copy).
+# ---------------------------------------------------------------------------
+
+
+def test_pseudonymize_text_matches_all_caps_rendering(tmp_path: Path) -> None:
+    """An ALL-CAPS rendering (e.g. an entire-agreement clause quoting a
+    counterparty's full legal name in uppercase) is aliased (issue #29).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    rendered = _KNOWN_ENTITY.upper()
+    text = f"Alpha Corp shall indemnify {rendered} against third-party claims."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert rendered not in out
+    assert reg.alias_for(_KNOWN_ENTITY) in out
+
+
+def test_pseudonymize_text_matches_mixed_case_rendering(tmp_path: Path) -> None:
+    """A mixed-case rendering of a known entity name is aliased (issue #29)."""
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    rendered = "StAtE UniVERsity"
+    text = f"Alpha Corp shall indemnify {rendered} against third-party claims."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert rendered not in out
+    assert reg.alias_for(_KNOWN_ENTITY) in out
+
+
+def test_pseudonymize_text_matches_doubled_whitespace_rendering(tmp_path: Path) -> None:
+    """A doubled-whitespace rendering (e.g. a double-spaced notices clause)
+    of a known entity name is aliased. Pre-fix, the matcher required an
+    EXACT single space between the name's words and let this slip through
+    un-aliased into the internal artifact (issue #29).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    rendered = "State  University"  # doubled space between the two words
+    text = f"Alpha Corp shall indemnify {rendered} against third-party claims."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert rendered not in out
+    assert "State" not in out
+    assert "University" not in out
+    assert reg.alias_for(_KNOWN_ENTITY) in out
+
+
+def test_pseudonymize_text_matches_irregular_whitespace_rendering(tmp_path: Path) -> None:
+    """Tab/newline extraction whitespace between a known name's words is
+    tolerated too, not just doubled plain spaces (issue #29).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    text = "Alpha Corp shall indemnify State\tUniversity, and State\nUniversity accepts."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert "State" not in out
+    assert "University" not in out
+    assert out.count(reg.alias_for(_KNOWN_ENTITY)) == 2
+
+
+def test_pseudonymize_text_matches_all_caps_and_doubled_whitespace_combined(
+    tmp_path: Path,
+) -> None:
+    """The exact combined failure mode the ticket names: an ALL-CAPS,
+    doubled-whitespace rendering (e.g. an entire-agreement clause quoting a
+    counterparty's full legal name in uppercase with double-spaced words)
+    must be aliased (issue #29).
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    rendered = "STATE   UNIVERSITY"  # ALL CAPS + tripled space
+    text = (
+        "This Agreement, together with its exhibits, is the entire agreement "
+        f"between Alpha Corp and {rendered}."
+    )
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert rendered not in out
+    assert "STATE" not in out
+    assert "UNIVERSITY" not in out
+    assert reg.alias_for(_KNOWN_ENTITY) in out
+
+
+def test_pseudonymize_text_substring_protection_holds_with_fuzzy_whitespace(
+    tmp_path: Path,
+) -> None:
+    """The whitespace-tolerant matcher must still NOT corrupt a longer word
+    that merely CONTAINS a known name's second token as a prefix, even when
+    doubled whitespace precedes it — the pre-existing substring guard (see
+    ``test_pseudonymize_text_does_not_corrupt_substring_words``) must survive
+    the whitespace-tolerance discriminator added for issue #29.
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    text = "The State   Universityville Annex is unaffected."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert out == text
+
+
+def test_pseudonymize_text_does_not_merge_across_sentence_boundary(tmp_path: Path) -> None:
+    """Whitespace tolerance must not degrade into punctuation-as-separator
+    matching: two unrelated words that happen to span a sentence boundary
+    (one ending sentence N, the next opening sentence N+1) must NOT be
+    merged into a false match merely because only whitespace+punctuation
+    separates them. This is the false-positive class the issue #29 fix
+    deliberately does not take on (see ``_fuzzy_name_pattern``'s docstring):
+    only whitespace RUNS are treated as an equivalent separator, not
+    punctuation.
+    """
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    text = "Our vendor is State. University policy states further terms apply."
+    out = pseudonymize_text(text, [_KNOWN_ENTITY], reg)
+    assert out == text
+
+
 def test_pseudonymize_document_id_replaces_matching_slug_span(tmp_path: Path) -> None:
     reg = EntityRegistry.load(tmp_path / "entity_registry.json")
     alias = reg.alias_for(_KNOWN_ENTITY)
