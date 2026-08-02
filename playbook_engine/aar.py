@@ -39,7 +39,12 @@ from playbook_engine.inspection_report import (
     _load_scope,
     _load_trails,
 )
-from playbook_engine.opf_accessors import clause_confidence, clause_stance, playbook_clauses
+from playbook_engine.opf_accessors import (
+    clause_confidence,
+    clause_stance,
+    playbook_clause_library,
+    playbook_clauses,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -108,7 +113,12 @@ def build_after_action_data(out_dir: Path) -> dict[str, Any]:
     data["judgment_economics"] = _build_judgment_economics(out_dir, all_obs)
     data["semantic_coverage"] = _build_semantic_coverage(all_obs, playbook)
     data["needs_attention"] = _build_needs_attention(
-        all_obs, observations_by_doc, manifest, quarantine=quarantine, trails=trails
+        all_obs,
+        observations_by_doc,
+        manifest,
+        quarantine=quarantine,
+        trails=trails,
+        playbook=playbook,
     )
     data["honesty"] = _build_honesty(all_obs, playbook)
     data["artifacts"] = _build_artifacts(out_dir, playbook)
@@ -460,16 +470,60 @@ def _build_semantic_coverage(
     }
 
 
+def _zero_clause_reason(
+    all_obs: list[dict[str, Any]], playbook: dict[str, Any] | None = None
+) -> str:
+    """Derive the likely-cause explanation for a playbook that compiled ZERO
+    clause positions — shared verbatim between the Needs Attention and
+    Honesty sections (issue #25) so the two can never drift out of sync.
+
+    Checks are ordered most-specific-first and are NOT mutually exclusive
+    with each other in the data — the first match wins:
+      1. All observations outcome=unsigned (unchanged from fix round 1 —
+         kept first so a corpus that is entirely unsigned keeps reporting
+         that as the cause even when the taxonomy also happens to be
+         empty, e.g. an all-unsigned fixture built from a minimal/empty
+         taxonomy).
+      2. Empty clause taxonomy (issue #25 fix round 2): taxonomy.entries
+         is schema-legal to be empty (spec/playbook.schema-0.3.json has no
+         minItems on it — see playbook_engine/taxonomy.py's loader), and a
+         zero-entry taxonomy leaves nothing to classify any observation
+         into regardless of signing status.
+      3. Generic fallback when neither specific cause is derivable.
+    """
+    outcomes = {obs.get("outcome") for obs in all_obs if isinstance(obs, dict)}
+    if outcomes and outcomes == {"unsigned"}:
+        return (
+            "playbook compiled ZERO clause positions — every observation "
+            "is outcome=unsigned (no signed/executed copy was detected in "
+            "any document; check signature blocks or set signed_version "
+            "in hints.yaml)"
+        )
+    if playbook is not None and not (playbook.get("taxonomy") or {}).get("entries"):
+        return (
+            "playbook compiled ZERO clause positions — the compiled "
+            "playbook's clause taxonomy has zero entries (taxonomy.entries "
+            "is empty), so no observation could be classified into any "
+            "clause taxonomy position"
+        )
+    return (
+        "playbook compiled ZERO clause positions — the compiled "
+        "playbook is schema-valid but semantically empty"
+    )
+
+
 def _build_needs_attention(
     all_obs: list[dict[str, Any]],
     observations_by_doc: dict[str, list[dict[str, Any]]],
     manifest: dict[str, Any] | None = None,
     quarantine: list[dict[str, Any]] | None = None,
     trails: dict[str, Any] | None = None,
+    playbook: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Needs attention: quarantined documents, degenerate deviation
-    distributions, corpus-level provenance ambiguity flips, failed version
-    ingests, low-confidence, needs_review, judge_error items.
+    """Needs attention: quarantined documents, a zero-clause playbook,
+    degenerate deviation distributions, corpus-level provenance ambiguity
+    flips, failed version ingests, low-confidence, needs_review, judge_error
+    items.
     """
     items: list[dict[str, Any]] = []
     item_num = 0
@@ -508,6 +562,29 @@ def _build_needs_attention(
                     "reasons": [f"quarantined: {q.get('reason') or 'unknown reason'}"],
                 }
             )
+
+    # Zero-clause playbook (issue #25): a schema-valid but semantically
+    # empty playbook — evidence.clauses compiled to nothing — is the
+    # single biggest gap a reader can miss, and previously only the
+    # Honesty section's blank-field list caught it; an empty
+    # needs_attention list read as "all observations clean" even though
+    # nothing was actually classified into a clause position. Shares its
+    # derived likely cause with the Honesty entry via _zero_clause_reason
+    # so the two sections never disagree. Guarded on `if playbook:` (not
+    # just `if not playbook_clauses(playbook):`) so a report built before
+    # `playbook project` has even run — no playbook.opf.json on disk yet —
+    # is never mistaken for a compiled-but-empty playbook.
+    if playbook and not playbook_clauses(playbook):
+        item_num += 1
+        items.append(
+            {
+                "item_number": item_num,
+                "document_id": "—",
+                "version": "—",
+                "taxonomy_id": None,
+                "reasons": [_zero_clause_reason(all_obs, playbook)],
+            }
+        )
 
     # Degenerate judging: a prior real run recorded 1029/1029 deviation
     # verdicts "none" (a scripted rubber stamp) and no gate flagged it. When
@@ -660,20 +737,84 @@ def _build_honesty(
         # on a schema-valid but semantically empty document (issue #208).
         # Name the likely cause when it is derivable from the observations.
         if not clauses:
-            outcomes = {obs.get("outcome") for obs in all_obs if isinstance(obs, dict)}
-            if outcomes and outcomes == {"unsigned"}:
-                reason = (
-                    "playbook compiled ZERO clause positions — every observation "
-                    "is outcome=unsigned (no signed/executed copy was detected in "
-                    "any document; check signature blocks or set signed_version "
-                    "in hints.yaml)"
-                )
-            else:
-                reason = (
-                    "playbook compiled ZERO clause positions — the compiled "
-                    "playbook is schema-valid but semantically empty"
-                )
+            reason = _zero_clause_reason(all_obs, playbook)
             blank_fields.append({"clause_id": "—", "field": "evidence.clauses", "reason": reason})
+
+            # Issue #25: evidence.clauses is not the only top-level section
+            # that can be empty. When the compiled playbook is this hollow,
+            # name every other empty top-level section too, so the reader
+            # sees the full extent of "this playbook is empty" rather than
+            # just the clause count. Scoped inside `if not clauses:` on
+            # purpose — posture/floor are unconditionally empty-but-present
+            # on EVERY compiled playbook today (#140: no interview has been
+            # run and no invariants have been derived in this engine slice),
+            # so flagging them here unconditionally would fire on every
+            # healthy, fully-populated playbook too. The unconditional
+            # honesty_notes below already disclose that standing fact; this
+            # block instead answers "is THIS playbook empty end to end?".
+            if not playbook_clause_library(playbook):
+                blank_fields.append(
+                    {
+                        "clause_id": "—",
+                        "field": "evidence.clause_library",
+                        "reason": (
+                            "no clause concepts were extracted — the compiled "
+                            "clause-concept library is empty"
+                        ),
+                    }
+                )
+            if not playbook.get("posture"):
+                blank_fields.append(
+                    {
+                        "clause_id": "—",
+                        "field": "posture",
+                        "reason": (
+                            "GC-authored Posture is a v0.2 human-input field not yet "
+                            "generated by the engine — no interview has been run"
+                        ),
+                    }
+                )
+            if not playbook.get("floor"):
+                blank_fields.append(
+                    {
+                        "clause_id": "—",
+                        "field": "floor",
+                        "reason": (
+                            "Floor clauses are derived from classified reversals and "
+                            "require attorney sign-off — none have been derived yet"
+                        ),
+                    }
+                )
+            if not (playbook.get("corpus") or {}).get("documents"):
+                blank_fields.append(
+                    {
+                        "clause_id": "—",
+                        "field": "corpus.documents",
+                        "reason": (
+                            "no documents are recorded in the compiled playbook's corpus section"
+                        ),
+                    }
+                )
+            # Issue #25 fix round 2: taxonomy is a required top-level section
+            # (spec/playbook.schema-0.3.json `required`) but taxonomy.entries
+            # carries no minItems, so `entries: []` is schema-legal — and a
+            # zero-entry taxonomy is itself a likely root cause of the
+            # zero-clause playbook this whole block is reporting on (nothing
+            # to classify observations into). Same reasoning as the
+            # clause_library/posture/floor/corpus.documents checks above:
+            # scoped inside `if not clauses:` so a healthy, non-empty
+            # taxonomy on a fully-populated playbook never flags here.
+            if not (playbook.get("taxonomy") or {}).get("entries"):
+                blank_fields.append(
+                    {
+                        "clause_id": "—",
+                        "field": "taxonomy.entries",
+                        "reason": (
+                            "no taxonomy entries are defined — the compiled "
+                            "playbook's clause taxonomy is empty"
+                        ),
+                    }
+                )
         for clause in clauses:
             if not isinstance(clause, dict):
                 continue
