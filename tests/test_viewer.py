@@ -175,6 +175,48 @@ def _write_feedback(tmp_path: Path, feedback: dict) -> Path:
     return p
 
 
+def _floor_candidate(
+    *,
+    id: str = "cand-001",  # noqa: A002
+    statement: str = "Never accept uncapped liability.",
+    rationale: str = "Proposed then reversed before signing in 2 deals.",
+    source: str = "reversal",
+    citations: list[dict] | None = None,
+    decision: str | None = None,
+) -> dict:
+    """A synthetic floor.candidates.json candidate (issue #90 fixtures)."""
+    if citations is None:
+        citations = [{"document_id": "state-university-2023", "version": 3, "clause_path": "8.1"}]
+    candidate: dict = {
+        "id": id,
+        "statement": statement,
+        "rationale": rationale,
+        "source": source,
+        "citations": citations,
+    }
+    if decision is not None:
+        candidate["decision"] = decision
+    return candidate
+
+
+def _write_floor_candidates(tmp_path: Path, candidates: list[dict]) -> Path:
+    """Write out/floor.candidates.json — call _make_opf(tmp_path) first."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    p = out_dir / "floor.candidates.json"
+    p.write_text(json.dumps({"candidates": candidates}), encoding="utf-8")
+    return p
+
+
+def _set_floor_invariants(tmp_path: Path, invariants: list[dict]) -> None:
+    """Mutate out/playbook.opf.json (already written by _make_opf) to carry
+    a floor.invariants list — for "already signed" candidate fixtures."""
+    opf_path = tmp_path / "out" / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    doc["floor"] = {"invariants": invariants}
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # _build_index — item numbering
 # ---------------------------------------------------------------------------
@@ -558,6 +600,259 @@ def test_render_html_numbering_stable_different_input_order(tmp_path: Path) -> N
     assert idx_c1 < idx_c2
     # Governing Law header should appear before the C2 (Indemnification) section
     assert idx_gov < idx_ind
+
+
+# ---------------------------------------------------------------------------
+# render_review_html — "Proposed hard lines" checklist (issue #90)
+# ---------------------------------------------------------------------------
+
+
+def test_render_html_no_floor_candidates_file_no_section(tmp_path: Path) -> None:
+    """No floor.candidates.json at all -> no section, no empty shell.
+
+    The static User Guide overlay mentions "Proposed hard lines" and
+    "already signed" unconditionally (it documents every page feature
+    regardless of whether THIS render happens to use it — same as it
+    always explains "preferred variations" even with none present), so the
+    absence check here is the structural section marker, not that prose.
+    """
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    assert 'id="floor-candidates"' not in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_empty_floor_candidates_no_section(tmp_path: Path) -> None:
+    """floor.candidates.json exists but has zero candidates -> still no
+    section (acceptance criteria: no empty shell either way)."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [])
+    html = render_review_html(tmp_path / "out")
+    assert 'id="floor-candidates"' not in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_all_malformed_floor_candidates_no_section(tmp_path: Path) -> None:
+    """floor.candidates.json's candidates list holds only malformed
+    (non-dict) entries -> still no section, no empty shell (issue #90
+    review finding 5: the early return checked `not candidates`, true only
+    for a genuinely EMPTY list -- a list of garbage is non-empty, so the
+    section header + help paragraph rendered with zero actual rows)."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, ["not-a-dict", 42])  # type: ignore[list-item]
+    html = render_review_html(tmp_path / "out")
+    assert 'id="floor-candidates"' not in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidates_section_present(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    html = render_review_html(tmp_path / "out")
+    assert "Proposed hard lines" in html
+    assert 'id="floor-candidates"' in html
+    assert "Never accept uncapped liability." in html
+    assert 'data-candidate-id="cand-001"' in html
+
+
+def test_render_html_undecided_candidate_has_three_way_control(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    html = render_review_html(tmp_path / "out")
+    assert 'class="floor-decision"' in html
+    assert 'value="accept"' in html
+    assert 'value="reject"' in html
+    assert 'value="undecided" checked' in html  # default undecided
+    # No status badge rendered for a still-pending candidate (the User
+    # Guide's own static prose mentions both words unconditionally, so the
+    # precise check is for the badge markup itself, not the bare words).
+    assert ">already signed<" not in html
+    assert ">rejected<" not in html
+
+
+def test_render_html_floor_candidate_shows_reversal_citation(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(
+        tmp_path,
+        [
+            _floor_candidate(
+                citations=[
+                    {"document_id": "state-university-2023", "version": 3, "clause_path": "8.1"}
+                ]
+            )
+        ],
+    )
+    html = render_review_html(tmp_path / "out")
+    assert "state-university-2023" in html
+    assert "v3" in html
+    assert "8.1" in html
+
+
+def test_render_html_floor_candidate_interview_q4_shows_marker_not_citation(
+    tmp_path: Path,
+) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(
+        tmp_path,
+        [
+            _floor_candidate(
+                id="cand-002",
+                statement="Never accept IP assignment.",
+                source="interview_q4",
+                citations=[],
+            )
+        ],
+    )
+    html = render_review_html(tmp_path / "out")
+    assert "Posture interview" in html
+    assert "Q4" in html
+
+
+def test_render_html_floor_candidate_already_signed_renders_inert(tmp_path: Path) -> None:
+    """A candidate whose derived id is already present in floor.invariants
+    renders as an inert 'already signed' row — no accept/reject control."""
+    _make_opf(tmp_path)
+    candidate = _floor_candidate()
+    _write_floor_candidates(tmp_path, [candidate])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "never-accept-uncapped-liability",
+                "statement": "Never accept uncapped liability.",
+                "rationale": "Accepted via review feedback (floor candidate cand-001).",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Proposed hard lines" in html
+    assert ">already signed<" in html
+    # No live control rendered for this (now inert) candidate.
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidate_rejected_renders_inert(tmp_path: Path) -> None:
+    """A candidate recorded as rejected in floor.candidates.json renders as
+    an inert 'rejected' row — no accept/reject control, and it is not
+    re-proposed as an open item."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate(decision="rejected")])
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Proposed hard lines" in html
+    assert ">rejected<" in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidates_mixed_states(tmp_path: Path) -> None:
+    """One undecided, one signed, one rejected — each candidate renders its
+    own independent state (no cross-contamination)."""
+    _make_opf(tmp_path)
+    undecided = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
+    signed = _floor_candidate(id="cand-002", statement="Never accept IP assignment.", citations=[])
+    rejected = _floor_candidate(
+        id="cand-003",
+        statement="Never accept broad non-compete.",
+        citations=[],
+        decision="rejected",
+    )
+    _write_floor_candidates(tmp_path, [undecided, signed, rejected])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "never-accept-ip-assignment",
+                "statement": "Never accept IP assignment.",
+                "rationale": "Accepted via review feedback (floor candidate cand-002).",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert 'data-candidate-id="cand-001"' in html
+    assert 'data-candidate-id="cand-002"' in html
+    assert 'data-candidate-id="cand-003"' in html
+    assert "already signed" in html
+    assert ">rejected<" in html
+    assert 'value="accept"' in html  # cand-001's live control
+
+
+def test_render_html_floor_candidate_q4_already_signed_via_other_id_renders_inert(
+    tmp_path: Path,
+) -> None:
+    """Issue #90 review finding 1 regression: an interview_q4-sourced
+    candidate's item may already be signed into floor.invariants via
+    promote_interview_q4_invariants (issue #89) -- under a DIFFERENT id
+    (_slugify_statement_item's "liability-caps", not
+    candidate_invariant_id's "never-accept-liability-caps") and different
+    wording ("Do not concede on ..." vs this candidate's draft "Never
+    accept ..."). The two must still be recognised as the same decided
+    item -- an inert row, not a live control."""
+    from playbook_engine.floor_candidates import promote_interview_q4_invariants
+
+    _make_opf(tmp_path)
+    item = "liability caps"
+    invariants = promote_interview_q4_invariants(
+        {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
+    )
+    _set_floor_invariants(tmp_path, invariants)
+    candidate = _floor_candidate(
+        id="cand-001",
+        statement=f"Never accept {item}.",
+        rationale='Named as non-negotiable in the Posture interview (Q4 "sacred_clauses").',
+        source="interview_q4",
+        citations=[],
+    )
+    _write_floor_candidates(tmp_path, [candidate])
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Proposed hard lines" in html
+    assert ">already signed<" in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidate_already_signed_with_alias_map_still_inert(
+    tmp_path: Path,
+) -> None:
+    """Issue #90 review finding 2 regression: candidate_invariant_id must be
+    derived from the RAW (unresolved) candidate -- the same input
+    apply_feedback uses -- not the alias-resolved display copy. A reversal
+    candidate whose statement quotes corpus text containing an alias (the
+    case an unclassified reversal's text snippet can produce) must still
+    render as inert 'already signed' when rendered WITH an alias map, using
+    the SAME id an unaliased render (or an actual accept) would derive."""
+    from playbook_engine.floor_candidates import candidate_invariant_id
+
+    _make_opf(tmp_path)
+    raw_statement = 'Never accept "ENTITY_1 shall bear all costs".'
+    candidate = _floor_candidate(id="cand-001", statement=raw_statement, source="reversal")
+    _write_floor_candidates(tmp_path, [candidate])
+    inv_id = candidate_invariant_id(candidate)
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": inv_id,
+                "statement": raw_statement,
+                "rationale": "Accepted via review feedback (floor candidate cand-001).",
+            }
+        ],
+    )
+
+    html_no_map = render_review_html(tmp_path / "out")
+    html_with_map = render_review_html(
+        tmp_path / "out", alias_map={"ENTITY_1": "Statewide College"}
+    )
+
+    for html in (html_no_map, html_with_map):
+        assert ">already signed<" in html
+        assert 'class="floor-decision"' not in html
+    assert "Statewide College" in html_with_map
 
 
 # ---------------------------------------------------------------------------
@@ -1009,6 +1304,322 @@ def test_apply_feedback_override_pin_updates_identity_when_present(tmp_path: Pat
 
 
 # ---------------------------------------------------------------------------
+# apply_feedback — floor candidate accept/reject (issue #90)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_feedback_floor_accept_promotes_invariant(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.floor_promoted == ["cand-001"]
+    assert result.floor_rejected == []
+    assert result.skipped == {}
+
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    invariants = doc["floor"]["invariants"]
+    assert len(invariants) == 1
+    assert invariants[0]["id"] == "never-accept-uncapped-liability"
+    assert invariants[0]["statement"] == "Never accept uncapped liability."
+    assert "Accepted via review feedback" in invariants[0]["rationale"]
+
+    candidates = json.loads((out_dir / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert candidates["candidates"][0]["decision"] == "accepted"
+
+
+def test_apply_feedback_floor_reject_records_rejection_never_touches_invariants(
+    tmp_path: Path,
+) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"decision": "reject"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.floor_rejected == ["cand-001"]
+    assert result.floor_promoted == []
+
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert doc.get("floor", {}).get("invariants", []) == []  # never promoted
+
+    candidates = json.loads((out_dir / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert candidates["candidates"][0]["decision"] == "rejected"
+
+
+def test_apply_feedback_floor_accept_and_reject_together(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(
+        tmp_path,
+        [
+            _floor_candidate(id="cand-001", statement="Never accept uncapped liability."),
+            _floor_candidate(
+                id="cand-002", statement="Never accept broad non-compete.", citations=[]
+            ),
+        ],
+    )
+
+    feedback = {
+        "floor": {
+            "cand-001": {"decision": "accept"},
+            "cand-002": {"decision": "reject", "comment": "too broad as worded"},
+        }
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.floor_promoted == ["cand-001"]
+    assert result.floor_rejected == ["cand-002"]
+
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert len(doc["floor"]["invariants"]) == 1
+    assert doc["floor"]["invariants"][0]["id"] == "never-accept-uncapped-liability"
+
+
+def test_apply_feedback_floor_comment_written_to_viewer_notes(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"decision": "reject", "comment": "too broad as worded"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.notes_written is True
+    notes = (out_dir / "viewer_notes.md").read_text(encoding="utf-8")
+    assert "too broad as worded" in notes
+    assert "cand-001" in notes
+
+
+def test_apply_feedback_floor_comment_without_decision_written_to_viewer_notes(
+    tmp_path: Path,
+) -> None:
+    """Issue #90 review finding 3 regression: a floor entry with only a
+    comment (no 'decision' key at all -- exactly the shape the page's
+    Export JS produces when a reviewer types a note and leaves the radio on
+    Undecided: viewer.py's collectFeedback skips 'undecided' radios but
+    unconditionally attaches .floor-comment-input text) must still land in
+    viewer_notes.md, the same as a comment on a clause item."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"comment": "worth revisiting next cycle"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.notes_written is True
+    notes = (out_dir / "viewer_notes.md").read_text(encoding="utf-8")
+    assert "worth revisiting next cycle" in notes
+    assert "cand-001" in notes
+    # Nothing was accepted or rejected -- only the comment landed; the
+    # missing decision is still (separately) reported as not applied.
+    assert result.floor_promoted == []
+    assert result.floor_rejected == []
+    assert "floor:cand-001" in result.skipped
+
+
+def test_apply_feedback_floor_accept_q4_already_signed_candidate_refused(
+    tmp_path: Path,
+) -> None:
+    """Issue #90 review finding 1 regression: accepting a source=interview_q4
+    candidate whose item was already promoted via
+    promote_interview_q4_invariants (issue #89, a DIFFERENT id derivation)
+    must be refused -- never append a second, opposite-polarity invariant
+    for the same item."""
+    from playbook_engine.floor_candidates import promote_interview_q4_invariants
+
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    item = "liability caps"
+    invariants = promote_interview_q4_invariants(
+        {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
+    )
+    _set_floor_invariants(tmp_path, invariants)
+    candidate = _floor_candidate(
+        id="cand-001",
+        statement=f"Never accept {item}.",
+        rationale='Named as non-negotiable in the Posture interview (Q4 "sacred_clauses").',
+        source="interview_q4",
+        citations=[],
+    )
+    _write_floor_candidates(tmp_path, [candidate])
+
+    # Render: the candidate must show as already-signed, not a live control.
+    html = render_review_html(out_dir)
+    assert ">already signed<" in html
+    assert 'class="floor-decision"' not in html
+
+    # Accepting it anyway (e.g. a stale feedback.json) must be refused, not
+    # append a second, contradictory invariant.
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.floor_promoted == []
+    assert "floor:cand-001" in result.skipped
+
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert len(doc["floor"]["invariants"]) == 1  # still just the one Q4-promoted entry
+
+
+def test_apply_feedback_floor_malformed_block_reported_not_applied(tmp_path: Path) -> None:
+    """'floor' feedback that isn't {candidate_id: {...}} is reported via
+    ApplyResult.skipped — never a false 'OK' (issue #138)."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": "accept everything"}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert "floor" in result.skipped
+    assert result.floor_promoted == []
+    assert result.floor_rejected == []
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert doc.get("floor", {}).get("invariants", []) == []
+
+
+def test_apply_feedback_floor_unknown_candidate_reported_not_applied(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-999": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert "floor:cand-999" in result.skipped
+    assert result.floor_promoted == []
+
+
+def test_apply_feedback_floor_unknown_decision_reported_not_applied(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"decision": "maybe"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert "floor:cand-001" in result.skipped
+    assert result.floor_promoted == []
+    assert result.floor_rejected == []
+
+
+def test_apply_feedback_floor_no_candidates_file_reports_not_applied(tmp_path: Path) -> None:
+    """No floor.candidates.json on disk at all -> every named candidate id
+    is 'unknown', reported honestly rather than silently ignored."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert "floor:cand-001" in result.skipped
+    assert result.floor_promoted == []
+
+
+def test_apply_feedback_floor_and_clause_item_together(tmp_path: Path) -> None:
+    """The reserved top-level "floor" key coexists with ordinary Cx items in
+    the same feedback.json — neither interferes with the other."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {
+        "floor": {"cand-001": {"decision": "accept"}},
+        "C1": {"comment": "double check this clause"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert result.floor_promoted == ["cand-001"]
+    assert result.notes_written is True
+    notes = (out_dir / "viewer_notes.md").read_text(encoding="utf-8")
+    assert "double check this clause" in notes
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert len(doc["floor"]["invariants"]) == 1
+
+
+def test_apply_feedback_floor_accept_changes_content_hash_when_present(tmp_path: Path) -> None:
+    """Unlike a curation pin, an accepted Floor candidate DOES change
+    content_hash — floor.invariants is NOT excluded from it, unlike
+    curation (canonicalize.py)."""
+    doc = _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    from playbook_engine.canonicalize import compute_section_digests, content_hash  # noqa: PLC0415
+
+    doc["identity"] = {
+        "content_hash": content_hash(doc),
+        "section_digests": compute_section_digests(doc),
+    }
+    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+    hash_before = doc["identity"]["content_hash"]
+    floor_digest_before = doc["identity"]["section_digests"]["floor"]
+
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    apply_feedback(out_dir, fp)
+
+    after = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert after["identity"]["content_hash"] != hash_before
+    assert after["identity"]["section_digests"]["floor"] != floor_digest_before
+
+
+def test_apply_feedback_floor_reject_does_not_write_playbook_opf_json(tmp_path: Path) -> None:
+    """A reject-only run never touches playbook.opf.json at all — only
+    floor.candidates.json changes."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    opf_path = out_dir / "playbook.opf.json"
+    bytes_before = opf_path.read_bytes()
+
+    feedback = {"floor": {"cand-001": {"decision": "reject"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    apply_feedback(out_dir, fp)
+
+    assert opf_path.read_bytes() == bytes_before
+
+
+def test_apply_feedback_floor_idempotent_second_apply_unchanged(tmp_path: Path) -> None:
+    """Round-trip requirement: re-applying identical feedback is a no-op —
+    both playbook.opf.json and floor.candidates.json are byte-identical
+    across the second apply."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+
+    first = apply_feedback(out_dir, fp)
+    opf_bytes_after_first = (out_dir / "playbook.opf.json").read_bytes()
+    candidates_bytes_after_first = (out_dir / "floor.candidates.json").read_bytes()
+
+    second = apply_feedback(out_dir, fp)
+
+    assert second.floor_promoted == first.floor_promoted == ["cand-001"]
+    assert (out_dir / "playbook.opf.json").read_bytes() == opf_bytes_after_first
+    assert (out_dir / "floor.candidates.json").read_bytes() == candidates_bytes_after_first
+
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert len(doc["floor"]["invariants"]) == 1  # never duplicated
+
+
+# ---------------------------------------------------------------------------
 # CLI — view render
 # ---------------------------------------------------------------------------
 
@@ -1057,6 +1668,25 @@ def test_view_render_cmd_truncated_opf_reports_error_no_traceback(tmp_path: Path
     # A raw JSONDecodeError propagating uncaught would surface as some other
     # exception type here; the handled path always exits via SystemExit(1).
     assert isinstance(result.exception, SystemExit)
+
+
+def test_view_render_cmd_tolerates_non_utf8_floor_candidates_sidecar(tmp_path: Path) -> None:
+    """Issue #90 review finding 6 regression: a non-UTF-8
+    floor.candidates.json must not abort the render (nor get misattributed
+    to playbook.opf.json, which is perfectly readable) -- it degrades to
+    'no candidates', same as malformed JSON, exit 0."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    (out_dir / "floor.candidates.json").write_bytes(b"\xff\xfe\x00\x01garbage")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "render", str(out_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert "OK" in result.output
+    assert 'id="floor-candidates"' not in (out_dir / "playbook.review.html").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_view_render_html_contains_numbered_items(tmp_path: Path) -> None:
@@ -1161,6 +1791,49 @@ def test_view_apply_cmd_override_only_reports_ok_and_pins(tmp_path: Path) -> Non
     assert "OK  feedback applied" in result.output
     assert "not applied" not in result.output
     assert "position pinned" in result.output
+
+
+def test_view_apply_cmd_floor_accept_reports_promoted(tmp_path: Path) -> None:
+    """Issue #90: ApplyResult reporting includes counts of promoted/rejected
+    Floor candidates."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
+    assert result.exit_code == 0, result.output
+    assert "OK  feedback applied" in result.output
+    assert "1 floor candidate(s) promoted" in result.output
+    assert "cand-001: promoted" in result.output
+
+
+def test_view_apply_cmd_floor_reject_reports_rejected(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    feedback = {"floor": {"cand-001": {"decision": "reject"}}}
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
+    assert result.exit_code == 0, result.output
+    assert "OK  feedback applied" in result.output
+    assert "1 floor candidate(s) rejected" in result.output
+    assert "cand-001: rejected" in result.output
+
+
+def test_view_apply_cmd_floor_malformed_reports_not_applied(tmp_path: Path) -> None:
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    feedback = {"floor": {"cand-999": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
+    assert result.exit_code == 0, result.output
+    assert "floor:cand-999: not applied" in result.output
+    assert "NOTE  no feedback applied" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1614,3 +2287,109 @@ def test_bundle_method_panel_counts_list_shaped_version_ingest(tmp_path: Path) -
     assert result.exit_code == 0, result.output
     html = (tmp_path / "out" / "playbook.opf.html").read_text(encoding="utf-8")
     assert "1 version file(s) failed extraction" in html
+
+
+# ---------------------------------------------------------------------------
+# Round trip — issue #90 acceptance criteria
+# ---------------------------------------------------------------------------
+
+
+def test_floor_checklist_round_trip_accept_reject_idempotent(tmp_path: Path) -> None:
+    """The full issue #90 acceptance-criteria round trip:
+
+    render (both candidates show live controls) -> feedback.json accepting
+    one and rejecting the other -> view apply (CLI) -> accepted is in
+    floor.invariants and validate passes; rejected never reappears as
+    proposed on re-render; re-applying the same feedback is a no-op.
+
+    Uses a hand-built, schema-conformant OPF v0.2 doc rather than this
+    file's v0.1-shaped ``_make_opf()`` fixture: OPF v0.1 predates the Floor
+    section entirely (OPF-SPEC.md §3.7 is "NEW" in v0.2), so a v0.1 doc
+    carrying a top-level ``"floor"`` key is schema-invalid by construction
+    — every OTHER test in this file exercises ``apply_feedback``/
+    ``render_review_html`` directly without ever running ``playbook
+    validate``, but this test's acceptance criterion explicitly requires
+    validation to pass.
+    """
+    doc = {
+        "opf_version": "0.2",
+        "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
+        "baseline": {"has_canonical_template": False},
+        "taxonomy": {"source": "custom", "entries": []},
+        "evidence": {"clauses": [], "clause_library": []},
+        "posture": {},
+        "floor": {},
+        "corpus": {"documents": [], "stats": {}},
+        "compiler": {
+            "name": "playbook-engine",
+            "version": "0.1.0",
+            "run_id": "run-abc",
+            "generated_at": "2026-01-01T00:00:00Z",
+        },
+        "identity": {
+            "content_hash": "sha256:" + "0" * 64,
+            "section_digests": {
+                "evidence": "sha256:" + "1" * 64,
+                "posture": "sha256:" + "2" * 64,
+                "floor": "sha256:" + "3" * 64,
+                "curation": "sha256:" + "4" * 64,
+            },
+        },
+    }
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True)
+    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    keep = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
+    drop = _floor_candidate(
+        id="cand-002", statement="Never accept broad non-compete.", citations=[]
+    )
+    _write_floor_candidates(tmp_path, [keep, drop])
+
+    # 1. Render — both candidates are live, undecided controls.
+    first_render = render_review_html(out_dir)
+    assert "Proposed hard lines" in first_render
+    assert 'data-candidate-id="cand-001"' in first_render
+    assert 'data-candidate-id="cand-002"' in first_render
+    assert first_render.count('value="undecided" checked') == 2
+
+    # 2. Hand-write feedback.json: accept cand-001, reject cand-002.
+    feedback = {
+        "floor": {
+            "cand-001": {"decision": "accept", "comment": "categorical, agreed"},
+            "cand-002": {"decision": "reject", "comment": "too broad as worded"},
+        }
+    }
+    fp = _write_feedback(tmp_path, feedback)
+
+    # 3. view apply (CLI).
+    runner = CliRunner()
+    apply_result = runner.invoke(cli, ["view", "apply", str(out_dir), str(fp)])
+    assert apply_result.exit_code == 0, apply_result.output
+    assert "1 floor candidate(s) promoted" in apply_result.output
+    assert "1 floor candidate(s) rejected" in apply_result.output
+
+    applied_doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    invariants = applied_doc["floor"]["invariants"]
+    assert len(invariants) == 1
+    assert invariants[0]["id"] == "never-accept-uncapped-liability"
+
+    # 4. playbook validate passes.
+    validate_result = runner.invoke(cli, ["validate", str(out_dir / "playbook.opf.json")])
+    assert validate_result.exit_code == 0, validate_result.output
+
+    # 5. Re-render: accepted -> inert "already signed"; rejected -> inert
+    #    "rejected", never re-proposed as an open item; no controls for
+    #    either.
+    second_render = render_review_html(out_dir)
+    assert ">already signed<" in second_render
+    assert ">rejected<" in second_render
+    assert 'class="floor-decision"' not in second_render
+
+    # 6. Re-applying the SAME feedback is a no-op: both files byte-identical.
+    opf_bytes = (out_dir / "playbook.opf.json").read_bytes()
+    candidates_bytes = (out_dir / "floor.candidates.json").read_bytes()
+    second_apply = runner.invoke(cli, ["view", "apply", str(out_dir), str(fp)])
+    assert second_apply.exit_code == 0, second_apply.output
+    assert (out_dir / "playbook.opf.json").read_bytes() == opf_bytes
+    assert (out_dir / "floor.candidates.json").read_bytes() == candidates_bytes
