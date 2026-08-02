@@ -1833,3 +1833,37 @@ def test_render_prompt_out_no_tmp_left_after_success(tmp_path: Path) -> None:
     assert result.exit_code == 0, f"expected success:\n{result.output}"
     assert out_path.exists()
     assert not out_path.with_suffix(out_path.suffix + ".tmp").exists()
+
+
+# ---------------------------------------------------------------------------
+# render-prompt advisory-only WARN (issue #92)
+# ---------------------------------------------------------------------------
+
+
+def test_render_prompt_warns_on_stderr_only_when_advisory_only(tmp_path: Path) -> None:
+    """A playbook with no Floor invariants and no Posture gets a one-line
+    stderr WARN — never stdout, since stdout is the artifact."""
+    doc = _minimal_publishable_doc()
+    doc["floor"] = {"invariants": []}
+    doc["posture"]["system_prompt"] = ""
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render-prompt", str(doc_path)])
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    assert "WARN" in result.stderr
+    assert "advisory-only" in result.stderr
+    assert "WARN" not in result.stdout
+
+
+def test_render_prompt_no_warn_when_floor_and_posture_populated(tmp_path: Path) -> None:
+    """A playbook with Floor invariants and a Posture gets no stderr WARN."""
+    doc_path = _write_publishable_doc(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["render-prompt", str(doc_path)])
+
+    assert result.exit_code == 0, f"expected success:\n{result.output}"
+    assert result.stderr == ""

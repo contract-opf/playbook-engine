@@ -408,7 +408,7 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     LLM alongside a contract to review. No API calls, no redline generation — the
     determinism boundary (§5) rendered as instructions.
     """
-    from playbook_engine.prompt_renderer import render_prompt
+    from playbook_engine.prompt_renderer import is_advisory_only, render_prompt
 
     try:
         doc = load_opf_file(playbook_file)
@@ -417,6 +417,21 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
         raise SystemExit(1) from exc
 
     rendered = render_prompt(doc)
+
+    # Advisory-only (no Floor invariants, no Posture) means nothing in the
+    # rendered prompt is binding — render_prompt() already says so loudly in
+    # the artifact itself (the banner), but a WARN on stderr surfaces it to
+    # whoever ran the command even when the artifact only ever lands in a
+    # file or a pipe. Never stdout — stdout is the artifact (issue #92; see
+    # the stderr-routing convention in commit f8abbaa/85c1a13).
+    if is_advisory_only(doc):
+        click.secho(
+            f"WARN {playbook_file.name}: advisory-only playbook (no hard lines, no "
+            "posture) — nothing in the rendered prompt is binding",
+            fg="yellow",
+            err=True,
+        )
+
     if out_file is not None:
         out_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = out_file.with_suffix(out_file.suffix + ".tmp")
