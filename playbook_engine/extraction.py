@@ -101,9 +101,12 @@ avoid replaying stale ``needs_review`` sentinels — see ``cli.py``'s
 ``_verdict_store_kwargs``) also silently threw away every prior extraction,
 re-running docling/pdfplumber/pandoc from scratch on every judge round over a
 real multi-hundred-version corpus. ``ExtractionCache`` is content-addressed
-purely on the source file's bytes (extraction has no judge/config
-dependency), so it is safe to keep warm across rounds regardless of whatever
-``no_cache`` value the judge wiring forces for the verdict-cache layers.
+on the source file's bytes and the current extractor environment (docling
+vs. legacy — issue #77; extraction has no other judge/config dependency), so
+it is safe to keep warm across rounds regardless of whatever ``no_cache``
+value the judge wiring forces for the verdict-cache layers, while still
+missing cleanly — rather than silently replaying stale output — if the
+extractor environment itself changes between rounds.
 """
 
 from __future__ import annotations
@@ -166,15 +169,27 @@ def detect_extractor(path: Path) -> str:
 
 
 def _extraction_cache_payload(path: Path) -> dict[str, str]:
-    """Cache-key payload for *path*: the file's raw content hash alone.
+    """Cache-key payload for *path*: the file's raw content hash plus the
+    current extractor environment.
 
-    Extraction is a pure function of the source bytes — no judge, no
-    segmentation model, no engine config affects it — so no other input
-    belongs in this key (issue #132).
+    Extraction is a pure function of the source bytes for a FIXED extractor
+    environment — no judge, no segmentation model, no engine config affects
+    it beyond that (issue #132) — but legacy and docling can produce
+    materially different output for the SAME bytes (legacy has no OCR and
+    can garble columns/scanned text), so ``detect_extractor(path)`` is part
+    of the key itself, not just the stored value (issue #77). This is the
+    authoritative scoping mechanism: a legacy-era entry (success OR
+    failure) simply misses once docling becomes available, and vice versa,
+    while a same-environment repeat lookup keeps hitting across store
+    instances/rounds — ``detect_extractor`` is a pure, stable function of
+    ``shutil.which`` for the life of a machine/session, which is what the
+    ``playbook judge`` warm-cache intent behind this class relies on (see
+    internal#132).
     """
     return {
         "file_sha256": _sha256_file(path),
         "format_version": _EXTRACTION_CACHE_FORMAT_VERSION,
+        "extractor_env": detect_extractor(path),
     }
 
 
@@ -185,13 +200,16 @@ class ExtractionCache:
     reimplementing content-hash JSONL storage (same pattern as
     :class:`~playbook_engine.llm_segmenter_batch.SegmentationVerdictCache`).
 
-    Cache key: the source file's raw content hash only (see
-    :func:`_extraction_cache_payload`) — independent of ``no_cache``, judge
-    identity, or engine config, so a repeat ``playbook judge`` round can
-    reuse a prior run's extracted blocks/clause trees for every version whose
-    source file is unchanged, even though the L1-L4 ``ArtifactStore``/
+    Cache key: the source file's raw content hash plus the current extractor
+    environment (see :func:`_extraction_cache_payload`; issue #77) —
+    independent of ``no_cache``, judge identity, or engine config, so a
+    repeat ``playbook judge`` round can reuse a prior run's extracted
+    blocks/clause trees for every version whose source file AND extractor
+    environment are unchanged, even though the L1-L4 ``ArtifactStore``/
     ``JudgmentCache`` stage cache is deliberately bypassed for store-backed
-    judge runs (issue #132).
+    judge runs (issue #132). A docling install/removal between rounds is
+    exactly the case that must NOT keep hitting — the environment component
+    turns that into a clean miss instead of silently replaying stale output.
     """
 
     def __init__(self, cache_path: Path) -> None:
@@ -257,6 +275,17 @@ class ExtractionCache:
         available, but a file that already failed under docling should not be
         re-OCR'd (up to the full per-file timeout) on every subsequent
         pipeline command.
+
+        Since issue #77 added the extractor environment to the cache KEY
+        (:func:`_extraction_cache_payload`), ``self._store.get()`` below can
+        no longer return a different-environment entry at all — the key is
+        now the authoritative scoping mechanism, and this method's own
+        ``cached.get("extractor") != detect_extractor(path)`` check is
+        redundant for any entry written through :meth:`put_failure`. It is
+        kept (not removed) as a belt-and-braces guard against the stored
+        *value* ever disagreeing with the *key* it was filed under — e.g. a
+        future direct ``_store.put`` call that bypasses
+        :func:`_extraction_cache_payload`.
         """
         cached = self._store.get(_extraction_cache_payload(path))
         if cached is None or "error" not in cached:

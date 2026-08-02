@@ -602,11 +602,19 @@ def test_extraction_cache_second_call_skips_extraction(
     assert second == first
 
 
-def test_extraction_cache_persists_across_instances(tmp_path: Path) -> None:
+def test_extraction_cache_persists_across_instances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A fresh ``ExtractionCache`` pointed at the same file on disk still hits
-    (load-on-init, same contract as ``VerdictStore``/``SegmentationVerdictCache``)."""
+    (load-on-init, same contract as ``VerdictStore``/``SegmentationVerdictCache``)
+    — for the SAME extractor environment. The cache key is now content hash
+    PLUS extractor environment (issue #77), so this pins ``detect_extractor``
+    rather than relying on whatever happens to be on the host's PATH, to test
+    same-environment persistence specifically (a cross-environment miss is
+    covered separately by ``test_extraction_cache_success_retried_under_better_extractor``)."""
     path = _simple_docx(tmp_path)
     cache_path = tmp_path / "extraction_cache.jsonl"
+    monkeypatch.setattr(extraction, "detect_extractor", lambda p: "legacy")
 
     canonical_text, blocks, extractor = extract_blocks(path, cache=ExtractionCache(cache_path))
 
@@ -757,6 +765,58 @@ def test_extraction_failure_retried_under_better_extractor(tmp_path: Path, monke
     # And the success overwrites the failure marker.
     hit = cache.get(pdf)
     assert hit is not None and hit[2] == "docling"
+
+
+def test_extraction_cache_success_retried_under_better_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mirror of ``test_extraction_failure_retried_under_better_extractor`` for
+    the SUCCESS case (issue #77): ``get_failure()`` was already scoped to the
+    current extractor environment, but ``get()`` was not — a legacy-era
+    SUCCESS was strictly stickier than a legacy-era failure. A born-digital
+    file that legacy extracted badly-but-non-emptily (no OCR, garbled
+    columns) must not be frozen at that bad extraction once docling becomes
+    available: it must be re-extracted, and the docling result must win.
+
+    This must fail against pre-fix code: the pre-fix cache key is content
+    hash only, so the second ``extract_blocks`` call below would hit the
+    legacy-era entry and never invoke docling at all.
+    """
+    from playbook_engine import extraction as ext
+
+    path = _simple_docx(tmp_path)
+    cache = ext.ExtractionCache(tmp_path / "cache.jsonl")
+
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "legacy")
+    legacy_canonical, _, legacy_extractor = ext.extract_blocks(path, cache=cache)
+    assert legacy_extractor == "legacy"
+
+    # docling appears on PATH: the legacy-era SUCCESS must NOT be replayed.
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "docling")
+    docling_calls = {"n": 0}
+
+    def _fake_docling_lines(p: Path) -> list[tuple[str, int]]:
+        docling_calls["n"] += 1
+        return [("Docling recovered text.", 0)]
+
+    monkeypatch.setattr(ext, "_extract_docling_lines", _fake_docling_lines)
+
+    docling_canonical, _, docling_extractor = ext.extract_blocks(path, cache=cache)
+    assert docling_calls["n"] == 1, "legacy-era success must not short-circuit docling extraction"
+    assert docling_extractor == "docling"
+    assert docling_canonical != legacy_canonical
+    assert "Docling recovered text." in docling_canonical
+
+    # And the docling success is what a same-environment lookup now returns.
+    hit = cache.get(path)
+    assert hit is not None and hit[2] == "docling"
+
+    # The stale legacy-era entry is still there but no longer reachable: a
+    # same-environment (legacy) lookup would still hit it too, unchanged.
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "legacy")
+    legacy_hit = cache.get(path)
+    assert legacy_hit is not None and legacy_hit[2] == "legacy"
+    assert legacy_hit[0] == legacy_canonical
 
 
 def test_docling_timeout_failure_negative_caches_under_docling_env(
