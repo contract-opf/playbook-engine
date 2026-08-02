@@ -4,8 +4,9 @@ Thanks for your interest in the Open Playbook Format and its reference
 compiler. By participating you agree to our
 [Code of Conduct](CODE_OF_CONDUCT.md). Two things live in this repository, and they have different bars:
 
-- **The OPF standard** (`docs/OPF-SPEC.md`, `spec/playbook.schema-0.2.json`)
-  — the current v0.2 format. `docs/OPF-SPEC-v0.1.md` /
+- **The OPF standard** (`docs/OPF-SPEC.md`, `spec/playbook.schema-0.3.json`)
+  — the current format. `spec/playbook.schema-0.2.json` documents remain
+  valid but are not current; `docs/OPF-SPEC-v0.1.md` /
   `spec/playbook.schema.json` are superseded.
 - **The engine** (`playbook_engine/`) — the compiler that produces OPF
   playbooks from a corpus of negotiated agreements.
@@ -49,7 +50,7 @@ Code changes need a green `make all` and a focused diff. **Spec/schema
 changes carry a higher bar** — the format is an interface others build on:
 
 - a rationale (what can't be expressed today, and why this shape),
-- the schema update (`spec/playbook.schema-0.2.json`),
+- the schema update (`spec/playbook.schema-0.3.json`),
 - an updated example (`examples/our-paper-baseline.v0.2.playbook.json`
   must keep validating — CI enforces this),
 - a spec-text update (`docs/OPF-SPEC.md`) including Appendix B changelog,

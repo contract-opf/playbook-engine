@@ -41,7 +41,7 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - compute rollups (acceptable_if / fallbacks / rejected), confidence, citations
                                      │
             ┌──────────────────────────────────────────────────────────────┐
-  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.2.json)     │
+  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.3.json)     │
             └──────────────────────────────────────────────────────────────┘
 ```
 
