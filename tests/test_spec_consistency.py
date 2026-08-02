@@ -219,3 +219,105 @@ def test_spec_changelog_states_current_digest_version() -> None:
 
     changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"Current `DIGEST_VERSION`: **{DIGEST_VERSION}**" in changelog
+
+
+# ---------------------------------------------------------------------------
+# #23 — docs drift: ARCHITECTURE.md must name the schema actually shipped
+# ---------------------------------------------------------------------------
+
+
+def test_architecture_output_box_names_current_schema() -> None:
+    """docs/ARCHITECTURE.md's pipeline diagram claims the OUTPUT artifact
+    "validates: <schema file>". That filename must be the schema the
+    validator actually dispatches to for the version the assembler emits —
+    otherwise the box silently names a superseded schema filename (exactly
+    what happened when the 0.2 -> 0.3 release landed without updating this
+    line). Deriving both sides from the shipping code, rather than a
+    hard-coded version string, means the next version bump fails this test
+    instead of drifting quietly. The assertion is anchored to the OUTPUT
+    box's own line — not "appears anywhere in the ~100-line doc" — and also
+    rejects a superseded schema filename sitting in that same line, so an
+    unrelated mention of the current filename elsewhere in the doc can't
+    make this pass by accident."""
+    from playbook_engine.playbook_assembler import _OPF_VERSION
+    from playbook_engine.validator import _SCHEMA_PATH_BY_VERSION
+
+    schema_name = _SCHEMA_PATH_BY_VERSION[_OPF_VERSION].name
+    text = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    box_line = next(
+        (line for line in text.splitlines() if "playbook.opf.json (validates:" in line),
+        None,
+    )
+    assert box_line is not None, (
+        "docs/ARCHITECTURE.md's OUTPUT box no longer contains a "
+        "'playbook.opf.json (validates: ...)' line — update this test's "
+        "anchor alongside any diagram reformat (#23)"
+    )
+
+    match = re.search(r"validates:\s*([^\s)]+)\)", box_line)
+    assert match, (
+        "docs/ARCHITECTURE.md's OUTPUT box line no longer matches the "
+        "expected 'validates: <schema file>)' shape — update this test's "
+        "anchor alongside any diagram reformat (#23)"
+    )
+    box_schema_name = match.group(1)
+    assert box_schema_name == schema_name, (
+        f"docs/ARCHITECTURE.md's OUTPUT box says 'validates: "
+        f"{box_schema_name}' but the validator dispatches to "
+        f"{schema_name!r} for opf_version={_OPF_VERSION!r} — the OUTPUT "
+        "box's schema filename reference has drifted (#23)"
+    )
+
+    superseded_names = {
+        path.name for version, path in _SCHEMA_PATH_BY_VERSION.items() if version != _OPF_VERSION
+    }
+    for superseded_name in superseded_names:
+        assert superseded_name not in box_line, (
+            f"docs/ARCHITECTURE.md's OUTPUT box also mentions the "
+            f"superseded schema {superseded_name!r} alongside the current "
+            f"{schema_name!r} (#23)"
+        )
+
+
+def test_plan_first_validate_row_names_current_schema() -> None:
+    """docs/PLAN-FIRST.md's stage-by-stage table has a `playbook validate`
+    row naming the schema file that command validates against. Like the
+    ARCHITECTURE.md OUTPUT box above, that filename must track the schema
+    the validator actually dispatches to for the version the assembler
+    emits, derived from the shipping code rather than hard-coded — and the
+    same 0.2 -> 0.3 drift that hit ARCHITECTURE.md hit this row too, so it
+    gets the same anchored (not "appears anywhere in the doc") check."""
+    from playbook_engine.playbook_assembler import _OPF_VERSION
+    from playbook_engine.validator import _SCHEMA_PATH_BY_VERSION
+
+    schema_name = _SCHEMA_PATH_BY_VERSION[_OPF_VERSION].name
+    text = (ROOT / "docs" / "PLAN-FIRST.md").read_text(encoding="utf-8")
+
+    row = next(
+        (
+            line
+            for line in text.splitlines()
+            if "`playbook validate`" in line and "JSON Schema validation" in line
+        ),
+        None,
+    )
+    assert row is not None, (
+        "docs/PLAN-FIRST.md's `playbook validate` row is missing or no "
+        "longer matches the expected shape — update this test's anchor "
+        "alongside any table reformat (#23)"
+    )
+
+    match = re.search(r"against `spec/([^`]+)`", row)
+    assert match, (
+        "docs/PLAN-FIRST.md's `playbook validate` row no longer names a "
+        "`spec/<file>` schema path — update this test's anchor alongside "
+        "any prose reformat (#23)"
+    )
+    row_schema_name = match.group(1)
+    assert row_schema_name == schema_name, (
+        f"docs/PLAN-FIRST.md's `playbook validate` row says "
+        f"'spec/{row_schema_name}' but the validator dispatches to "
+        f"{schema_name!r} for opf_version={_OPF_VERSION!r} — the row's "
+        "schema filename reference has drifted (#23)"
+    )
