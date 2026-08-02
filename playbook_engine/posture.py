@@ -17,6 +17,13 @@ error; ``validator.py`` wires it in as a non-blocking ``ValidationError``.
 The GC actually answering the interview is a runtime step; this module is
 exercised in tests with fixture answers (issue #156's Out of scope note).
 
+Issue #89 adds one more effect to ``apply_posture_interview()``: the Q4
+("sacred_clauses") answer is promoted directly into ``floor.invariants`` —
+see ``floor_candidates.promote_interview_q4_invariants()`` for why that is
+not the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids (short version: a Q4
+answer is human-authored, not a compiler-derived candidate — the human act
+of authorship already is the sign-off).
+
 API
 ---
 ``INTERVIEW_QUESTIONS``       — the canonical 6-question set (OPF §7).
@@ -27,10 +34,11 @@ API
                                  concept alongside softening language?
 ``apply_posture_interview()`` — I/O orchestration: read a prior compile's
                                  ``playbook.opf.json``, generate the new
-                                 (versioned) Posture, refresh ``identity``,
-                                 write back atomically. The CLI's thin
-                                 ``playbook posture interview`` command calls
-                                 this.
+                                 (versioned) Posture, promote the Q4 answer
+                                 into ``floor.invariants``, refresh
+                                 ``identity``, write back atomically. The
+                                 CLI's thin ``playbook posture interview``
+                                 command calls this.
 """
 
 from __future__ import annotations
@@ -41,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
+from playbook_engine.floor_candidates import FloorCandidateError, promote_interview_q4_invariants
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.validator import load_opf_file
 
@@ -113,14 +122,55 @@ _MIN_ANSWERS = 3
 
 # Deterministic prose templates, one per question id, in canonical order.
 # Assembled (not LLM-generated) per issue #156's Out-of-scope note.
+#
+# One consistent, grammatical scheme for all six (issue #89): a short label,
+# a colon, then the answer verbatim with NOTHING template-authored appended
+# after it. Two of these used to interpolate {answer} mid-sentence with
+# template text trailing it ("rounds": "...goes {answer} negotiation
+# round(s)..."; "sacred_clauses": "...{answer} (see Floor)."), which
+# produced a double-punctuated splice the instant an answer was a full
+# sentence rather than a bare fragment (e.g. answer = "Two rounds, then
+# escalate to the GC." rendered as "...goes Two rounds, then escalate to
+# the GC. negotiation round(s) before..."). Putting {answer} last removes
+# that particular splice — but is NOT sufficient on its own: a FRAGMENT
+# answer (no trailing ./!/?) then leaves no sentence boundary before the
+# next field's label, so e.g. a sacred_clauses fragment ran straight into
+# "Flexible to close a deal: ..." as one unreadable, unsplittable run-on
+# sentence (issue #89 review finding 1). ``_assemble_system_prompt`` closes
+# that gap by passing every assembled field through ``_terminate`` before
+# joining — see its docstring.
 _PROSE_TEMPLATES: dict[str, str] = {
+    "rounds": "Rounds before escalating: {answer}",
     "leverage": "Default leverage posture: {answer}",
-    "rounds": "Typically goes {answer} negotiation round(s) before escalating or walking.",
-    "risk_appetite": "On a non-material counterparty change: {answer}",
-    "sacred_clauses": "Hold firm on: {answer} (see Floor).",
+    "risk_appetite": "Non-material counterparty change: {answer}",
+    "sacred_clauses": "Hard lines named in interview (see Floor): {answer}",
     "flexible_clauses": "Flexible to close a deal: {answer}",
     "audience": "Deal-size sensitivity / output audience: {answer}",
 }
+
+
+def _terminate(field: str) -> str:
+    """Ensure *field* ends with sentence-final punctuation.
+
+    Every ``_PROSE_TEMPLATES`` entry puts the answer LAST with nothing
+    template-authored appended after it (see the comment above
+    ``_PROSE_TEMPLATES``), which fixed the original mid-sentence splice —
+    but a FRAGMENT answer (no trailing ``.``/``!``/``?``) then has no
+    sentence boundary before the next field's label: "Hard lines named in
+    interview (see Floor): Liability caps and student-data protection
+    Flexible to close a deal: ..." reads (and, worse, PARSES) as one run-on
+    sentence — invisible to ``_SENTENCE_RE``'s ``(?<=[.!?])\\s+`` boundary
+    detector, which is exactly what ``check_posture_floor_conflict`` splits
+    on to reason about "one sentence at a time" (issue #89 review finding
+    1). Appending "." only when *field* doesn't already end in terminal
+    punctuation leaves a full-sentence answer's own punctuation untouched
+    (no double punctuation), while guaranteeing every field — fragment or
+    full sentence — ends its own sentence.
+    """
+    field = field.rstrip()
+    if field and field[-1] not in ".!?":
+        field += "."
+    return field
 
 
 def _assemble_system_prompt(answers: dict[str, str]) -> str:
@@ -128,10 +178,13 @@ def _assemble_system_prompt(answers: dict[str, str]) -> str:
 
     One templated sentence per answered question, in ``INTERVIEW_QUESTIONS``
     order (not answer-dict order, so the prose reads the same regardless of
-    what order the caller's dict happens to iterate in).
+    what order the caller's dict happens to iterate in). Each assembled
+    field is passed through :func:`_terminate` before joining, so a
+    fragment answer still ends its sentence — see that function's
+    docstring.
     """
     sentences = [
-        _PROSE_TEMPLATES[iq.q].format(answer=answers[iq.q].strip())
+        _terminate(_PROSE_TEMPLATES[iq.q].format(answer=answers[iq.q].strip()))
         for iq in INTERVIEW_QUESTIONS
         if iq.q in answers
     ]
@@ -261,6 +314,24 @@ _STOPWORDS: frozenset[str] = frozenset(
         "see",
         "floor",
         "posture",
+        # "concede" is the boilerplate verb every interview-promoted
+        # invariant's statement is built from (floor_candidates.py's
+        # ``_q4_promoted_statement`` — "Do not concede on {item}."), so it
+        # is a CONTENT word of every one of those statements regardless of
+        # which clause type the legal owner actually named. It is also a
+        # constituent word of three ``_SOFTENING_TERMS`` phrases above
+        # ("willing to concede", "happy to concede", "concede to move").
+        # Left as a content word, ANY Posture sentence using one of those
+        # phrases would content-word-overlap EVERY promoted invariant on
+        # "concede" alone, regardless of what concept the sentence and the
+        # invariant actually name — a pure template artifact, not a shared
+        # concept (issue #89 review, fix round 2). Treating it as a
+        # stopword removes it from the overlap computation on both sides
+        # (invariant statement and Posture sentence) without touching
+        # ``_SOFTENING_TERMS`` softening-phrase detection itself, which
+        # matches those phrases as substrings independently of
+        # ``_content_words`` — see ``check_posture_floor_conflict`` below.
+        "concede",
     }
 )
 
@@ -360,13 +431,30 @@ def apply_posture_interview(
     generated_by: str = "playbook-engine",
 ) -> PostureApplyResult:
     """Read ``{out_dir}/playbook.opf.json``, write a freshly generated,
-    versioned Posture into it, and return the result.
+    versioned Posture into it — promoting the Q4 ("sacred_clauses") answer
+    directly into ``floor.invariants`` along the way — and return the result.
 
     Mirrors ``viewer.apply_feedback``'s curation-pin write path: reads the
-    existing document, replaces one section, refreshes ``identity`` (since —
-    unlike ``curation`` — ``posture`` IS part of ``content_hash``; see
-    ``canonicalize.py``), and writes back atomically via
-    ``playbook_assembler.write_playbook``.
+    existing document, replaces sections, refreshes ``identity`` (since —
+    unlike ``curation`` — both ``posture`` and ``floor`` ARE part of
+    ``content_hash``; see ``canonicalize.py``), and writes back atomically
+    via ``playbook_assembler.write_playbook``. ``posture`` is always
+    replaced (its ``version`` always advances); ``floor`` is only replaced
+    when the Q4 promotion below actually changed ``floor.invariants`` — a
+    run that doesn't touch the Floor doesn't fabricate a
+    ``floor.invariants: []`` or otherwise perturb ``identity`` for no
+    reason (issue #89 review finding 6).
+
+    The Floor promotion (issue #89) is not the auto-promotion OPF-SPEC.md
+    §3.7 rule 4 forbids — see ``floor_candidates.promote_interview_q4_invariants``'s
+    docstring for why — and is idempotent per statement: re-running the
+    interview with an unchanged ``sacred_clauses`` answer leaves
+    ``floor.invariants`` unchanged (same id, same statement, no duplicate;
+    OPF-SPEC.md §3.13 makes a duplicate sibling id a blocking validator
+    error). Reversal-derived candidates never take this path — they stay on
+    ``floor_candidates.derive_reversal_candidates``'s propose-then-sign-off
+    path (``playbook floor propose`` / ``floor.candidates.json``), which
+    this function never touches.
 
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` (produced
@@ -377,12 +465,18 @@ def apply_posture_interview(
 
     Returns:
         ``PostureApplyResult`` — the new version number, any SHOULD-warn
-        messages from ``check_posture_floor_conflict()``, and the path
-        written.
+        messages from ``check_posture_floor_conflict()`` (checked against
+        the Floor's post-promotion state), and the path written.
 
     Raises:
         FileNotFoundError: no ``playbook.opf.json`` in *out_dir*.
-        PostureError:      see ``generate_posture()``.
+        PostureError:      see ``generate_posture()``; also raised (wrapping
+                           a ``floor_candidates.FloorCandidateError``) when
+                           a Q4 item's derived id collides with an existing
+                           ``floor.invariants`` entry this function's Q4
+                           promotion did not itself author — that entry is
+                           never silently overwritten, and nothing is
+                           written (issue #89 review finding 2).
     """
     opf_path = out_dir / "playbook.opf.json"
     if not opf_path.exists():
@@ -403,10 +497,29 @@ def apply_posture_interview(
         existing_posture=existing_posture,
     )
 
-    floor_invariants = (doc.get("floor") or {}).get("invariants") or []
+    existing_invariants = (doc.get("floor") or {}).get("invariants") or []
+    try:
+        floor_invariants = promote_interview_q4_invariants(
+            answers,
+            posture_version=posture["version"],
+            existing_invariants=existing_invariants,
+        )
+    except FloorCandidateError as exc:
+        raise PostureError(str(exc)) from exc
     warnings = check_posture_floor_conflict(posture["system_prompt"], floor_invariants)
 
     doc["posture"] = posture
+    # Only rewrite `floor` when promotion actually changed it — e.g. no
+    # `sacred_clauses` answer this run, or a true no-op re-run — so a
+    # document with no Floor section doesn't gain a fabricated
+    # `{"invariants": []}` (and a changed identity.content_hash /
+    # section_digests) for no reason. OPF-SPEC.md §3.7 rule 3 makes the
+    # section optional; prompt_renderer.py already treats `[]` and absent
+    # identically (issue #89 review finding 6).
+    if floor_invariants != existing_invariants:
+        floor_section = dict(doc.get("floor") or {})
+        floor_section["invariants"] = floor_invariants
+        doc["floor"] = floor_section
     if "identity" in doc:
         doc["identity"]["content_hash"] = content_hash(doc)
         doc["identity"]["section_digests"] = compute_section_digests(doc)

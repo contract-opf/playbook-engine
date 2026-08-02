@@ -1,19 +1,38 @@
 """Floor-candidate proposal — derive review candidates from reversals + the
-Posture interview's Q4 answer (issue #166).
+Posture interview's Q4 answer (issue #166) — and direct Floor promotion of
+that same Q4 answer's human-authored statements (issue #89).
 
 OPF-SPEC.md §3.7 rule 4: the compiler MAY propose Floor candidates
-("every ``outcome: proposed_then_reversed`` in the Evidence is a candidate red
-line") and §7 marks the interview's Q4 ("sacred_clauses") as seeding Floor
-candidates (see ``posture.py``'s ``seeds_floor_candidates=True``) — but the
-legal owner finalizes, and a proposal must NEVER be auto-promoted into the
-signed OPF ``floor.invariants`` (spec rule 4, "never auto-promote").
+("every ``outcome: proposed_then_reversed`` in the Evidence is a candidate
+hard line") and §7 marks the interview's Q4 ("sacred_clauses") as seeding
+Floor candidates (see ``posture.py``'s ``seeds_floor_candidates=True``) —
+but the legal owner finalizes, and a *compiler-derived* candidate must
+NEVER be auto-promoted into the signed OPF ``floor.invariants`` (spec rule
+4, "never auto-promote"). Reversal-derived candidates are compiler-derived
+— machine inferences read off the Evidence that no human has seen or
+endorsed — so they stay firmly on the propose-then-sign-off path.
 
-This module implements PROPOSAL only:
+A Q4 answer is different in kind: it is *human-authored* prose the legal
+owner typed directly into the Posture interview, naming their own hard
+line. There is no separate machine inference to approve there — the human
+act of authorship already IS the sign-off (Marc Mandel, spec owner,
+approved this distinction 2026-07-31; OPF-SPEC.md §3.7 rule 4 records it).
+So a Q4 answer gets two independent, simultaneously-true treatments here:
+it is still offered as PROPOSAL material (``floor.candidates.json``, via
+:func:`derive_interview_q4_candidates` below, unchanged since #166 — a
+legal owner reviewing that sidecar sees every named clause type in one
+place, alongside reversal candidates), and it is ALSO promoted directly
+into ``floor.invariants`` (via :func:`promote_interview_q4_invariants`,
+called from ``posture.apply_posture_interview`` every time ``playbook
+posture interview`` completes — no separate accept step, because the
+interview answer already carries the legal owner's sign-off).
+
+This module implements:
 
   - :func:`derive_reversal_candidates` — one candidate per distinct reversed
     concept (grouped by ``taxonomy_id``, falling back to per-observation
     grouping when unclassified), citing every reversal observation that
-    contributed to it.
+    contributed to it. PROPOSAL only — never promoted by this module.
   - :func:`derive_interview_q4_candidates` — one candidate per semicolon-
     separated clause type named in the Q4 ("sacred_clauses") interview
     answer, uncited (the interview names a clause TYPE, not a specific
@@ -26,16 +45,24 @@ This module implements PROPOSAL only:
     (for the Posture interview's Q4 answer, if a Posture interview has been
     run) from an output directory, and writes ``floor.candidates.json`` next
     to the playbook. This file is a sidecar ENGINE OUTPUT artifact, never
-    written into the OPF document itself — the OPF ``floor`` section stays
-    authored-and-signed only. Accepting a candidate is a human act: editing
-    ``floor.invariants`` directly, or via the curation CLI. This module
-    never writes to ``floor.invariants``.
+    written into the OPF document itself. Accepting a REVERSAL candidate
+    stays a human act: editing ``floor.invariants`` directly, or via the
+    curation CLI — :func:`write_floor_candidates` never writes to it.
+  - :func:`promote_interview_q4_invariants` — the one exception to "never
+    writes to floor.invariants": a pure merge function (the caller,
+    ``posture.apply_posture_interview``, handles I/O) that promotes each
+    Q4-named item directly into a ``floor.invariants`` list, idempotently
+    (OPF-SPEC.md §3.13 — a duplicate sibling id is a blocking validator
+    error, so re-running the interview must never append a duplicate) and
+    raises :class:`FloorCandidateError` rather than silently overwriting an
+    entry it did not itself promote (issue #89 review finding 2).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -46,8 +73,10 @@ from playbook_engine.validator import load_opf_file
 __all__ = [
     "FloorCandidate",
     "FloorCandidateCitation",
+    "FloorCandidateError",
     "derive_interview_q4_candidates",
     "derive_reversal_candidates",
+    "promote_interview_q4_invariants",
     "propose_floor_candidates",
     "write_floor_candidates",
 ]
@@ -216,6 +245,75 @@ def derive_reversal_candidates(
 # ---------------------------------------------------------------------------
 
 
+def _q4_items(answer: str | None) -> list[str]:
+    """Split a Q4 ("sacred_clauses") answer into its named clause-type items.
+
+    The interview names clause TYPES as semicolon-separated free text (e.g.
+    "uncapped liability; IP assignment") — this is the one splitting rule
+    shared by every consumer of the Q4 answer
+    (:func:`derive_interview_q4_candidates` below, and
+    :func:`promote_interview_q4_invariants`), so they always agree on what
+    counts as "one named item."
+
+    Returns:
+        Items in the order named, stripped, blank items dropped. Empty when
+        *answer* is ``None`` or blank.
+    """
+    if not answer or not answer.strip():
+        return []
+    return [item.strip() for item in answer.split(";") if item.strip()]
+
+
+def _q4_statement(item: str) -> str:
+    """The single checkable Floor sentence one Q4-named *item* becomes in a
+    PROPOSED candidate (:func:`derive_interview_q4_candidates`, written to
+    ``floor.candidates.json``) — a draft a human reviews and rewrites
+    before ever signing it into ``floor.invariants``.
+
+    NOT used for the direct ACTIVE-promotion path
+    (:func:`promote_interview_q4_invariants`) — see
+    :func:`_q4_promoted_statement` for that one. The "Never accept
+    {item}." phrasing here inverts a sacred-clause answer's intent (issue
+    #89 review finding 3: Q4 names things to KEEP, not things to reject),
+    which is tolerable in a draft a human is expected to rewrite, but not
+    in a statement that ships live, unedited, with fail-closed consequence
+    semantics (OPF-SPEC.md §3.7 rule 1).
+    """
+    return f"Never accept {item}."
+
+
+def _q4_promoted_statement(item: str) -> str:
+    """The single checkable Floor sentence a Q4-named *item* becomes when
+    promoted directly, unedited, into the ACTIVE ``floor.invariants``
+    (:func:`promote_interview_q4_invariants`) — deliberately different
+    wording from :func:`_q4_statement`'s candidate-draft phrasing.
+
+    Q4 asks which clause TYPES are non-negotiable — i.e. things the legal
+    owner insists on KEEPING regardless of deal value, not things to
+    reject. :func:`_q4_statement`'s "Never accept {item}." (fine for a
+    PROPOSED candidate a human reviews and rewrites before ever signing it)
+    inverts that intent when shipped verbatim as an ACTIVE invariant:
+    "Never accept Liability caps and student-data protection." tells the
+    Floor judge to force negotiation-unacceptable on any clause that
+    CONTAINS a liability cap — backwards (issue #89 review finding 3).
+    "Do not concede on X." keeps the same imperative, judge-checkable
+    register without inverting the polarity.
+
+    Deliberately does NOT echo the interview question's own "regardless of
+    deal value" phrase, tempting as that callback is: ``_PROSE_TEMPLATES``'s
+    fixed "Flexible to close a deal: {answer}" label means every assembled
+    Posture ``system_prompt`` unconditionally contains the words
+    "close"/"deal" alongside the softening term "flexible" — a promoted
+    statement containing "deal" would then spuriously content-word-overlap
+    with that ALWAYS-present sentence, tripping
+    ``posture.check_posture_floor_conflict`` on every playbook regardless
+    of what was actually said (verified against the ticket's own demo
+    answers while fixing review finding 3 — dropping "deal" from this
+    wording is what keeps that demo warning-free).
+    """
+    return f"Do not concede on {item}."
+
+
 def derive_interview_q4_candidates(
     interview_answers: dict[str, str] | None,
 ) -> list[FloorCandidate]:
@@ -235,16 +333,12 @@ def derive_interview_q4_candidates(
     """
     if not interview_answers:
         return []
-    answer = interview_answers.get(INTERVIEW_Q4_ID)
-    if not answer or not answer.strip():
-        return []
-
-    items = [item.strip() for item in answer.split(";") if item.strip()]
+    items = _q4_items(interview_answers.get(INTERVIEW_Q4_ID))
 
     return [
         FloorCandidate(
             id="",  # assigned by propose_floor_candidates
-            statement=f"Never accept {item}.",
+            statement=_q4_statement(item),
             rationale=(
                 f'Named as non-negotiable in the Posture interview (Q4 "{INTERVIEW_Q4_ID}").'
             ),
@@ -295,6 +389,198 @@ def propose_floor_candidates(
         for i, c in enumerate(all_candidates, start=1)
     ]
     return {"candidates": [c.to_dict() for c in numbered]}
+
+
+# ---------------------------------------------------------------------------
+# Interview-Q4 direct promotion (issue #89) — the one exception to
+# "never writes to floor.invariants"
+# ---------------------------------------------------------------------------
+
+
+class FloorCandidateError(Exception):
+    """Raised when a Q4 promotion would silently overwrite a
+    ``floor.invariants`` entry this module did not itself author (issue
+    #89 review finding 2).
+
+    ``posture.apply_posture_interview`` catches this and re-raises it as a
+    ``PostureError`` (the CLI already surfaces that type as a clean
+    ``ERROR:`` line — see ``cli.py``'s ``posture_interview_cmd``). Defined
+    here rather than imported from ``posture.py`` to avoid a circular
+    import: ``posture.py`` already imports from this module, not the
+    reverse.
+    """
+
+
+_ID_SEP_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify_statement_item(item: str) -> str:
+    """Stable kebab-case id for one Q4-named clause type.
+
+    Derived from *item* — the semicolon-separated fragment of the Q4
+    answer, which is also the variable part of the promoted ``statement``
+    (:func:`_q4_statement`) — so the same wording always resolves to the
+    same id, this run and every future rerun. That stability is what makes
+    :func:`promote_interview_q4_invariants` idempotent: OPF-SPEC.md §3.13
+    makes a duplicate sibling id in ``floor.invariants`` a blocking
+    validator error, so re-deriving a different id for the same item on a
+    later run would grow the list forever instead of updating in place.
+    """
+    slug = _ID_SEP_RE.sub("-", item.strip().lower()).strip("-")
+    return slug or "sacred-clause"
+
+
+_Q4_ATTRIBUTION_RE = re.compile(
+    r"^Authored by the legal owner in posture interview v\d+, question "
+    + re.escape(INTERVIEW_Q4_ID)
+    + r"\.$"
+)
+
+
+def _is_own_q4_promotion(entry: dict[str, Any]) -> bool:
+    """Whether *entry* carries THIS function's own attribution marker.
+
+    Distinguishes "an invariant :func:`promote_interview_q4_invariants`
+    itself promoted on an earlier run" (safe to update in place on a
+    rerun — same id, refreshed ``statement``/``rationale``) from "an
+    existing invariant whose id merely happens to collide with a freshly
+    Q4-named item's slug" — e.g. a hand-authored, signed-off statement, or
+    one written by a different producer entirely (never safe to overwrite;
+    issue #89 review finding 2). Matches the EXACT ``rationale`` text
+    :func:`promote_interview_q4_invariants` itself writes (below) —
+    deliberately narrow, so a hand-written rationale that merely sounds
+    similar (or names a different question id) is never mistaken for our
+    own marker.
+    """
+    rationale = entry.get("rationale")
+    return isinstance(rationale, str) and bool(_Q4_ATTRIBUTION_RE.match(rationale))
+
+
+def promote_interview_q4_invariants(
+    interview_answers: dict[str, str] | None,
+    *,
+    posture_version: int,
+    existing_invariants: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Promote each Q4 ("sacred_clauses") item directly into ``floor.invariants``.
+
+    Why this is not the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids: that
+    rule bars promoting a *compiler-derived* candidate — a machine
+    inference read off the Evidence (see :func:`derive_reversal_candidates`)
+    that no human has seen — without an explicit accept decision. A Q4
+    answer is different in kind: the legal owner typed this exact statement
+    into the Posture interview themselves. There is no separate machine
+    inference to approve; the human act of authorship already IS the
+    sign-off. (Marc Mandel, spec owner, approved this distinction
+    2026-07-31; OPF-SPEC.md §3.7 rule 4 records it.) Reversal-derived
+    candidates are NOT human-authored — they never take this path; they
+    stay on :func:`derive_reversal_candidates`'s propose-then-sign-off path
+    via ``floor.candidates.json``, entirely untouched by this function.
+
+    Idempotent per statement — never appends a duplicate ``id`` (OPF-SPEC.md
+    §3.13 makes a duplicate sibling id a blocking validator error):
+
+      - an item whose derived id already exists in *existing_invariants*,
+        AUTHORED BY AN EARLIER RUN OF THIS SAME FUNCTION (its ``rationale``
+        carries this function's own attribution marker — see
+        :func:`_is_own_q4_promotion`), with the exact same ``statement`` is
+        left byte-for-byte untouched — a true no-op, so re-running the
+        interview with unchanged answers leaves ``floor.invariants``
+        unchanged;
+      - such an entry whose statement has changed (the wording was edited
+        but slugifies the same) is updated in place, at the same list
+        position, with a fresh ``rationale``;
+      - an existing id that collides with a freshly Q4-named item's slug
+        but was NOT written by an earlier run of this function (no
+        matching attribution marker — e.g. hand-authored and signed off,
+        possibly carrying its own ``rationale``/``x_*`` fields) is NEVER
+        overwritten: promotion raises :class:`FloorCandidateError` naming
+        the conflicting id instead, so the conflict surfaces to the legal
+        owner rather than silently destroying a signed statement (issue
+        #89 review finding 2);
+      - a new item (no id collision at all) is appended, in Q4-answer
+        order.
+
+    Invariants this run's Q4 answer doesn't name — hand-authored, or
+    promoted by an earlier interview run naming a since-dropped item — are
+    left exactly as they are: this is an upsert, never a delete, so a legal
+    owner's hand edits (or an earlier run's promotions) are never silently
+    discarded. Non-dict entries (a hand-authored playbook MAY carry a bare
+    ``floor.invariants[]`` string — ``prompt_renderer.py`` and
+    ``document_renderer.py`` both tolerate that shape) are likewise left
+    untouched; they simply never match a Q4-derived id (``index_by_id``
+    only ever indexes dict entries with a string ``id``).
+
+    Args:
+        interview_answers:   ``{question_id: answer}`` — see
+                             :func:`derive_interview_q4_candidates`.
+        posture_version:     The just-generated ``posture.version`` a
+                             freshly-written or freshly-updated invariant's
+                             ``rationale`` is attributed to.
+        existing_invariants: The playbook's current ``floor.invariants``
+                             list (schema-0.2/0.3 shape: dicts with
+                             ``id``/``statement``/``rationale``), or
+                             ``None``/``[]`` for a first-ever promotion.
+
+    Returns:
+        The full, merged ``floor.invariants`` list: pre-existing entries in
+        their original order (untouched, or updated in place), then any
+        newly-named items appended in Q4-answer order. Equal to
+        *existing_invariants* (same order, same content) when Q4 was not
+        answered this run.
+
+    Raises:
+        FloorCandidateError: a freshly Q4-named item's derived id collides
+            with an *existing_invariants* entry this function did not
+            itself promote (see above) — never overwritten.
+    """
+    items = _q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID))
+    merged: list[dict[str, Any]] = list(existing_invariants or [])
+    if not items:
+        return merged
+
+    index_by_id: dict[str, int] = {
+        inv["id"]: i
+        for i, inv in enumerate(merged)
+        if isinstance(inv, dict) and isinstance(inv.get("id"), str)
+    }
+
+    for item in items:
+        inv_id = _slugify_statement_item(item)
+        statement = _q4_promoted_statement(item)
+        existing_index = index_by_id.get(inv_id)
+        if existing_index is not None:
+            # existing_index only ever comes from a dict entry with a
+            # string "id" (see index_by_id's construction above) — never a
+            # bare-string invariant.
+            existing_entry = merged[existing_index]
+            if not _is_own_q4_promotion(existing_entry):
+                raise FloorCandidateError(
+                    f"floor.invariants already has an entry with id {inv_id!r} "
+                    f"(statement={existing_entry.get('statement')!r}, rationale="
+                    f"{existing_entry.get('rationale')!r}) that this posture "
+                    "interview's Q4 promotion did not itself author — refusing "
+                    "to silently overwrite it. Rename or remove the conflicting "
+                    "invariant, or reword the sacred_clauses answer so it "
+                    "slugifies to a different id."
+                )
+            if existing_entry.get("statement") == statement:
+                continue  # true no-op: same id, same statement, nothing changed
+        entry = {
+            "id": inv_id,
+            "statement": statement,
+            "rationale": (
+                f"Authored by the legal owner in posture interview v{posture_version}, "
+                f"question {INTERVIEW_Q4_ID}."
+            ),
+        }
+        if existing_index is not None:
+            merged[existing_index] = entry
+        else:
+            index_by_id[inv_id] = len(merged)
+            merged.append(entry)
+
+    return merged
 
 
 # ---------------------------------------------------------------------------

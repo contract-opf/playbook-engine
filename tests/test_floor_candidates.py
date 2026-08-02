@@ -21,12 +21,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import (
+    FloorCandidateError,
     derive_interview_q4_candidates,
     derive_reversal_candidates,
+    promote_interview_q4_invariants,
     propose_floor_candidates,
     write_floor_candidates,
 )
@@ -188,6 +191,212 @@ def test_interview_q4_missing_answer_yields_no_candidates() -> None:
     assert derive_interview_q4_candidates(None) == []
     assert derive_interview_q4_candidates({"sacred_clauses": "   "}) == []
     assert derive_interview_q4_candidates({"rounds": "2 rounds"}) == []
+
+
+# ---------------------------------------------------------------------------
+# promote_interview_q4_invariants — direct Floor promotion (issue #89)
+# ---------------------------------------------------------------------------
+
+
+def test_promote_q4_writes_new_invariants_with_attribution() -> None:
+    answers = {"sacred_clauses": "uncapped liability; IP assignment"}
+
+    result = promote_interview_q4_invariants(answers, posture_version=1, existing_invariants=[])
+
+    assert len(result) == 2
+    for inv in result:
+        assert inv["id"]
+        assert inv["statement"].startswith("Do not concede on ")
+        assert "posture interview v1" in inv["rationale"]
+        assert "sacred_clauses" in inv["rationale"]
+    statements = {inv["statement"] for inv in result}
+    assert any("uncapped liability" in s for s in statements)
+    assert any("IP assignment" in s for s in statements)
+    # Every id is a stable slug of its statement's named item, not a
+    # sequential cand-NNN — unlike the candidate ids assigned by
+    # propose_floor_candidates, these ARE the OPF floor.invariants[].id.
+    ids = {inv["id"] for inv in result}
+    assert "uncapped-liability" in ids
+    assert "ip-assignment" in ids
+
+
+def test_promote_q4_no_answer_returns_existing_invariants_unchanged() -> None:
+    existing = [{"id": "hand-authored", "statement": "Never do X.", "rationale": "Because."}]
+
+    assert (
+        promote_interview_q4_invariants(None, posture_version=1, existing_invariants=existing)
+        == existing
+    )
+    assert (
+        promote_interview_q4_invariants({}, posture_version=1, existing_invariants=existing)
+        == existing
+    )
+    assert (
+        promote_interview_q4_invariants(
+            {"sacred_clauses": "   "}, posture_version=1, existing_invariants=existing
+        )
+        == existing
+    )
+    assert (
+        promote_interview_q4_invariants(
+            {"rounds": "2 rounds"}, posture_version=1, existing_invariants=existing
+        )
+        == existing
+    )
+
+
+def test_promote_q4_preserves_hand_authored_invariants() -> None:
+    hand_authored = {
+        "id": "no-uncapped-liability",
+        "statement": "Never accept uncapped liability.",
+        "rationale": "Categorically unacceptable regardless of deal value.",
+    }
+    answers = {"sacred_clauses": "IP assignment"}
+
+    result = promote_interview_q4_invariants(
+        answers, posture_version=1, existing_invariants=[hand_authored]
+    )
+
+    assert hand_authored in result  # byte-identical, untouched
+    assert len(result) == 2
+
+
+def test_promote_q4_rerun_same_answer_is_true_noop() -> None:
+    answers = {"sacred_clauses": "uncapped liability; IP assignment"}
+
+    first = promote_interview_q4_invariants(answers, posture_version=1, existing_invariants=[])
+    # Simulate a second interview run (posture.version bumps to 2) with the
+    # exact same answer.
+    second = promote_interview_q4_invariants(answers, posture_version=2, existing_invariants=first)
+
+    assert second == first  # no duplicates, no rationale churn — a true no-op
+    assert len(second) == 2
+    ids = [inv["id"] for inv in second]
+    assert len(ids) == len(set(ids))  # OPF-SPEC.md §3.13: no duplicate sibling ids
+
+
+def test_promote_q4_rerun_with_changed_wording_updates_in_place() -> None:
+    """Issue #89 review finding 4: this test must actually drive the
+    ``existing_index is not None`` branch with a DIFFERING ``statement`` for
+    the SAME slug. Pre-fix, this test ran the identical answer twice (a
+    no-op) and then a genuinely different item (an append) — the
+    update-in-place branch (the one branch that can rewrite an existing
+    entry, and so the one finding 2 guards) was never exercised at all."""
+    first = promote_interview_q4_invariants(
+        {"sacred_clauses": "uncapped liability"}, posture_version=1, existing_invariants=[]
+    )
+    assert len(first) == 1
+    assert first[0]["id"] == "uncapped-liability"
+    assert first[0]["statement"] == "Do not concede on uncapped liability."
+
+    # Re-run with different casing for the SAME item: same slug
+    # ("uncapped-liability"), a genuinely different statement string. The
+    # existing entry carries THIS function's own attribution marker (it was
+    # itself written by the promotion above), so this is the legitimate
+    # update-in-place case — not the foreign-collision case finding 2
+    # guards against (see
+    # test_promote_q4_refuses_to_overwrite_colliding_hand_authored_id).
+    second = promote_interview_q4_invariants(
+        {"sacred_clauses": "Uncapped Liability"}, posture_version=2, existing_invariants=first
+    )
+
+    assert len(second) == 1  # updated in place, not appended alongside
+    assert second[0]["id"] == "uncapped-liability"
+    assert second[0]["statement"] == "Do not concede on Uncapped Liability."
+    assert second[0]["statement"] != first[0]["statement"]
+    assert "posture interview v2" in second[0]["rationale"]
+
+
+def test_promote_q4_rerun_dropped_item_is_not_deleted() -> None:
+    # First run names two items; second run's answer only re-names one.
+    # The dropped item's invariant must survive (upsert, never a delete).
+    first = promote_interview_q4_invariants(
+        {"sacred_clauses": "uncapped liability; IP assignment"},
+        posture_version=1,
+        existing_invariants=[],
+    )
+    second = promote_interview_q4_invariants(
+        {"sacred_clauses": "uncapped liability"}, posture_version=2, existing_invariants=first
+    )
+
+    assert len(second) == 2
+    ids = {inv["id"] for inv in second}
+    assert "uncapped-liability" in ids
+    assert "ip-assignment" in ids
+
+
+def test_promote_q4_tolerates_bare_string_invariants() -> None:
+    # A hand-edited playbook MAY carry a bare-string floor invariant
+    # (document_renderer.py/prompt_renderer.py both tolerate this shape) —
+    # the merge must pass it through untouched, not crash on .get().
+    existing: list[Any] = ["No indemnity cap below $1M"]
+    answers = {"sacred_clauses": "IP assignment"}
+
+    result = promote_interview_q4_invariants(
+        answers, posture_version=1, existing_invariants=existing
+    )
+
+    assert "No indemnity cap below $1M" in result
+    assert len(result) == 2
+
+
+def test_promote_q4_semicolon_separated_items_get_distinct_ids() -> None:
+    answers = {"sacred_clauses": "Liability caps and student-data protection"}
+
+    result = promote_interview_q4_invariants(answers, posture_version=1, existing_invariants=[])
+
+    assert len(result) == 1
+    assert result[0]["id"] == "liability-caps-and-student-data-protection"
+    assert result[0]["statement"] == "Do not concede on Liability caps and student-data protection."
+
+
+def test_promote_q4_statement_does_not_invert_sacred_clause_into_prohibition() -> None:
+    """Issue #89 review finding 3 regression: Q4 asks which clause types are
+    non-negotiable -- i.e. things the legal owner insists on KEEPING. The
+    promoted ACTIVE invariant must not read as "Never accept <the thing we
+    want>." -- that would instruct the Floor judge to force
+    negotiation-unacceptable on any clause that CONTAINS student-data
+    protection, the opposite of the legal owner's intent."""
+    answers = {"sacred_clauses": "Liability caps and student-data protection"}
+
+    result = promote_interview_q4_invariants(answers, posture_version=1, existing_invariants=[])
+
+    assert len(result) == 1
+    statement = result[0]["statement"]
+    assert not statement.lower().startswith("never accept")
+    assert "accept" not in statement.lower()
+    assert "Liability caps and student-data protection" in statement
+
+
+def test_promote_q4_refuses_to_overwrite_colliding_hand_authored_id() -> None:
+    """Issue #89 review finding 2 regression: an existing invariant whose id
+    happens to equal a freshly Q4-named item's slug, but which this
+    function did NOT itself promote (no matching attribution marker in its
+    rationale), must never be silently overwritten -- even though the ids
+    collide byte-for-byte. A hand-authored, signed-off statement (plus any
+    x_* extension field) must survive untouched; the promotion fails
+    loudly instead of silently destroying it."""
+    hand_authored = {
+        "id": "ip-assignment",
+        "statement": "Never accept present-tense assignment of pre-existing IP.",
+        "rationale": "Signed off by the GC 2026-03-01 after board review.",
+        "x_signed_by": "gc@example.com",
+    }
+    answers = {"sacred_clauses": "IP assignment"}  # slugifies to "ip-assignment"
+
+    with pytest.raises(FloorCandidateError, match="ip-assignment"):
+        promote_interview_q4_invariants(
+            answers, posture_version=1, existing_invariants=[hand_authored]
+        )
+
+    # The exception is raised before any mutation -- the caller's own dict
+    # is completely untouched (never mutated in place, never replaced).
+    assert hand_authored == {
+        "id": "ip-assignment",
+        "statement": "Never accept present-tense assignment of pre-existing IP.",
+        "rationale": "Signed off by the GC 2026-03-01 after board review.",
+        "x_signed_by": "gc@example.com",
+    }
 
 
 # ---------------------------------------------------------------------------
