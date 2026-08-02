@@ -416,6 +416,109 @@ def test_honesty_flags_zero_clause_playbook(tmp_path: Path) -> None:
     assert "unsigned" in report
     assert "No blank or defaulted fields detected" not in report
 
+    # Issue #25: the Needs Attention section must ALSO flag the zero-clause
+    # playbook as a first-class item — previously only the Honesty section's
+    # blank-field list caught it, so an empty needs_attention list read as
+    # "all observations clean" on the emptiest possible playbook.
+    data = build_after_action_data(out_dir)
+    assert data["needs_attention"], "zero-clause playbook must produce a needs-attention item"
+    assert "No needs-attention items detected" not in report
+
+
+def _make_empty_v02_playbook(generated_at: str = "2026-01-15T09:00:00Z") -> dict:
+    """OPF v0.2/v0.3 playbook with every top-level section empty — the exact
+    all-empty shape issue #17 documents for the quickstart's pre-fix failure
+    mode: ``evidence.clauses: []``, ``clause_library: []``, ``posture: {}``,
+    ``floor: {}`` (here also ``corpus.documents: []``, to exercise every
+    section issue #25's Honesty extension checks)."""
+    return {
+        "opf_version": "0.3",
+        "agreement_type": {"id": "test", "name": "Test Agreement"},
+        "baseline": {"has_canonical_template": False},
+        "taxonomy": {"source": "test", "entries": []},
+        "evidence": {"clauses": [], "clause_library": []},
+        "posture": {},
+        "floor": {},
+        "corpus": {"documents": [], "stats": {}},
+        "compiler": {
+            "name": "playbook-engine",
+            "version": "0.3.0",
+            "generated_at": generated_at,
+        },
+    }
+
+
+def test_honesty_flags_all_empty_top_level_sections(tmp_path: Path) -> None:
+    """Issue #25: on the OPF v0.2/v0.3 all-empty playbook shape, every empty
+    top-level section — not just evidence.clauses — must be named in the
+    Honesty section: evidence.clause_library, posture, floor, and
+    corpus.documents."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    _write_observations(out_dir, [_make_obs("deal-alice", "v1", "Clause.", outcome="unsigned")])
+    _write_playbook(out_dir, _make_empty_v02_playbook())
+
+    data = build_after_action_data(out_dir)
+    flagged_fields = {entry["field"] for entry in data["honesty"]["blank_or_defaulted_fields"]}
+    assert flagged_fields == {
+        "evidence.clauses",
+        "evidence.clause_library",
+        "posture",
+        "floor",
+        "corpus.documents",
+        "taxonomy.entries",
+    }
+
+    report = build_after_action_report(out_dir)
+    for field in flagged_fields:
+        assert field in report
+
+
+def test_zero_clause_reason_names_empty_taxonomy(tmp_path: Path) -> None:
+    """Issue #25 fix round 2: when a playbook compiles ZERO clause positions
+    because its taxonomy has no entries (nothing to classify observations
+    into) — as opposed to every observation being unsigned — the Honesty and
+    Needs Attention sections must name the empty taxonomy as the likely
+    cause instead of falling back to the generic "schema-valid but
+    semantically empty" message. Observations here are outcome=signed (not
+    unsigned) precisely so the all-unsigned branch cannot explain the
+    result, isolating the empty-taxonomy cause."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    _write_observations(
+        out_dir,
+        [_make_obs("deal-alice", "v1", "Clause.", tid=None, outcome="signed")],
+    )
+    _write_playbook(out_dir, _make_empty_v02_playbook())
+
+    data = build_after_action_data(out_dir)
+    report = build_after_action_report(out_dir)
+
+    assert "schema-valid but semantically empty" not in report
+    assert "taxonomy.entries" in report
+    assert "zero entries" in report
+
+    # Honesty's evidence.clauses reason and the Needs Attention zero-clause
+    # item share the derived cause via _zero_clause_reason and must agree.
+    evidence_clauses_reason = next(
+        entry["reason"]
+        for entry in data["honesty"]["blank_or_defaulted_fields"]
+        if entry["field"] == "evidence.clauses"
+    )
+    assert "taxonomy" in evidence_clauses_reason
+    assert "zero entries" in evidence_clauses_reason
+
+    needs_attention_reasons = [
+        reason for item in data["needs_attention"] for reason in item["reasons"]
+    ]
+    assert any("taxonomy" in r and "zero entries" in r for r in needs_attention_reasons), (
+        needs_attention_reasons
+    )
+
 
 def test_honesty_section_notes_present(tmp_path: Path) -> None:
     """Honesty notes are always present."""
