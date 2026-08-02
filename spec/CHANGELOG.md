@@ -75,8 +75,8 @@ top-5-plus-material capped lists; `digestObservationSummary` gained
 changelog exists to prevent recurring.** It was corrected hours later by
 PR #230's bump to digest_version 2 (which covers both changes); no
 consumer had bound an artifact in the gap. Flagged by a downstream
-review-engine team (Contract Toaster) — the pin-and-verify discipline that
-caught it is the intended consumer posture.
+review-engine team — the pin-and-verify discipline that caught it is the
+intended consumer posture.
 
 ### 2026-07-16 — OPF 0.3 introduced (PR #227)
 
