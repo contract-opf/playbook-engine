@@ -169,6 +169,11 @@ For real semantic judgment, you don't write code: use the packaged
 `ANTHROPIC_API_KEY` for headless judges; [PLAN-FIRST.md](PLAN-FIRST.md)
 compares the two, stage by stage.
 
+Once judgment is real, how far you take the playbook from there — your
+own intent, signed hard lines, granular curation — is entirely optional:
+see the [control ladder](ADOPTING.md#how-much-control-do-you-want) in
+ADOPTING.md.
+
 ---
 
 ## Troubleshooting
