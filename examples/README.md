@@ -149,10 +149,20 @@ Markdown, pastable into any chat LLM alongside a contract to review:
 playbook render-prompt out/quickstart-demo/playbook.opf.json --out out/quickstart-demo/review-prompt.md
 ```
 
-Expected output:
+Expected output (stdout — the artifact):
 
 ```text
 wrote out/quickstart-demo/review-prompt.md
+```
+
+Expected stderr (not part of the artifact — printed alongside the stdout
+above): the fixture playbook is advisory-only by design (no hard lines, no
+posture — see step 4's compiled `playbook.opf.json`), so `render-prompt`
+also prints a one-line WARN here. This is expected on this walkthrough, not
+a sign anything went wrong:
+
+```text
+WARN playbook.opf.json: advisory-only playbook (no hard lines, no posture) — nothing in the rendered prompt is binding
 ```
 <!-- quickstart:end -->
 
