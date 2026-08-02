@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from click.testing import CliRunner
 
 from playbook_engine.canonicalize import content_hash
 from playbook_engine.cli import cli
+from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.posture import (
     INTERVIEW_QUESTIONS,
     PostureApplyResult,
@@ -185,6 +187,130 @@ def test_generate_posture_allows_pruned_subset_of_3() -> None:
     posture = generate_posture(minimal_answers, generated_at="2026-07-10T00:00:00Z")
     assert posture["version"] == 1
     assert len(posture["generation"]["interview"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# _assemble_system_prompt / generate_posture — answer-splice grammar (#89)
+#
+# Pre-fix, two of the six _PROSE_TEMPLATES interpolated {answer} MID-sentence
+# with template text trailing it ("rounds": "...goes {answer} negotiation
+# round(s)..."; "sacred_clauses": "...{answer} (see Floor)."). A FRAGMENT
+# answer ("Two rounds") read fine; a FULL-SENTENCE answer ("Two rounds, then
+# escalate to the GC.") produced a garbled double-punctuated splice. These
+# tests cover both answer shapes for both formerly-broken templates.
+# ---------------------------------------------------------------------------
+
+
+def test_rounds_full_sentence_answer_has_no_splice_artifact() -> None:
+    answers = {**_ANSWERS, "rounds": "Two rounds, then escalate to the GC."}
+    posture = generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert ". negotiation round(s)" not in posture["system_prompt"]
+    assert "Two rounds, then escalate to the GC. negotiation" not in posture["system_prompt"]
+    assert (
+        "Rounds before escalating: Two rounds, then escalate to the GC."
+        in (posture["system_prompt"])
+    )
+
+
+def test_rounds_fragment_answer_renders_cleanly() -> None:
+    answers = {**_ANSWERS, "rounds": "Two rounds"}
+    posture = generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert "Rounds before escalating: Two rounds" in posture["system_prompt"]
+    assert "negotiation round(s)" not in posture["system_prompt"]
+
+
+def test_sacred_clauses_full_sentence_answer_has_no_splice_artifact() -> None:
+    answers = {**_ANSWERS, "sacred_clauses": "Liability cap and indemnification are sacred."}
+    posture = generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert ". (see Floor)" not in posture["system_prompt"]
+    assert (
+        "Hard lines named in interview (see Floor): "
+        "Liability cap and indemnification are sacred." in posture["system_prompt"]
+    )
+
+
+def test_sacred_clauses_fragment_answer_renders_cleanly() -> None:
+    answers = {**_ANSWERS, "sacred_clauses": "Liability cap"}
+    posture = generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert "Hard lines named in interview (see Floor): Liability cap" in posture["system_prompt"]
+
+
+# A field's "trailing" text (everything right after the raw *answer*
+# substring) alone can't tell "properly terminated" from "run-on": a
+# full-sentence answer's own "." is INSIDE the answer substring, so a
+# correctly-formed trailing looks like " NextLabel..." (space, uppercase) —
+# but that is EXACTLY what an unterminated FRAGMENT run straight into the
+# next label ALSO looks like, since nothing was inserted between them
+# either. The two are only distinguishable by ALSO checking whether the
+# answer itself already ended in terminal punctuation — hence two patterns,
+# selected by that check, not one pattern applied uniformly (a single
+# "punctuation-is-optional" regex here would silently accept the very
+# run-on issue #89 review finding 1 reported — caught while writing this
+# fix's own regression test, against the pre-fix source, before it ever
+# reached review).
+_ALREADY_TERMINATED_TRAILING_RE = re.compile(r"^(?:\s[A-Z].*)?$")  # "" or " NextLabel..."
+_FRAGMENT_TRAILING_RE = re.compile(r"^\.(?:\s[A-Z].*)?$")  # "." or ". NextLabel..."
+
+_FULL_SENTENCE_ANSWERS: dict[str, str] = {
+    "rounds": "We go two rounds, then escalate.",
+    "leverage": "We favor a collaborative posture.",
+    "risk_appetite": "We accept to close on non-material changes.",
+    "sacred_clauses": "We hold firm on the liability cap.",
+    "flexible_clauses": "We concede on renewal mechanics.",
+    "audience": "We write for a GC audience.",
+}
+
+# No trailing '.'/'!'/'?' on any answer — the FRAGMENT case (issue #89
+# review finding 1's regression: pre-fix, a fragment ran straight into the
+# next field's label with no sentence boundary at all).
+_FRAGMENT_ANSWERS: dict[str, str] = {
+    "rounds": "Two rounds before escalating",
+    "leverage": "Collaborative",
+    "risk_appetite": "Accept-to-close on non-material changes",
+    "sacred_clauses": "Liability caps and student-data protection",
+    "flexible_clauses": "Term length and renewal mechanics",
+    "audience": "Terse rationale for a GC audience",
+}
+
+
+@pytest.mark.parametrize(
+    "answers", [_FULL_SENTENCE_ANSWERS, _FRAGMENT_ANSWERS], ids=["full_sentence", "fragment"]
+)
+def test_all_six_templates_terminate_each_field_before_the_next_label(
+    answers: dict[str, str],
+) -> None:
+    """One consistent, grammatical scheme for all six templates (#89): every
+    assembled field ends with the answer, immediately followed by
+    sentence-final punctuation, before the next field's label begins — for
+    BOTH a full-sentence answer (already ends in ./!/?, left untouched) and
+    a FRAGMENT answer (no terminal punctuation — issue #89 review finding
+    1's regression: pre-fix, a fragment ran straight into the next label
+    with no sentence boundary at all, e.g. "...protection Flexible to
+    close a deal:...", which also defeated ``_SENTENCE_RE``'s sentence
+    splitting in ``check_posture_floor_conflict``).
+
+    Distinguishes "legitimately followed by the next label" from "template
+    junk trails the answer" (pre-fix: a space then lowercase "negotiation"
+    or a literal "(") — and, for a fragment answer, from a bare run-on with
+    NO terminator at all — using whichever of
+    ``_ALREADY_TERMINATED_TRAILING_RE`` / ``_FRAGMENT_TRAILING_RE`` applies
+    to that answer; see the comment above them.
+    """
+    posture = generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
+    system_prompt = posture["system_prompt"]
+
+    for iq in INTERVIEW_QUESTIONS:
+        answer = answers[iq.q]
+        assert system_prompt.count(answer) == 1, iq.q
+        trailing = system_prompt[system_prompt.index(answer) + len(answer) :]
+        pattern = _ALREADY_TERMINATED_TRAILING_RE if answer[-1] in ".!?" else _FRAGMENT_TRAILING_RE
+        assert pattern.match(trailing), (
+            f"{iq.q}: field not properly terminated before the next label — {trailing[:30]!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +476,262 @@ def test_apply_posture_interview_missing_playbook_raises(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
+# apply_posture_interview — Q4 -> Floor promotion (issue #89)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_posture_interview_promotes_q4_into_floor_invariants(tmp_path: Path) -> None:
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    invariants = written["floor"]["invariants"]
+    assert len(invariants) == 1
+    inv = invariants[0]
+    assert inv["id"] == "liability-caps-and-student-data-protection"
+    assert inv["statement"] == "Do not concede on Liability caps and student-data protection."
+    assert "posture interview v1" in inv["rationale"]
+    assert "sacred_clauses" in inv["rationale"]
+
+
+def test_apply_posture_interview_ticket_demo_answers_yield_zero_warnings(tmp_path: Path) -> None:
+    """Issue #89 review finding 1 regression: the ticket's own required-
+    verification demo answers (``sacred_clauses`` = "Liability caps and
+    student-data protection" — a FRAGMENT, no terminal punctuation) must
+    not trip ``check_posture_floor_conflict`` against the very invariant
+    this same interview run promotes from that answer.
+
+    Pre-fix, the missing sentence terminator let ``_SENTENCE_RE`` merge the
+    sacred_clauses field with the next field into one run-on sentence
+    ("...student-data protection Flexible to close a deal: Term length and
+    renewal mechanics."), which contains the softening term "flexible" and
+    overlaps the freshly-promoted invariant's content words — a
+    false-positive SHOULD-warn on the exact invariant just promoted."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    result = apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert result.warnings == ()
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    validated = validate_document(written)
+    warn_messages = [e.message for e in validated.errors if not e.blocking]
+    assert warn_messages == []
+
+
+def test_apply_posture_interview_concede_softening_phrase_does_not_warn_on_unrelated_invariants(
+    tmp_path: Path,
+) -> None:
+    """Issue #89 review, fix round 2: every interview-promoted invariant's
+    statement is built from the same boilerplate — "Do not concede on
+    {item}." (``floor_candidates._q4_promoted_statement``) — so "concede"
+    is a content word of EVERY promoted invariant regardless of which
+    clause type was actually named. "concede" is also a constituent word
+    of three ``_SOFTENING_TERMS`` phrases ("willing to concede", "happy to
+    concede", "concede to move"). Pre-fix, an ordinary ``risk_appetite``
+    answer using one of those phrases content-word-overlapped on "concede"
+    alone with every promoted invariant, regardless of the concept either
+    one actually named — a pure template artifact, not a shared concept.
+
+    Reproduces the reviewer's own end-to-end repro: a risk_appetite answer
+    using "willing to concede" alongside three unrelated sacred_clauses
+    items must promote three invariants and warn about none of them."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {
+        **_ANSWERS,
+        "risk_appetite": "We are willing to concede on non-material drafting changes",
+        "sacred_clauses": "Student-data protection; audit rights; source-code escrow",
+    }
+    result = apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    invariants = written["floor"]["invariants"]
+    assert len(invariants) == 3  # the promotion itself is unaffected by this fix
+
+    assert result.warnings == ()
+
+    validated = validate_document(written)
+    warn_messages = [e.message for e in validated.errors if not e.blocking]
+    assert warn_messages == []  # validator.py re-derives the same check on every run
+
+
+def test_apply_posture_interview_colliding_hand_authored_id_raises_postureerror(
+    tmp_path: Path,
+) -> None:
+    """Issue #89 review finding 2, end-to-end: a hand-authored invariant
+    whose id collides with a freshly Q4-named item's slug must never be
+    silently overwritten by 'playbook posture interview' — the conflict
+    surfaces as a PostureError (the public type this module's callers
+    already catch — see cli.py), and nothing is written."""
+    hand_authored = {
+        "id": "ip-assignment",
+        "statement": "Never accept present-tense assignment of pre-existing IP.",
+        "rationale": "Signed off by the GC 2026-03-01 after board review.",
+        "x_signed_by": "gc@example.com",
+    }
+    doc = _minimal_v02_doc(floor={"invariants": [hand_authored]})
+    opf_path = tmp_path / "playbook.opf.json"
+    original_bytes = json.dumps(doc).encode("utf-8")
+    opf_path.write_bytes(original_bytes)
+
+    answers = {**_ANSWERS, "sacred_clauses": "IP assignment"}
+    with pytest.raises(PostureError, match="ip-assignment"):
+        apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    # Nothing was written — the atomic tmp+replace write never ran.
+    assert opf_path.read_bytes() == original_bytes
+
+
+def test_apply_posture_interview_promotion_is_idempotent_on_rerun(tmp_path: Path) -> None:
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+    first_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
+
+    # Re-run with the SAME answers file — posture.version bumps, but the
+    # promoted invariant must not duplicate or otherwise change.
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-11T00:00:00Z")
+    second_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
+
+    assert len(second_invariants) == 1
+    assert second_invariants == first_invariants  # byte-for-byte unchanged
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["posture"]["version"] == 2  # posture itself did advance
+
+
+def test_apply_posture_interview_promotion_preserves_hand_authored_invariants(
+    tmp_path: Path,
+) -> None:
+    doc = _minimal_v02_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "IP assignment"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    invariants = written["floor"]["invariants"]
+    assert _LIABILITY_INVARIANT in invariants
+    assert len(invariants) == 2
+
+
+def test_apply_posture_interview_promoted_invariants_pass_validation(tmp_path: Path) -> None:
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+    # Re-run twice more to prove the validator's duplicate-id check
+    # (OPF-SPEC.md §3.13) never trips on repeated promotion of the same
+    # statement.
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-11T00:00:00Z")
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-12T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    result = validate_document(written)
+    blocking_errors = [str(e) for e in result.errors if e.blocking]
+    assert result.ok, blocking_errors
+    assert not any("duplicate" in e.lower() for e in blocking_errors)
+
+
+def test_apply_posture_interview_no_sacred_clauses_answer_leaves_floor_untouched(
+    tmp_path: Path,
+) -> None:
+    doc = _minimal_v02_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {k: v for k, v in _ANSWERS.items() if k != "sacred_clauses"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["floor"]["invariants"] == [_LIABILITY_INVARIANT]
+
+
+def test_apply_posture_interview_no_promotion_leaves_floor_section_untouched(
+    tmp_path: Path,
+) -> None:
+    """Issue #89 review finding 6 regression: when Q4 wasn't answered (so
+    promotion is a pure pass-through, producing the identical invariants
+    list), the ``floor`` section itself must not be rewritten — an empty
+    ``floor: {}`` must stay exactly ``{}``, not gain a fabricated
+    ``{"invariants": []}`` that changes identity.content_hash for no
+    reason."""
+    doc = _minimal_v02_doc()  # floor={}
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {k: v for k, v in _ANSWERS.items() if k != "sacred_clauses"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["floor"] == {}
+
+
+def test_apply_posture_interview_never_promotes_reversal_candidates(tmp_path: Path) -> None:
+    """Issue #89 acceptance criterion: an out dir whose observations contain
+    ``proposed_then_reversed`` still gets those ONLY as candidates in
+    ``floor.candidates.json`` (via 'playbook floor propose'), never
+    auto-promoted — posture interview's Floor promotion is scoped to the Q4
+    answer only and never reads observations.jsonl."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    obs_path = tmp_path / "observations.jsonl"
+    reversal_obs = {
+        "observation_id": "doc-a/2/8.1",
+        "taxonomy_id": "uncapped_liability",
+        "text_summary": "The Vendor's liability shall be uncapped for any breach.",
+        "full_text": "The Vendor's liability shall be uncapped for any breach.",
+        "citation": {
+            "document_id": "doc-a",
+            "version": 2,
+            "clause_path": "8.1",
+            "char_span": None,
+            "version_id": None,
+        },
+        "deviation": "substantive",
+        "risk_delta": {"direction": "neutral", "magnitude": "none"},
+        "provenance": "counterparty_paper",
+        "outcome": "proposed_then_reversed",
+        "confidence": None,
+        "basis": "deterministic",
+    }
+    obs_path.write_text(json.dumps(reversal_obs) + "\n", encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "IP assignment"}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    invariant_statements = [inv["statement"] for inv in written["floor"]["invariants"]]
+    # Only the human-authored Q4 item was promoted — the reversal never was.
+    assert invariant_statements == ["Do not concede on IP assignment."]
+    assert not any("uncapped" in s.lower() for s in invariant_statements)
+
+    # The reversal is still available as a pending PROPOSAL, untouched.
+    candidates_path = write_floor_candidates(tmp_path)
+    candidates = json.loads(candidates_path.read_text(encoding="utf-8"))["candidates"]
+    reversal_candidates = [c for c in candidates if c["source"] == "reversal"]
+    assert len(reversal_candidates) == 1
+    assert "uncapped liability" in reversal_candidates[0]["statement"].lower()
+
+
+# ---------------------------------------------------------------------------
 # CLI — playbook posture interview / questions
 # ---------------------------------------------------------------------------
 
@@ -386,6 +768,34 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     )
     assert exit_code2 == 0, output2
     assert "posture.version=2" in output2
+
+
+def test_cli_posture_interview_rerun_does_not_duplicate_floor_invariants(tmp_path: Path) -> None:
+    """Issue #89 required verification: run the interview a second time with
+    the same answers file; floor.invariants must be unchanged (no
+    duplicates)."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps(answers), encoding="utf-8")
+
+    exit_code, output = _invoke(
+        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+    )
+    assert exit_code == 0, output
+    first_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
+    assert len(first_invariants) == 1
+
+    exit_code2, output2 = _invoke(
+        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+    )
+    assert exit_code2 == 0, output2
+    second_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
+
+    assert second_invariants == first_invariants
 
 
 def test_cli_posture_interview_missing_out_dir_playbook_fails(tmp_path: Path) -> None:
