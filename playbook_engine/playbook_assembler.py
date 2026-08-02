@@ -56,8 +56,8 @@ _COMPILER_NAME = "playbook-engine"
 # LRE..RLO embedding range). Extraction preserves them from source documents,
 # but downstream consumers treat them as prompt-injection markers — a
 # downstream review engine's fail-closed injection scan rejects exactly this
-# set (Contract Toaster is one reference implementation) — so the assembled
-# document must never carry them (issue: pre-derivation QA).
+# set — so the assembled document must never carry them (issue:
+# pre-derivation QA).
 _INVISIBLE_CHARS_RE = re.compile("[\u200b-\u200d\ufeff\u202a-\u202e]")
 
 

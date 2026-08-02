@@ -49,10 +49,10 @@ _SCHEMA_PATH_BY_VERSION = {"0.2": _SCHEMA_PATH_V2, "0.3": _SCHEMA_PATH_V3}
 SUPPORTED_OPF_VERSIONS = _SUPPORTED_OPF_VERSIONS
 
 # Zero-width/bidi-control characters. A downstream review engine's fail-closed
-# injection scan (e.g. Contract Toaster, a reference implementation) rejects a
-# document containing any of these, so their presence is a blocking error here
-# — the assembler strips them (``playbook_assembler._strip_invisible``) and
-# this check keeps hand-edited or third-party documents honest.
+# injection scan rejects a document containing any of these, so their
+# presence is a blocking error here — the assembler strips them
+# (``playbook_assembler._strip_invisible``) and this check keeps hand-edited
+# or third-party documents honest.
 _INVISIBLE_CHARS_RE = re.compile("[\u200b-\u200d\ufeff\u202a-\u202e]")
 
 
