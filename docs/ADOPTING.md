@@ -97,7 +97,96 @@ cites `document / version / clause`. Follow a few citations —
 have the "oh, it really *does* know" moment: round-by-round, who asked for
 what, and where it landed.
 
+## How much control do you want?
+
+A compiled, validating playbook is already useful — everything from here
+is optional, and each step buys something specific rather than being
+required busywork. Think of it as a ladder: climb as many rungs as the
+deal, or your risk tolerance, calls for.
+
+- **Rung 0 — ship it as-is (0 min).** Stop right after `playbook
+  validate`. An evidence-only playbook — no Posture, no Floor — is a
+  complete, legitimate OPF document; it's exactly what the
+  [quickstart](../examples/README.md) produces. Evidence is **advisory
+  by contract** (OPF-SPEC.md §5): the app reading it reasons over the
+  history and is free to weigh it however its own rules see fit — a
+  review engine's system prompt, a human reviewer's judgment. `playbook
+  render-prompt` says so loudly rather than silently: an evidence-only
+  playbook's rendered prompt opens with an **ADVISORY ONLY — NOTHING
+  BELOW IS BINDING** banner instead of quietly shipping unmarked
+  guidance. Stopping here is a real endpoint, not an unfinished state.
+
+- **Rung 1 — say what you want (~10 min).** `playbook posture interview`
+  asks six questions — rounds, leverage, risk appetite, sacred clauses,
+  flexible clauses, audience (OPF-SPEC.md §7 has the exact wording) —
+  interactively, or non-interactively via `--answers-file` for scripting.
+  Answer at least three and each becomes one sentence of
+  `posture.system_prompt`: soft-binding intent that shapes judgment but,
+  by itself, never gates a decision (§5). The sacred-clauses question is
+  different in kind: naming what's non-negotiable regardless of deal
+  value is a human authoring a hard line in natural language, so that
+  answer is written directly into signed `floor.invariants`, with
+  attribution back to the interview. This is not the auto-promotion
+  OPF-SPEC.md §3.7 rule 4 forbids — that rule bars promoting a
+  *compiler-derived* candidate (a machine inference read off the
+  Evidence) without an explicit accept; a human-authored statement's
+  sign-off is the act of writing it. Re-run the interview as often as you
+  like: the same statement always resolves to the same id and updates in
+  place, never a duplicate (a repeated id is a blocking validator error,
+  §3.13).
+
+- **Rung 2 — sign the corpus's proposals (~minutes).** Every ask your
+  history reversed before signing is a *candidate* hard line — a pattern
+  the compiler can surface but must never assert on its own. `playbook
+  floor propose` collects them into `floor.candidates.json` (folding in
+  Rung 1's sacred-clauses answer too, if you've already signed one — it
+  renders as an inert "already signed" row here, not a control, so
+  nothing gets asked twice). `playbook view render` puts the candidates
+  in a "Proposed hard lines" checklist above the clause sections of
+  `playbook.review.html`, each with its evidence citation and an accept /
+  reject / undecided control (undecided by default — nothing here expires
+  unreviewed, it just keeps reappearing). Decide, click **Export
+  feedback**, then run `playbook view apply`: `accept` signs the
+  candidate into `floor.invariants` with attribution; `reject` records
+  that a human looked and declined, so it will not be re-proposed. Every
+  promotion here traces to an explicit accept in `feedback.json` —
+  nothing is inferred into force.
+
+- **Rung 3 — correct the record (open-ended, optional).** The same
+  review HTML's per-clause audit surface, collapsed by default and sorted
+  attention-first: thin evidence, confidence below 0.6, or a pinned
+  position that conflicts with freshly recomputed evidence all sort to
+  the top, with why stated right in the summary line before you expand
+  anything. Four correction kinds round-trip through `feedback.json` and
+  `playbook view apply`: **pin** an attorney-asserted position (it
+  survives recompiles, and evidence that later disagrees is flagged,
+  never silently dropped or silently kept); correct **provenance** (who
+  proposed a change, which version is the signed one); correct
+  **classification** (which taxonomy entry a clause belongs to); or leave
+  a free-text **note**. There's no finish line — audit one clause or
+  every clause, once or after every recompile.
+
+**Which rung do you need?** Only Rungs 1 and 2 create binding content — a
+Posture (soft) or a signed Floor invariant (hard); Rung 3 only improves
+the evidence those judgments rest on, it authors nothing new. Every rung
+past 0 is optional and independent — sign a hard line without ever
+running the interview, or run the interview and never touch the audit
+surface. What makes stopping early safe is the same asymmetry
+OPF-SPEC.md §5 sets out: your consuming app's own rules always keep the
+last word over advisory Evidence — Rung 0 leans on exactly that — but a
+signed Floor invariant is the one section a conformant consumer may never
+quietly override, no matter how far up the ladder you climb.
+
+`playbook.review.html` leads with this same ladder: a triage header
+naming the same three ways to act (interview, sign, audit), the Rung 2
+checklist directly under it, then the Rung 3 audit — collapsed and
+attention-sorted — below that. This section is the narrative form of
+that page.
+
 ## Stage 3 — Make it yours (curation + posture)
+
+The concrete tools behind Rungs 1–3 above, roughly in the order you'd
+reach for them:
 
 - **Pin what the corpus gets wrong.** An attorney pin
   (`curation.pins[]`) overrides a compiled stance and *survives

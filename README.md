@@ -46,6 +46,9 @@ through every step's expected output, plus the Docker variant.
 
 Ready for your own agreements? See **[docs/ADOPTING.md](docs/ADOPTING.md)**
 — the path from a messy folder of deals to a curated, publishable playbook.
+Not sure how much of that curation to do? ADOPTING.md's [control
+ladder](docs/ADOPTING.md#how-much-control-do-you-want) lays out four
+rungs from zero-effort to full audit, each with an honest cost.
 
 ## What a playbook knows
 
