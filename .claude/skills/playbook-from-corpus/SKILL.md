@@ -480,22 +480,46 @@ relevant corpus subfolders (see the "Step 4 — Review the intermediates" sectio
 
 **Pre-flight — reuse a warm extraction cache; never re-OCR what's done.**
 Extraction/OCR is the multi-hour step, and it is cached at
-`$OUT/extraction_cache.jsonl` keyed by **file content hash only** — so any run
-pointed at an `$OUT` a prior or parallel run already used skips extraction for
-every unchanged version and goes straight to segmentation/judging. **Always
-point `$OUT` at the same output directory across runs** (that is the whole
-mechanism — a fresh `$OUT` throws the cache away and re-OCRs from scratch).
+`$OUT/extraction_cache.jsonl` keyed by **file content hash plus the current
+extractor environment** (docling on PATH or not) — so any run pointed at an
+`$OUT` a prior or parallel run already used skips extraction for every
+unchanged version extracted under the SAME environment, and goes straight to
+segmentation/judging. **Always point `$OUT` at the same output directory
+across runs** (that is the whole mechanism — a fresh `$OUT` throws the cache
+away and re-OCRs from scratch). Installing or removing `docling` between runs
+against the same `$OUT` deliberately does NOT replay the cache for affected
+versions — each is re-extracted once under the new environment rather than
+staying frozen at a possibly-worse legacy-only extraction (issue #77).
 
-Run the pre-flight estimator (host venv, seconds, no docling) — pass the
-**same `$OUT`** so it reports what's already cached:
+Run the pre-flight estimator (host venv, seconds, no docling needed). It
+checks the cache for **both** the `docling` and `legacy` key variants of
+each file, regardless of whether docling is installed on the host running
+the script — so it correctly *detects* a warm cache hit even when the corpus
+was actually extracted inside the docker container (which has docling; the
+host venv typically does not). Pass the **same `$OUT`** so it reports
+what's already cached:
 
 ```bash
 python .claude/skills/playbook-from-corpus/estimate_runtime.py ./corpus ./out
 ```
 
+Only a hit under the **target environment** — the one the upcoming
+`judge`/`mine` run will actually extract under — counts as 0 wall-clock.
+This defaults to `docling`, since the documented pipeline always extracts
+inside the container (`make docker-run ... mine/judge`, Dockerfile has
+docling). A file cached under `legacy` only is reported separately (`N
+version(s) cached under legacy only — will be re-extracted under docling`)
+rather than folded into the "already extracted" count — it will genuinely
+re-run. If you are intentionally extracting on the host instead of the
+container (no docling there), set
+`PLAYBOOK_ESTIMATE_TARGET_ENV=legacy` before running the estimator so
+host-cached entries are credited correctly instead of being reported as a
+needless re-OCR.
+
 If it reports `~0m — corpus already extracted (cache hit)`, the expensive step
 is done: proceed directly to `judge`/`mine` (they replay the cache
-automatically — no flag needed). If it reports uncached versions, that count
+automatically — no flag needed). If it reports uncached versions (including
+any reported as cached under the non-target environment only), that count
 is the real remaining OCR cost; surface the ETA to the human before
 committing.
 

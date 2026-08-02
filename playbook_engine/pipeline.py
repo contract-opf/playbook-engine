@@ -1397,10 +1397,16 @@ def _compute_doc_result(
             tree.write(out_dir / "normalized" / doc_id / f"{vid}.clauses.json")
             version_trees[vid] = tree
             if use_llm_segmentation and extraction_cache is not None:
-                # Prefer the extractor that actually produced the text: a
-                # cache hit replays a prior environment's extraction (e.g. a
-                # docling-built cache read on a docling-less host), and the
-                # up-front detect_extractor PATH check would mislabel it.
+                # Prefer the extractor that actually produced the text over
+                # the up-front detect_extractor(vf) PATH check above: a
+                # per-file docling failure falls back to the legacy adapter
+                # for just that one file (the docling->legacy fallback in
+                # extraction.py's extract_blocks) and stores
+                # extractor="legacy" in the cached VALUE under a
+                # docling-environment KEY — which the PATH check above
+                # would still mislabel as "docling", since it only re-checks
+                # PATH and cannot see which adapter actually produced this
+                # file's text.
                 cached_extraction = extraction_cache.get(vf)
                 if cached_extraction is not None:
                     extractor = cached_extraction[2]
