@@ -2457,12 +2457,16 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
 
     Translates provenance/signed/order corrections into per-document
     hints.yaml entries, classification corrections into VerdictStore entries,
-    free-text notes/comments into viewer_notes.md, and ``override``
+    free-text notes/comments into viewer_notes.md, ``override``
     (attorney-pinned position) corrections into a ``curation`` pin embedded
     directly in ``playbook.opf.json`` (issue #147) — it survives a later
-    recompile and is flagged if fresh evidence contradicts it. Any key it
-    cannot honor is reported as not applied rather than counted toward a
-    false "OK" (issue #138).
+    recompile and is flagged if fresh evidence contradicts it — and the
+    top-level ``"floor"`` key's accept/reject decisions (issue #90):
+    ``accept`` promotes a Floor candidate into ``floor.invariants`` with
+    attribution; ``reject`` records the rejection in
+    ``floor.candidates.json`` so it is not re-proposed. Any key it cannot
+    honor is reported as not applied rather than counted toward a false
+    "OK" (issue #138).
 
     OUT_DIR is the output directory produced by ``playbook compile``.
     FEEDBACK_FILE is the feedback.json produced by the HTML viewer.
@@ -2489,6 +2493,21 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
     if result.pins_written:
         for item_num in result.pins_written:
             click.secho(f"  {item_num}: position pinned in playbook.opf.json", fg="cyan")
+    if result.floor_promoted:
+        click.secho(
+            f"  {len(result.floor_promoted)} floor candidate(s) promoted to "
+            "floor.invariants in playbook.opf.json",
+            fg="cyan",
+        )
+        for candidate_id in result.floor_promoted:
+            click.secho(f"    {candidate_id}: promoted", fg="cyan")
+    if result.floor_rejected:
+        click.secho(
+            f"  {len(result.floor_rejected)} floor candidate(s) rejected in floor.candidates.json",
+            fg="cyan",
+        )
+        for candidate_id in result.floor_rejected:
+            click.secho(f"    {candidate_id}: rejected", fg="cyan")
     for item_num, messages in result.skipped.items():
         for message in messages:
             click.secho(f"  {item_num}: not applied — {message}", fg="yellow")
@@ -2498,6 +2517,8 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
         or result.verdicts_written
         or result.notes_written
         or result.pins_written
+        or result.floor_promoted
+        or result.floor_rejected
     )
     if applied:
         click.secho("OK  feedback applied", fg="green")

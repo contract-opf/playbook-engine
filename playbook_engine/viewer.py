@@ -24,6 +24,16 @@ in the returned/written HTML: ``playbook.opf.json`` on disk is never read
 back and never rewritten, so the stored artifact continues to hold only
 aliases regardless of whether a reviewer renders it with or without the map.
 
+When ``<out_dir>/floor.candidates.json`` exists and carries at least one
+candidate (issue #166's ``playbook floor propose`` output), ``render_review_html``
+also renders a "Proposed hard lines" accept/reject checklist ABOVE the
+clause sections (issue #90): one row per candidate, its statement, its
+source (reversal evidence citations, or a Posture-interview-Q4 marker), and
+a three-way accept/reject/undecided control (default undecided) — or, for a
+candidate already present in ``floor.invariants``, an inert "already signed"
+row, and for one already recorded rejected in ``floor.candidates.json``, an
+inert "rejected" row. No candidates -> no section at all (no empty shell).
+
 ``apply_feedback(out_dir, feedback_path) -> ApplyResult``
     Read *feedback_path* (a ``feedback.json`` produced by the HTML viewer) and
     translate corrections into:
@@ -43,6 +53,11 @@ aliases regardless of whether a reviewer renders it with or without the map.
       (``pipeline.project_playbook``) preserves the pin and flags/clears its
       ``conflict`` against freshly recomputed evidence — see
       ``playbook_engine/curation.py``.
+    - ``floor.invariants`` promotion + ``floor.candidates.json`` decision
+      recording (issue #90) for the top-level ``"floor"`` key — see below.
+      Like ``override``, an ``accept`` decision rewrites ``playbook.opf.json``
+      itself (via ``floor_candidates.promote_floor_candidate``) and refreshes
+      ``identity`` the same way.
 
     Any correction key ``apply_feedback`` cannot honor is recorded in
     ``ApplyResult.skipped`` instead of being silently dropped, so callers
@@ -51,6 +66,10 @@ aliases regardless of whether a reviewer renders it with or without the map.
 Feedback JSON schema (produced by the viewer's **Export feedback** button)::
 
     {
+      "floor": {
+        "cand-001": {"decision": "accept", "comment": "agreed, categorical"},
+        "cand-002": {"decision": "reject", "comment": "too broad as worded"}
+      },
       "C1": {"comment": "...", "override": null},
       "C1.1": {
         "comment": "looks correct",
@@ -62,8 +81,8 @@ Feedback JSON schema (produced by the viewer's **Export feedback** button)::
       }
     }
 
-Each key is an item number (``Cx`` for a clause, ``Cx.y`` for an observation).
-Recognised correction keys:
+Every key EXCEPT ``"floor"`` is an item number (``Cx`` for a clause, ``Cx.y``
+for an observation). Recognised per-item correction keys:
 
 - ``provenance``    → ``hints.yaml`` for the cited document
 - ``signed_version``→ ``hints.yaml`` for the cited document
@@ -74,8 +93,22 @@ Recognised correction keys:
 - ``override``      → an embedded ``curation`` pin in ``playbook.opf.json``
                       (issue #147)
 
-Any other key is not applied; it is reported back via ``ApplyResult.skipped``
-as a human-readable "not applied" message.
+Any other per-item key is not applied; it is reported back via
+``ApplyResult.skipped`` as a human-readable "not applied" message.
+
+``"floor"`` (issue #90) is the one reserved top-level, non-item key: a map
+of ``floor.candidates.json`` candidate id -> ``{"decision": "accept"|
+"reject", "comment": "..."}``. ``accept`` promotes the candidate into
+``floor.invariants`` with attribution (never an auto-promotion — OPF-SPEC.md
+§3.7 rule 4 — it happens only because a human recorded this exact accept
+decision); ``reject`` records the rejection directly on the candidate in
+``floor.candidates.json`` so a later re-render shows it as rejected rather
+than re-proposing it. Both are idempotent (OPF-SPEC.md §3.13 forbids
+duplicate sibling ids, so re-applying the same decision must update in
+place, never append). A malformed ``"floor"`` block, an unknown candidate
+id, or an unknown ``decision`` value is reported via ``ApplyResult.skipped``
+under the key ``"floor"`` or ``f"floor:{candidate_id}"`` — never a false
+"OK" (issue #138), same as every other unsupported key.
 """
 
 from __future__ import annotations
@@ -95,6 +128,12 @@ from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.curation import CurationPin
+from playbook_engine.floor_candidates import (
+    apply_floor_review,
+    candidate_invariant_id,
+    candidate_q4_invariant_id,
+    read_floor_candidates,
+)
 from playbook_engine.opf_accessors import clause_confidence, clause_stance, playbook_clauses
 from playbook_engine.playbook_assembler import write_playbook
 
@@ -118,16 +157,29 @@ class ApplyResult:
                           ``curation`` pin in ``playbook.opf.json`` (issue
                           #147). Empty if no ``override`` corrections were
                           present.
+        floor_promoted:   Floor candidate ids accepted and promoted into
+                          ``floor.invariants`` this run (issue #90).
+                          Includes a true no-op re-accept, so re-applying
+                          identical feedback reports the same ids both
+                          times. Empty if no candidate was accepted.
+        floor_rejected:   Floor candidate ids marked rejected in
+                          ``floor.candidates.json`` this run (issue #90).
+                          Empty if no candidate was rejected.
         skipped:          Item number → list of human-readable "not applied"
                           messages, one per correction key that
                           ``apply_feedback`` recognised as unsupported.
-                          Empty if every key was applied.
+                          Also carries malformed/unknown ``"floor"`` entries,
+                          keyed ``"floor"`` (malformed top-level block) or
+                          ``f"floor:{candidate_id}"`` (issue #90). Empty if
+                          every key was applied.
     """
 
     hints_written: list[str] = field(default_factory=list)
     verdicts_written: int = 0
     notes_written: bool = False
     pins_written: list[str] = field(default_factory=list)
+    floor_promoted: list[str] = field(default_factory=list)
+    floor_rejected: list[str] = field(default_factory=list)
     skipped: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -420,6 +472,160 @@ def _render_clause_section(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# "Proposed hard lines" checklist — floor.candidates.json (issue #90)
+# ---------------------------------------------------------------------------
+
+_FLOOR_STATUS_BADGES = {
+    "signed": ("already signed", "#d1fae5", "#065f46"),
+    "rejected": ("rejected", "#fee2e2", "#991b1b"),
+}
+
+
+def _candidate_source_html(candidate: dict[str, Any]) -> str:
+    """Escaped HTML for one Floor candidate's "source" cell (issue #90):
+    every reversal-evidence citation on the candidate record, or — for a
+    ``source: interview_q4`` candidate, which carries none (see
+    ``floor_candidates.derive_interview_q4_candidates``) — a Posture
+    interview marker."""
+    citations = candidate.get("citations") or []
+    if citations:
+        parts = [_citation_str(c) for c in citations if isinstance(c, dict)]
+        joined = "; ".join(p for p in parts if p)
+        if joined:
+            return html_lib.escape(joined)
+    if candidate.get("source") == "interview_q4":
+        return html_lib.escape('Posture interview (Q4 "sacred_clauses")')
+    return ""
+
+
+def _render_floor_candidate_row(candidate: dict[str, Any], status: str | None) -> str:
+    """Render one "Proposed hard lines" row.
+
+    *status* is ``"signed"`` (already present in ``floor.invariants`` —
+    inert), ``"rejected"`` (recorded in ``floor.candidates.json`` — inert),
+    or ``None`` (still pending — a live three-way accept/reject/undecided
+    control, default undecided).
+    """
+    cand_id = html_lib.escape(str(candidate.get("id", "")))
+    statement = html_lib.escape(str(candidate.get("statement", "")))
+    rationale = html_lib.escape(str(candidate.get("rationale", "")))
+    source_html = _candidate_source_html(candidate)
+
+    lines = [f'<div class="floor-candidate" data-candidate-id="{cand_id}">']
+    header = (
+        f'<div class="candidate-header">'
+        f'<span class="item-num">{cand_id}</span> '
+        f'<span class="candidate-statement">{statement}</span>'
+    )
+    if status is not None:
+        label, bg, fg = _FLOOR_STATUS_BADGES[status]
+        header += " " + _badge(label, bg, fg)
+    header += "</div>"
+    lines.append(header)
+    if rationale:
+        lines.append(f'<div class="clause-meta">{rationale}</div>')
+    if source_html:
+        lines.append(f'<div class="clause-meta">{source_html}</div>')
+
+    if status is None:
+        lines.append(
+            '<div class="feedback-row">'
+            f'<label><input type="radio" class="floor-decision" '
+            f'name="floor-decision-{cand_id}" data-candidate-id="{cand_id}" '
+            f'value="accept"> Accept</label> '
+            f'<label><input type="radio" class="floor-decision" '
+            f'name="floor-decision-{cand_id}" data-candidate-id="{cand_id}" '
+            f'value="reject"> Reject</label> '
+            f'<label><input type="radio" class="floor-decision" '
+            f'name="floor-decision-{cand_id}" data-candidate-id="{cand_id}" '
+            f'value="undecided" checked> Undecided</label> '
+            f'<label>Comment: <input class="floor-comment-input" '
+            f'data-candidate-id="{cand_id}" type="text" '
+            f'placeholder="Reviewer note…" style="width:30%"></label>'
+            "</div>"
+        )
+
+    lines.append("</div>")  # .floor-candidate
+    return "\n".join(lines)
+
+
+def _render_floor_candidates_section(
+    candidates: list[dict[str, Any]],
+    invariant_ids: set[str],
+    *,
+    raw_candidates: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render the "Proposed hard lines" accept/reject checklist (issue #90).
+
+    *candidates* is ``floor.candidates.json``'s ``candidates`` list, already
+    alias-resolved by the caller for DISPLAY (statement/rationale/source
+    text) — same as everything else in the page. *raw_candidates* is the
+    SAME list before alias resolution, positionally paired with
+    *candidates* — defaults to *candidates* itself (i.e. identical) when
+    the caller has no alias map to apply. *invariant_ids* is the set of
+    ``floor.invariants[].id`` already present in the playbook — the
+    ground-truth signal for the "already signed" inert state.
+
+    The "already signed" id lookup below is always computed from the RAW,
+    unresolved candidate — the same input ``apply_feedback`` (and,
+    transitively, ``floor_candidates.promote_floor_candidate``) actually
+    uses to derive an accepted id — never the resolved DISPLAY copy.
+    Deriving it from the display copy instead would disagree with what
+    accepting the candidate actually produces whenever a candidate's
+    statement quotes corpus text containing an alias (e.g. an unclassified
+    reversal's text snippet): the resolved and raw statements differ, so
+    their slugs would too, and an already-signed candidate would wrongly
+    render as a live control under an alias map (issue #90 review
+    finding 2). Two ids are checked per candidate, both derived from the
+    raw copy: ``floor_candidates.candidate_invariant_id`` (this candidate's
+    own draft statement) and, for a ``source: interview_q4`` candidate,
+    ``floor_candidates.candidate_q4_invariant_id`` — the OTHER id the same
+    Q4-named item already carries if it was promoted directly via
+    ``floor_candidates.promote_interview_q4_invariants`` (issue #89), which
+    ``candidate_invariant_id`` alone can never match (issue #90 review
+    finding 1).
+
+    Returns the empty string when there are no renderable rows — either
+    *candidates* itself is empty, or every entry in it is malformed (not a
+    dict) — the caller must not emit an empty section shell (acceptance
+    criteria; issue #90 review finding 5).
+    """
+    if raw_candidates is None:
+        raw_candidates = candidates
+
+    rows: list[str] = []
+    for candidate, raw_candidate in zip(candidates, raw_candidates, strict=True):
+        if not isinstance(candidate, dict):
+            continue
+        raw = raw_candidate if isinstance(raw_candidate, dict) else candidate
+        q4_inv_id = candidate_q4_invariant_id(raw)
+        if candidate_invariant_id(raw) in invariant_ids or (
+            q4_inv_id is not None and q4_inv_id in invariant_ids
+        ):
+            status: str | None = "signed"
+        elif candidate.get("decision") == "rejected":
+            status = "rejected"
+        else:
+            status = None
+        rows.append(_render_floor_candidate_row(candidate, status))
+
+    if not rows:
+        return ""
+
+    return (
+        '<div id="floor-candidates" class="floor-section">'
+        "<h2>Proposed hard lines</h2>"
+        '<p class="floor-section-help">Machine-proposed Floor candidates, pending your '
+        "sign-off — never auto-promoted (OPF-SPEC.md §3.7 rule 4). "
+        "<b>Accept</b> promotes a candidate into the signed "
+        "<code>floor.invariants</code>, a categorical, judge-checkable red line. "
+        "<b>Reject</b> records that you looked at it and declined; it will not be "
+        "re-proposed. Undecided candidates reappear on every render until you "
+        "decide.</p>" + "\n".join(rows) + "</div>"
+    )
+
+
 _GUIDE_HTML = """
 <div id="guide-overlay" onclick="if(event.target===this)toggleGuide(false)">
  <div id="guide-panel">
@@ -458,12 +664,23 @@ _GUIDE_HTML = """
      distilled from.</li>
    <li>Hover any badge or section heading for its definition.</li>
   </ul>
+  <h3>Proposed hard lines</h3>
+  <p>Above the clause list, if <code>playbook floor propose</code> has been
+  run, any machine-proposed Floor candidates appear as a short accept/reject
+  checklist. <b>Accept</b> promotes a candidate into the signed Floor
+  (<code>floor.invariants</code>) with your review recorded as its
+  attribution — never automatic (a candidate sits there until a human
+  decides). <b>Reject</b> records that you looked at it and declined; it
+  will not be re-proposed. Undecided candidates reappear on every render
+  until you decide. A candidate already signed, or already rejected, shows
+  as an inert status badge instead of a control.</p>
   <h3>How to act on it</h3>
   <ol>
    <li>Read each clause; open observations that look misclassified, misattributed
      (provenance), or wrongly risk-scored.</li>
    <li>Type a note in the item's comment box (e.g. "taxonomy should be
      indemnification", "this is our paper", "risk is material, not minor").</li>
+   <li>Decide any proposed hard lines (accept/reject) at the top of the page.</li>
    <li>Click <b>Export feedback</b> (top bar) — it downloads
      <code>feedback.json</code>.</li>
    <li>Hand that file back to the pipeline:
@@ -509,6 +726,12 @@ h1 { font-size: 1.4rem; margin: 0 0 0.5rem }
 .feedback-row { margin-top: 0.4rem; font-size: 0.85rem; color: #374151 }
 .feedback-row input, .feedback-row select { font-size: 0.85rem; padding: 2px 6px; border: 1px solid #d1d5db; border-radius: 3px }
 #toc-taxonomy h4 { font-size: 0.8rem; text-transform: uppercase; color: #9ca3af; margin: 0.6rem 0 0.1rem }
+.floor-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 1.4rem; padding: 1rem 1.2rem }
+.floor-section h2 { margin: 0 0 0.4rem; font-size: 1.1rem }
+.floor-section-help { color: #6b7280; font-size: 0.85rem; margin: 0 0 0.8rem }
+.floor-candidate { border-top: 1px solid #f3f4f6; padding: 0.6rem 0 }
+.floor-candidate:first-of-type { border-top: none }
+.candidate-statement { font-weight: 600 }
 """
 
 _JS = r"""
@@ -533,6 +756,21 @@ function collectFeedback() {
       fb[item].override = el.value;
     }
   });
+  var floorFb = {};
+  document.querySelectorAll('.floor-decision:checked').forEach(function(el) {
+    var cid = el.getAttribute('data-candidate-id');
+    if (el.value === 'undecided') return;
+    if (!floorFb[cid]) floorFb[cid] = {};
+    floorFb[cid].decision = el.value;
+  });
+  document.querySelectorAll('.floor-comment-input').forEach(function(el) {
+    var cid = el.getAttribute('data-candidate-id');
+    if (el.value.trim()) {
+      if (!floorFb[cid]) floorFb[cid] = {};
+      floorFb[cid].comment = el.value.trim();
+    }
+  });
+  if (Object.keys(floorFb).length) fb.floor = floorFb;
   return fb;
 }
 
@@ -606,10 +844,14 @@ def render_review_html(
     Groups clauses by taxonomy, numbers them ``C1``, ``C1.1``, etc.  Embeds
     the full playbook JSON in a ``<script>`` tag for drill-down access.  Adds a
     per-item comment box and an **Export feedback** button that produces
-    ``feedback.json``.
+    ``feedback.json``. When ``out_dir/floor.candidates.json`` carries at
+    least one candidate, also renders a "Proposed hard lines" accept/reject
+    checklist above the clause sections (issue #90) — see the module
+    docstring.
 
     Args:
-        out_dir:   Path to the directory containing ``playbook.opf.json``.
+        out_dir:   Path to the directory containing ``playbook.opf.json``
+                   (and, optionally, ``floor.candidates.json``).
         out_file:  If given, write the HTML to this file atomically; the HTML
                    string is still returned regardless.
         alias_map: Optional ``alias -> real entity name`` held-out map (issue
@@ -691,6 +933,31 @@ def render_review_html(
 
     clauses_html = "\n".join(clause_sections)
 
+    # "Proposed hard lines" checklist (issue #90) — candidates get the same
+    # alias resolution as everything else on the page (reversal candidates
+    # can carry corpus text, e.g. an unclassified reversal's snippet, that
+    # may itself contain an alias); wrapping in a throwaway {"candidates":
+    # ...} dict reuses _resolve_aliases_in_doc's existing recursive walk
+    # without needing a second entry point. The RAW (unresolved)
+    # candidates are threaded through alongside the resolved copy — issue
+    # #90 review finding 2: the "already signed" id lookup must agree with
+    # what apply_feedback derives from the raw file on disk, not with a
+    # display-only, alias-resolved statement.
+    floor_candidates = read_floor_candidates(out_dir)
+    render_candidates = (
+        _resolve_aliases_in_doc({"candidates": floor_candidates}, alias_map)["candidates"]
+        if alias_map
+        else floor_candidates
+    )
+    invariant_ids: set[str] = {
+        inv_id
+        for inv in (render_doc.get("floor") or {}).get("invariants") or []
+        if isinstance(inv, dict) and isinstance(inv_id := inv.get("id"), str)
+    }
+    floor_section_html = _render_floor_candidates_section(
+        render_candidates, invariant_ids, raw_candidates=floor_candidates
+    )
+
     agreement_type = render_doc.get("agreement_type", {}).get("name", "Playbook Review")
     generated_at = render_doc.get("compiler", {}).get("generated_at", "")
 
@@ -712,7 +979,7 @@ def render_review_html(
         _GUIDE_HTML,
         '<div class="layout">',
         toc_html,
-        f'<div id="content">{clauses_html}</div>',
+        f'<div id="content">{floor_section_html}{clauses_html}</div>',
         "</div>",
         # Embedded playbook JSON for drill-down / JS access
         f'<script id="playbook-data" type="application/json">\n{embedded_json}\n</script>',
@@ -747,6 +1014,11 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
     - ``classification`` → ``VerdictStore`` entry at
       ``out_dir/judge/verdicts.jsonl``.
     - ``note`` → appended to ``out_dir/viewer_notes.md``.
+    - ``"floor"`` (issue #90) → ``accept`` promotes a
+      ``out_dir/floor.candidates.json`` candidate into ``floor.invariants``;
+      ``reject`` records the rejection on the candidate itself so a later
+      render shows it as rejected instead of re-proposing it. See the
+      module docstring for the full ``"floor"`` feedback shape.
 
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` and corpus
@@ -795,6 +1067,12 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
     pinned_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
     for item_num, corrections in feedback.items():
+        if item_num == "floor":
+            # Reserved top-level key (issue #90) — a map of candidate_id ->
+            # decision, not a Cx/Cx.y item number. Handled separately below
+            # (_apply_floor_feedback), after this loop.
+            continue
+
         if not isinstance(corrections, dict):
             continue
 
@@ -958,6 +1236,28 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
                 clause_title = payload.get("title") or payload.get("_clause_title", "")
                 notes.append(f"**{item_num}** ({clause_title}): {str(text_val).strip()}")
 
+    # --- Floor candidate accept/reject decisions (issue #90) ---------------
+    # The reserved top-level "floor" key is a batch of candidate_id ->
+    # decision, not a per-item correction, so it is resolved once here
+    # (the per-item loop above explicitly skips it) rather than inline.
+    floor_invariants_changed = False
+    if "floor" in feedback:
+        existing_invariants = list((doc.get("floor") or {}).get("invariants") or [])
+        floor_result = apply_floor_review(out_dir, feedback["floor"], existing_invariants)
+
+        result.floor_promoted = floor_result.promoted
+        result.floor_rejected = floor_result.rejected
+        for key, messages in floor_result.skipped.items():
+            result.skipped.setdefault(key, []).extend(messages)
+        for candidate_id, statement, comment in floor_result.comments:
+            notes.append(f"**floor:{candidate_id}** ({statement}): {comment}")
+
+        if floor_result.invariants_changed:
+            floor_section = dict(doc.get("floor") or {})
+            floor_section["invariants"] = floor_result.invariants
+            doc["floor"] = floor_section
+            floor_invariants_changed = True
+
     # Write hints.yaml files
     # Locate document directories: scan out_dir and one level up for doc dirs
     # The hints.yaml lives alongside the corpus document folder.
@@ -1017,6 +1317,7 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
     # clause_id (a later pin on the same clause replaces the earlier one,
     # clearing whatever conflict it may have carried — the attorney is
     # re-asserting the position now).
+    opf_doc_changed = False
     if pins_by_clause_id:
         existing_pins = {p["clause_id"]: p for p in (doc.get("curation") or {}).get("pins", [])}
         pins_written: list[str] = []
@@ -1024,18 +1325,28 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
             existing_pins[clause_id] = pin.to_dict()
             pins_written.append(pin.item_id)
         doc["curation"] = {"pins": list(existing_pins.values())}
+        result.pins_written = pins_written
+        opf_doc_changed = True
 
-        # Refresh identity so it never goes stale after a curation-only edit.
-        # content_hash itself is unaffected (curation is excluded from it —
-        # see canonicalize.py) but section_digests.curation must track the
-        # new pin content. Only touched if this document already carries an
-        # identity block (v0.1 fixtures / playbooks without one are left as-is).
+    # A Floor promotion (issue #90) already mutated doc["floor"]["invariants"]
+    # above, in place, when floor_invariants_changed. Both curation (pins)
+    # and floor participate in this single shared write: identity is
+    # refreshed and playbook.opf.json is written at most once per call,
+    # regardless of how many of the two sections changed this run.
+    if floor_invariants_changed:
+        opf_doc_changed = True
+
+    if opf_doc_changed:
+        # Refresh identity so it never goes stale after a curation/floor
+        # edit. content_hash is unaffected by a curation-only change
+        # (curation is excluded from it — see canonicalize.py) but DOES
+        # change when floor.invariants changes (floor is NOT excluded);
+        # section_digests always reflects both independently either way.
         if "identity" in doc:
             doc["identity"]["content_hash"] = content_hash(doc)
             doc["identity"]["section_digests"] = compute_section_digests(doc)
 
         write_playbook(doc, opf_path)
-        result.pins_written = pins_written
 
     return result
 
