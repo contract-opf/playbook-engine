@@ -2135,6 +2135,21 @@ def mine_corpus(
             "template_content_hash": template_content_hash,
             "template_tree_present": template_tree is not None,
             "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),
+            # Which extractor produced the source text changes L1 ingest
+            # output for byte-identical source files — legacy
+            # (pdfplumber/python-docx/pandoc) has no OCR and can garble
+            # columns/scanned text, so docling and legacy can disagree on the
+            # SAME bytes (see extraction.detect_extractor). Installing or
+            # removing docling between runs must bust every per-doc
+            # stage-cache entry rather than replay an L1-L4 result derived
+            # from the OTHER environment's extraction as if it were current
+            # (issue #79). This is a corpus-level, PATH-only check (constant
+            # across every file in the run), so any Path argument yields the
+            # same answer — corpus_dir is passed for clarity, not because its
+            # content matters. Adding this field intentionally invalidates
+            # every existing L1-L4 stage-cache entry once, the same one-time
+            # cost as any other fingerprint-field addition.
+            "extractor_env": detect_extractor(corpus_dir),
             # Switching segmentation paths changes L1 output for identical
             # source files — must bust the cache, not replay a stale tree
             # segmented (and classified) the other way.
