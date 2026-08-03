@@ -8,6 +8,7 @@ and author names only.
 from __future__ import annotations
 
 import dataclasses
+import shutil
 from pathlib import Path
 
 import pytest
@@ -22,13 +23,23 @@ from playbook_engine.corpus_linter import LintItem, LintReport, lint_corpus
 # ---------------------------------------------------------------------------
 
 
-_UNSET = object()  # sentinel: distinguishes "provenance key omitted" from "provenance: null"
+_UNSET = object()  # sentinel: distinguishes "key omitted" from "key: null" (provenance/extraction)
 
 
 def _write_docx_stub(path: Path) -> None:
     """Write a minimal PK-magic-bytes stub so the file has the right extension."""
     # A real .docx is a ZIP; we just need a non-empty file recognised by extension.
     path.write_bytes(b"PK\x03\x04" + b"\x00" * 20)
+
+
+def _write_pdf_stub(path: Path) -> None:
+    """Write a minimal PDF-header stub so the file has the right extension."""
+    path.write_bytes(b"%PDF-1.4\n%stub")
+
+
+def _write_rtf_stub(path: Path) -> None:
+    """Write a minimal RTF-header stub so the file has the right extension."""
+    path.write_text(r"{\rtf1\ansi stub}", encoding="utf-8")
 
 
 def _make_config(
@@ -43,6 +54,7 @@ def _make_config(
     include_taxonomy: bool = True,
     segmentation: dict | None = None,
     provenance: object = _UNSET,
+    extraction: object = _UNSET,
 ) -> Path:
     """Build a config YAML at tmp_path/config.yaml and return the path."""
     config_path = tmp_path / "playbook.config.yaml"
@@ -66,6 +78,8 @@ def _make_config(
         data["segmentation"] = segmentation
     if provenance is not _UNSET:
         data["provenance"] = provenance
+    if extraction is not _UNSET:
+        data["extraction"] = extraction
 
     config_path.write_text(yaml.dump(data), encoding="utf-8")
     return config_path
@@ -513,6 +527,419 @@ def test_config_segmentation_agent_true_no_credentials_no_error(
     cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True, "agent": True})
     report = lint_corpus(corpus, config_path=cfg)
     assert not any(i.code == "CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS" for i in report.errors())
+
+
+# ---------------------------------------------------------------------------
+# lint_corpus: extraction environment checks (issue #82)
+#
+# extraction.extract_blocks (docling/pdfplumber/pandoc) is reachable ONLY
+# from the LLM-segmentation path (segmentation.llm or segmentation.agent) --
+# the deterministic ingest path (docx_ingester/rtf_ingester/pdf_ingester)
+# never calls it (config.py's ExtractionConfig docstring: "a declared
+# extractor has nothing to govern" there). Every fixture below therefore
+# turns on ``segmentation: {llm: true}`` unless a test specifically
+# exercises that gate itself. A dummy ANTHROPIC_API_KEY is set wherever a
+# test asserts the ABSENCE of errors/warnings, so the unrelated
+# CONFIG_SEGMENTATION_LLM_NO_CREDENTIALS check (issue #131) never
+# contaminates that assertion.
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_docling_declared_missing_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extraction.extractor: docling`` + no docling on PATH must error --
+    the exact host-run failure mode (Jul 14: 161/161 legacy) this ticket
+    exists to catch at lint time instead of after a burned LLM budget."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "docling"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_DOCLING_MISSING" for i in report.errors())
+
+
+def test_extraction_docling_declared_present_no_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same config, but docling IS on PATH -> no error."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "docling"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_DOCLING_MISSING" for i in report.errors())
+
+
+def test_extraction_checks_gated_on_llm_segmentation_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard: with no ``segmentation:`` section at all (the
+    engine's own deterministic default), extract_blocks is never reached --
+    docx_ingester/rtf_ingester/pdf_ingester never call docling/pandoc -- so a
+    declared ``extraction.extractor: docling`` must not be flagged even on a
+    docling-less host. This is exactly examples/judge-fixture/'s shape
+    (.rtf files, no segmentation: section); an ungated check here would
+    break tests/test_quickstart.py's "no errors, 2 warning(s)" marker on any
+    docling+pandoc-less machine."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, extraction={"extractor": "docling"})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code.startswith("CONFIG_EXTRACTION_") for i in report.items)
+
+
+def test_extraction_checks_apply_under_agent_without_llm_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``segmentation: {agent: true}`` (``llm`` key omitted) still resolves
+    to llm-first under the loader (``llm=bool(seg_raw.get("llm")) or
+    agent_seg`` -- config.py), and the agent path still calls
+    extract_blocks (it only skips the live API call) -- so the extraction
+    checks must still apply."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"agent": True},
+        extraction={"extractor": "docling"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_DOCLING_MISSING" for i in report.errors())
+
+
+def test_extraction_auto_pdf_no_docling_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default ``extractor: auto`` + no docling + a .pdf in the corpus must
+    warn, not error -- legacy PDF via pdfplumber is degraded (no OCR) but
+    functional, and erroring would break every docling-less dev loop
+    (verifier correction on the ticket)."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_pdf_stub(corpus / "deal-alice" / "v1.pdf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING" for i in report.warnings())
+    assert not report.has_errors
+
+
+def test_extraction_auto_pdf_with_docling_no_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same corpus, but docling IS on PATH -> no warning (PDFs go through
+    docling, not the legacy no-OCR pdfplumber adapter)."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_pdf_stub(corpus / "deal-alice" / "v1.pdf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING" for i in report.warnings())
+
+
+def test_extraction_legacy_declared_pdf_no_docling_no_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extraction.extractor: legacy`` is a deliberate, informed choice to
+    accept the legacy adapters even without docling -- must not warn."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_pdf_stub(corpus / "deal-alice" / "v1.pdf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "legacy"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING" for i in report.warnings())
+
+
+def test_extraction_auto_no_pdf_no_docling_no_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No .pdf anywhere in the corpus -> no warning, even docling-less."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING" for i in report.warnings())
+
+
+def test_extraction_rtf_no_pandoc_under_auto_no_docling_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.rtf in the corpus, default ``auto`` extractor, neither pandoc nor
+    docling on PATH must error -- the legacy RTF adapter raises
+    ExtractionError at runtime today; this surfaces it at lint time
+    instead."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_RTF_NO_PANDOC" for i in report.errors())
+
+
+def test_extraction_rtf_with_pandoc_no_docling_no_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pandoc present (docling absent) -> the legacy RTF adapter works
+    fine, no error."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/local/bin/pandoc" if cmd == "pandoc" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_RTF_NO_PANDOC" for i in report.errors())
+
+
+def test_extraction_rtf_with_docling_no_pandoc_no_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling present (pandoc absent), extractor auto -> docling handles
+    RTF directly, no error."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code == "CONFIG_EXTRACTION_RTF_NO_PANDOC" for i in report.errors())
+
+
+def test_extraction_rtf_declared_legacy_docling_present_no_pandoc_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extraction.extractor: legacy`` always forces the legacy adapters --
+    extraction._resolve_extractor_env resolves a declared "legacy" to
+    "legacy" verbatim even when docling IS on PATH (that's the whole point:
+    a deterministic, container-free run). So for .rtf the pandoc-backed
+    legacy adapter always runs under this setting, and a missing pandoc must
+    still error even though docling happens to be present -- this is the
+    false negative a prior review round caught: docling's mere presence must
+    NOT silence the check when the config forces legacy explicitly."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "legacy"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_RTF_NO_PANDOC" for i in report.errors())
+
+
+def test_extraction_rtf_declared_docling_missing_no_duplicate_rtf_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extraction.extractor: docling`` + docling absent + .rtf present +
+    pandoc also absent must produce ONLY CONFIG_EXTRACTION_DOCLING_MISSING
+    -- not also CONFIG_EXTRACTION_RTF_NO_PANDOC, which would misname the fix (this
+    corpus never reaches the pandoc-backed adapter in this configuration;
+    installing docling is what unblocks it, not pandoc)."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-alice" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "docling"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_DOCLING_MISSING" for i in report.errors())
+    assert not any(i.code == "CONFIG_EXTRACTION_RTF_NO_PANDOC" for i in report.errors())
+
+
+def test_extraction_green_path_docling_present_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling present, corpus has both .pdf and .rtf -> no CONFIG_EXTRACTION_*
+    items at all (silence on success, matching the ANTHROPIC_API_KEY gate's
+    own style -- no OK item either)."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_pdf_stub(corpus / "deal-alice" / "v1.pdf")
+    (corpus / "deal-bob").mkdir(parents=True)
+    _write_rtf_stub(corpus / "deal-bob" / "v1.rtf")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, segmentation={"llm": True})
+    report = lint_corpus(corpus, config_path=cfg)
+    assert not any(i.code.startswith("CONFIG_EXTRACTION_") for i in report.items)
+
+
+def test_extraction_invalid_extractor_value_reports_error_and_falls_back_to_auto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A garbage ``extraction.extractor`` value (something load_config would
+    reject with a ConfigError -- "extraction.extractor must be one of
+    'docling', 'legacy', or 'auto'") must be reported as a lint ERROR here
+    too, mirroring CONFIG_PROVENANCE_INVALID -- so lint-corpus never says
+    "OK" about a config mine/compile will refuse to load. It still falls
+    back to "auto" for the docling/pandoc environment checks specifically
+    (not for the shape report itself), so those checks run against a sane
+    default instead of skipping outright."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "bogus-value"},
+    )
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_INVALID_EXTRACTOR" for i in report.errors())
+    # Treated as "auto" for the environment checks: no docling declared, so
+    # no DOCLING_MISSING; no .pdf/.rtf in this corpus, so no other
+    # environment item fires either.
+    assert not any(i.code == "CONFIG_EXTRACTION_DOCLING_MISSING" for i in report.errors())
+    assert not any(
+        i.code in ("CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING", "CONFIG_EXTRACTION_RTF_NO_PANDOC")
+        for i in report.items
+    )
+
+
+def test_extraction_non_mapping_section_reports_invalid_ungated(tmp_path: Path) -> None:
+    """A bare ``extraction:`` key (YAML null, or any other non-mapping
+    scalar) parses fine as YAML but load_config rejects it outright
+    ("config.extraction must be a mapping") -- lint-corpus must report this
+    as an ERROR, mirroring CONFIG_PROVENANCE_INVALID for the analogous
+    ``provenance:`` shape. Deliberately no ``segmentation:`` section at all
+    here (extraction_relevant is False, the deterministic-ingest default)
+    to prove this shape check is NOT nested under extraction_relevant --
+    load_config validates extraction: unconditionally, so lint-corpus must
+    too, or a docling/pandoc-irrelevant corpus could still say "OK" about a
+    config mine/compile hard-fails on."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, extraction=None)
+    report = lint_corpus(corpus, config_path=cfg)
+    assert any(i.code == "CONFIG_EXTRACTION_INVALID" for i in report.errors())
+
+
+def test_extraction_section_typo_flagged_as_unknown_key(tmp_path: Path) -> None:
+    """A misspelled ``extraction:`` sub-key must be flagged, mirroring the
+    existing segmentation/provenance typo checks -- the extraction: section
+    (issue #80) was previously absent from the per-section unknown-key
+    loop, so a typo like ``extractr`` silently fell back to the "auto"
+    default with no warning."""
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(tmp_path, taxonomy_path=tax, extraction={"extractr": "docling"})
+    report = lint_corpus(corpus, config_path=cfg)
+    unknown_key_items = [i for i in report.errors() if i.code == "CONFIG_UNKNOWN_KEY"]
+    assert unknown_key_items
+    assert "extraction.extractr" in unknown_key_items[0].message
+    assert "extraction.extractor" in unknown_key_items[0].message
+
+
+def test_lint_corpus_cmd_docling_declared_missing_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI-level acceptance criterion: ``playbook lint-corpus`` on a
+    docling-less host with a declared-docling config exits 1 with the new
+    error."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-dummy-key")
+    corpus = tmp_path / "corpus"
+    (corpus / "deal-alice").mkdir(parents=True)
+    _write_docx_stub(corpus / "deal-alice" / "v1.docx")
+    tax = _make_taxonomy(tmp_path)
+    cfg = _make_config(
+        tmp_path,
+        taxonomy_path=tax,
+        segmentation={"llm": True},
+        extraction={"extractor": "docling"},
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["lint-corpus", str(corpus), "--config", str(cfg)])
+    assert result.exit_code == 1
+    assert "docling binary was not found on PATH" in result.output
 
 
 def test_config_no_our_party_aliases_missing_provenance_warns(tmp_path: Path) -> None:
