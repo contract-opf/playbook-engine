@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from playbook_engine.extraction import ExtractionCache, extract_blocks
+from playbook_engine.extraction import ExtractionCache, ExtractorLabel, extract_blocks
 from playbook_engine.llm_segmenter import DEFAULT_MODEL
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.segmentation_grounding import Block, GroundingResult, SegNode
@@ -87,7 +87,7 @@ def segment_to_tree(
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
     extractor: str = "auto",
-) -> GroundingResult:
+) -> tuple[GroundingResult, ExtractorLabel]:
     """Extract + LLM-segment + verify/repair *path* into a grounded tree.
 
     ``extract_blocks(path)`` → ``segment_verify_repair(canonical_text, blocks,
@@ -173,8 +173,14 @@ def segment_to_tree(
                       to ``"auto"`` (today's behavior).
 
     Returns:
-        The grounded :class:`~playbook_engine.segmentation_grounding.GroundingResult`
+        ``(result, extractor_label)`` — *result* is the grounded
+        :class:`~playbook_engine.segmentation_grounding.GroundingResult`
         (``tree`` + ``taxonomy_by_path``) once every QA gate has passed.
+        *extractor_label* is the :class:`~playbook_engine.extraction.ExtractorLabel`
+        :func:`~playbook_engine.extraction.extract_blocks` actually resolved
+        for *path* — the real post-fallback label, not a PATH-check guess
+        (issue #81). Returned on every path through this function (cache hit
+        or miss) since extraction always runs first, before either.
 
     Raises:
         ExtractionError:      ``path`` cannot be extracted (see
@@ -183,14 +189,15 @@ def segment_to_tree(
                                gate. Fail loud — no deterministic-segmenter
                                fallback.
     """
-    canonical_text, blocks, _extractor = extract_blocks(
+    canonical_text, blocks, extractor_label = extract_blocks(
         path, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
     )
 
     if cache is not None:
         cached_nodes = cache.get(canonical_text, model=model)
         if cached_nodes is not None:
-            return run_gates(canonical_text, blocks, cached_nodes, taxonomy_ids=taxonomy_ids)
+            grounded = run_gates(canonical_text, blocks, cached_nodes, taxonomy_ids=taxonomy_ids)
+            return grounded, extractor_label
 
     # Typed permissively (not `SegmentFn`) so the repair-aware call below
     # (three positional args) type-checks: the underlying callable may be
@@ -228,7 +235,7 @@ def segment_to_tree(
     if cache is not None:
         cache.put(canonical_text, last_seg_nodes, model=model)
 
-    return result
+    return result, extractor_label
 
 
 __all__: list[str] = ["SegmentFn", "segment_to_tree"]

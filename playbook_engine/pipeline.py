@@ -59,7 +59,12 @@ from playbook_engine.entity_registry import (
     pseudonymize_text,
     write_holdout_map,
 )
-from playbook_engine.extraction import ExtractionCache, detect_extractor, extract_blocks
+from playbook_engine.extraction import (
+    ExtractionCache,
+    ExtractorLabel,
+    detect_extractor,
+    extract_blocks,
+)
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
     BatchedDeviationJudge,
@@ -173,6 +178,31 @@ _MEDIA_TYPES: dict[str, str] = {
 # per-doc deviation assessments computed against the old empty standards must
 # not be replayed.
 _DEVIATION_VS_TEMPLATE_VERSION = 6
+
+# Bump whenever the SHAPE of what _compute_doc_result records into
+# version_ingest changes in a way that must invalidate a warm L1-L4 stage
+# cache (out/.cache) — same convention as _DEVIATION_VS_TEMPLATE_VERSION
+# above, folded into config_fp alongside it.
+#
+# v1 (issue #81): version_ingest entries gained a "reason" field
+# (env-missing | backend-error | declared | None) alongside "extractor", and
+# a live per-file docling->legacy fallback on the LLM-segmentation path is
+# now labeled "legacy" from the label extract_blocks actually returned
+# (previously mislabeled "docling" — the up-front detect_extractor(vf)
+# PATH-check guess — until a cache-hit replay happened to correct it; see
+# extraction.ExtractorLabel). A warm cache entry from before this fix has
+# neither the corrected label nor any "reason" key at all, so
+# config.extraction.max_fallback would silently find zero fallbacks against
+# a replayed pre-#81 result even on a corpus that DID fall back.
+_VERSION_INGEST_REASON_VERSION = 1
+
+# version_ingest[].reason values that represent a real DEGRADATION — the
+# legacy adapter ran because docling was unavailable or crashed on this
+# file, not because it was deliberately declared (issue #81). This is
+# exactly what config.extraction.max_fallback counts and what the CLI/review
+# advisory flags surface; "declared" is a producer's deliberate choice and
+# never counts as a fallback.
+_FALLBACK_REASONS = frozenset({"env-missing", "backend-error"})
 
 # Legacy binary Word format — not ingestible directly, but common in
 # negotiation history from the 2000s-2010s. Flagged distinctly (not lumped
@@ -368,8 +398,8 @@ def _llm_segment_file(
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
     extractor: str = "auto",
-) -> tuple[ClauseTree, dict[str, str | None]]:
-    """LLM-segment one agreement file → ``(tree, taxonomy_by_path)``.
+) -> tuple[ClauseTree, dict[str, str | None], ExtractorLabel]:
+    """LLM-segment one agreement file → ``(tree, taxonomy_by_path, extractor_label)``.
 
     The LLM-segmentation alternative to ``segment(_ingest_file(...))``: same
     ``(document_id, version)`` call shape as ``_ingest_file``, same
@@ -409,8 +439,16 @@ def _llm_segment_file(
     ``extractor`` is forwarded to ``segment_to_tree`` unchanged — the
     declared extractor environment (``config.extraction.extractor``, issue
     #80). Defaults to ``"auto"`` (today's behavior).
+
+    The returned ``extractor_label`` is the real :class:`~playbook_engine.extraction.ExtractorLabel`
+    ``segment_to_tree``/``extract_blocks`` resolved for *path* — the actual
+    post-fallback label, not a PATH-check guess (issue #81). Callers that
+    record ``version_ingest``/``corpus_manifest.json`` entries (see
+    ``_compute_doc_result``) use this directly instead of the old up-front
+    ``detect_extractor(vf)`` guess, which could not see a live per-file
+    docling->legacy fallback.
     """
-    result = segment_to_tree(
+    result, extractor_label = segment_to_tree(
         path,
         taxonomy_ids=taxonomy_ids,
         segment_fn=segment_fn,
@@ -423,7 +461,7 @@ def _llm_segment_file(
     result.tree.document_id = document_id
     result.tree.version = version
     result.tree.source_file = path.name
-    return result.tree, result.taxonomy_by_path
+    return result.tree, result.taxonomy_by_path, extractor_label
 
 
 def _batch_custom_id(doc_id: str, version: str) -> str:
@@ -441,11 +479,18 @@ class _BatchExtraction:
     synchronous ``_ingest_file``/``_llm_segment_file`` loop in
     ``_compute_doc_result`` — extraction failure is not a QA-gate failure and
     must not abort the whole corpus batch).
+
+    ``extractor_label`` (issue #81) is the real
+    :class:`~playbook_engine.extraction.ExtractorLabel` :func:`extract_blocks`
+    resolved for this version — ``_compute_doc_result`` reads it straight off
+    this object for a batch-resolved version's ``version_ingest`` entry,
+    instead of the old up-front ``detect_extractor(vf)`` PATH-check guess.
     """
 
     canonical_text: str
     blocks: list[Block]
     source_file: str
+    extractor_label: ExtractorLabel
 
 
 def _collect_batch_items(
@@ -497,14 +542,17 @@ def _collect_batch_items(
     for doc_id, versions in doc_versions.items():
         for vid, path in versions.items():
             try:
-                canonical_text, blocks, _extractor = extract_blocks(
+                canonical_text, blocks, extractor_label = extract_blocks(
                     path, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
                 )
             except Exception as exc:  # noqa: BLE001 — same tolerance as the sync path
                 progress(f"    WARNING: {path.name}: {exc}")
                 continue
             extractions.setdefault(doc_id, {})[vid] = _BatchExtraction(
-                canonical_text=canonical_text, blocks=blocks, source_file=path.name
+                canonical_text=canonical_text,
+                blocks=blocks,
+                source_file=path.name,
+                extractor_label=extractor_label,
             )
             items.append(
                 SegmentationBatchItem(_batch_custom_id(doc_id, vid), canonical_text, blocks)
@@ -1183,11 +1231,13 @@ def _pseudonymize_corpus_documents(
 ) -> list[dict[str, Any]]:
     """Return *corpus_documents* with each entry's ``document_id`` aliased (issue #153).
 
-    ``corpus_documents`` (``corpus_manifest.json``) is embedded verbatim into
-    ``playbook.opf.json``'s ``documents`` field (see ``playbook_assembler``),
-    so its ``document_id`` must carry the same alias as the matching
-    observations' ``citation.document_id`` for the compiled OPF to be
-    consistent, not just the observation store.
+    ``corpus_documents`` (``corpus_manifest.json``) feeds directly into
+    ``playbook.opf.json``'s ``documents`` field (see ``playbook_assembler`` —
+    every key survives except a small schema-only strip-list, e.g.
+    ``version_ingest[].reason``, issue #81), so its ``document_id`` must
+    carry the same alias as the matching observations'
+    ``citation.document_id`` for the compiled OPF to be consistent, not just
+    the observation store.
     """
     out = []
     for doc in corpus_documents:
@@ -1378,15 +1428,18 @@ def _compute_doc_result(
         sha256_by_vid[vid] = file_sha256(vf)
         media_type_by_vid[vid] = _MEDIA_TYPES.get(vf.suffix.lower(), "application/octet-stream")
         # Per-version extractor recorded in version_ingest/corpus_manifest.json
-        # (issue #129): the deterministic path always uses the file suffix
+        # (issue #129). The deterministic path always uses the file suffix
         # (unchanged). The LLM-segmentation path (sync, batch pre-pass, or a
         # segmentation-cache hit — all funnel through extraction.extract_blocks)
-        # previously collapsed this to a flat "llm", which hid whether docling
-        # or a legacy pdfplumber/python-docx/pandoc adapter actually ran behind
-        # a suppressed logging.info line (extraction.py:135-139). Computed via
-        # detect_extractor (a pure PATH check) up front so it is known even if
-        # extraction/ingest subsequently fails for this version.
-        extractor = detect_extractor(vf) if use_llm_segmentation else vf.suffix.lower().lstrip(".")
+        # gets the REAL label extract_blocks/_llm_segment_file/
+        # _ground_batch_result resolved (issue #81) — set in the try block
+        # below as soon as one is available. `extractor`/`extractor_label`
+        # start as the deterministic-path default so the except-Exception
+        # branch below still has a sane fallback value for a version whose
+        # LLM-path resolution never got far enough to produce a real label
+        # (e.g. extract_blocks itself raised).
+        extractor = vf.suffix.lower().lstrip(".")
+        extractor_label: ExtractorLabel | None = None
         try:
             if use_llm_segmentation and batch_seg_nodes is not None and vid in batch_seg_nodes:
                 extraction = (batch_extractions or {})[vid]
@@ -1394,8 +1447,9 @@ def _compute_doc_result(
                     doc_id, vid, extraction, batch_seg_nodes[vid], taxonomy_ids
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
+                extractor_label = extraction.extractor_label
             elif use_llm_segmentation:
-                tree, tax_by_path = _llm_segment_file(
+                tree, tax_by_path, extractor_label = _llm_segment_file(
                     vf,
                     doc_id,
                     vid,
@@ -1434,21 +1488,17 @@ def _compute_doc_result(
 
             tree.write(out_dir / "normalized" / doc_id / f"{vid}.clauses.json")
             version_trees[vid] = tree
-            if use_llm_segmentation and extraction_cache is not None:
-                # Prefer the extractor that actually produced the text over
-                # the up-front detect_extractor(vf) PATH check above: a
-                # per-file docling failure falls back to the legacy adapter
-                # for just that one file (the docling->legacy fallback in
-                # extraction.py's extract_blocks) and stores
-                # extractor="legacy" in the cached VALUE under a
-                # docling-environment KEY — which the PATH check above
-                # would still mislabel as "docling", since it only re-checks
-                # PATH and cannot see which adapter actually produced this
-                # file's text.
-                cached_extraction = extraction_cache.get(vf)
-                if cached_extraction is not None:
-                    extractor = cached_extraction[2]
-            version_ingest[vid] = {"status": "ok", "error": None, "extractor": extractor}
+            if extractor_label is not None:
+                extractor = extractor_label.extractor
+            version_ingest[vid] = {
+                "status": "ok",
+                "error": None,
+                "extractor": extractor,
+                # None on the deterministic path (never a fallback) and
+                # whenever docling ran clean with no degradation — see
+                # ExtractorLabel.reason (issue #81).
+                "reason": extractor_label.reason if extractor_label is not None else None,
+            }
         except SegmentationQAError:
             # Fail loud, by design: a QA-gate failure on the LLM path must
             # never be swallowed into a per-file warning + skipped version —
@@ -1463,7 +1513,14 @@ def _compute_doc_result(
             raise
         except Exception as exc:  # noqa: BLE001
             progress(f"    WARNING: {vf.name}: {exc}")
-            version_ingest[vid] = {"status": "failed", "error": str(exc), "extractor": extractor}
+            if extractor_label is not None:
+                extractor = extractor_label.extractor
+            version_ingest[vid] = {
+                "status": "failed",
+                "error": str(exc),
+                "extractor": extractor,
+                "reason": extractor_label.reason if extractor_label is not None else None,
+            }
 
     if not version_trees:
         progress(f"  {doc_id}: all ingests failed — skipping")
@@ -1511,7 +1568,13 @@ def _compute_doc_result(
         {
             "version": vf.stem,
             **version_ingest.get(
-                vf.stem, {"status": "unknown", "error": "not attempted", "extractor": None}
+                vf.stem,
+                {
+                    "status": "unknown",
+                    "error": "not attempted",
+                    "extractor": None,
+                    "reason": None,
+                },
             ),
         }
         for vf in version_files
@@ -2069,7 +2132,12 @@ def mine_corpus(
     if config.baseline.template_path:
         try:
             if use_llm_segmentation:
-                template_tree, t_tax_by_path = _llm_segment_file(
+                # The template is not a corpus document — it never enters
+                # corpus_documents/version_ingest and is not counted against
+                # config.extraction.max_fallback (issue #81's (document_id,
+                # version, reason) tuple spec is per corpus document), so its
+                # own extractor label is discarded here.
+                template_tree, t_tax_by_path, _template_extractor_label = _llm_segment_file(
                     config.baseline.template_path,
                     "template",
                     "template",
@@ -2238,6 +2306,14 @@ def mine_corpus(
             # this constant on any future change to that comparison logic so
             # a warm cache from before the fix is never replayed verbatim.
             "deviation_vs_template_version": _DEVIATION_VS_TEMPLATE_VERSION,
+            # version_ingest's "reason" field and the corrected live-fallback
+            # label (issue #81) — see _VERSION_INGEST_REASON_VERSION above.
+            # Without this, a warm per-doc stage-cache entry from before the
+            # fix would keep replaying corpus_doc dicts whose version_ingest
+            # entries carry no "reason" key (and, for a live fallback, the
+            # WRONG "docling" label), making max_fallback/the review flags/
+            # the CLI reason breakdown all silently blind.
+            "version_ingest_reason_version": _VERSION_INGEST_REASON_VERSION,
         }
     )
 
@@ -2534,6 +2610,21 @@ def mine_corpus(
             f"(see quarantine.json): {ids}"
         )
 
+    # Extraction fallback budget check happens AFTER every artifact below is
+    # written (see the end of this function) — a run that exceeds the
+    # budget still leaves a complete, correct corpus_manifest.json/
+    # observations.jsonl behind for the operator to inspect, it just also
+    # raises. Computed from corpus_documents captured here, BEFORE the
+    # born-safe pseudonymization pass below reassigns that name, so the
+    # tally reflects every version_ingest entry regardless of pseudonymization
+    # (reason is a closed enum, never a raw name — see _FALLBACK_REASONS).
+    fallbacks: list[tuple[str, str, str]] = [
+        (doc.get("document_id", "?"), ver.get("version", "?"), ver["reason"])
+        for doc in corpus_documents
+        for ver in (doc.get("version_ingest", []) or [])
+        if isinstance(ver, dict) and ver.get("reason") in _FALLBACK_REASONS
+    ]
+
     # Alias sanity check (issue #182): if provenance.our_party_aliases are
     # configured but NONE appear anywhere in the corpus, "us" is almost
     # certainly misconfigured — the classic trap is configuring the brand
@@ -2647,6 +2738,38 @@ def mine_corpus(
     else:
         progress(
             f"L1-L4 complete: {len(all_observations)} observations, {len(corpus_documents)} docs"
+        )
+
+    # Extraction fallback budget (issue #81): count every version_ingest
+    # entry across the whole run whose "reason" reflects a DEGRADATION — the
+    # file was extracted via the legacy adapter because docling was
+    # unavailable ("env-missing") or crashed on this specific file
+    # ("backend-error") — see extraction.ExtractorLabel and _FALLBACK_REASONS
+    # above (fallbacks itself was computed earlier, before pseudonymization
+    # reassigned corpus_documents — see the comment there). A config-DECLARED
+    # "legacy" run ("declared") is a deliberate choice, not a degradation,
+    # and never counts here. config.extraction.max_fallback is the number of
+    # such degradations a run tolerates before failing outright; None (the
+    # default) is unbounded — today's behavior, unchanged. Checked LAST, once
+    # every artifact above has already been written correctly — an operator
+    # who exceeds the budget still gets a complete, inspectable
+    # corpus_manifest.json/observations.jsonl, not a half-finished run; the
+    # raise below is a fail-loud POLICY gate on top of that ground truth, not
+    # a precondition for producing it. Uses the RAW (pre-pseudonymization)
+    # document_id/version, same as every progress() line above that already
+    # names raw document_ids — this is local console/error output, not a
+    # persisted artifact, so it is not subject to the born-safe
+    # pseudonymization contract the artifacts above uphold.
+    max_fallback = config.extraction.max_fallback
+    if max_fallback is not None and len(fallbacks) > max_fallback:
+        offending = ", ".join(
+            f"{doc_id}/{version} ({reason})" for doc_id, version, reason in fallbacks
+        )
+        raise PipelineError(
+            f"extraction.max_fallback ({max_fallback}) exceeded: {len(fallbacks)} "
+            f"version(s) fell back to the legacy extractor this run — {offending}. "
+            "Install/repair docling, raise extraction.max_fallback, or set "
+            "extraction.extractor to 'legacy' if this is expected."
         )
 
 

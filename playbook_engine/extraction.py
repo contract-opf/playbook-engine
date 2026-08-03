@@ -65,6 +65,18 @@ docling vs. legacy adapters:
   #80. ``extractor="auto"`` (the default) is exactly the behavior described
   above, unchanged.
 
+  Whenever the returned ``extractor`` label is ``"legacy"``, it is not
+  self-explanatory WHY: a whole-run PATH miss under ``auto``, a live
+  per-file docling crash recovered on this one file (redline DOCX tracked-
+  changes are the common case), and a corpus that deliberately declared
+  ``extractor: legacy`` are three very different situations that used to be
+  indistinguishable downstream. :class:`ExtractorLabel` (returned in place
+  of the old plain string — issue #81) carries a structured ``reason`` —
+  ``"env-missing" | "backend-error" | "declared" | None`` — so
+  ``corpus_manifest.json``'s ``version_ingest``, ``config.extraction.
+  max_fallback``'s budget, and the ``mine``/``compile`` CLI summary can all
+  tell these apart instead of collapsing to one ambiguous ``"legacy"``.
+
 Markdown → Block parsing (docling path) and citation cleanliness:
   The block ``text`` used for grounding/citation must be the *clean*
   clause text: Markdown decoration is stripped from ``text`` even though
@@ -163,7 +175,19 @@ _log = logging.getLogger(__name__)
 
 #: Bumped whenever ``extract_blocks``'s output shape changes in a way that
 #: should invalidate previously cached entries (e.g. a block-parsing bug fix).
-_EXTRACTION_CACHE_FORMAT_VERSION = "1"
+#:
+#: v2 (issue #81): the returned/cached ``extractor`` (the tuple's third
+#: element) changed from a plain "docling"/"legacy" string to an
+#: :class:`ExtractorLabel` carrying a structured ``reason`` ("env-missing" |
+#: "backend-error" | "declared" | ``None``) and ``fallback_from``. A warm
+#: ``extraction_cache.jsonl`` entry from before this fix has neither key, so
+#: ``ExtractionCache.get`` would silently reload it as ``reason=None`` — the
+#: same "legacy" label a genuine per-file docling fallback carries — making
+#: ``config.extraction.max_fallback``, ``corpus_manifest.json``, the review
+#: flags, and the CLI's reason breakdown all permanently blind on any corpus
+#: ever extracted before this fix. Bumping this forces one clean re-extraction
+#: per file, after which the cache is warm and correct again.
+_EXTRACTION_CACHE_FORMAT_VERSION = "2"
 
 # ---------------------------------------------------------------------------
 # Error
@@ -177,6 +201,75 @@ class ExtractionError(Exception):
     binary, and extraction that yields no usable text (e.g. an empty/blank
     source or a failed/empty docling conversion).
     """
+
+
+# ---------------------------------------------------------------------------
+# ExtractorLabel — which extractor produced a document's blocks, and why
+# ---------------------------------------------------------------------------
+
+
+class ExtractorLabel(str):
+    """Which extractor produced a document's blocks, and why (issue #81).
+
+    A ``str`` subclass equal to (and interchangeable with) the plain
+    ``"docling"``/``"legacy"`` string :func:`extract_blocks` returned before
+    this — every pre-existing ``extractor == "legacy"``/f-string/``json.dumps``
+    call site keeps working unchanged (``str.__eq__``/``__str__``/the ``json``
+    module all operate on the underlying character data, ignoring the extra
+    attributes below) — while carrying the structured reason a caller that
+    wants one (``corpus_manifest.json``'s ``version_ingest``, the CLI's
+    fallback tally, ``mine_corpus``'s ``max_fallback`` budget) can read
+    directly, instead of reverse-engineering it from a suppressed log line.
+
+    Attributes:
+        extractor: Same value as ``str(self)`` — ``"docling"`` or
+            ``"legacy"`` — exposed as a named attribute for readability at
+            call sites that already hold a label.
+        reason: Why LEGACY ran, or ``None`` when docling ran with no
+            degradation at all. One of:
+              - ``"env-missing"``: ``auto`` mode, docling was never on PATH.
+              - ``"backend-error"``: docling was attempted (on PATH, or
+                declared) and raised on THIS file — a live per-file recovery
+                fallback.
+              - ``"declared"``: config explicitly set
+                ``extraction.extractor: legacy`` — a deliberate choice, not
+                a degradation.
+              - ``None``: ``extractor == "docling"`` — no fallback happened.
+        fallback_from: ``"docling"`` when this is a live ``"backend-error"``
+            fallback; ``None`` otherwise (including for ``"env-missing"``/
+            ``"declared"`` — docling was never attempted in either case, so
+            there is nothing it fell back FROM).
+        detail: ``str(exc)`` from the docling failure that triggered a
+            ``"backend-error"`` fallback, or ``None``. **IN-MEMORY / LOGGING
+            ONLY**: it embeds the absolute source path, which embeds the
+            counterparty/entity name baked into the corpus folder structure.
+            NEVER persist this to ``corpus_manifest.json``, ``review.json``,
+            or any other artifact inside the born-safe pseudonymization
+            boundary — only ``reason``/``fallback_from`` (closed enums, no
+            raw names) are safe to persist (issue #81).
+    """
+
+    reason: str | None
+    fallback_from: str | None
+    detail: str | None
+
+    def __new__(
+        cls,
+        extractor: str,
+        *,
+        reason: str | None = None,
+        fallback_from: str | None = None,
+        detail: str | None = None,
+    ) -> ExtractorLabel:
+        obj = super().__new__(cls, extractor)
+        obj.reason = reason
+        obj.fallback_from = fallback_from
+        obj.detail = detail
+        return obj
+
+    @property
+    def extractor(self) -> str:
+        return str(self)
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +420,8 @@ class ExtractionCache:
 
     def get(
         self, path: Path, *, extractor: str | None = None
-    ) -> tuple[str, list[Block], str] | None:
-        """Return the cached ``(canonical_text, blocks, extractor)``, or ``None`` on a miss.
+    ) -> tuple[str, list[Block], ExtractorLabel] | None:
+        """Return the cached ``(canonical_text, blocks, ExtractorLabel)``, or ``None`` on a miss.
 
         Per-block ``text`` is reconstructed from
         ``canonical_text[char_span[0]:char_span[1]]`` (the documented
@@ -342,6 +435,14 @@ class ExtractionCache:
         look this entry up under — see :func:`_resolve_cache_environment`
         (issue #80). Defaults to ``None`` (today's bare PATH-check
         behavior, unchanged for every pre-existing caller).
+
+        The returned label's ``reason``/``fallback_from`` come from
+        ``cached.get(...)`` (issue #81) — absent on any entry written before
+        that field existed, so a stale (pre-#81) on-disk value still loads
+        without raising; ``detail`` is never round-tripped through the cache
+        (in-memory-only — see :class:`ExtractorLabel`), so a reloaded label's
+        ``detail`` is always ``None`` even for an entry whose live extraction
+        did carry one.
         """
         cached = self._store.get(_extraction_cache_payload(path, extractor))
         if cached is None or "error" in cached:
@@ -356,14 +457,19 @@ class ExtractionCache:
             )
             for b in cached["blocks"]
         ]
-        return canonical_text, blocks, cached["extractor"]
+        label = ExtractorLabel(
+            cached["extractor"],
+            reason=cached.get("reason"),
+            fallback_from=cached.get("fallback_from"),
+        )
+        return canonical_text, blocks, label
 
     def put(
         self,
         path: Path,
         canonical_text: str,
         blocks: list[Block],
-        extractor: str,
+        extractor: str | ExtractorLabel,
         *,
         environment: str | None = None,
     ) -> None:
@@ -379,15 +485,21 @@ class ExtractionCache:
 
         ``extractor`` is the adapter that actually PRODUCED this content
         ("docling" or "legacy") — stored in the VALUE for reporting
-        (corpus_manifest, etc.). ``environment`` is the concrete environment
-        governing this entry's KEY (issue #80; see
-        :func:`_resolve_cache_environment`); it differs from ``extractor``
-        only when a per-file docling failure fell back to legacy under a
-        docling-declared/available environment (see :func:`extract_blocks`) —
-        the KEY must stay pinned to the environment regardless of that
-        per-file fallback, or a docling-environment run's cache would
-        fragment across "docling" and "legacy" keys for the same file.
-        Defaults to ``None`` (today's bare PATH-check behavior).
+        (corpus_manifest, etc.). When it is an :class:`ExtractorLabel`
+        (issue #81), its ``reason``/``fallback_from`` are stored alongside it
+        (``getattr`` so a plain ``str`` caller — none remain in this repo,
+        but the type stays accepted for the same "richer third element, same
+        arity" reason :func:`extract_blocks` does — degrades to ``None`` for
+        both, same as a pre-#81 cache entry). ``detail`` is deliberately never
+        stored (see :class:`ExtractorLabel` — it embeds the raw source path).
+        ``environment`` is the concrete environment governing this entry's
+        KEY (issue #80; see :func:`_resolve_cache_environment`); it differs
+        from ``extractor`` only when a per-file docling failure fell back to
+        legacy under a docling-declared/available environment (see
+        :func:`extract_blocks`) — the KEY must stay pinned to the environment
+        regardless of that per-file fallback, or a docling-environment run's
+        cache would fragment across "docling" and "legacy" keys for the same
+        file. Defaults to ``None`` (today's bare PATH-check behavior).
         """
         value: dict[str, Any] = {
             "canonical_text": canonical_text,
@@ -399,7 +511,9 @@ class ExtractionCache:
                 }
                 for b in blocks
             ],
-            "extractor": extractor,
+            "extractor": str(extractor),
+            "reason": getattr(extractor, "reason", None),
+            "fallback_from": getattr(extractor, "fallback_from", None),
         }
         self._store.put(_extraction_cache_payload(path, environment), value)
 
@@ -459,16 +573,18 @@ def extract_blocks(
     cache: ExtractionCache | None = None,
     refresh: bool = False,
     extractor: str = "auto",
-) -> tuple[str, list[Block], str]:
+) -> tuple[str, list[Block], ExtractorLabel]:
     """Extract ``path`` into ``(canonical_text, blocks, extractor)``.
 
     ``blocks`` are in reading order; ``block_id`` values are ``"b0", "b1",
     …`` in that order.  Every block's ``char_span`` is an offset into
     ``canonical_text`` such that
     ``block.text == canonical_text[slice(*block.char_span)]``.
-    The returned ``extractor`` is ``"docling"`` or ``"legacy"`` — the
-    adapter that actually produced this content (see :func:`detect_extractor`
-    and, for a per-file docling failure, the fallback below).
+    The returned ``extractor`` is an :class:`ExtractorLabel` — a ``str``
+    equal to ``"docling"`` or ``"legacy"`` (the adapter that actually
+    produced this content — see :func:`detect_extractor` and, for a per-file
+    docling failure, the fallback below) carrying a structured ``reason``
+    for why LEGACY ran, if it did (issue #81).
 
     Args:
         path:  Path to a ``.docx``, ``.pdf``, or ``.rtf`` file.
@@ -532,6 +648,12 @@ def extract_blocks(
             raise ExtractionError(f"{cached_failure} (cached failure — same extractor)")
 
     resolved = environment
+    # Structured reason for why LEGACY ran, if it did (issue #81) — None
+    # means extractor=="docling" ran clean, no degradation. Set below in
+    # whichever of the two branches actually determines *resolved*.
+    reason: str | None = None
+    fallback_from: str | None = None
+    detail: str | None = None
     if resolved == "docling":
         _log.info("extract_blocks: using docling for %s", path)
         try:
@@ -546,13 +668,14 @@ def extract_blocks(
             # one file instead. A scanned PDF that docling cannot OCR will still
             # yield little here (legacy has no OCR) and then raise below, as
             # before; born-digital docx/pdf are recovered. The fallback is
-            # logged and reflected in the returned ``extractor`` label so it is
-            # visible in reporting (issue #129). Unchanged by issue #80's
-            # declared-extractor option: a declared "docling" run still allows
-            # this same PER-FILE fallback (the corpus-wide availability
-            # precondition above is a separate, one-time concern — see
-            # _resolve_extractor_env); a fallback budget is the follow-up
-            # ticket's ``max_fallback``.
+            # logged and reflected in the returned ``extractor`` label
+            # (reason="backend-error") so it is visible in reporting (issues
+            # #129, #81) and countable against ``config.extraction.
+            # max_fallback``. Unchanged by issue #80's declared-extractor
+            # option: a declared "docling" run still allows this same
+            # PER-FILE fallback (the corpus-wide availability precondition
+            # above is a separate, one-time concern — see
+            # _resolve_extractor_env).
             _log.warning(
                 "extract_blocks: docling failed on %s (%s); falling back to legacy adapter",
                 path,
@@ -560,11 +683,26 @@ def extract_blocks(
             )
             lines = _extract_legacy_lines(path, suffix)
             resolved = "legacy"
+            reason = "backend-error"
+            fallback_from = "docling"
+            # IN-MEMORY ONLY — never persisted (see ExtractorLabel.detail):
+            # str(exc) embeds the absolute source path, which embeds the
+            # counterparty/entity name baked into the corpus folder
+            # structure (issue #81).
+            detail = str(exc)
     else:
         _log.info(
             "extract_blocks: using legacy adapter for %s (declared extractor=%r)", path, extractor
         )
         lines = _extract_legacy_lines(path, suffix)
+        # Two distinct reasons legacy was resolved with no docling attempt at
+        # all (issue #81): the config explicitly declared it (a deliberate
+        # choice, never counted against max_fallback), or "auto" mode found
+        # no docling on PATH at all (a real degradation, counted). These are
+        # the only two ways `environment` can already be "legacy" here — see
+        # _resolve_extractor_env: declared=="docling" either raises above (if
+        # unavailable) or resolves to "docling", never reaching this branch.
+        reason = "declared" if extractor == "legacy" else "env-missing"
 
     if not lines:
         message = f"extraction yielded no text: {path}"
@@ -602,10 +740,12 @@ def extract_blocks(
 
     canonical_text, blocks = _build_stream(lines)
 
-    if cache is not None:
-        cache.put(path, canonical_text, blocks, resolved, environment=environment)
+    label = ExtractorLabel(resolved, reason=reason, fallback_from=fallback_from, detail=detail)
 
-    return canonical_text, blocks, resolved
+    if cache is not None:
+        cache.put(path, canonical_text, blocks, label, environment=environment)
+
+    return canonical_text, blocks, label
 
 
 def _extract_legacy_lines(path: Path, suffix: str) -> list[tuple[str, int]]:

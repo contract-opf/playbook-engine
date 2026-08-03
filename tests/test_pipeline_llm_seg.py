@@ -31,6 +31,7 @@ no API key. Fictional party names only (e.g. "Alpha Corp", "Beta University").
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,6 +40,7 @@ import pytest
 import yaml
 
 from playbook_engine import extraction
+from playbook_engine import pipeline as pipeline_module
 from playbook_engine.aar import build_after_action_data
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
@@ -51,10 +53,12 @@ from playbook_engine.llm_segmenter_batch import (
 )
 from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import (
+    PipelineError,
     _classified_from_taxonomy_by_path,
     mine_corpus,
     project_playbook,
 )
+from playbook_engine.review import write_review
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.validator import validate_document
@@ -225,6 +229,78 @@ def _make_corpus(tmp_path: Path, *, two_versions: bool) -> tuple[Path, Path, Pat
 
     out_dir = tmp_path / "out"
     return corpus_dir, config_path, out_dir
+
+
+# ---------------------------------------------------------------------------
+# docling mocking helpers (issue #81) — mirror test_extraction.py's
+# _mock_docling_subprocess, but split into an always-failing variant (forces
+# extract_blocks's live per-file backend-error fallback) and a
+# markdown-controlled succeeding variant, since the fallback tests below
+# need BOTH within the same file (and sometimes within the same test).
+# ---------------------------------------------------------------------------
+
+
+#: The real shutil.which/subprocess.run, captured once at import time — the
+#: fakes below must only special-case docling invocations and delegate
+#: everything else (notably pandoc's OWN `shutil.which("pandoc")` check AND
+#: its own `subprocess.run(["pandoc", ...])` call — both go through these
+#: same two extraction.py module attributes) to the real implementation, or
+#: a docling-fails-and-recovers scenario would ALSO break the RTF legacy
+#: fallback and mask the recovery behind an unrelated ExtractionError.
+_real_which = extraction.shutil.which
+_real_subprocess_run = extraction.subprocess.run
+
+
+def _mock_docling_present_and_failing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docling is on PATH but raises on every conversion — forces
+    extract_blocks's live per-file backend-error fallback."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else _real_which(cmd)
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "docling":
+            raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+        return _real_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+
+def _mock_docling_present_and_succeeding(
+    monkeypatch: pytest.MonkeyPatch, markdown: str, *, stem: str
+) -> None:
+    """docling is on PATH and succeeds, writing *markdown* as its output for
+    the file whose stem is *stem*."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else _real_which(cmd)
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] != "docling":
+            return _real_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        (outdir / f"{stem}.md").write_text(markdown, encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+
+# Markdown docling would produce for _V1_BODY's content — matches
+# _fake_segment_fn's expected (heading, body) block-pair shape exactly (see
+# _HEADING_TAXONOMY above): "1. Indemnification"/"2. Governing Law" headings,
+# each followed by its body paragraph.
+_V1_DOCLING_MARKDOWN = (
+    "# 1. Indemnification\n"
+    "\n"
+    "Alpha Corp shall indemnify Beta University against third-party claims "
+    "arising from the placement programme.\n"
+    "\n"
+    "# 2. Governing Law\n"
+    "\n"
+    "This agreement is governed by the laws of the State of California.\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1141,3 +1217,420 @@ def test_batch_prepass_skips_stage_cache_hits(tmp_path: Path) -> None:
     # documents across the store (final manifest reflects both).
     raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
     assert {o["citation"]["document_id"] for o in raw_obs} >= {"deal-001", "deal-002"}
+
+
+# ---------------------------------------------------------------------------
+# Issue #81: structured fallback reason, fixed manifest mislabel, and
+# config.extraction.max_fallback enforcement.
+# ---------------------------------------------------------------------------
+
+
+def test_live_fallback_records_legacy_and_backend_error_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live per-file docling failure on the SYNCHRONOUS LLM path must be
+    recorded as extractor="legacy" + reason="backend-error" in
+    corpus_manifest.json's version_ingest — not mislabeled "docling" (the
+    old up-front detect_extractor(vf) PATH-check guess, corrected only on a
+    cache-hit replay) and not silently invisible.
+
+    Must fail against pre-fix code: pre-fix, version_ingest["extractor"]
+    would be the up-front "docling" guess (shutil.which reports it present)
+    with no "reason" key at all, since no extraction_cache is passed here to
+    trigger the old cache-hit-relabel correction.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["extractor"] == "legacy"
+    assert ingest["reason"] == "backend-error"
+    assert "detail" not in ingest, "the raw exception text must never reach version_ingest"
+
+
+def test_batch_path_live_fallback_records_legacy_and_backend_error_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The batch pre-pass (_collect_batch_items -> _BatchExtraction) must
+    also surface the real extractor label for a live per-file docling
+    fallback — not just the synchronous path.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    client = _make_batch_client(corpus_dir)
+
+    def _batch_fn(items: Any, *, taxonomy_ids: Any, cache: Any = None, **_kwargs: Any) -> Any:
+        return segment_documents_batch(
+            items, taxonomy_ids=taxonomy_ids, client=client, cache=cache, poll_interval_s=0
+        )
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        use_batch_segmentation=True,
+        segment_documents_batch_fn=_batch_fn,
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["extractor"] == "legacy"
+    assert ingest["reason"] == "backend-error"
+
+
+def test_max_fallback_exceeded_raises_pipeline_error_naming_tuples(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exceeding config.extraction.max_fallback must fail the run, naming
+    the offending (document_id, version, reason) tuples — but the manifest
+    must still be written correctly first (an operator who exceeds the
+    budget still gets a complete, inspectable corpus_manifest.json, not a
+    half-finished run)."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.extraction.max_fallback = 0  # tolerate zero degradations
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    with pytest.raises(PipelineError) as exc_info:
+        mine_corpus(
+            corpus_dir=corpus_dir,
+            config=cfg,
+            taxonomy=taxonomy,
+            out_dir=out_dir,
+            use_llm_segmentation=True,
+            llm_segment_fn=_fake_segment_fn,
+        )
+    message = str(exc_info.value)
+    assert "deal-001" in message
+    assert "v1" in message
+    assert "backend-error" in message
+
+    # The manifest was still written correctly before the raise.
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["extractor"] == "legacy"
+    assert ingest["reason"] == "backend-error"
+
+
+def test_max_fallback_unbounded_by_default_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """max_fallback is None by default (unbounded) — a live fallback must
+    not fail the run unless a budget was actually configured."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    assert cfg.extraction.max_fallback is None
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    # Does not raise.
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+
+
+def test_max_fallback_not_tripped_by_declared_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """extraction.extractor: legacy (a deliberate config choice) must NEVER
+    count against max_fallback, even at max_fallback=0 — only real
+    degradations (env-missing/backend-error) count (verifier correction on
+    issue #81)."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.extraction.max_fallback = 0
+    cfg.extraction.extractor = "legacy"
+
+    # docling IS on PATH but must never even be attempted (declared legacy) —
+    # pandoc's own subprocess.run call (the real RTF legacy path) must still
+    # go through untouched.
+    def _boom_if_docling_invoked(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "docling":
+            raise AssertionError("docling must never be invoked under a declared 'legacy' run")
+        return _real_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd: "/usr/bin/docling" if cmd == "docling" else _real_which(cmd),
+    )
+    monkeypatch.setattr(extraction.subprocess, "run", _boom_if_docling_invoked)
+
+    # Does NOT raise.
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["extractor"] == "legacy"
+    assert ingest["reason"] == "declared"
+
+
+def test_reason_survives_pseudonymization_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """version_ingest[].reason must survive _pseudonymize_corpus_documents's
+    dict-spread rewrite (issue #81's explicitly required test) — the
+    pseudonymization pass copies whole version_ingest dicts, so extra keys
+    should pass through, but this proves it rather than assuming it."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.provenance.known_entities = ["Beta University"]  # triggers the pseudonymization pass
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["reason"] == "backend-error", (
+        "reason must survive the pseudonymization pass unchanged"
+    )
+    assert ingest["extractor"] == "legacy"
+
+
+def test_fallback_detail_never_leaks_raw_entity_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #81): ExtractorLabel.detail
+    (str(exc) from a docling failure) embeds the absolute source path, which
+    embeds the counterparty/entity name baked into the corpus folder
+    structure. It must never reach corpus_manifest.json or review.json —
+    defeating the born-safe pseudonymization contract those artifacts
+    otherwise uphold.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "Fictional University"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _V1_BODY)
+
+    cfg_dict = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {
+            "our_party_aliases": ["Alpha Corp"],
+            "known_entities": ["Fictional University"],
+        },
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg_dict), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["reason"] == "backend-error", "sanity: the fallback must actually have happened"
+    assert "detail" not in ingest, "version_ingest must never carry a 'detail' key at all"
+    assert "Fictional University" not in manifest_text
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert "Fictional University" not in review_text
+
+
+def test_stage_cache_reason_version_bump_forces_recompute_on_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A warm L1-L4 stage cache (out/.cache) written under a DIFFERENT
+    version_ingest_reason_version must not be replayed — otherwise
+    config.extraction.max_fallback (and corpus_manifest.json's reason field)
+    would go silently blind on any out_dir mined before this fix (issue
+    #81's stage-cache invalidation requirement).
+
+    Simulates "before this fix" by pinning
+    pipeline._VERSION_INGEST_REASON_VERSION to a different sentinel for run
+    1 (so its L1-L4 stage-cache entry is filed under a fingerprint the real
+    code will never compute) while docling succeeds cleanly. Restoring the
+    real constant for run 2 AND making docling now fail on the exact same
+    file makes any stale replay directly observable: if the cache
+    incorrectly hit the run-1 entry, the manifest would still show
+    "docling"/reason=None; only a genuine recompute observes the new
+    failure and records "legacy"/"backend-error".
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.extraction.max_fallback = 0
+
+    real_reason_version = pipeline_module._VERSION_INGEST_REASON_VERSION
+
+    # Run 1: docling succeeds cleanly; cached under a SENTINEL fingerprint
+    # standing in for "the fingerprint shape before this fix existed".
+    monkeypatch.setattr(pipeline_module, "_VERSION_INGEST_REASON_VERSION", "sentinel-pre-81")
+    _mock_docling_present_and_succeeding(monkeypatch, _V1_DOCLING_MARKDOWN, stem="v1")
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+    manifest_1 = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest_1 = manifest_1[0]["version_ingest"][0]
+    assert ingest_1["extractor"] == "docling"
+    assert ingest_1.get("reason") is None
+
+    # Restore the real constant AND make docling now fail on this file.
+    monkeypatch.setattr(pipeline_module, "_VERSION_INGEST_REASON_VERSION", real_reason_version)
+    _mock_docling_present_and_failing(monkeypatch)
+
+    with pytest.raises(PipelineError):
+        mine_corpus(
+            corpus_dir=corpus_dir,
+            config=cfg,
+            taxonomy=taxonomy,
+            out_dir=out_dir,
+            use_llm_segmentation=True,
+            llm_segment_fn=_fake_segment_fn,
+        )
+
+    manifest_2 = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest_2 = manifest_2[0]["version_ingest"][0]
+    assert ingest_2["extractor"] == "legacy", "the stale run-1 cache entry must not be replayed"
+    assert ingest_2["reason"] == "backend-error"
+
+
+def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SEPARATE, more persistent extraction_cache.jsonl (kept warm
+    across every judge/mine/compile round, independent of the L1-L4 stage
+    cache) must ALSO not silently replay a pre-#81-shaped entry.
+
+    Seeds a pre-#81-shaped extraction_cache.jsonl entry (extractor="legacy",
+    no reason/fallback_from/detail keys — as a real pre-#81 build would have
+    written for a file that fell back under a docling-available
+    environment), then re-mines into a FRESH out_dir (cold L1-L4 stage
+    cache — the ONLY warm state is extraction_cache.jsonl) with a live
+    docling fallback and max_fallback=0. Asserts the manifest records
+    reason="backend-error" (proving the stale extraction-cache entry was
+    NOT replayed — a bare cache HIT would have loaded reason=None and never
+    even attempted a live extraction) AND PipelineError is raised naming the
+    fallback version (issue #81, project-note item 6 — this is the exact
+    scenario that deadlocked the first implementation attempt).
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.extraction.max_fallback = 0
+
+    vf = corpus_dir / "deal-001" / "v1.rtf"
+    extraction_cache_path = out_dir / "extraction_cache.jsonl"
+    extraction_cache = ExtractionCache(extraction_cache_path)
+
+    # Seed the pre-#81-shaped entry under the PRE-#81 KEY — format_version
+    # hardcoded to "1" (NOT via extraction._extraction_cache_payload, which
+    # would pick up today's bumped "2") so this genuinely simulates on-disk
+    # state from before this fix, under the environment a docling-available
+    # host would have resolved ("docling" — the per-file fallback pins the
+    # KEY to the environment, not the post-fallback adapter label; see
+    # extraction._extraction_cache_payload).
+    canonical_text = (
+        "1. Indemnification\n"
+        "Alpha Corp shall indemnify Beta University against third-party claims "
+        "arising from the placement programme.\n"
+        "2. Governing Law\n"
+        "This agreement is governed by the laws of the State of California."
+    )
+    pre_81_key_payload = {
+        "file_sha256": extraction._sha256_file(vf),
+        "format_version": "1",
+        "extractor_env": "docling",
+    }
+    pre_81_value = {
+        "canonical_text": canonical_text,
+        "blocks": [
+            {"block_id": "b0", "page": 0, "char_span": [0, 18]},
+        ],
+        "extractor": "legacy",
+        # No "reason"/"fallback_from" keys — exactly the pre-#81 shape.
+    }
+    extraction_cache._store.put(pre_81_key_payload, pre_81_value)
+
+    _mock_docling_present_and_failing(monkeypatch)
+
+    with pytest.raises(PipelineError) as exc_info:
+        mine_corpus(
+            corpus_dir=corpus_dir,
+            config=cfg,
+            taxonomy=taxonomy,
+            out_dir=out_dir,
+            use_llm_segmentation=True,
+            llm_segment_fn=_fake_segment_fn,
+            extraction_cache=extraction_cache,
+        )
+    assert "backend-error" in str(exc_info.value)
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest = manifest[0]["version_ingest"][0]
+    assert ingest["extractor"] == "legacy"
+    assert ingest["reason"] == "backend-error", (
+        "the stale pre-#81 extraction_cache.jsonl entry (reason=None) must not have been "
+        "replayed — a genuine live extraction must have run and correctly recorded the "
+        "backend-error fallback"
+    )
