@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from playbook_engine.artifact_store import make_config_fingerprint
@@ -477,6 +478,76 @@ def test_config_fingerprint_differs_across_judge_identity(tmp_path: Path) -> Non
     assert fp_stub != fp_real, (
         "make_config_fingerprint must produce different fingerprints for "
         "different judge_identity values with every other field held constant"
+    )
+
+
+def test_config_fingerprint_differs_across_extractor_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #61 stage-cache config fingerprint must carry the extractor
+    environment (issue #79): it must differ across a legacy/docling switch
+    and stay stable across repeat runs in the SAME environment.
+
+    Before issue #79, ``config_fp`` had no ``extractor_env`` component, so
+    installing (or removing) docling between two ``mine_corpus`` runs over an
+    UNCHANGED corpus left every #61 per-doc stage-cache key unchanged too —
+    every L1-L4 result derived from the OLD environment's extraction would be
+    replayed verbatim under the NEW one, even though legacy (no OCR) and
+    docling can disagree on the same source bytes.
+
+    Drives three real ``mine_corpus`` runs over the same corpus/out_dir with
+    ``shutil.which`` monkeypatched (the same PATH check
+    ``extraction.detect_extractor`` makes) and inspects the #61
+    ``ArtifactStore`` index directly — entries are never evicted (see
+    ``ArtifactStore``'s docstring), so a same-environment repeat run must add
+    ZERO new keys and an environment switch must add exactly one new key per
+    document. Uses only the default stub judges — the deterministic RTF
+    ingest path this corpus exercises never itself calls docling, so any
+    behavioural difference observed here comes solely from ``config_fp``.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    index_path = out_dir / ".cache" / "index.json"
+
+    # Run 1 — simulate a legacy-only host (docling absent from PATH).
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_legacy_1 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    assert len(keys_legacy_1) == 2, (
+        f"expected one stage-cache key per document (deal-alpha, deal-beta), got {keys_legacy_1}"
+    )
+
+    # Run 2 — SAME (legacy) environment, no manual cache-busting: an
+    # unchanged environment must produce a STABLE fingerprint, i.e. a pure
+    # cache replay that adds no new keys.
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_legacy_2 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    assert keys_legacy_2 == keys_legacy_1, (
+        "a repeat run in the SAME extractor environment must not add new stage-cache "
+        f"keys — the fingerprint must be stable within one environment; got {keys_legacy_2}"
+    )
+
+    # Run 3 — SAME corpus/out_dir, but docling now "installed": must bust the
+    # #61 stage cache for every document (a NEW key per doc) rather than
+    # replaying the legacy-derived entries under an environment that can
+    # produce materially different L1 text (docling has OCR; legacy does not).
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/docling" if cmd == "docling" else None
+    )
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_docling = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    new_keys = keys_docling - keys_legacy_1
+    assert len(new_keys) == 2, (
+        "switching extractor environments (legacy -> docling) with no other config "
+        "change must produce a NEW stage-cache key per document, not replay the "
+        f"legacy-derived entries verbatim; index now has {keys_docling}"
     )
 
 
