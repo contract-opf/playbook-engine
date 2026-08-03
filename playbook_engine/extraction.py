@@ -67,15 +67,29 @@ docling vs. legacy adapters:
 
   Whenever the returned ``extractor`` label is ``"legacy"``, it is not
   self-explanatory WHY: a whole-run PATH miss under ``auto``, a live
-  per-file docling crash recovered on this one file (redline DOCX tracked-
-  changes are the common case), and a corpus that deliberately declared
-  ``extractor: legacy`` are three very different situations that used to be
-  indistinguishable downstream. :class:`ExtractorLabel` (returned in place
-  of the old plain string — issue #81) carries a structured ``reason`` —
-  ``"env-missing" | "backend-error" | "declared" | None`` — so
-  ``corpus_manifest.json``'s ``version_ingest``, ``config.extraction.
-  max_fallback``'s budget, and the ``mine``/``compile`` CLI summary can all
-  tell these apart instead of collapsing to one ambiguous ``"legacy"``.
+  per-file docling crash recovered on this one file, and a corpus that
+  deliberately declared ``extractor: legacy`` are three very different
+  situations that used to be indistinguishable downstream. :class:`ExtractorLabel`
+  (returned in place of the old plain string — issue #81) carries a
+  structured ``reason`` — ``"env-missing" | "backend-error" | "declared" |
+  None`` — so ``corpus_manifest.json``'s ``version_ingest``,
+  ``config.extraction.max_fallback``'s budget, and the ``mine``/``compile``
+  CLI summary can all tell these apart instead of collapsing to one
+  ambiguous ``"legacy"``.
+
+  Redline (tracked-changes/commented) DOCX used to be the common case
+  landing in that per-file ``"backend-error"`` bucket, since docling 2.x's
+  DOCX backend crashes on tracked-changes/comment nodes (``etree.QName`` on
+  a comment factory) — exactly what redline drafts contain, the
+  highest-value documents in a negotiation corpus. As of issue #84, a DOCX
+  docling failure is retried once on a pre-normalized copy (see
+  :func:`_retry_docling_on_normalized_docx` and
+  :mod:`playbook_engine.docx_normalizer`) before falling back — so most
+  redlines now stay on the docling path (``reason=None``, real heading
+  structure) instead of degrading to the legacy adapter, which has no
+  heading detection at all. Only a DOCX whose docling failure survives even
+  the normalized retry still falls all the way through to
+  ``reason="backend-error"``.
 
 Markdown → Block parsing (docling path) and citation cleanliness:
   The block ``text`` used for grounding/citation must be the *clean*
@@ -169,6 +183,7 @@ from docx import Document
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.artifact_store import _sha256_file
 from playbook_engine.docx_ingester import _extract_para_text, _iter_body_blocks
+from playbook_engine.docx_normalizer import normalize_tracked_docx
 from playbook_engine.segmentation_grounding import Block
 
 _log = logging.getLogger(__name__)
@@ -187,7 +202,22 @@ _log = logging.getLogger(__name__)
 #: flags, and the CLI's reason breakdown all permanently blind on any corpus
 #: ever extracted before this fix. Bumping this forces one clean re-extraction
 #: per file, after which the cache is warm and correct again.
-_EXTRACTION_CACHE_FORMAT_VERSION = "2"
+#:
+#: v3 (issue #84): a redline (tracked-changes/commented) DOCX that previously
+#: hit the docling->legacy fallback is now retried once on a normalized copy
+#: before falling back (see :func:`_retry_docling_on_normalized_docx` and
+#: :mod:`playbook_engine.docx_normalizer`), so for the SAME file bytes under
+#: the SAME extractor environment, the correct output now differs from what
+#: was cached before this fix: docling block structure and ``reason=None``
+#: instead of legacy blocks and ``reason="backend-error"``. Neither
+#: ``file_sha256`` nor ``extractor_env`` changes for that file (the KEY
+#: records the environment "docling", not the post-fallback adapter
+#: "legacy" — see the pipeline.py comment added in d08b895), so without this
+#: bump a warm pre-#84 entry would silently keep reloading the stale
+#: legacy/backend-error result forever and this fix would never reach any
+#: corpus already extracted. Bumping this forces one clean re-extraction per
+#: file, after which the cache is warm and correct again.
+_EXTRACTION_CACHE_FORMAT_VERSION = "3"
 
 # ---------------------------------------------------------------------------
 # Error
@@ -662,34 +692,49 @@ def extract_blocks(
             # docling's per-format backends can fail on inputs the legacy
             # adapters handle fine — notably docling 2.x's DOCX backend raises
             # on tracked-changes/comment nodes (``etree.QName`` on a comment
-            # factory), which is exactly what redline drafts contain. Skipping
-            # the document would silently drop negotiation versions and corrupt
-            # the trail, so fall back to the legacy per-format adapter for this
-            # one file instead. A scanned PDF that docling cannot OCR will still
-            # yield little here (legacy has no OCR) and then raise below, as
-            # before; born-digital docx/pdf are recovered. The fallback is
-            # logged and reflected in the returned ``extractor`` label
-            # (reason="backend-error") so it is visible in reporting (issues
-            # #129, #81) and countable against ``config.extraction.
-            # max_fallback``. Unchanged by issue #80's declared-extractor
-            # option: a declared "docling" run still allows this same
-            # PER-FILE fallback (the corpus-wide availability precondition
-            # above is a separate, one-time concern — see
-            # _resolve_extractor_env).
-            _log.warning(
-                "extract_blocks: docling failed on %s (%s); falling back to legacy adapter",
-                path,
-                exc,
-            )
-            lines = _extract_legacy_lines(path, suffix)
-            resolved = "legacy"
-            reason = "backend-error"
-            fallback_from = "docling"
-            # IN-MEMORY ONLY — never persisted (see ExtractorLabel.detail):
-            # str(exc) embeds the absolute source path, which embeds the
-            # counterparty/entity name baked into the corpus folder
-            # structure (issue #81).
-            detail = str(exc)
+            # factory), which is exactly what redline drafts contain — the
+            # highest-value documents in a negotiation corpus. For DOCX,
+            # retry docling once on a pre-normalized copy (insertions
+            # accepted, deletions rejected, comment markup stripped — see
+            # :func:`playbook_engine.docx_normalizer.normalize_tracked_docx`)
+            # before giving up on docling structure: this recovers real
+            # heading detection for redlines instead of routing them through
+            # the legacy adapter, which has none at all (issue #84). Only
+            # when that retry ALSO fails (or the file isn't DOCX) does the
+            # original per-file legacy fallback below run. Skipping the
+            # document outright would silently drop negotiation versions and
+            # corrupt the trail, so a scanned PDF that docling cannot OCR
+            # will still yield little here (legacy has no OCR) and then
+            # raise below, as before; born-digital docx/pdf are recovered.
+            # The fallback is logged and reflected in the returned
+            # ``extractor`` label (reason="backend-error") so it is visible
+            # in reporting (issues #129, #81) and countable against
+            # ``config.extraction.max_fallback`` — a redline recovered via
+            # the normalized retry is NOT counted here, since ``resolved``
+            # never leaves "docling" for it (see
+            # :func:`_retry_docling_on_normalized_docx`). Unchanged by issue
+            # #80's declared-extractor option: a declared "docling" run
+            # still allows this same PER-FILE fallback (the corpus-wide
+            # availability precondition above is a separate, one-time
+            # concern — see _resolve_extractor_env).
+            retried_lines = _retry_docling_on_normalized_docx(path) if suffix == ".docx" else None
+            if retried_lines is not None:
+                lines = retried_lines
+            else:
+                _log.warning(
+                    "extract_blocks: docling failed on %s (%s); falling back to legacy adapter",
+                    path,
+                    exc,
+                )
+                lines = _extract_legacy_lines(path, suffix)
+                resolved = "legacy"
+                reason = "backend-error"
+                fallback_from = "docling"
+                # IN-MEMORY ONLY — never persisted (see ExtractorLabel.detail):
+                # str(exc) embeds the absolute source path, which embeds the
+                # counterparty/entity name baked into the corpus folder
+                # structure (issue #81).
+                detail = str(exc)
     else:
         _log.info(
             "extract_blocks: using legacy adapter for %s (declared extractor=%r)", path, extractor
@@ -803,6 +848,56 @@ def _extract_docling_lines(path: Path) -> list[tuple[str, int]]:
     with tempfile.TemporaryDirectory(prefix="docling-") as tmpdir:
         markdown = _run_docling(path, Path(tmpdir))
         return _parse_markdown_lines(markdown)
+
+
+def _retry_docling_on_normalized_docx(path: Path) -> list[tuple[str, int]] | None:
+    """Retry docling once on a pre-normalized copy of a DOCX that just failed it.
+
+    docling 2.x's DOCX backend crashes on tracked-changes/comment nodes
+    (``etree.QName`` on a comment factory) — exactly what redline drafts
+    contain, the highest-value documents in a negotiation corpus. Rather than
+    degrading straight to the legacy adapter (no heading detection at all)
+    for those, normalize a temp copy — insertions accepted, deletions
+    rejected, comment markup stripped, matching the accepted-changes
+    semantics :mod:`playbook_engine.docx_ingester` already produces — and
+    retry docling on THAT (issue #84).
+
+    Design choice (retry-on-failure vs. proactive normalization): this module
+    normalizes only AFTER docling has already raised on the original file,
+    rather than detecting tracked changes/comments up front and normalizing
+    every DOCX proactively before the first docling attempt. Retry-on-failure
+    costs nothing on the overwhelming majority of DOCX that docling already
+    parses cleanly on the first try, at the price of one wasted docling
+    subprocess round-trip only on the redlines that actually need the retry —
+    proactive detection would pay a normalization cost on every DOCX just to
+    save that one wasted round-trip on the minority that fail.
+
+    Returns the extracted lines on success, or ``None`` if normalization or
+    the retry itself failed for any reason — a plain DOCX with nothing to
+    normalize will fail identically on both attempts and correctly fall
+    through to ``None`` here, so the caller's existing legacy fallback is
+    unchanged for that case. Deliberately broad ``except Exception`` (not
+    just :class:`ExtractionError`): normalizing an unparseable/corrupt DOCX
+    can raise a python-docx/lxml error that isn't an ``ExtractionError`` at
+    all, and any such failure must still fall through to the legacy adapter
+    rather than propagate and mask the original docling failure. The temp
+    file is always cleaned up before returning, in either outcome.
+    """
+    normalized_path: Path | None = None
+    try:
+        normalized_path = normalize_tracked_docx(path)
+        return _extract_docling_lines(normalized_path)
+    except Exception as exc:  # noqa: BLE001 — any failure here just means "no recovery"
+        _log.warning(
+            "extract_blocks: docling retry on normalized copy of %s failed (%s); "
+            "falling back to legacy adapter",
+            path,
+            exc,
+        )
+        return None
+    finally:
+        if normalized_path is not None:
+            normalized_path.unlink(missing_ok=True)
 
 
 # OCR language passed to ``docling convert --ocr-lang``. English by default;
