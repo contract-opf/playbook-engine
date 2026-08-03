@@ -56,6 +56,15 @@ docling vs. legacy adapters:
   subprocess only — it is never imported as a Python module, keeping the
   engine importable without ``torch`` on the host.
 
+  This auto-preference is only the *default*. A corpus config can declare
+  ``extraction: {extractor: docling}`` (fail loudly if docling is
+  unavailable — no silent downgrade) or ``extraction: {extractor: legacy}``
+  (force the legacy adapters even when docling IS installed, for
+  deterministic container-free runs) via :func:`extract_blocks`'s
+  ``extractor`` parameter — see :func:`_resolve_extractor_env` and issue
+  #80. ``extractor="auto"`` (the default) is exactly the behavior described
+  above, unchanged.
+
 Markdown → Block parsing (docling path) and citation cleanliness:
   The block ``text`` used for grounding/citation must be the *clean*
   clause text: Markdown decoration is stripped from ``text`` even though
@@ -176,43 +185,121 @@ class ExtractionError(Exception):
 
 
 def detect_extractor(path: Path) -> str:
-    """Return which extractor :func:`extract_blocks` will use for *path*.
+    """Return which extractor :func:`extract_blocks` will use for *path*
+    under ``extractor="auto"`` (the default — see :func:`_resolve_extractor_env`
+    for the declared-override cases).
 
     ``"docling"`` when ``shutil.which("docling")`` finds the binary,
     ``"legacy"`` otherwise (pdfplumber/python-docx/pandoc, per format) —
     the exact same check ``extract_blocks`` makes internally to choose its
-    code path. Factored out so callers that need to *record* the choice
-    (corpus manifest, ``mine``/``compile`` CLI output) can do so up front —
-    including for a version whose extraction subsequently fails — without
-    duplicating or risking drift from ``extract_blocks``'s own branch
-    (issue #129: this was previously only visible via a suppressed
-    ``logging.info`` line).
+    code path when no extractor is declared. Factored out so callers that
+    need to *record* the choice (corpus manifest, ``mine``/``compile`` CLI
+    output) can do so up front — including for a version whose extraction
+    subsequently fails — without duplicating or risking drift from
+    ``extract_blocks``'s own branch (issue #129: this was previously only
+    visible via a suppressed ``logging.info`` line).
     """
     return "docling" if shutil.which("docling") is not None else "legacy"
 
 
-def _extraction_cache_payload(path: Path) -> dict[str, str]:
+#: Valid values for ``extraction.extractor`` (config.py) / ``extract_blocks``'s
+#: ``extractor`` parameter — issue #80.
+_VALID_EXTRACTORS = frozenset({"docling", "legacy", "auto"})
+
+
+def _resolve_extractor_env(declared: str, path: Path) -> str:
+    """Resolve a *declared* extractor ("docling" | "legacy" | "auto") to the
+    concrete environment governing *path* for this call — always "docling"
+    or "legacy", never "auto" (issue #80).
+
+    This is the single source of truth for both (a) which code path
+    :func:`extract_blocks` takes and (b) the extraction cache key's
+    ``extractor_env`` component (:func:`_extraction_cache_payload`) — a
+    declared "legacy" run must never share a cache key with a same-machine
+    "docling"-environment run of the same file just because docling happens
+    to be on PATH (mirrors the issue #77 fix that first folded the
+    environment into the cache key).
+
+    - ``"legacy"`` always resolves to ``"legacy"``, even when docling IS on
+      PATH — this is what lets a config force the legacy adapters for a
+      deterministic, container-free run.
+    - ``"docling"`` resolves to ``"docling"`` if available, else raises
+      immediately (see below) — a declared "docling" requirement is never
+      silently downgraded.
+    - ``"auto"`` (the default) preserves today's behavior exactly:
+      whatever :func:`detect_extractor` reports for *path* right now.
+
+    Raises:
+        ExtractionError: *declared* is not one of "docling"/"legacy"/"auto",
+            or *declared* is "docling" and the docling binary is not on
+            PATH. Checked here — before any file I/O — so a corpus-wide
+            misconfiguration (``extraction.extractor: docling`` on a
+            docling-less host) fails immediately with ONE clear,
+            actionable error instead of silently falling back to the
+            legacy adapters (no OCR, no heading detection) for every
+            version, as the Jul 14 host-run incident this closes did (see
+            module docstring, "docling vs. legacy adapters", and issue
+            #80).
+    """
+    if declared not in _VALID_EXTRACTORS:
+        raise ExtractionError(
+            f"invalid extractor {declared!r}; expected 'docling', 'legacy', or 'auto'"
+        )
+    if declared == "docling" and shutil.which("docling") is None:
+        raise ExtractionError(
+            "config declares extraction.extractor: docling, but the docling "
+            "binary was not found on PATH. Install docling, run this corpus "
+            "inside the project's container (see Dockerfile), or set "
+            "extraction.extractor to 'legacy' or 'auto' (or omit the "
+            "extraction: section) to use the legacy adapters instead."
+        )
+    if declared == "auto":
+        return detect_extractor(path)
+    return declared
+
+
+def _resolve_cache_environment(path: Path, environment: str | None) -> str:
+    """Resolve the cache-key environment for *path*: *environment* itself if
+    given, else today's bare :func:`detect_extractor` PATH check.
+
+    ``None`` is the "no override" default every :class:`ExtractionCache`
+    method accepts (issue #80) — it preserves every pre-existing direct
+    caller's behavior (tests, and ``pipeline._compute_doc_result``'s
+    manifest-reporting lookup) exactly: a fresh, unconditional
+    ``detect_extractor(path)`` check, same as before this parameter
+    existed. Only :func:`extract_blocks` (via :func:`_resolve_extractor_env`)
+    ever passes an explicit, possibly config-declared value.
+    """
+    return environment if environment is not None else detect_extractor(path)
+
+
+def _extraction_cache_payload(path: Path, environment: str | None = None) -> dict[str, str]:
     """Cache-key payload for *path*: the file's raw content hash plus the
-    current extractor environment.
+    extractor environment governing this call.
 
     Extraction is a pure function of the source bytes for a FIXED extractor
     environment — no judge, no segmentation model, no engine config affects
     it beyond that (issue #132) — but legacy and docling can produce
     materially different output for the SAME bytes (legacy has no OCR and
-    can garble columns/scanned text), so ``detect_extractor(path)`` is part
-    of the key itself, not just the stored value (issue #77). This is the
-    authoritative scoping mechanism: a legacy-era entry (success OR
-    failure) simply misses once docling becomes available, and vice versa,
-    while a same-environment repeat lookup keeps hitting across store
-    instances/rounds — ``detect_extractor`` is a pure, stable function of
-    ``shutil.which`` for the life of a machine/session, which is what the
-    ``playbook judge`` warm-cache intent behind this class relies on (see
-    internal#132).
+    can garble columns/scanned text), so the environment is part of the key
+    itself, not just the stored value (issue #77). This is the authoritative
+    scoping mechanism: a legacy-era entry (success OR failure) simply misses
+    once docling becomes available, and vice versa, while a
+    same-environment repeat lookup keeps hitting across store
+    instances/rounds.
+
+    *environment* defaults to ``None`` — see :func:`_resolve_cache_environment`
+    for what that means. A caller (:func:`extract_blocks`) that has a
+    config-declared extractor override (``"docling"`` or ``"legacy"``, issue
+    #80) MUST pass the resolved value explicitly here, or a declared
+    "legacy" run on a docling-equipped host would key under "docling" (the
+    bare PATH check) and silently collide with a real docling-environment
+    entry for the same file.
     """
     return {
         "file_sha256": _sha256_file(path),
         "format_version": _EXTRACTION_CACHE_FORMAT_VERSION,
-        "extractor_env": detect_extractor(path),
+        "extractor_env": _resolve_cache_environment(path, environment),
     }
 
 
@@ -238,7 +325,9 @@ class ExtractionCache:
     def __init__(self, cache_path: Path) -> None:
         self._store = VerdictStore(cache_path)
 
-    def get(self, path: Path) -> tuple[str, list[Block], str] | None:
+    def get(
+        self, path: Path, *, extractor: str | None = None
+    ) -> tuple[str, list[Block], str] | None:
         """Return the cached ``(canonical_text, blocks, extractor)``, or ``None`` on a miss.
 
         Per-block ``text`` is reconstructed from
@@ -248,8 +337,13 @@ class ExtractionCache:
         it (issue #67). A ``b.get("text")`` fallback keeps pre-existing cache
         entries (written before this fix, which still carry a per-block
         ``"text"``) loading unchanged.
+
+        ``extractor``: the concrete environment ("docling" or "legacy") to
+        look this entry up under — see :func:`_resolve_cache_environment`
+        (issue #80). Defaults to ``None`` (today's bare PATH-check
+        behavior, unchanged for every pre-existing caller).
         """
-        cached = self._store.get(_extraction_cache_payload(path))
+        cached = self._store.get(_extraction_cache_payload(path, extractor))
         if cached is None or "error" in cached:
             return None
         canonical_text = cached["canonical_text"]
@@ -264,7 +358,15 @@ class ExtractionCache:
         ]
         return canonical_text, blocks, cached["extractor"]
 
-    def put(self, path: Path, canonical_text: str, blocks: list[Block], extractor: str) -> None:
+    def put(
+        self,
+        path: Path,
+        canonical_text: str,
+        blocks: list[Block],
+        extractor: str,
+        *,
+        environment: str | None = None,
+    ) -> None:
         """Store *canonical_text*/*blocks*/*extractor* for *path*'s current content.
 
         Per-block ``text`` is deliberately NOT persisted: it is fully
@@ -274,6 +376,18 @@ class ExtractionCache:
         reconstructs it from the span instead, halving on-disk entry size and
         the in-memory footprint of ``VerdictStore``, which parses the whole
         file at construction (issue #67).
+
+        ``extractor`` is the adapter that actually PRODUCED this content
+        ("docling" or "legacy") — stored in the VALUE for reporting
+        (corpus_manifest, etc.). ``environment`` is the concrete environment
+        governing this entry's KEY (issue #80; see
+        :func:`_resolve_cache_environment`); it differs from ``extractor``
+        only when a per-file docling failure fell back to legacy under a
+        docling-declared/available environment (see :func:`extract_blocks`) —
+        the KEY must stay pinned to the environment regardless of that
+        per-file fallback, or a docling-environment run's cache would
+        fragment across "docling" and "legacy" keys for the same file.
+        Defaults to ``None`` (today's bare PATH-check behavior).
         """
         value: dict[str, Any] = {
             "canonical_text": canonical_text,
@@ -287,46 +401,64 @@ class ExtractionCache:
             ],
             "extractor": extractor,
         }
-        self._store.put(_extraction_cache_payload(path), value)
+        self._store.put(_extraction_cache_payload(path, environment), value)
 
-    def get_failure(self, path: Path) -> str | None:
+    def get_failure(self, path: Path, *, extractor: str | None = None) -> str | None:
         """Return the cached failure message for *path*, or ``None``.
 
         A failure entry only counts when it was produced by the SAME extractor
-        environment (``detect_extractor``) as the current one — a file that
-        failed under the legacy adapter must be retried once docling becomes
-        available, but a file that already failed under docling should not be
-        re-OCR'd (up to the full per-file timeout) on every subsequent
-        pipeline command.
+        environment as the current one — a file that failed under the legacy
+        adapter must be retried once docling becomes available, but a file
+        that already failed under docling should not be re-OCR'd (up to the
+        full per-file timeout) on every subsequent pipeline command.
+
+        ``extractor``: the concrete environment to look this entry up under
+        (issue #80) — defaults to ``None`` (today's bare PATH-check
+        behavior via :func:`_resolve_cache_environment`, unchanged for every
+        pre-existing caller).
 
         Since issue #77 added the extractor environment to the cache KEY
         (:func:`_extraction_cache_payload`), ``self._store.get()`` below can
         no longer return a different-environment entry at all — the key is
         now the authoritative scoping mechanism, and this method's own
-        ``cached.get("extractor") != detect_extractor(path)`` check is
-        redundant for any entry written through :meth:`put_failure`. It is
-        kept (not removed) as a belt-and-braces guard against the stored
-        *value* ever disagreeing with the *key* it was filed under — e.g. a
-        future direct ``_store.put`` call that bypasses
-        :func:`_extraction_cache_payload`.
+        ``cached.get("extractor") != resolved`` check is redundant for any
+        entry written through :meth:`put_failure`. It is kept (not removed)
+        as a belt-and-braces guard against the stored *value* ever
+        disagreeing with the *key* it was filed under — e.g. a future direct
+        ``_store.put`` call that bypasses :func:`_extraction_cache_payload`.
         """
-        cached = self._store.get(_extraction_cache_payload(path))
+        resolved = _resolve_cache_environment(path, extractor)
+        cached = self._store.get(_extraction_cache_payload(path, resolved))
         if cached is None or "error" not in cached:
             return None
-        if cached.get("extractor") != detect_extractor(path):
+        if cached.get("extractor") != resolved:
             return None
         return str(cached["error"])
 
     def put_failure(self, path: Path, message: str, extractor: str) -> None:
-        """Store a failure marker for *path*'s current content (see get_failure)."""
+        """Store a failure marker for *path*'s current content (see get_failure).
+
+        ``extractor`` here is the environment that FAILED — used for BOTH
+        the cache KEY and the stored value's label (issue #80/#77; unlike
+        :meth:`put`, a failure has no separate "actual adapter" worth
+        preserving distinct from the environment: a docling timeout that
+        falls back to legacy internally before yielding nothing must still
+        negative-cache under the DOCLING environment, or every subsequent
+        docling-environment lookup would miss and re-burn the full OCR
+        timeout instead of hitting this negative cache).
+        """
         self._store.put(
-            _extraction_cache_payload(path),
+            _extraction_cache_payload(path, extractor),
             {"error": message, "extractor": extractor},
         )
 
 
 def extract_blocks(
-    path: Path, *, cache: ExtractionCache | None = None, refresh: bool = False
+    path: Path,
+    *,
+    cache: ExtractionCache | None = None,
+    refresh: bool = False,
+    extractor: str = "auto",
 ) -> tuple[str, list[Block], str]:
     """Extract ``path`` into ``(canonical_text, blocks, extractor)``.
 
@@ -334,8 +466,9 @@ def extract_blocks(
     …`` in that order.  Every block's ``char_span`` is an offset into
     ``canonical_text`` such that
     ``block.text == canonical_text[slice(*block.char_span)]``.
-    ``extractor`` is ``"docling"`` or ``"legacy"`` — see
-    :func:`detect_extractor`.
+    The returned ``extractor`` is ``"docling"`` or ``"legacy"`` — the
+    adapter that actually produced this content (see :func:`detect_extractor`
+    and, for a per-file docling failure, the fallback below).
 
     Args:
         path:  Path to a ``.docx``, ``.pdf``, or ``.rtf`` file.
@@ -358,11 +491,31 @@ def extract_blocks(
                round 2), not new evidence the content is bad. Ignored when
                *cache* is None (already always re-extracts). Defaults to
                False.
+        extractor: Declared extractor environment — ``"docling"``,
+               ``"legacy"``, or ``"auto"`` (default; mirrors
+               ``config.extraction.extractor``, issue #80). ``"auto"`` is
+               exactly today's behavior (prefer docling when on PATH, else
+               legacy). ``"docling"`` forces docling and raises
+               :class:`ExtractionError` immediately — before any file I/O —
+               if the docling binary is not on PATH, instead of silently
+               falling back to the legacy adapters. ``"legacy"`` forces the
+               legacy per-format adapters even when docling IS on PATH
+               (deterministic, container-free runs). See
+               :func:`_resolve_extractor_env`.
 
     Raises:
-        ExtractionError: unsupported extension, missing ``pandoc`` (RTF), or
-                          the document yields no non-empty text.
+        ExtractionError: an invalid *extractor* value; *extractor* is
+                          ``"docling"`` but the binary is not on PATH;
+                          unsupported extension; missing ``pandoc`` (RTF);
+                          or the document yields no non-empty text.
     """
+    # Validate + availability-check the DECLARED extractor and resolve it to
+    # the concrete environment governing this call — before any file I/O, so
+    # a corpus-wide misconfiguration (extraction.extractor: docling on a
+    # docling-less host) fails immediately rather than after this file has
+    # already been opened/hashed (issue #80).
+    environment = _resolve_extractor_env(extractor, path)
+
     if not path.is_file():
         raise ExtractionError(f"file not found: {path}")
 
@@ -371,15 +524,15 @@ def extract_blocks(
         raise ExtractionError(f"unsupported file extension: {suffix!r} ({path})")
 
     if cache is not None and not refresh:
-        cached = cache.get(path)
+        cached = cache.get(path, extractor=environment)
         if cached is not None:
             return cached
-        cached_failure = cache.get_failure(path)
+        cached_failure = cache.get_failure(path, extractor=environment)
         if cached_failure is not None:
             raise ExtractionError(f"{cached_failure} (cached failure — same extractor)")
 
-    extractor = detect_extractor(path)
-    if extractor == "docling":
+    resolved = environment
+    if resolved == "docling":
         _log.info("extract_blocks: using docling for %s", path)
         try:
             lines = _extract_docling_lines(path)
@@ -394,16 +547,23 @@ def extract_blocks(
             # yield little here (legacy has no OCR) and then raise below, as
             # before; born-digital docx/pdf are recovered. The fallback is
             # logged and reflected in the returned ``extractor`` label so it is
-            # visible in reporting (issue #129).
+            # visible in reporting (issue #129). Unchanged by issue #80's
+            # declared-extractor option: a declared "docling" run still allows
+            # this same PER-FILE fallback (the corpus-wide availability
+            # precondition above is a separate, one-time concern — see
+            # _resolve_extractor_env); a fallback budget is the follow-up
+            # ticket's ``max_fallback``.
             _log.warning(
                 "extract_blocks: docling failed on %s (%s); falling back to legacy adapter",
                 path,
                 exc,
             )
             lines = _extract_legacy_lines(path, suffix)
-            extractor = "legacy"
+            resolved = "legacy"
     else:
-        _log.info("extract_blocks: docling not found on PATH; using legacy adapter for %s", path)
+        _log.info(
+            "extract_blocks: using legacy adapter for %s (declared extractor=%r)", path, extractor
+        )
         lines = _extract_legacy_lines(path, suffix)
 
     if not lines:
@@ -412,11 +572,11 @@ def extract_blocks(
         # whole per-file timeout) so later pipeline commands fail fast
         # instead of re-attempting per round — see get_failure for the
         # extractor-environment scoping that keeps a docling upgrade able to
-        # retry a legacy-era failure. Record the ENVIRONMENT that failed
-        # (detect_extractor), not the post-fallback adapter label: a docling
-        # timeout falls back to legacy before landing here, and storing
-        # "legacy" would make every docling-environment lookup miss and
-        # re-burn the OCR timeout each round.
+        # retry a legacy-era failure. Record the ENVIRONMENT (not the
+        # post-fallback adapter label): a docling timeout falls back to
+        # legacy before landing here, and storing "legacy" would make every
+        # docling-environment lookup miss and re-burn the OCR timeout each
+        # round.
         #
         # Exception: under refresh=True, if a cached SUCCESS already exists
         # under this exact key (same file bytes + extractor environment —
@@ -434,16 +594,18 @@ def extract_blocks(
         # the contrary. A refresh with no pre-existing success (first
         # attempt, or a prior same-key failure) still negative-caches as
         # before.
-        if cache is not None and not (refresh and cache.get(path) is not None):
-            cache.put_failure(path, message, detect_extractor(path))
+        if cache is not None and not (
+            refresh and cache.get(path, extractor=environment) is not None
+        ):
+            cache.put_failure(path, message, environment)
         raise ExtractionError(message)
 
     canonical_text, blocks = _build_stream(lines)
 
     if cache is not None:
-        cache.put(path, canonical_text, blocks, extractor)
+        cache.put(path, canonical_text, blocks, resolved, environment=environment)
 
-    return canonical_text, blocks, extractor
+    return canonical_text, blocks, resolved
 
 
 def _extract_legacy_lines(path: Path, suffix: str) -> list[tuple[str, int]]:

@@ -86,6 +86,7 @@ def segment_to_tree(
     model: str = DEFAULT_MODEL,
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
+    extractor: str = "auto",
 ) -> GroundingResult:
     """Extract + LLM-segment + verify/repair *path* into a grounded tree.
 
@@ -164,6 +165,12 @@ def segment_to_tree(
                       wiring elsewhere in the pipeline — see
                       ``pipeline.mine_corpus``'s parameter of the same name
                       for the full rationale. Defaults to False.
+        extractor:    Forwarded to
+                      :func:`~playbook_engine.extraction.extract_blocks`
+                      unchanged — the declared extractor environment
+                      (``"docling"``/``"legacy"``/``"auto"``; mirrors
+                      ``config.extraction.extractor``, issue #80). Defaults
+                      to ``"auto"`` (today's behavior).
 
     Returns:
         The grounded :class:`~playbook_engine.segmentation_grounding.GroundingResult`
@@ -176,11 +183,8 @@ def segment_to_tree(
                                gate. Fail loud — no deterministic-segmenter
                                fallback.
     """
-    # extractor (docling vs legacy) is not needed here — mine_corpus records
-    # it per version via extraction.detect_extractor before this ever runs
-    # (see pipeline._compute_doc_result), so this path only needs the text.
     canonical_text, blocks, _extractor = extract_blocks(
-        path, cache=extraction_cache, refresh=refresh_extraction
+        path, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
     )
 
     if cache is not None:

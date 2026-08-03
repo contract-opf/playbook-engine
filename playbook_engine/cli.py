@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,28 @@ def _llm_segmentation_kwargs(
     kwargs: dict[str, Any] = {}
     if not cfg.segmentation.llm:
         return kwargs
+
+    # Fail loud, ONCE, before any per-version work starts: a declared
+    # extraction.extractor: docling on a docling-less host must never
+    # silently downgrade every version to the legacy adapters (no OCR, no
+    # heading detection) — see extraction.py's module docstring and issue
+    # #80. Checked here rather than inside the per-version extract_blocks
+    # loop so a whole-corpus misconfiguration produces ONE clear,
+    # actionable error instead of N per-version "extraction failed"
+    # warnings a human could mistake for N unrelated bad files — same
+    # "raise before any per-file work starts" shape as the
+    # ANTHROPIC_API_KEY check below (issue #131). extract_blocks() also
+    # re-checks this per call (defense in depth for direct callers that
+    # bypass this function, e.g. the standalone `segment` command, which
+    # runs the same check inline — see segment_cmd).
+    if cfg.extraction.extractor == "docling" and shutil.which("docling") is None:
+        raise ConfigError(
+            "extraction.extractor is set to 'docling' in the config, but the "
+            "docling binary was not found on PATH. Install docling, run this "
+            "corpus inside the project's container (see Dockerfile), or set "
+            "extraction.extractor to 'legacy' or 'auto' (or omit the "
+            "extraction: section) to use the legacy adapters instead."
+        )
 
     # Agent-as-segmenter (issue #191): key-free store-backed segmentation. The
     # agent produces SegNodes via `segment`/`segment-apply`; `mine` replays them
@@ -1925,6 +1948,24 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
             err=True,
         )
         raise SystemExit(1)
+    # Fail loud, ONCE, before any per-version work starts — mirrors
+    # cli._llm_segmentation_kwargs's identical check (issue #80). This
+    # command has no shared kwargs-building helper of its own (it builds
+    # its extraction_cache/etc. inline below), so the check is repeated
+    # here rather than factored out, to avoid a drive-by refactor of its
+    # existing structure.
+    if cfg.extraction.extractor == "docling" and shutil.which("docling") is None:
+        click.secho(
+            "ERROR: extraction.extractor is set to 'docling' in the config, "
+            "but the docling binary was not found on PATH. Install docling, "
+            "run this corpus inside the project's container (see "
+            "Dockerfile), or set extraction.extractor to 'legacy' or 'auto' "
+            "(or omit the extraction: section) to use the legacy adapters "
+            "instead.",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
     try:
         taxonomy = load_taxonomy(cfg.taxonomy_path)
     except TaxonomyError as exc:
@@ -1957,7 +1998,9 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
         for path in versions:
             n_versions += 1
             try:
-                canonical_text, blocks, _extractor = extract_blocks(path, cache=extraction_cache)
+                canonical_text, blocks, _extractor = extract_blocks(
+                    path, cache=extraction_cache, extractor=cfg.extraction.extractor
+                )
             except Exception as exc:  # noqa: BLE001
                 click.secho(
                     f"  WARNING: {doc_dir.name}/{path.name}: extraction failed ({exc}) — skipped",

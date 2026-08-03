@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -924,8 +925,15 @@ _LLM_SEGMENT_RESPONSE = json.dumps(
 )
 
 
-def _make_llm_corpus(tmp_path: Path, *, segmentation: dict[str, Any]) -> tuple[Path, Path, Path]:
-    """Single-document, single-version corpus + config with a segmentation block."""
+def _make_llm_corpus(
+    tmp_path: Path, *, segmentation: dict[str, Any], extraction: dict[str, Any] | None = None
+) -> tuple[Path, Path, Path]:
+    """Single-document, single-version corpus + config with a segmentation block.
+
+    ``extraction``, when given, adds an ``extraction:`` config block (issue
+    #80) — e.g. ``{"extractor": "docling"}``. Defaults to ``None`` (section
+    omitted), preserving every pre-existing caller's config shape exactly.
+    """
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
@@ -944,6 +952,8 @@ def _make_llm_corpus(tmp_path: Path, *, segmentation: dict[str, Any]) -> tuple[P
         "provenance": {"our_party_aliases": ["Alpha Corp"]},
         "segmentation": segmentation,
     }
+    if extraction is not None:
+        cfg["extraction"] = extraction
     config_path = tmp_path / "playbook.config.yaml"
     config_path.write_text(yaml.dump(cfg), encoding="utf-8")
 
@@ -1206,6 +1216,167 @@ def test_mine_without_segmentation_block_never_touches_anthropic(
     assert result.exit_code == 0, f"mine failed:\n{result.output}"
     assert _fake_anthropic.instances == [], (
         "anthropic.Anthropic must not be constructed when segmentation.llm is absent"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Declared-extractor preflight (issue #80): extraction.extractor: docling on
+# a docling-less host must fail fast, once, before any per-version work —
+# mirrors the ANTHROPIC_API_KEY preflight above exactly (same boundary,
+# same "before extraction" guarantee).
+# ---------------------------------------------------------------------------
+
+
+def test_mine_preflight_docling_declared_but_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+) -> None:
+    """``extraction.extractor: docling`` + no docling on PATH -> ``mine``
+    exits 1 with a friendly message naming the remedy, before any per-version
+    work (no observations.jsonl, no anthropic client construction — the
+    preflight in ``_llm_segmentation_kwargs`` runs before the live-LLM
+    closures are even built)."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus_dir, config_path, out_dir = _make_llm_corpus(
+        tmp_path, segmentation={"llm": True}, extraction={"extractor": "docling"}
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output, (
+        f"a declared-but-unavailable extractor must produce a friendly message, "
+        f"not a traceback:\n{result.output}"
+    )
+    assert "docling" in result.output
+    assert "PATH" in result.output
+    assert not (out_dir / "observations.jsonl").exists(), (
+        "the preflight must fail before mine_corpus ever runs, so no store is written"
+    )
+    assert _fake_anthropic.instances == [], (
+        "the docling preflight must fail before any anthropic client is constructed"
+    )
+
+
+def test_compile_preflight_docling_declared_but_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+) -> None:
+    """Same preflight, wired the same way, for ``compile``."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus_dir, config_path, out_dir = _make_llm_corpus(
+        tmp_path, segmentation={"llm": True}, extraction={"extractor": "docling"}
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "docling" in result.output
+
+
+def test_judge_preflight_docling_declared_but_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+) -> None:
+    """Same preflight, wired the same way, for ``judge``."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus_dir, config_path, out_dir = _make_llm_corpus(
+        tmp_path, segmentation={"llm": True}, extraction={"extractor": "docling"}
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["judge", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "docling" in result.output
+
+
+def test_mine_docling_declared_without_segmentation_llm_never_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: the preflight is config-gated on ``segmentation.llm`` —
+    the deterministic path never calls the docling/legacy extractor at all,
+    so a declared ``extraction.extractor: docling`` must not block ``mine``
+    even on a docling-less host."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+    # Add the extraction: block directly (the plain _make_corpus fixture has
+    # no extraction= parameter — it predates issue #80).
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["extraction"] = {"extractor": "docling"}
+    config_path.write_text(yaml.dump(raw), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 0, f"mine failed:\n{result.output}"
+
+
+def test_mine_docling_declared_and_available_reaches_llm_client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+) -> None:
+    """Regression: a declared ``extraction.extractor: docling`` that IS
+    available must not be rejected by the preflight — it only fires when the
+    binary is genuinely missing. The run may still fail downstream for
+    unrelated environmental reasons (no real ``docling``/``pandoc`` binary in
+    the test environment to actually convert the fixture file — see
+    ``tests/test_extraction.py::test_declared_docling_available_uses_docling``
+    for the fully-mocked positive path), so this only asserts the ABSENCE of
+    the preflight's specific rejection, not the overall exit code."""
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/docling" if cmd == "docling" else None
+    )
+    corpus_dir, config_path, out_dir = _make_llm_corpus(
+        tmp_path, segmentation={"llm": True}, extraction={"extractor": "docling"}
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert "extraction.extractor is set to 'docling'" not in result.output, (
+        f"must not be rejected by the preflight when shutil.which reports docling present:\n"
+        f"{result.output}"
+    )
+
+
+def test_segment_cmd_preflight_docling_declared_but_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standalone ``segment`` command (agent path) has its own inline
+    copy of the same preflight check (it doesn't go through
+    ``_llm_segmentation_kwargs`` — issue #80)."""
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    corpus_dir, config_path, out_dir = _make_llm_corpus(
+        tmp_path,
+        segmentation={"agent": True},
+        extraction={"extractor": "docling"},
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["segment", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "docling" in result.output
+    assert "PATH" in result.output
+    assert not (out_dir / "segment" / "pending.jsonl").exists(), (
+        "the preflight must fail before any version is extracted"
     )
 
 

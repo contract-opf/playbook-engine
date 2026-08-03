@@ -367,6 +367,7 @@ def _llm_segment_file(
     model: str = DEFAULT_MODEL,
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
+    extractor: str = "auto",
 ) -> tuple[ClauseTree, dict[str, str | None]]:
     """LLM-segment one agreement file → ``(tree, taxonomy_by_path)``.
 
@@ -404,6 +405,10 @@ def _llm_segment_file(
     this call bypasses ``extraction_cache``'s reads (always re-extracts) while
     still refreshing the cache — see ``mine_corpus``'s parameter of the same
     name (issue #78).
+
+    ``extractor`` is forwarded to ``segment_to_tree`` unchanged — the
+    declared extractor environment (``config.extraction.extractor``, issue
+    #80). Defaults to ``"auto"`` (today's behavior).
     """
     result = segment_to_tree(
         path,
@@ -413,6 +418,7 @@ def _llm_segment_file(
         model=model,
         extraction_cache=extraction_cache,
         refresh_extraction=refresh_extraction,
+        extractor=extractor,
     )
     result.tree.document_id = document_id
     result.tree.version = version
@@ -447,6 +453,7 @@ def _collect_batch_items(
     progress: Callable[[str], None],
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
+    extractor: str = "auto",
 ) -> tuple[list[SegmentationBatchItem], dict[str, dict[str, _BatchExtraction]]]:
     """Extract every version file up front and build the corpus-wide batch request.
 
@@ -462,6 +469,17 @@ def _collect_batch_items(
         refresh_extraction: Forwarded to ``extract_blocks`` as its ``refresh``
                       argument for every version — bypasses cache reads while
                       still refreshing the cache (issue #78). Defaults to False.
+        extractor:    Forwarded to ``extract_blocks`` unchanged for every
+                      version — the declared extractor environment
+                      (``config.extraction.extractor``, issue #80). Defaults
+                      to ``"auto"`` (today's behavior). Note: the caller
+                      (``mine_corpus``) is expected to have already validated
+                      a declared ``"docling"`` is available up front (see
+                      ``cli._llm_segmentation_kwargs``), so a per-version
+                      ``ExtractionError`` here is a genuine per-file failure,
+                      not a corpus-wide misconfiguration — hence it keeps the
+                      existing "warn and skip this one version" tolerance
+                      below rather than aborting the whole batch pre-pass.
 
     Returns:
         ``(items, extractions)`` — *items* is the flat list of
@@ -480,7 +498,7 @@ def _collect_batch_items(
         for vid, path in versions.items():
             try:
                 canonical_text, blocks, _extractor = extract_blocks(
-                    path, cache=extraction_cache, refresh=refresh_extraction
+                    path, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
                 )
             except Exception as exc:  # noqa: BLE001 — same tolerance as the sync path
                 progress(f"    WARNING: {path.name}: {exc}")
@@ -1387,6 +1405,7 @@ def _compute_doc_result(
                     model=config.segmentation.model,
                     extraction_cache=extraction_cache,
                     refresh_extraction=refresh_extraction,
+                    extractor=config.extraction.extractor,
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
             else:
@@ -2060,6 +2079,7 @@ def mine_corpus(
                     model=config.segmentation.model,
                     extraction_cache=extraction_cache,
                     refresh_extraction=refresh_extraction,
+                    extractor=config.extraction.extractor,
                 )
                 template_classified = _classified_from_taxonomy_by_path(
                     template_tree, t_tax_by_path
@@ -2143,13 +2163,24 @@ def mine_corpus(
             # removing docling between runs must bust every per-doc
             # stage-cache entry rather than replay an L1-L4 result derived
             # from the OTHER environment's extraction as if it were current
-            # (issue #79). This is a corpus-level, PATH-only check (constant
-            # across every file in the run), so any Path argument yields the
-            # same answer — corpus_dir is passed for clarity, not because its
-            # content matters. Adding this field intentionally invalidates
-            # every existing L1-L4 stage-cache entry once, the same one-time
-            # cost as any other fingerprint-field addition.
+            # (issue #79). "extractor_env" itself is still exactly that
+            # original PATH-only check (constant across every file in the
+            # run, hence corpus_dir rather than a per-file path — passed for
+            # clarity, not because its content matters): it is blind to a
+            # config-DECLARED extractor (config.extraction.extractor, issue
+            # #80), since detect_extractor never looks at config. Without
+            # more, flipping the config between "auto"/"docling"/"legacy" on
+            # the SAME host leaves "extractor_env" unchanged whenever the
+            # PATH check's own answer doesn't move, so a declared "legacy"
+            # run would silently replay docling-derived L1-L4 results (or
+            # vice versa) instead of busting the cache. "declared_extractor"
+            # below closes that gap by folding the raw declared value itself
+            # into the fingerprint, independently of what the PATH check
+            # reports. Adding either field intentionally invalidates every
+            # existing L1-L4 stage-cache entry once, the same one-time cost
+            # as any other fingerprint-field addition.
             "extractor_env": detect_extractor(corpus_dir),
+            "declared_extractor": config.extraction.extractor,
             # Switching segmentation paths changes L1 output for identical
             # source files — must bust the cache, not replay a stale tree
             # segmented (and classified) the other way.
@@ -2310,6 +2341,7 @@ def mine_corpus(
             progress,
             extraction_cache=extraction_cache,
             refresh_extraction=refresh_extraction,
+            extractor=config.extraction.extractor,
         )
         progress(f"  batch segmentation: {len(items)} version(s) to segment")
 
