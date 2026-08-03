@@ -366,6 +366,7 @@ def _llm_segment_file(
     segmentation_cache: SegmentationVerdictCache | None = None,
     model: str = DEFAULT_MODEL,
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
 ) -> tuple[ClauseTree, dict[str, str | None]]:
     """LLM-segment one agreement file → ``(tree, taxonomy_by_path)``.
 
@@ -398,6 +399,11 @@ def _llm_segment_file(
     repeat run over unchanged source content skips extraction (docling/
     pdfplumber/python-docx/pandoc) entirely, independent of
     ``segmentation_cache`` (issue #132).
+
+    ``refresh_extraction``, when True, is forwarded to ``segment_to_tree`` so
+    this call bypasses ``extraction_cache``'s reads (always re-extracts) while
+    still refreshing the cache — see ``mine_corpus``'s parameter of the same
+    name (issue #78).
     """
     result = segment_to_tree(
         path,
@@ -406,6 +412,7 @@ def _llm_segment_file(
         cache=segmentation_cache,
         model=model,
         extraction_cache=extraction_cache,
+        refresh_extraction=refresh_extraction,
     )
     result.tree.document_id = document_id
     result.tree.version = version
@@ -439,6 +446,7 @@ def _collect_batch_items(
     doc_versions: dict[str, dict[str, Path]],
     progress: Callable[[str], None],
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
 ) -> tuple[list[SegmentationBatchItem], dict[str, dict[str, _BatchExtraction]]]:
     """Extract every version file up front and build the corpus-wide batch request.
 
@@ -451,6 +459,9 @@ def _collect_batch_items(
                       forwarded to ``extract_blocks`` for every version — a
                       hit skips extraction entirely for that version
                       (issue #132).
+        refresh_extraction: Forwarded to ``extract_blocks`` as its ``refresh``
+                      argument for every version — bypasses cache reads while
+                      still refreshing the cache (issue #78). Defaults to False.
 
     Returns:
         ``(items, extractions)`` — *items* is the flat list of
@@ -468,7 +479,9 @@ def _collect_batch_items(
     for doc_id, versions in doc_versions.items():
         for vid, path in versions.items():
             try:
-                canonical_text, blocks, _extractor = extract_blocks(path, cache=extraction_cache)
+                canonical_text, blocks, _extractor = extract_blocks(
+                    path, cache=extraction_cache, refresh=refresh_extraction
+                )
             except Exception as exc:  # noqa: BLE001 — same tolerance as the sync path
                 progress(f"    WARNING: {path.name}: {exc}")
                 continue
@@ -1236,6 +1249,7 @@ def _compute_doc_result(
     batch_extractions: dict[str, _BatchExtraction] | None = None,
     segmentation_cache: SegmentationVerdictCache | None = None,
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
 ) -> dict[str, Any] | None:
     """Compute L1–L4 for a single document; return a cacheable result dict or None on skip.
 
@@ -1309,6 +1323,10 @@ def _compute_doc_result(
     python-docx/pandoc) entirely — independent of ``segmentation_cache``,
     which only covers the LLM segmentation call (issue #132).
 
+    ``refresh_extraction`` is forwarded to ``_llm_segment_file`` alongside
+    ``extraction_cache`` — see ``mine_corpus``'s parameter of the same name
+    (issue #78).
+
     A version whose ingest yields an EMPTY ``ClauseTree`` from a non-empty
     source file (e.g. a scanned/image PDF on the deterministic path, where no
     OCR is wired) is treated as an ingest failure — recorded via the same
@@ -1368,6 +1386,7 @@ def _compute_doc_result(
                     segmentation_cache,
                     model=config.segmentation.model,
                     extraction_cache=extraction_cache,
+                    refresh_extraction=refresh_extraction,
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
             else:
@@ -1792,6 +1811,7 @@ def mine_corpus(
     segmentation_cache: SegmentationVerdictCache | None = None,
     segment_documents_batch_fn: Callable[..., dict[str, list[SegNode]]] | None = None,
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
     entity_registry_path: Path | None = None,
     progress: Callable[[str], None] = lambda _: None,
 ) -> None:
@@ -1924,7 +1944,27 @@ def mine_corpus(
                               force every judge round to re-extract/re-OCR
                               every version of every agreement from scratch
                               (issue #132). Defaults to None (no caching —
-                              every run re-extracts).
+                              every run re-extracts). See
+                              ``refresh_extraction`` below for the
+                              operator-facing lever that DOES force
+                              re-extraction on demand.
+        refresh_extraction:   If True, bypass ``extraction_cache``'s reads for
+                              this run — every version is re-extracted from
+                              source (docling/pdfplumber/python-docx/pandoc)
+                              — while writes still happen, leaving a fresh,
+                              correct cache behind for subsequent runs
+                              (issue #78). Deliberately a SEPARATE signal
+                              from ``no_cache`` above: the judge path forces
+                              ``no_cache=True`` without wanting to force
+                              re-extraction (that would re-burn docling OCR
+                              timeouts every round — issue #132), so this
+                              must be threaded independently. ``cli.py``'s
+                              ``compile`` command sources it from the
+                              operator's own ``--no-cache`` flag (captured
+                              before any store-backed-judge override of
+                              ``no_cache`` itself); ``playbook judge`` never
+                              sets it. Ignored when ``extraction_cache`` is
+                              None. Defaults to False.
         entity_registry_path: Path to the persisted entity->alias registry
                               used to pseudonymize ``config.provenance.known_entities``
                               (issue #153). Defaults to
@@ -2019,6 +2059,7 @@ def mine_corpus(
                     segmentation_cache,
                     model=config.segmentation.model,
                     extraction_cache=extraction_cache,
+                    refresh_extraction=refresh_extraction,
                 )
                 template_classified = _classified_from_taxonomy_by_path(
                     template_tree, t_tax_by_path
@@ -2250,7 +2291,10 @@ def mine_corpus(
 
         taxonomy_ids = [e.id for e in taxonomy.classifier_entries()]
         items, batch_extractions_by_doc = _collect_batch_items(
-            doc_versions, progress, extraction_cache=extraction_cache
+            doc_versions,
+            progress,
+            extraction_cache=extraction_cache,
+            refresh_extraction=refresh_extraction,
         )
         progress(f"  batch segmentation: {len(items)} version(s) to segment")
 
@@ -2309,6 +2353,7 @@ def mine_corpus(
                     batch_extractions=_batch_extractions,
                     segmentation_cache=segmentation_cache,
                     extraction_cache=extraction_cache,
+                    refresh_extraction=refresh_extraction,
                 )
 
             return store.get_or_compute(cache_key, _compute)
@@ -2338,6 +2383,7 @@ def mine_corpus(
             batch_extractions=doc_batch_extractions,
             segmentation_cache=segmentation_cache,
             extraction_cache=extraction_cache,
+            refresh_extraction=refresh_extraction,
         )
 
     # Documents whose LLM segmentation/normalization failed a fail-loud QA gate,
@@ -2788,6 +2834,7 @@ def compile_corpus(
     segmentation_cache: SegmentationVerdictCache | None = None,
     segment_documents_batch_fn: Callable[..., dict[str, list[SegNode]]] | None = None,
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
     entity_registry_path: Path | None = None,
     stop_after: str | None = None,
     progress: Callable[[str], None] = lambda _: None,
@@ -2829,6 +2876,11 @@ def compile_corpus(
                               run segments identically to a ``mine``/``judge``
                               run; see there for the full contract. All default
                               off (deterministic path).
+        refresh_extraction:   Passed through to :func:`mine_corpus` unchanged
+                              (NOT folded into *effective_no_cache* below —
+                              it is a deliberately separate signal; see
+                              ``mine_corpus``'s parameter of the same name,
+                              issue #78). Defaults to False.
         entity_registry_path: Passed through to :func:`mine_corpus`; see there
                               for the full contract (issue #153).
         stop_after:           If ``"intermediates"``, stop after writing
@@ -2881,6 +2933,7 @@ def compile_corpus(
         segmentation_cache=segmentation_cache,
         segment_documents_batch_fn=segment_documents_batch_fn,
         extraction_cache=extraction_cache,
+        refresh_extraction=refresh_extraction,
         entity_registry_path=entity_registry_path,
         progress=progress,
     )

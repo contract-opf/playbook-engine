@@ -155,6 +155,7 @@ order:
 Re-run after editing:
 
 ```bash
+# --no-cache also forces re-extraction, even if extraction_cache.jsonl is warm
 playbook compile ./corpus --config ./playbook.config.yaml --out ./out --no-cache
 ```
 
