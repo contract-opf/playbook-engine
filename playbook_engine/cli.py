@@ -868,7 +868,11 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
     "no_cache",
     is_flag=True,
     default=False,
-    help="Disable the stage cache and force a full recompute.",
+    help=(
+        "Disable the stage cache and force a full recompute — including "
+        "re-extraction (docling/pdfplumber/python-docx/pandoc), even if "
+        "extraction_cache.jsonl is warm (issue #78)."
+    ),
 )
 @click.option(
     "--stop-after",
@@ -912,7 +916,13 @@ def compile_playbook(
     silently overwritten by a stub recompute.
 
     Pass --no-cache to disable the content-addressed stage cache and force a
-    full recompute even if intermediates already exist.
+    full recompute even if intermediates already exist — this also forces
+    re-extraction (docling/pdfplumber/python-docx/pandoc) even if
+    extraction_cache.jsonl already has a warm entry for a version's current
+    content, so a suspect extraction can be recomputed rather than silently
+    replayed (issue #78). Reads are bypassed; extraction_cache.jsonl is still
+    refreshed with the new result, so a subsequent run without --no-cache
+    stays warm.
 
     Pass --stop-after intermediates to stop after the L1–L4 intermediates are
     written, without proceeding to L5 playbook compilation.
@@ -952,8 +962,24 @@ def compile_playbook(
     # (issue #102). ``_verdict_store_kwargs`` forces no_cache=True when a
     # store is wired, which deliberately overrides the --no-cache flag's
     # default (``no_cache``) below.
+    #
+    # ``refresh_extraction`` is sourced directly from the raw ``no_cache``
+    # flag (the operator's literal --no-cache), NOT from whatever
+    # ``compile_kwargs["no_cache"]`` ends up as after the merges below
+    # (issue #78). This matters because ``verdict_kwargs`` can force
+    # ``no_cache=True`` even when the operator did not pass --no-cache (a
+    # verdict store exists) — that override exists to bypass stale L1-L4
+    # stage-cache sentinels, not to declare the extraction suspect, and must
+    # not also force every compile round after a judge round to re-extract/
+    # re-OCR the whole corpus (the exact regression this issue's fix must
+    # avoid — see extraction.py's ExtractionCache docstring).
     verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
-    compile_kwargs: dict[str, Any] = {"no_cache": no_cache, **seg_kwargs, **verdict_kwargs}
+    compile_kwargs: dict[str, Any] = {
+        "no_cache": no_cache,
+        "refresh_extraction": no_cache,
+        **seg_kwargs,
+        **verdict_kwargs,
+    }
 
     try:
         result = compile_corpus(
@@ -994,6 +1020,17 @@ def compile_playbook(
     help="Output directory for the observation store (default: <corpus_dir>/../out).",
 )
 @click.option(
+    "--no-cache",
+    "no_cache",
+    is_flag=True,
+    default=False,
+    help=(
+        "Disable the stage cache and force a full recompute — including "
+        "re-extraction (docling/pdfplumber/python-docx/pandoc), even if "
+        "extraction_cache.jsonl is warm (issue #78)."
+    ),
+)
+@click.option(
     "--entity-registry",
     "entity_registry_path",
     type=click.Path(path_type=Path),
@@ -1010,6 +1047,7 @@ def mine_cmd(
     corpus_dir: Path,
     config_path: Path,
     out_path: Path | None,
+    no_cache: bool,
     entity_registry_path: Path | None,
 ) -> None:
     """Mine CORPUS_DIR and write the observation store (L1–L4).
@@ -1023,6 +1061,15 @@ def mine_cmd(
       scope.json            — scope-gate decisions
       trail/<doc_id>.json   — version-order and provenance signals
       normalized/           — segmented clause trees
+
+    Pass --no-cache to disable the content-addressed stage cache and force a
+    full recompute even if intermediates already exist — this also forces
+    re-extraction (docling/pdfplumber/python-docx/pandoc) even if
+    extraction_cache.jsonl already has a warm entry for a version's current
+    content, so a suspect extraction can be recomputed rather than silently
+    replayed (issue #78). Reads are bypassed; extraction_cache.jsonl is still
+    refreshed with the new result, so a subsequent run without --no-cache
+    stays warm.
 
     Does NOT write playbook.opf.json.  Run ``playbook project`` afterwards
     to compile the playbook from the store, or use ``playbook compile`` for
@@ -1046,15 +1093,36 @@ def mine_cmd(
     click.echo(f"config : {config_path}")
     click.echo(f"out    : {out_dir}")
 
-    # If a verdict store exists (populated by ``playbook judge-apply``), wire in
-    # the store-backed judges so the mining step replays stored verdicts rather
-    # than generating new needs_review sentinels.
-    mine_kwargs: dict[str, Any] = _verdict_store_kwargs(out_dir, click.echo)
+    # Segment the same way ``compile``/``judge`` do.
     try:
-        mine_kwargs.update(_llm_segmentation_kwargs(cfg, taxonomy, out_dir, click.echo))
+        seg_kwargs = _llm_segmentation_kwargs(cfg, taxonomy, out_dir, click.echo)
     except ConfigError as exc:
         click.secho(f"Config error: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+
+    # If a verdict store exists (populated by ``playbook judge-apply``), wire in
+    # the store-backed judges so the mining step replays stored verdicts rather
+    # than generating new needs_review sentinels (issue #102). ``_verdict_store_kwargs``
+    # forces no_cache=True when a store is wired, which deliberately overrides
+    # the --no-cache flag's default (``no_cache``) below.
+    #
+    # ``refresh_extraction`` is sourced directly from the raw ``no_cache``
+    # flag (the operator's literal --no-cache), NOT from whatever
+    # ``mine_kwargs["no_cache"]`` ends up as after the merges below (issue
+    # #78) — mirrors ``compile_playbook``'s identical reasoning immediately
+    # below its own analogous merge: the verdict store's forced
+    # ``no_cache=True`` exists to bypass stale L1-L4 stage-cache sentinels,
+    # not to declare the extraction suspect, and must not also force every
+    # mine round after a judge round to re-extract/re-OCR the whole corpus
+    # (the exact regression this issue's fix must avoid — see
+    # extraction.py's ExtractionCache docstring).
+    verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
+    mine_kwargs: dict[str, Any] = {
+        "no_cache": no_cache,
+        "refresh_extraction": no_cache,
+        **seg_kwargs,
+        **verdict_kwargs,
+    }
 
     try:
         mine_corpus(
@@ -1508,6 +1576,13 @@ def judge_cmd(
                     deviation_judge=dev_judge,
                     provenance_judge=prov_judge,
                     no_cache=True,
+                    # Deliberately NOT True (the default already): this
+                    # no_cache=True is the judge wiring's forced bypass of the
+                    # L1-L4 stage cache, not an operator --no-cache request —
+                    # extraction_cache must stay warm across judge rounds or
+                    # every round re-burns docling OCR from scratch (issue
+                    # #78; the regression issue #132 originally fixed).
+                    refresh_extraction=False,
                     progress=click.echo,
                     **seg_kwargs,
                 )
@@ -1591,6 +1666,11 @@ def judge_cmd(
             deviation_judge=dev_judge,
             provenance_judge=prov_judge,
             no_cache=True,
+            # See the --plan-only branch above: this no_cache=True is the
+            # judge wiring's forced bypass, not an operator --no-cache
+            # request — extraction_cache must stay warm across judge rounds
+            # (issue #78).
+            refresh_extraction=False,
             progress=click.echo,
             **seg_kwargs,
         )

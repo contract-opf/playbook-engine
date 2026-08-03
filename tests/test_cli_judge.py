@@ -828,6 +828,225 @@ def test_judge_plan_reuses_extraction_from_prior_judge_round(
 
 
 # ---------------------------------------------------------------------------
+# Issue #78: ``compile --no-cache`` must force re-extraction at the CLI seam
+#
+# The tests above (and the lower-level tests in test_pipeline_llm_seg.py /
+# test_extraction.py) all enter at the mine_corpus/extract_blocks API layer,
+# so none of them exercise cli.py's ``"refresh_extraction": no_cache`` kwarg
+# itself — the actual operator-facing deliverable of issue #78. These two
+# tests invoke ``compile`` through CliRunner (the real entry point an
+# operator uses) and count extractor calls across the full CLI wiring.
+# ---------------------------------------------------------------------------
+
+
+def test_compile_no_cache_forces_reextraction(
+    tmp_path: Path,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+    _count_rtf_extractions: list[Path],
+) -> None:
+    """``compile --no-cache`` must re-extract despite a warm
+    ``extraction_cache.jsonl``, and must leave the cache refreshed so a
+    subsequent plain run stays warm (issue #78).
+
+    Before the fix, ``--no-cache`` disabled only the L1-L4 stage cache;
+    ``ExtractionCache`` was threaded through independently and always hit,
+    so ``--no-cache`` silently replayed the same stale extracted blocks.
+    """
+    corpus_dir, config_path, out_dir = _make_llm_judge_corpus(tmp_path)
+    runner = CliRunner()
+
+    def _compile(*extra_args: str) -> None:
+        result = runner.invoke(
+            cli,
+            [
+                "compile",
+                str(corpus_dir),
+                "--config",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                *extra_args,
+            ],
+        )
+        assert result.exit_code == 0, f"compile {' '.join(extra_args)} failed:\n{result.output}"
+
+    _compile()
+    assert len(_count_rtf_extractions) == 1, "first compile must extract the one version"
+
+    _compile()
+    assert len(_count_rtf_extractions) == 1, (
+        "plain repeat compile must reuse the warm extraction cache, not re-extract"
+    )
+
+    _compile("--no-cache")
+    assert len(_count_rtf_extractions) == 2, (
+        "compile --no-cache must force re-extraction despite a warm "
+        "extraction_cache.jsonl (issue #78)"
+    )
+
+    _compile()
+    assert len(_count_rtf_extractions) == 2, (
+        "compile after --no-cache must reuse the freshly-refreshed extraction "
+        "cache — proving --no-cache left the cache warm, not just bypassed"
+    )
+
+
+def test_compile_verdict_store_forced_no_cache_does_not_reextract(
+    tmp_path: Path,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+    _count_rtf_extractions: list[Path],
+) -> None:
+    """A verdict-store-forced ``no_cache=True`` (``_verdict_store_kwargs``,
+    triggered whenever ``out_dir/judge/verdicts.jsonl`` exists) must NOT force
+    re-extraction, even though it forces the same ``no_cache`` flag an
+    operator's literal ``--no-cache`` would (issue #78).
+
+    This is the seam the issue's "Verifier corrections" single out: cli.py's
+    ``compile_kwargs`` merge at ``{"no_cache": no_cache, "refresh_extraction":
+    no_cache, **seg_kwargs, **verdict_kwargs}`` — ``verdict_kwargs`` can
+    override ``no_cache`` to True without the operator ever passing
+    --no-cache. If ``refresh_extraction`` were (re)computed from the merged
+    ``no_cache`` instead of the raw flag, every post-judge compile round
+    would re-burn a full re-extraction, regressing issue #132.
+    """
+    corpus_dir, config_path, out_dir = _make_llm_judge_corpus(tmp_path)
+    runner = CliRunner()
+
+    def _compile() -> str:
+        result = runner.invoke(
+            cli,
+            ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+        )
+        assert result.exit_code == 0, f"compile failed:\n{result.output}"
+        return result.output
+
+    _compile()
+    assert len(_count_rtf_extractions) == 1, "first compile must extract the one version"
+
+    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
+    verdicts_path.parent.mkdir(parents=True, exist_ok=True)
+    verdicts_path.touch()
+
+    output = _compile()
+    assert "store-backed judges active" in output, (
+        "compile must have wired store-backed judges (forcing no_cache=True) "
+        "for this assertion to actually exercise the forced-no_cache path"
+    )
+    assert len(_count_rtf_extractions) == 1, (
+        "a verdict-store-forced no_cache=True must not force re-extraction — "
+        "extraction_cache must stay warm across post-judge compile rounds"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #78 round 2: ``mine --no-cache`` must force re-extraction too
+#
+# Round 1 wired --no-cache/refresh_extraction through ``compile`` only —
+# ``mine_cmd`` had no --no-cache option at all, so an operator following the
+# engine's own version_ingest_failed remediation ("Inspect the source file
+# and re-run 'playbook mine' with --no-cache" — review.py/
+# inspection_report.py) hit "Error: No such option '--no-cache'." on exactly
+# the mine->project workflow the remediation text points at. These mirror
+# the two ``compile`` tests directly above for the ``mine`` path.
+# ---------------------------------------------------------------------------
+
+
+def test_mine_no_cache_forces_reextraction(
+    tmp_path: Path,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+    _count_rtf_extractions: list[Path],
+) -> None:
+    """``mine --no-cache`` must re-extract despite a warm
+    ``extraction_cache.jsonl``, and must leave the cache refreshed so a
+    subsequent plain run stays warm (issue #78 round 2).
+
+    Before the fix, ``mine`` had no ``--no-cache`` option at all — this test
+    exercises the real CLI entry point (``CliRunner``), not the
+    ``mine_corpus``/``extract_blocks`` API layer directly, so it actually
+    covers the operator-facing deliverable.
+    """
+    corpus_dir, config_path, out_dir = _make_llm_judge_corpus(tmp_path)
+    runner = CliRunner()
+
+    def _mine(*extra_args: str) -> None:
+        result = runner.invoke(
+            cli,
+            [
+                "mine",
+                str(corpus_dir),
+                "--config",
+                str(config_path),
+                "--out",
+                str(out_dir),
+                *extra_args,
+            ],
+        )
+        assert result.exit_code == 0, f"mine {' '.join(extra_args)} failed:\n{result.output}"
+
+    _mine()
+    assert len(_count_rtf_extractions) == 1, "first mine must extract the one version"
+
+    _mine()
+    assert len(_count_rtf_extractions) == 1, (
+        "plain repeat mine must reuse the warm extraction cache, not re-extract"
+    )
+
+    _mine("--no-cache")
+    assert len(_count_rtf_extractions) == 2, (
+        "mine --no-cache must force re-extraction despite a warm extraction_cache.jsonl (issue #78)"
+    )
+
+    _mine()
+    assert len(_count_rtf_extractions) == 2, (
+        "mine after --no-cache must reuse the freshly-refreshed extraction "
+        "cache — proving --no-cache left the cache warm, not just bypassed"
+    )
+
+
+def test_mine_verdict_store_forced_no_cache_does_not_reextract(
+    tmp_path: Path,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+    _count_rtf_extractions: list[Path],
+) -> None:
+    """A verdict-store-forced ``no_cache=True`` (``_verdict_store_kwargs``,
+    triggered whenever ``out_dir/judge/verdicts.jsonl`` exists) must NOT
+    force re-extraction on the ``mine`` path either (issue #78 round 2) —
+    same seam ``test_compile_verdict_store_forced_no_cache_does_not_reextract``
+    covers for ``compile``: ``mine_kwargs`` merges as ``{"no_cache": no_cache,
+    "refresh_extraction": no_cache, **seg_kwargs, **verdict_kwargs}``, so
+    ``verdict_kwargs`` can override ``no_cache`` to True without the operator
+    ever passing --no-cache, but must not also override ``refresh_extraction``.
+    """
+    corpus_dir, config_path, out_dir = _make_llm_judge_corpus(tmp_path)
+    runner = CliRunner()
+
+    def _mine() -> str:
+        result = runner.invoke(
+            cli,
+            ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+        )
+        assert result.exit_code == 0, f"mine failed:\n{result.output}"
+        return result.output
+
+    _mine()
+    assert len(_count_rtf_extractions) == 1, "first mine must extract the one version"
+
+    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
+    verdicts_path.parent.mkdir(parents=True, exist_ok=True)
+    verdicts_path.touch()
+
+    output = _mine()
+    assert "store-backed judges active" in output, (
+        "mine must have wired store-backed judges (forcing no_cache=True) "
+        "for this assertion to actually exercise the forced-no_cache path"
+    )
+    assert len(_count_rtf_extractions) == 1, (
+        "a verdict-store-forced no_cache=True must not force re-extraction — "
+        "extraction_cache must stay warm across post-judge mine rounds"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Apply-time semantic verdict validation (pre-derivation QA)
 # ---------------------------------------------------------------------------
 

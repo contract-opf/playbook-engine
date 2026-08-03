@@ -107,6 +107,29 @@ it is safe to keep warm across rounds regardless of whatever ``no_cache``
 value the judge wiring forces for the verdict-cache layers, while still
 missing cleanly — rather than silently replaying stale output — if the
 extractor environment itself changes between rounds.
+
+``refresh`` (issue #78): the flip side of the above — an operator who
+suspects bad extraction (e.g. a stale pre-docling-install entry) needs a way
+to force a real re-extraction, not just a re-judgment; before this,
+``--no-cache`` disabled the L1-L4 ``ArtifactStore``/``JudgmentCache`` but
+never touched ``ExtractionCache``, so it silently replayed the same stale
+blocks. :func:`extract_blocks`'s ``refresh`` parameter is the fix: when
+True, ``cache.get``/``cache.get_failure`` are skipped (this call always
+re-extracts from source) but ``cache.put`` still runs at the end (and so
+does ``cache.put_failure``, EXCEPT when a cached success already exists
+under the identical key — see :func:`extract_blocks`'s ``if not lines``
+guard, issue #78 round 2: a same-key failure there is necessarily transient,
+since extraction is a pure function of (bytes, extractor environment), so it
+must not permanently clobber output already proven extractable), so the
+cache is left warm and correct for the *next* call.
+``refresh`` is deliberately a plain parameter to ``extract_blocks`` — not
+tied to ``no_cache`` — because ``no_cache`` is also forced ``True`` by the
+judge wiring described above, and gating extraction refresh on that same
+boolean would defeat the judge-warm-cache guarantee this class exists for.
+Callers thread their own distinct signal sourced from the operator's actual
+``--no-cache`` CLI flag (see ``pipeline.mine_corpus``'s
+``refresh_extraction`` parameter) — never from a forced/internal
+``no_cache``.
 """
 
 from __future__ import annotations
@@ -303,7 +326,7 @@ class ExtractionCache:
 
 
 def extract_blocks(
-    path: Path, *, cache: ExtractionCache | None = None
+    path: Path, *, cache: ExtractionCache | None = None, refresh: bool = False
 ) -> tuple[str, list[Block], str]:
     """Extract ``path`` into ``(canonical_text, blocks, extractor)``.
 
@@ -322,6 +345,19 @@ def extract_blocks(
                see issue #132. On a miss, the result is stored before
                returning. Defaults to ``None`` (no caching — every call
                re-extracts).
+        refresh: If True, skip *cache*'s ``get``/``get_failure`` reads for
+               this call — always re-extract from source — while still
+               writing the fresh result via ``put``/``put_failure`` at the
+               end: reads bypassed, writes still happen (issue #78). This is
+               what lets an operator-invoked ``--no-cache`` force a real
+               recompute of a suspect extraction instead of silently
+               replaying stale cached blocks. Exception: a refresh attempt
+               that yields no text does NOT overwrite a pre-existing cached
+               SUCCESS for the same key — see the ``if not lines`` guard
+               below; a same-key failure is necessarily transient (issue #78
+               round 2), not new evidence the content is bad. Ignored when
+               *cache* is None (already always re-extracts). Defaults to
+               False.
 
     Raises:
         ExtractionError: unsupported extension, missing ``pandoc`` (RTF), or
@@ -334,7 +370,7 @@ def extract_blocks(
     if suffix not in (".docx", ".pdf", ".rtf"):
         raise ExtractionError(f"unsupported file extension: {suffix!r} ({path})")
 
-    if cache is not None:
+    if cache is not None and not refresh:
         cached = cache.get(path)
         if cached is not None:
             return cached
@@ -372,16 +408,33 @@ def extract_blocks(
 
     if not lines:
         message = f"extraction yielded no text: {path}"
-        if cache is not None:
-            # Negative-cache the full failed attempt (docling OCR can burn its
-            # whole per-file timeout) so later pipeline commands fail fast
-            # instead of re-attempting per round — see get_failure for the
-            # extractor-environment scoping that keeps a docling upgrade able
-            # to retry a legacy-era failure. Record the ENVIRONMENT that
-            # failed (detect_extractor), not the post-fallback adapter label:
-            # a docling timeout falls back to legacy before landing here, and
-            # storing "legacy" would make every docling-environment lookup
-            # miss and re-burn the OCR timeout each round.
+        # Negative-cache the full failed attempt (docling OCR can burn its
+        # whole per-file timeout) so later pipeline commands fail fast
+        # instead of re-attempting per round — see get_failure for the
+        # extractor-environment scoping that keeps a docling upgrade able to
+        # retry a legacy-era failure. Record the ENVIRONMENT that failed
+        # (detect_extractor), not the post-fallback adapter label: a docling
+        # timeout falls back to legacy before landing here, and storing
+        # "legacy" would make every docling-environment lookup miss and
+        # re-burn the OCR timeout each round.
+        #
+        # Exception: under refresh=True, if a cached SUCCESS already exists
+        # under this exact key (same file bytes + extractor environment —
+        # see _extraction_cache_payload), do NOT overwrite it with this
+        # failure (issue #78 round 2). put_failure files under the SAME key
+        # as put, so an unguarded write here would let a transient
+        # re-extraction failure (e.g. the docling OCR-timeout mode this
+        # comment already documents) permanently clobber a known-good entry
+        # — recovery would be back to hand-deleting extraction_cache.jsonl,
+        # exactly what this issue exists to eliminate. This is sound because
+        # extraction is documented as a pure function of (bytes, extractor
+        # environment) — the cache key inputs — so a prior success under
+        # the IDENTICAL key already proves the content is extractable; a
+        # refresh that nonetheless yields nothing is not new evidence to
+        # the contrary. A refresh with no pre-existing success (first
+        # attempt, or a prior same-key failure) still negative-caches as
+        # before.
+        if cache is not None and not (refresh and cache.get(path) is not None):
             cache.put_failure(path, message, detect_extractor(path))
         raise ExtractionError(message)
 

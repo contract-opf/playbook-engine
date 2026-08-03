@@ -35,13 +35,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 import yaml
 
+from playbook_engine import extraction
 from playbook_engine.aar import build_after_action_data
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
-from playbook_engine.extraction import extract_blocks
+from playbook_engine.extraction import ExtractionCache, extract_blocks
 from playbook_engine.llm_segmenter_batch import (
     NormalizeTrailResult,
     SegmentationVerdictCache,
@@ -490,6 +492,113 @@ def test_segmentation_cache_hits_on_sync_path(tmp_path: Path) -> None:
 
     raw_obs = read_observations_jsonl(out_dir_2 / "observations.jsonl")
     assert {o["taxonomy_id"] for o in raw_obs} == {"indemnification", "governing_law"}
+
+
+# ---------------------------------------------------------------------------
+# refresh_extraction (issue #78) — operator-invoked --no-cache must force
+# real re-extraction despite a warm extraction_cache.jsonl, while the judge
+# path's internally-forced no_cache=True must NOT (regression guard for
+# issue #132's judge-warm-cache intent). Mirrors
+# test_segmentation_cache_hits_on_sync_path's two-out_dir/shared-cache shape,
+# but counts the underlying RTF extractor call instead of segment_fn calls.
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_extraction_forces_reextraction_despite_warm_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mine_corpus(no_cache=True, refresh_extraction=True) — the shape
+    cli.py's ``compile --no-cache`` produces — must re-invoke the extractor
+    for a version whose content is already in a warm ``extraction_cache``.
+
+    Before the fix, ``no_cache`` only gated the L1-L4 ``ArtifactStore``/
+    ``JudgmentCache``; ``ExtractionCache`` was threaded through completely
+    independently and always hit, so ``--no-cache`` silently replayed the
+    same stale blocks.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    extraction_cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    call_count = 0
+    real_extract_rtf_lines = extraction._extract_rtf_lines
+
+    def _counting_extract_rtf_lines(path: Path) -> list[tuple[str, int]]:
+        nonlocal call_count
+        call_count += 1
+        return real_extract_rtf_lines(path)
+
+    monkeypatch.setattr(extraction, "_extract_rtf_lines", _counting_extract_rtf_lines)
+
+    common_kwargs: dict[str, Any] = {
+        "corpus_dir": corpus_dir,
+        "config": cfg,
+        "taxonomy": taxonomy,
+        "use_llm_segmentation": True,
+        "llm_segment_fn": _fake_segment_fn,
+        "extraction_cache": extraction_cache,
+        "no_cache": True,  # disable the L1-L4 stage cache so _compute_doc_result re-executes
+    }
+
+    mine_corpus(out_dir=out_dir, **common_kwargs)
+    assert call_count == 1, "first run must extract (cache miss)"
+
+    out_dir_2 = tmp_path / "out2"
+    mine_corpus(out_dir=out_dir_2, refresh_extraction=True, **common_kwargs)
+    assert call_count == 2, (
+        "refresh_extraction=True must force re-extraction despite the warm extraction_cache"
+    )
+
+    # The refreshed run's output is unaffected — same source, same result.
+    raw_obs = read_observations_jsonl(out_dir_2 / "observations.jsonl")
+    assert {o["taxonomy_id"] for o in raw_obs} == {"indemnification", "governing_law"}
+
+
+def test_judge_forced_no_cache_does_not_force_reextraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mine_corpus(no_cache=True) ALONE — refresh_extraction left at its
+    default False, exactly how ``playbook judge``'s cli.py wiring calls it —
+    must NOT force re-extraction: the judge path forces no_cache=True to
+    bypass the L1-L4 stage cache's stale needs_review sentinels, and that
+    must not also force every judge round to re-extract/re-OCR every version
+    from scratch (issue #132's judge-warm-cache intent, which this issue
+    #78 fix must not regress).
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    extraction_cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    call_count = 0
+    real_extract_rtf_lines = extraction._extract_rtf_lines
+
+    def _counting_extract_rtf_lines(path: Path) -> list[tuple[str, int]]:
+        nonlocal call_count
+        call_count += 1
+        return real_extract_rtf_lines(path)
+
+    monkeypatch.setattr(extraction, "_extract_rtf_lines", _counting_extract_rtf_lines)
+
+    common_kwargs: dict[str, Any] = {
+        "corpus_dir": corpus_dir,
+        "config": cfg,
+        "taxonomy": taxonomy,
+        "use_llm_segmentation": True,
+        "llm_segment_fn": _fake_segment_fn,
+        "extraction_cache": extraction_cache,
+        "no_cache": True,  # the judge path's forced stage-cache bypass
+    }
+
+    mine_corpus(out_dir=out_dir, **common_kwargs)
+    assert call_count == 1
+
+    out_dir_2 = tmp_path / "out2"
+    mine_corpus(out_dir=out_dir_2, **common_kwargs)  # refresh_extraction defaults to False
+    assert call_count == 1, (
+        "no_cache=True alone must not force re-extraction — extraction_cache must stay warm"
+    )
 
 
 # ---------------------------------------------------------------------------

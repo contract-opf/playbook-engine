@@ -852,3 +852,179 @@ def test_docling_timeout_failure_negative_caches_under_docling_env(
     with pytest.raises(ext.ExtractionError, match="cached failure"):
         ext.extract_blocks(pdf, cache=cache)
     assert docling_calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# extract_blocks(refresh=True) (issue #78) — the primitive an operator-
+# invoked --no-cache relies on to force a real recompute of a suspect
+# extraction: cache READS are bypassed but WRITES still happen, so the
+# refreshed entry serves the next plain (non-refresh) call.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_blocks_refresh_bypasses_read_but_still_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``refresh=True`` must skip the cache read (always re-extract from
+    source) while still refreshing the cache entry — "reads bypassed, writes
+    still happen". Before this parameter existed, ``extract_blocks`` had no
+    way at all to bypass a cache hit, so an operator's ``--no-cache`` could
+    not force re-extraction of a suspect cached result.
+    """
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+
+    calls: list[Path] = []
+    real_extract_docx_lines = extraction._extract_docx_lines
+
+    def _counting_extract_docx_lines(p: Path) -> list[tuple[str, int]]:
+        calls.append(p)
+        return real_extract_docx_lines(p)
+
+    monkeypatch.setattr(extraction, "_extract_docx_lines", _counting_extract_docx_lines)
+
+    first = extract_blocks(path, cache=cache)
+    assert len(calls) == 1, "first call must extract (cache miss)"
+
+    second = extract_blocks(path, cache=cache)
+    assert len(calls) == 1, "plain repeat call must hit the cache, not re-extract"
+    assert second == first
+
+    third = extract_blocks(path, cache=cache, refresh=True)
+    assert len(calls) == 2, "refresh=True must bypass the cache read and re-extract"
+    assert third == first  # unchanged source content -> identical result
+
+    fourth = extract_blocks(path, cache=cache)
+    assert len(calls) == 2, (
+        "the refresh must have written a fresh entry — the next plain call must hit it"
+    )
+    assert fourth == first
+
+
+def test_extract_blocks_refresh_ignores_cached_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``refresh=True`` must also bypass a cached FAILURE (``get_failure``),
+    not just a cached success — an operator forcing ``--no-cache`` to retry a
+    suspect extraction must not be blocked by its own prior negative-cache
+    entry in the SAME extractor environment.
+    """
+    from playbook_engine import extraction as ext
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake scanned pdf")
+    cache = ext.ExtractionCache(tmp_path / "cache.jsonl")
+
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "legacy")
+    monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [])
+
+    with pytest.raises(ext.ExtractionError):
+        ext.extract_blocks(pdf, cache=cache)
+
+    # Plain retry (no refresh): served from the negative cache, fails fast.
+    with pytest.raises(ext.ExtractionError, match="cached failure"):
+        ext.extract_blocks(pdf, cache=cache)
+
+    # refresh=True, same environment: the operator forces a real retry — this
+    # time extraction succeeds. The cached failure must not block it.
+    monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [("Recovered text.", 0)])
+    canonical, _, extractor = ext.extract_blocks(pdf, cache=cache, refresh=True)
+    assert "Recovered text." in canonical
+    assert extractor == "legacy"
+
+    # The success overwrites the failure marker for future plain calls.
+    hit = cache.get(pdf)
+    assert hit is not None and hit[2] == "legacy"
+
+
+def test_extract_blocks_refresh_failure_does_not_clobber_cached_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``refresh=True`` call that transiently yields no text must NOT
+    overwrite a pre-existing cached SUCCESS for the same key (issue #78
+    round 2).
+
+    ``_extraction_cache_payload`` keys ``put`` and ``put_failure`` identically
+    (path content hash + format version + extractor environment — no
+    dependency on ``refresh``), so before this guard, a refresh attempt that
+    transiently yielded no lines (the documented docling-OCR-timeout mode)
+    would negative-cache directly over a previously-good entry. Every later
+    PLAIN call would then raise "cached failure" forever, even once the
+    extractor is healthy again — recovery was hand-deleting
+    extraction_cache.jsonl by hand, exactly the state issue #78 exists to
+    eliminate, and newly reachable only via the very flag meant to fix it.
+    """
+    from playbook_engine import extraction as ext
+
+    path = _simple_docx(tmp_path)
+    cache = ext.ExtractionCache(tmp_path / "extraction_cache.jsonl")
+
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "legacy")
+
+    # Cold run: succeeds and caches the real extracted content.
+    good = ext.extract_blocks(path, cache=cache)
+    assert good[2] == "legacy"
+
+    # Refresh run: extraction transiently yields nothing (e.g. an OCR
+    # timeout) even though the source content is unchanged and genuinely
+    # extractable (proven by the successful cold run above under the
+    # IDENTICAL cache key — same bytes, same extractor environment).
+    monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [])
+    with pytest.raises(ext.ExtractionError, match="yielded no text"):
+        ext.extract_blocks(path, cache=cache, refresh=True)
+
+    # The prior success must survive untouched...
+    hit = cache.get(path)
+    assert hit is not None, "a transient refresh failure must not clobber the cached success"
+    assert hit == good
+
+    # ...and a subsequent PLAIN call must replay it, not raise a cached
+    # failure (the extractor being "healthy again" in the wording above is
+    # irrelevant here — the cache read never re-invokes the extractor at
+    # all on a plain hit).
+    replay = ext.extract_blocks(path, cache=cache)
+    assert replay == good
+
+
+def test_extract_blocks_refresh_failure_still_negative_caches_without_prior_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new refresh-vs-clobber guard (issue #78 round 2) must not disable
+    negative-caching outright — only the "overwrite an existing success"
+    case is special-cased. A refresh with NO pre-existing cached success
+    (first attempt under this key, or a prior same-key failure) still
+    negative-caches as before, so repeated plain calls keep failing fast
+    instead of re-attempting a full docling OCR timeout every round.
+    """
+    from playbook_engine import extraction as ext
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake scanned pdf")
+    cache = ext.ExtractionCache(tmp_path / "cache.jsonl")
+
+    monkeypatch.setattr(ext, "detect_extractor", lambda p: "legacy")
+    monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [])
+
+    # refresh=True as the very first call for this key: no cached success
+    # exists yet, so the failure must still be negative-cached.
+    with pytest.raises(ext.ExtractionError, match="yielded no text"):
+        ext.extract_blocks(pdf, cache=cache, refresh=True)
+
+    assert cache.get(pdf) is None
+    assert cache.get_failure(pdf) is not None, (
+        "a refresh failure with no pre-existing success must still negative-cache"
+    )
+
+    # A subsequent PLAIN call must fail fast from the negative cache, not
+    # re-invoke the extractor.
+    calls = {"n": 0}
+    real = ext._extract_legacy_lines
+
+    def _counting(p: Path, s: str) -> list[tuple[str, int]]:
+        calls["n"] += 1
+        return real(p, s)
+
+    monkeypatch.setattr(ext, "_extract_legacy_lines", _counting)
+    with pytest.raises(ext.ExtractionError, match="cached failure"):
+        ext.extract_blocks(pdf, cache=cache)
+    assert calls["n"] == 0

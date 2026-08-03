@@ -137,7 +137,7 @@ order:
   - v3-fully-executed.pdf
 ```
 
-Then re-run `playbook compile --no-cache` to pick up the hints.
+Then re-run `playbook compile --no-cache` to pick up the hints. Note: `--no-cache` also forces a full re-extraction (docling/pdfplumber/python-docx/pandoc) of the corpus, even if `extraction_cache.jsonl` is already warm — it is not a cheap flag to reach for routinely.
 
 ---
 
@@ -147,7 +147,7 @@ Then re-run `playbook compile --no-cache` to pick up the hints.
 # Default: resumes from saved observations (fast)
 playbook compile ./corpus --config ./playbook.config.yaml --out ./out
 
-# Force full re-run (e.g. after adding new documents)
+# Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if extraction_cache.jsonl is warm
 playbook compile ./corpus --config ./playbook.config.yaml --out ./out --no-cache
 ```
 

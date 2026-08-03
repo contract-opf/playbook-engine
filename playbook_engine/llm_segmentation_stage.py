@@ -85,6 +85,7 @@ def segment_to_tree(
     cache: SegmentationVerdictCache | None = None,
     model: str = DEFAULT_MODEL,
     extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
 ) -> GroundingResult:
     """Extract + LLM-segment + verify/repair *path* into a grounded tree.
 
@@ -153,6 +154,16 @@ def segment_to_tree(
                       not segmentation, is the dominant cost on a real
                       corpus with scanned PDFs (issue #132). Defaults to
                       ``None`` (no caching — every call re-extracts).
+        refresh_extraction: Forwarded to
+                      :func:`~playbook_engine.extraction.extract_blocks` as
+                      its ``refresh`` argument — when True, bypasses
+                      ``extraction_cache``'s reads for this call (always
+                      re-extracts from source) while its writes still
+                      happen, refreshing the cache for next time (issue
+                      #78). Deliberately independent of ``no_cache``/judge
+                      wiring elsewhere in the pipeline — see
+                      ``pipeline.mine_corpus``'s parameter of the same name
+                      for the full rationale. Defaults to False.
 
     Returns:
         The grounded :class:`~playbook_engine.segmentation_grounding.GroundingResult`
@@ -168,7 +179,9 @@ def segment_to_tree(
     # extractor (docling vs legacy) is not needed here — mine_corpus records
     # it per version via extraction.detect_extractor before this ever runs
     # (see pipeline._compute_doc_result), so this path only needs the text.
-    canonical_text, blocks, _extractor = extract_blocks(path, cache=extraction_cache)
+    canonical_text, blocks, _extractor = extract_blocks(
+        path, cache=extraction_cache, refresh=refresh_extraction
+    )
 
     if cache is not None:
         cached_nodes = cache.get(canonical_text, model=model)

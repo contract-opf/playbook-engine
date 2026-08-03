@@ -140,6 +140,7 @@ def test_template_segmented_via_llm_path(tmp_path: Path, monkeypatch) -> None:
         segmentation_cache=None,
         model: str = "test-model",
         extraction_cache=None,
+        refresh_extraction: bool = False,
     ):
         calls.append((document_id, version, Path(path).name))
         # Enough clauses to pass the scope gate's "too short" heuristic. The
