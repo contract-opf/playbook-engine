@@ -52,7 +52,14 @@ import sys
 # no docling/torch. Degrades safely: if the recipe ever drifts, cache hits
 # simply go undetected and the ETA is over-estimated (conservative), never
 # wrong-low.
-_EXTRACTION_CACHE_FORMAT_VERSION = "1"
+#
+# Bumped to "2" alongside extraction._EXTRACTION_CACHE_FORMAT_VERSION (issue
+# #81: extract_blocks's returned/cached third element gained a structured
+# reason — see extraction.ExtractorLabel). Without this bump, this script's
+# own cache-hit probe would keep matching pre-#81 keys that the real engine
+# no longer does, over-reporting "already extracted" and under-estimating
+# the ETA for a corpus whose warm cache the real run will actually miss.
+_EXTRACTION_CACHE_FORMAT_VERSION = "2"
 
 # Per-version wall-clock (seconds), docling on CPU. Born-digital = model
 # cold-load + convert; scanned = the same plus RapidOCR over page images,

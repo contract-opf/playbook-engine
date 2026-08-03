@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from playbook_engine.extraction import ExtractorLabel
 from playbook_engine.llm_segmentation_stage import segment_to_tree
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.segmentation_grounding import Block, GroundingResult, SegNode
@@ -79,7 +80,7 @@ def test_segment_to_tree_extracts_and_grounds_with_injected_segment_fn(tmp_path:
     path = tmp_path / "v1.rtf"
     _write_rtf(path, _BODY)
 
-    result = segment_to_tree(
+    result, extractor_label = segment_to_tree(
         path,
         taxonomy_ids=["indemnification"],
         segment_fn=_two_block_segment_fn,
@@ -89,6 +90,14 @@ def test_segment_to_tree_extracts_and_grounds_with_injected_segment_fn(tmp_path:
     assert len(result.tree.nodes) == 1
     assert result.tree.nodes[0].heading == "1. Indemnification"
     assert result.taxonomy_by_path == {"1": "indemnification"}
+
+    # issue #81: segment_to_tree also surfaces the REAL extractor label that
+    # extract_blocks resolved for this file — docling is not installed in
+    # the test environment, so "auto" mode resolves to legacy with reason
+    # "env-missing" (no docling on PATH at all, not a per-file crash).
+    assert isinstance(extractor_label, ExtractorLabel)
+    assert extractor_label == "legacy"
+    assert extractor_label.reason == "env-missing"
 
 
 def test_segment_to_tree_returned_tree_uses_run_gates_defaults(tmp_path: Path) -> None:
@@ -100,7 +109,7 @@ def test_segment_to_tree_returned_tree_uses_run_gates_defaults(tmp_path: Path) -
     path = tmp_path / "v1.rtf"
     _write_rtf(path, _BODY)
 
-    result = segment_to_tree(
+    result, _extractor_label = segment_to_tree(
         path,
         taxonomy_ids=["indemnification"],
         segment_fn=_two_block_segment_fn,
@@ -164,7 +173,7 @@ def test_segment_to_tree_cache_path_forwards_last_error_to_repair_aware_fn(
 
     cache = SegmentationVerdictCache(tmp_path / "seg_cache.jsonl")
 
-    result = segment_to_tree(
+    result, _extractor_label = segment_to_tree(
         path,
         taxonomy_ids=["indemnification"],
         segment_fn=_repair_aware_segment_fn,
@@ -222,10 +231,79 @@ def test_default_segment_fn_binds_taxonomy_ids_and_delegates(
 
     monkeypatch.setattr("playbook_engine.llm_segmenter.segment_document", _fake_segment_document)
 
-    result = segment_to_tree(path, taxonomy_ids=["indemnification"])  # no segment_fn injected
+    # no segment_fn injected
+    result, _extractor_label = segment_to_tree(path, taxonomy_ids=["indemnification"])
 
     assert len(calls) == 1
     called_text, called_blocks, called_taxonomy_ids = calls[0]
     assert called_taxonomy_ids == ["indemnification"]
     assert len(called_blocks) == 2
     assert result.taxonomy_by_path == {"1": "indemnification"}
+
+
+# ---------------------------------------------------------------------------
+# extractor_label (issue #81) — segment_to_tree surfaces the REAL label
+# extract_blocks resolved, on both the cache-hit and full-compute paths.
+# ---------------------------------------------------------------------------
+
+
+def test_segment_to_tree_cache_hit_path_still_returns_extractor_label(
+    tmp_path: Path,
+) -> None:
+    """A SegmentationVerdictCache HIT skips segment_fn entirely, but
+    extraction still runs first (extract_blocks is called before the cache
+    is even consulted) — the returned extractor_label must be present and
+    correct on this path too, not just the full-compute path.
+    """
+    path = tmp_path / "v1.rtf"
+    _write_rtf(path, _BODY)
+    cache = SegmentationVerdictCache(tmp_path / "seg_cache.jsonl")
+
+    first_result, first_label = segment_to_tree(
+        path,
+        taxonomy_ids=["indemnification"],
+        segment_fn=_two_block_segment_fn,
+        cache=cache,
+    )
+    assert len(first_result.tree.nodes) == 1
+
+    calls = 0
+
+    def _boom_if_called(
+        canonical_text: str, blocks: list[Block], last_error: object = None
+    ) -> list[SegNode]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("segment_fn must not be called on a cache hit")
+
+    second_result, second_label = segment_to_tree(
+        path,
+        taxonomy_ids=["indemnification"],
+        segment_fn=_boom_if_called,
+        cache=cache,
+    )
+
+    assert calls == 0, "the second call must be a cache hit — segment_fn never invoked"
+    assert len(second_result.tree.nodes) == 1
+    assert second_label == first_label == "legacy"
+    assert second_label.reason == first_label.reason == "env-missing"
+
+
+def test_segment_to_tree_declared_legacy_reason_is_declared(tmp_path: Path) -> None:
+    """extractor="legacy" (mirrors config.extraction.extractor: legacy) must
+    surface reason="declared" — a deliberate config choice, distinct from
+    "env-missing" (auto mode, docling absent) even though both resolve to
+    the same "legacy" extractor.
+    """
+    path = tmp_path / "v1.rtf"
+    _write_rtf(path, _BODY)
+
+    _result, extractor_label = segment_to_tree(
+        path,
+        taxonomy_ids=["indemnification"],
+        segment_fn=_two_block_segment_fn,
+        extractor="legacy",
+    )
+
+    assert extractor_label == "legacy"
+    assert extractor_label.reason == "declared"

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+import playbook_engine.cli as cli_module
 from playbook_engine.cli import cli
 from playbook_engine.validator import validate_document
 
@@ -1452,6 +1454,184 @@ def test_mine_records_extractor_per_version(
     doc_entry = next(d for d in manifest if d["document_id"] == "deal-001")
     ingest_by_version = {v["version"]: v for v in doc_entry["version_ingest"]}
     assert ingest_by_version["v1"]["extractor"] == "legacy"
+
+
+def test_mine_echoes_fallback_breakdown_for_live_backend_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_anthropic: type[_RecordingAnthropicClient],
+) -> None:
+    """A live per-file docling failure must show up in ``mine``'s output as
+    a fallback breakdown naming the affected document/version — not just a
+    bare ``extraction: legacy=1`` count with no indication anything
+    degraded (issue #81)."""
+    real_which = shutil.which
+
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/docling" if cmd == "docling" else real_which(cmd)
+    )
+
+    real_subprocess_run = subprocess.run
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "docling":
+            raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+        # pandoc's own call (the real RTF legacy path) must go through
+        # untouched, or the fallback itself would also fail.
+        return real_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    corpus_dir, config_path, out_dir = _make_llm_corpus(tmp_path, segmentation={"llm": True})
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+    )
+    assert result.exit_code == 0, f"mine failed:\n{result.output}"
+
+    assert "extraction: legacy=1" in result.output
+    assert "extraction fallback: 1 version(s) (backend-error=1)" in result.output
+    assert "deal-001/v1" in result.output
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    doc_entry = next(d for d in manifest if d["document_id"] == "deal-001")
+    ingest_by_version = {v["version"]: v for v in doc_entry["version_ingest"]}
+    assert ingest_by_version["v1"]["extractor"] == "legacy"
+    assert ingest_by_version["v1"]["reason"] == "backend-error"
+
+
+# ---------------------------------------------------------------------------
+# _echo_extractor_summary — direct unit coverage for formatting edge cases
+# (multi-reason breakdown, the naming cap/"+N more" tail, and the
+# deterministic-only-corpus case) that would need a disproportionate amount
+# of fixture/mocking machinery to exercise end-to-end through a real ``mine``
+# run for every combination (issue #81).
+# ---------------------------------------------------------------------------
+
+
+def _write_manifest(out_dir: Path, manifest: list[dict[str, Any]]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "corpus_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_echo_extractor_summary_deterministic_only_corpus_not_blind(tmp_path: Path) -> None:
+    """A docling-less DETERMINISTIC-segmentation run (extractor is the raw
+    file suffix, e.g. "docx") must still print a summary line — previously
+    this function filtered to just "docling"/"legacy" and returned early
+    with nothing to show for a purely deterministic run (issue #81)."""
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "deal-001",
+                "version_ingest": [
+                    {"version": "v1", "status": "ok", "error": None, "extractor": "docx"},
+                    {"version": "v2", "status": "ok", "error": None, "extractor": "pdf"},
+                ],
+            }
+        ],
+    )
+    lines: list[str] = []
+    cli_module._echo_extractor_summary(tmp_path, lines.append)
+
+    assert any("docx=1" in line and "pdf=1" in line for line in lines), lines
+    # No fallback block — the deterministic path never carries a "reason".
+    assert not any("fallback" in line for line in lines)
+
+
+def test_echo_extractor_summary_breaks_down_by_reason(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "deal-001",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "backend-error",
+                    },
+                    {
+                        "version": "v2",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "env-missing",
+                    },
+                    {
+                        "version": "v3",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "docling",
+                        "reason": None,
+                    },
+                    {
+                        "version": "v4",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "declared",
+                    },
+                ],
+            }
+        ],
+    )
+    lines: list[str] = []
+    cli_module._echo_extractor_summary(tmp_path, lines.append)
+
+    summary_line = next(line for line in lines if line.strip().startswith("extraction:"))
+    assert "docling=1" in summary_line
+    assert "legacy=3" in summary_line
+
+    fallback_line = next(line for line in lines if "fallback:" in line)
+    assert "2 version(s)" in fallback_line
+    assert "backend-error=1" in fallback_line
+    assert "env-missing=1" in fallback_line
+    # "declared" is a deliberate config choice, never a fallback — must not
+    # be counted in the fallback tally.
+    assert "declared" not in fallback_line
+
+    names_line = next(line for line in lines if "deal-001/v1" in line or "deal-001/v2" in line)
+    assert "deal-001/v1" in names_line
+    assert "deal-001/v2" in names_line
+    # v3 (docling, no fallback) and v4 (declared) must not be named here.
+    assert "deal-001/v3" not in names_line
+    assert "deal-001/v4" not in names_line
+
+
+def test_echo_extractor_summary_caps_named_fallbacks_with_tail(tmp_path: Path) -> None:
+    """More than the cap's worth of fallback versions collapses into a
+    "+N more" tail rather than dumping every name inline (issue #81)."""
+    version_ingest = [
+        {
+            "version": f"v{i}",
+            "status": "ok",
+            "error": None,
+            "extractor": "legacy",
+            "reason": "backend-error",
+        }
+        for i in range(1, 13)  # 12 fallbacks, cap is 10
+    ]
+    _write_manifest(tmp_path, [{"document_id": "deal-001", "version_ingest": version_ingest}])
+
+    lines: list[str] = []
+    cli_module._echo_extractor_summary(tmp_path, lines.append)
+
+    fallback_line = next(line for line in lines if "fallback:" in line)
+    assert "12 version(s)" in fallback_line
+
+    names_line = next(line for line in lines if "deal-001/v1" in line)
+    assert "+2 more" in names_line
+    assert "deal-001/v11" not in names_line, "only the first 10 must be named inline"
+
+
+def test_echo_extractor_summary_no_manifest_is_silent_noop(tmp_path: Path) -> None:
+    lines: list[str] = []
+    cli_module._echo_extractor_summary(tmp_path, lines.append)
+    assert lines == []
 
 
 def test_mine_segmentation_llm_batch_cache_wires_all_three(

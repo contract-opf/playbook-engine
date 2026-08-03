@@ -72,6 +72,54 @@ def _strip_invisible(value: Any) -> Any:
     return value
 
 
+# Keys corpus.documents[].version_ingest[] may carry into the PUBLISHED
+# playbook — mirrors spec/playbook.schema-0.3.json's (and -0.2.json's,
+# identical here) corpus.documents.items.properties.version_ingest.items.
+# properties exactly, whose additionalProperties:false rejects anything
+# else. corpus_documents (as read from corpus_manifest.json) can carry
+# richer, engine-internal-only keys not in this set — e.g. "reason"
+# (extraction.ExtractorLabel.reason, issue #81), additive to
+# corpus_manifest.json/review.json but never part of the public OPF schema
+# — see _sanitize_corpus_documents_for_schema below, which strips down to
+# exactly this set before assembly. A test (test_playbook_assembler.py)
+# asserts this set stays in sync with the schema's actual property set:
+# used as a strip-list, drift in the OTHER direction (a future schema
+# addition silently stripped from every published playbook) would
+# otherwise fail silently.
+_VERSION_INGEST_SCHEMA_KEYS = frozenset({"version", "status", "error", "extractor"})
+
+
+def _sanitize_corpus_documents_for_schema(
+    corpus_documents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return *corpus_documents* with each ``version_ingest`` entry stripped to
+    :data:`_VERSION_INGEST_SCHEMA_KEYS` — see the constant's docstring.
+
+    Every other field on each document dict (and every other key on each
+    ``version_ingest`` entry within ``_VERSION_INGEST_SCHEMA_KEYS``) passes
+    through unchanged — only ``version_ingest`` entries are rebuilt, and only
+    to drop keys outside the whitelist; nothing else this function's caller
+    relies on is touched.
+    """
+    sanitized: list[dict[str, Any]] = []
+    for doc in corpus_documents:
+        version_ingest = doc.get("version_ingest")
+        if not isinstance(version_ingest, list):
+            sanitized.append(doc)
+            continue
+        new_doc = dict(doc)
+        new_doc["version_ingest"] = [
+            (
+                {k: v for k, v in vi.items() if k in _VERSION_INGEST_SCHEMA_KEYS}
+                if isinstance(vi, dict)
+                else vi
+            )
+            for vi in version_ingest
+        ]
+        sanitized.append(new_doc)
+    return sanitized
+
+
 # Observation bases meaning no real judge assessed the clause — mirrors
 # ``clause_position_compiler._UNJUDGED_BASES``. "stub" (no judge configured
 # at all) is the strict case; "needs_review"/"judge_error" additionally
@@ -224,6 +272,17 @@ def assemble_playbook(
     Raises:
         AssemblyError: if ``validate_document()`` reports any blocking errors.
     """
+    # Strip each version_ingest entry down to the schema-allowed key set
+    # (issue #81) BEFORE anything below reads/embeds corpus_documents — the
+    # schema's additionalProperties:false on version_ingest.items would
+    # otherwise reject a document carrying e.g. "reason"
+    # (extraction.ExtractorLabel.reason), which corpus_manifest.json/
+    # review.json/the CLI need but the published OPF does not. Reassigning
+    # the local name means every use below (stats, the embedded
+    # corpus.documents, corpus.snapshot's manifest_triples) sees the
+    # sanitized shape automatically.
+    corpus_documents = _sanitize_corpus_documents_for_schema(corpus_documents)
+
     # --- corpus stats (auto-computed) ---
     n_total = len(corpus_documents)
     n_in_scope = sum(1 for d in corpus_documents if d.get("in_scope", True))

@@ -677,6 +677,123 @@ def test_report_dedupes_version_ingest_failure_present_in_both_sources(
 
 
 # ---------------------------------------------------------------------------
+# version_ingest fallback advisory flag — issue #81
+# ---------------------------------------------------------------------------
+
+
+def test_report_shows_version_ingest_fallback_flag(tmp_path: Path) -> None:
+    """A version mined via the legacy extractor after a real degradation
+    (reason="backend-error"/"env-missing") gets an advisory info flag in the
+    Needs-Attention section — distinct from an actual ingest failure, since
+    the version WAS mined, just possibly lower-fidelity."""
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [
+            {
+                "document_id": "deal-alice",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "backend-error",
+                    }
+                ],
+            }
+        ],
+    )
+    report = build_inspection_report(out_dir)
+    assert "version_ingest_fallback" in report
+    assert "version_ingest_failed" not in report
+
+
+def test_report_no_fallback_flag_for_declared_legacy(tmp_path: Path) -> None:
+    """reason="declared" (a deliberate config choice) must not produce an
+    advisory fallback flag."""
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [
+            {
+                "document_id": "deal-alice",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "declared",
+                    }
+                ],
+            }
+        ],
+    )
+    report = build_inspection_report(out_dir)
+    assert "version_ingest_fallback" not in report
+
+
+def test_report_dedupes_version_ingest_fallback_present_in_both_sources(
+    tmp_path: Path,
+) -> None:
+    """Mirrors test_report_dedupes_version_ingest_failure_present_in_both_sources
+    for the NEW fallback kind (issue #81): review._check_manifest and
+    inspection_report._version_ingest_review_flags must build byte-identical
+    suggested_action text for the SAME underlying fallback, or a version
+    present in both corpus_manifest.json and review.json renders as two
+    Needs-Attention rows instead of one.
+    """
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [
+            {
+                "document_id": "deal-alice",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "backend-error",
+                    }
+                ],
+            }
+        ],
+    )
+    # Mirrors exactly what `playbook review`'s `_check_manifest` writes to
+    # review.json for the identical underlying fallback.
+    _write_review_json(
+        out_dir,
+        [
+            {
+                "document_id": "deal-alice",
+                "stage": "ingest",
+                "kind": "version_ingest_fallback",
+                "severity": "info",
+                "detail": (
+                    "Version 'v1' was mined via the legacy extractor: docling failed on "
+                    "this file and the engine fell back to legacy."
+                ),
+                "suggested_action": (
+                    "Version 'v1' was mined via the legacy extractor: docling failed on "
+                    "this file and the engine fell back to legacy — no OCR, no "
+                    "docling-derived heading structure for this version. Review the "
+                    "extracted text, or install docling and re-run 'playbook mine' with "
+                    "--no-cache to recover the higher-fidelity docling extraction."
+                ),
+            }
+        ],
+    )
+    report = build_inspection_report(out_dir)
+    assert report.count("version_ingest_fallback") == 1, (
+        "a fallback present in both corpus_manifest.json and review.json must render as "
+        "exactly one Needs-Attention row, not two"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Trail confidence fields — issue #59
 # ---------------------------------------------------------------------------
 

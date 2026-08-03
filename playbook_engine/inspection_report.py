@@ -339,32 +339,81 @@ def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return deduped
 
 
+#: Human-readable text for a fallback version_ingest[].reason (issue #81) —
+#: kept in sync with review._FALLBACK_REASON_TEXT (same reason vocabulary as
+#: pipeline._FALLBACK_REASONS). "declared" is deliberately absent: a
+#: config-declared legacy run is not a degradation and never flagged here.
+_FALLBACK_REASON_TEXT = {
+    "env-missing": "docling was not available on this host — legacy ran automatically",
+    "backend-error": "docling failed on this file and the engine fell back to legacy",
+}
+
+
 def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build "Needs attention"-shaped flag dicts for failed per-version ingests.
+    """Build "Needs attention"-shaped flag dicts for per-version ingest issues.
 
     Mirrors :func:`playbook_engine.review._check_manifest` but reads
     ``corpus_manifest.json`` directly (via *manifest*) so the inspection
-    report surfaces a failed version even when ``playbook review`` was never
-    run to populate ``review.json`` (issue #89).
+    report surfaces these even when ``playbook review`` was never run to
+    populate ``review.json`` (issue #89).
+
+    Two kinds of flag:
+      - ``version_ingest_failed`` (``severity="warn"``): the version's
+        extraction/segmentation raised and it was never mined at all.
+      - ``version_ingest_fallback`` (``severity="info"``, issue #81): the
+        version WAS mined, but via the legacy extractor after a real
+        degradation (``reason`` is ``"env-missing"``/``"backend-error"`` —
+        never ``"declared"``, a deliberate config choice, not a
+        degradation) — advisory only, since the version isn't missing, just
+        possibly lower-fidelity (no OCR, no docling-derived heading
+        structure). Only ``reason``/``version``/``document_id`` feed this
+        message — never ``version_ingest[].detail`` (there is no such key:
+        the raw exception text embedding the source path/counterparty name
+        is never persisted past the in-memory ExtractorLabel — see
+        pipeline.py's version_ingest construction).
     """
     flags: list[dict[str, Any]] = []
     for doc_id in sorted(manifest):
         for ver in manifest[doc_id].get("version_ingest", []) or []:
-            if not isinstance(ver, dict) or ver.get("status") != "failed":
+            if not isinstance(ver, dict):
                 continue
+            status = ver.get("status")
             version = ver.get("version", "?")
-            error = ver.get("error") or "unknown error"
-            flags.append(
-                {
-                    "document_id": doc_id,
-                    "severity": "warn",
-                    "kind": "version_ingest_failed",
-                    "suggested_action": (
-                        f"Version {version!r} failed to ingest and was never mined: {error}. "
-                        "Inspect the source file and re-run 'playbook mine' with --no-cache."
-                    ),
-                }
-            )
+            if status == "failed":
+                error = ver.get("error") or "unknown error"
+                flags.append(
+                    {
+                        "document_id": doc_id,
+                        "severity": "warn",
+                        "kind": "version_ingest_failed",
+                        "suggested_action": (
+                            f"Version {version!r} failed to ingest and was never mined: {error}. "
+                            "Inspect the source file and re-run 'playbook mine' with --no-cache."
+                        ),
+                    }
+                )
+            elif status == "ok" and ver.get("reason") in _FALLBACK_REASON_TEXT:
+                reason_text = _FALLBACK_REASON_TEXT[ver["reason"]]
+                flags.append(
+                    {
+                        "document_id": doc_id,
+                        "severity": "info",
+                        "kind": "version_ingest_fallback",
+                        # Must match review._check_manifest's text VERBATIM
+                        # (issue #89 fix-round-1's dedupe convention —
+                        # _dedupe_flags keys on (document_id, kind,
+                        # suggested_action), so a fallback present in BOTH
+                        # corpus_manifest.json and review.json collapses to
+                        # one Needs-Attention row, not two).
+                        "suggested_action": (
+                            f"Version {version!r} was mined via the legacy extractor: "
+                            f"{reason_text} — no OCR, no docling-derived heading structure "
+                            "for this version. Review the extracted text, or install docling "
+                            "and re-run 'playbook mine' with --no-cache to recover the "
+                            "higher-fidelity docling extraction."
+                        ),
+                    }
+                )
     return flags
 
 

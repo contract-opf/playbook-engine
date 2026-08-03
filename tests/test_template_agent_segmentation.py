@@ -22,6 +22,7 @@ from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassifica
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.extraction import ExtractorLabel
 from playbook_engine.pipeline import _template_observations_from_classified, mine_corpus
 from playbook_engine.taxonomy import load_taxonomy
 
@@ -163,7 +164,7 @@ def test_template_segmented_via_llm_path(tmp_path: Path, monkeypatch) -> None:
             source_file=Path(path).name,
             nodes=nodes,
         )
-        return tree, {p: h for p, h, _ in specs}
+        return tree, {p: h for p, h, _ in specs}, ExtractorLabel("legacy")
 
     monkeypatch.setattr(pipeline, "_llm_segment_file", fake_llm_segment_file)
 

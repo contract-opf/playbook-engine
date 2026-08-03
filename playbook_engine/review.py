@@ -288,16 +288,40 @@ def _check_observations(out_dir: Path) -> list[ReviewFlag]:
     return flags
 
 
+#: Human-readable text for a fallback version_ingest[].reason (issue #81) —
+#: kept in sync with inspection_report._FALLBACK_REASON_TEXT (same reason
+#: vocabulary as pipeline._FALLBACK_REASONS). "declared" is deliberately
+#: absent: a config-declared legacy run is not a degradation and never
+#: flagged here. Built ONLY from the closed `reason` enum and the
+#: already-aliased `version`/`document_id` strings already in
+#: corpus_manifest.json — NEVER from a `detail` key, which does not exist on
+#: a persisted version_ingest entry (the raw exception text — source path,
+#: hence counterparty name — lives only on the in-memory ExtractorLabel and
+#: is never written to any artifact this function reads).
+_FALLBACK_REASON_TEXT = {
+    "env-missing": "docling was not available on this host — legacy ran automatically",
+    "backend-error": "docling failed on this file and the engine fell back to legacy",
+}
+
+
 def _check_manifest(out_dir: Path) -> list[ReviewFlag]:
-    """Emit ``warn`` flags for versions whose ingest failed (issue #89).
+    """Emit flags for per-version ingest issues (issue #89, #81).
 
     ``corpus_manifest.json["version_ingest"]`` records "ok"/"failed" for every
     version file a document folder contains — a version whose extraction or
     segmentation raised previously surfaced only as a scrolled-past progress-
     line WARNING and then vanished (a cache hit on a later run didn't even
-    re-print that). Turning each failed entry into a durable ``ReviewFlag``
-    means a negotiation version that was never actually read shows up in the
-    reviewer's checklist, not just stdout.
+    re-print that). Turning each failed entry into a durable ``warn``
+    ``ReviewFlag`` means a negotiation version that was never actually read
+    shows up in the reviewer's checklist, not just stdout.
+
+    A version that WAS mined but only via a legacy-extractor fallback after
+    a real degradation (``reason`` ``"env-missing"``/``"backend-error"`` —
+    never ``"declared"``, a deliberate config choice) gets its own advisory
+    ``info`` flag (issue #81) — the version isn't missing, just possibly
+    lower-fidelity (no OCR, no docling-derived heading structure), so review
+    packets show which versions rode the degraded path without conflating
+    them with an actual ingest failure.
     """
     manifest_path = out_dir / "corpus_manifest.json"
     if not manifest_path.exists():
@@ -317,23 +341,49 @@ def _check_manifest(out_dir: Path) -> list[ReviewFlag]:
             continue
         doc_id = doc.get("document_id")
         for ver in doc.get("version_ingest", []) or []:
-            if not isinstance(ver, dict) or ver.get("status") != "failed":
+            if not isinstance(ver, dict):
                 continue
+            status = ver.get("status")
             version = ver.get("version", "?")
-            error = ver.get("error") or "unknown error"
-            flags.append(
-                ReviewFlag(
-                    document_id=doc_id,
-                    stage="ingest",
-                    kind="version_ingest_failed",
-                    severity="warn",
-                    detail=f"Version {version!r} failed to ingest and was never mined: {error}",
-                    suggested_action=(
-                        f"Version {version!r} failed to ingest and was never mined: {error}. "
-                        "Inspect the source file and re-run 'playbook mine' with --no-cache."
-                    ),
+            if status == "failed":
+                error = ver.get("error") or "unknown error"
+                flags.append(
+                    ReviewFlag(
+                        document_id=doc_id,
+                        stage="ingest",
+                        kind="version_ingest_failed",
+                        severity="warn",
+                        detail=f"Version {version!r} failed to ingest and was never mined: {error}",
+                        suggested_action=(
+                            f"Version {version!r} failed to ingest and was never mined: {error}. "
+                            "Inspect the source file and re-run 'playbook mine' with --no-cache."
+                        ),
+                    )
                 )
-            )
+            elif status == "ok" and ver.get("reason") in _FALLBACK_REASON_TEXT:
+                reason_text = _FALLBACK_REASON_TEXT[ver["reason"]]
+                flags.append(
+                    ReviewFlag(
+                        document_id=doc_id,
+                        stage="ingest",
+                        kind="version_ingest_fallback",
+                        severity="info",
+                        detail=f"Version {version!r} was mined via the legacy extractor: {reason_text}.",
+                        # Must match inspection_report._version_ingest_review_flags's
+                        # text VERBATIM (issue #89 fix-round-1's dedupe
+                        # convention — _dedupe_flags keys on (document_id,
+                        # kind, suggested_action), so a fallback present in
+                        # BOTH corpus_manifest.json and review.json must
+                        # collapse to one Needs-Attention row, not two).
+                        suggested_action=(
+                            f"Version {version!r} was mined via the legacy extractor: "
+                            f"{reason_text} — no OCR, no docling-derived heading structure "
+                            "for this version. Review the extracted text, or install docling "
+                            "and re-run 'playbook mine' with --no-cache to recover the "
+                            "higher-fidelity docling extraction."
+                        ),
+                    )
+                )
 
     return flags
 

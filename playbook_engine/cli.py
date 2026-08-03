@@ -345,20 +345,46 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
     }
 
 
+#: version_ingest[].reason values that represent a real extraction
+#: DEGRADATION (issue #81) — mirrors pipeline._FALLBACK_REASONS. Duplicated
+#: (not imported) since this function only ever reads the already-written
+#: JSON manifest, never pipeline internals — same "own its vocabulary as
+#: plain literals" convention config.py's _VALID_EXTRACTORS docstring
+#: documents for the analogous cross-module case.
+_FALLBACK_REASONS = ("env-missing", "backend-error")
+
+#: Cap on how many fallback document/version names _echo_extractor_summary
+#: prints inline before collapsing the rest into a "+N more" tail — a
+#: corpus-wide docling outage could otherwise dump hundreds of lines.
+_FALLBACK_NAMES_CAP = 10
+
+
 def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
-    """Echo how many mined versions used ``docling`` vs. the legacy adapters.
+    """Echo how many mined versions used each extractor, and name any fallbacks.
 
     Reads ``out_dir/corpus_manifest.json`` (already written by
     ``mine_corpus``/``compile_corpus`` by the time this runs) and tallies
-    each version's ``version_ingest[].extractor`` value. Mirrors the
-    ``segmentation: ...`` echo above so the docling-vs-legacy choice is a
-    first-class part of ``mine``/``compile`` output rather than only a
-    ``logging.info`` line suppressed by default Python logging config
+    each version's ``version_ingest[].extractor`` value — every value seen,
+    not just ``"docling"``/``"legacy"``: the deterministic path records the
+    raw file suffix (``"docx"``, ``"pdf"``, ``"rtf"``) there, so a
+    docling-less deterministic-only run now prints a line too instead of
+    being silently blind (issue #81; previously this function filtered to
+    just ``"docling"``/``"legacy"`` and returned early with nothing to show).
+    Mirrors the ``segmentation: ...`` echo above so the docling-vs-legacy
+    choice is a first-class part of ``mine``/``compile`` output rather than
+    only a ``logging.info`` line suppressed by default Python logging config
     (issue #129) — a host run without docling silently extracting scanned
-    PDFs with no OCR was otherwise invisible to the operator. Silent no-op
-    when the manifest is missing or no version recorded a ``"docling"``/
-    ``"legacy"`` extractor (e.g. a purely deterministic-segmentation run,
-    where ``extractor`` is the file suffix instead — nothing to summarize).
+    PDFs with no OCR was otherwise invisible to the operator.
+
+    When any version's ``version_ingest[].reason`` is a real degradation
+    (``"env-missing"``/``"backend-error"`` — never ``"declared"``, a
+    deliberate config choice, not a degradation), a second block breaks the
+    fallback count down by reason and names the affected document/version
+    pairs, up to :data:`_FALLBACK_NAMES_CAP` with a "+N more" tail — the
+    same information ``config.extraction.max_fallback`` enforces against,
+    surfaced even when the run stayed under budget (or is unbounded).
+
+    Silent no-op when the manifest is missing or empty.
     """
     import json  # noqa: PLC0415
 
@@ -368,17 +394,36 @@ def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    fallback_names: list[str] = []
     for doc in manifest:
-        for v in doc.get("version_ingest", []):
+        doc_id = doc.get("document_id", "?")
+        for v in doc.get("version_ingest", []) or []:
+            if not isinstance(v, dict):
+                continue
             ext = v.get("extractor")
-            if ext in ("docling", "legacy"):
+            if ext:
                 counts[ext] = counts.get(ext, 0) + 1
+            reason = v.get("reason")
+            if reason in _FALLBACK_REASONS:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                fallback_names.append(f"{doc_id}/{v.get('version', '?')}")
 
     if not counts:
         return
 
     summary = ", ".join(f"{ext}={n}" for ext, n in sorted(counts.items()))
     echo(f"  extraction: {summary}")
+
+    if not fallback_names:
+        return
+
+    reason_summary = ", ".join(f"{r}={n}" for r, n in sorted(reason_counts.items()))
+    echo(f"  extraction fallback: {len(fallback_names)} version(s) ({reason_summary})")
+    shown = fallback_names[:_FALLBACK_NAMES_CAP]
+    more = len(fallback_names) - len(shown)
+    tail = f", +{more} more" if more > 0 else ""
+    echo(f"    {', '.join(shown)}{tail}")
 
 
 @click.group()

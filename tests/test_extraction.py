@@ -1195,3 +1195,237 @@ def test_declared_extractor_failure_scoped_to_declared_environment(
     canonical_text, _, extractor = extract_blocks(pdf, cache=cache, extractor="docling")
     assert extractor == "docling"
     assert "Recovered." in canonical_text
+
+
+# ---------------------------------------------------------------------------
+# ExtractorLabel — structured reason for why LEGACY ran (issue #81).
+#
+# The three cases: docling absent from PATH under "auto" -> "env-missing";
+# docling raised on this file -> "backend-error"; config declared legacy ->
+# "declared". reason is None whenever extractor == "docling" (no fallback).
+# ---------------------------------------------------------------------------
+
+
+def test_extractor_label_reason_env_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """auto mode, docling never on PATH -> reason="env-missing", no fallback_from
+    (docling was never attempted, so there's nothing it fell back FROM)."""
+    monkeypatch.setattr(extraction.shutil, "which", lambda _cmd: None)
+    path = _simple_docx(tmp_path)
+
+    _, _, label = extract_blocks(path)
+
+    assert isinstance(label, extraction.ExtractorLabel)
+    assert label == "legacy"
+    assert label.extractor == "legacy"
+    assert label.reason == "env-missing"
+    assert label.fallback_from is None
+    assert label.detail is None
+
+
+def test_extractor_label_reason_declared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """extractor="legacy" (config-declared) -> reason="declared", even when
+    docling IS available — a deliberate choice, not a degradation, and
+    distinct from "env-missing" even though both resolve to "legacy"."""
+    path = _simple_docx(tmp_path)
+    calls = _mock_docling_subprocess(monkeypatch, "# SHOULD NOT RUN\n", stem=path.stem)
+
+    _, _, label = extract_blocks(path, extractor="legacy")
+
+    assert label == "legacy"
+    assert label.reason == "declared"
+    assert label.fallback_from is None
+    assert calls == [], "declared legacy must never invoke docling"
+
+
+def test_extractor_label_reason_backend_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling on PATH but raises on this file -> reason="backend-error",
+    fallback_from="docling", and detail carries the underlying exception
+    text (in-memory only — see the privacy-focused tests below)."""
+    path = _simple_docx(tmp_path)
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    _, _, label = extract_blocks(path)
+
+    assert label == "legacy"
+    assert label.reason == "backend-error"
+    assert label.fallback_from == "docling"
+    assert label.detail is not None
+    assert "docling" in label.detail.lower()
+
+
+def test_extractor_label_reason_none_when_docling_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling runs clean, no fallback -> reason/fallback_from/detail all None."""
+    path = _simple_docx(tmp_path)
+    _mock_docling_subprocess(monkeypatch, "# Title\n\nBody text.\n", stem=path.stem)
+
+    _, _, label = extract_blocks(path)
+
+    assert label == "docling"
+    assert label.reason is None
+    assert label.fallback_from is None
+    assert label.detail is None
+
+
+def test_extractor_label_is_str_subclass_backward_compatible(tmp_path: Path) -> None:
+    """ExtractorLabel must be usable exactly like the old plain string
+    everywhere a caller might store/format/compare/serialize it — this is
+    what lets every pre-existing ``extractor == "legacy"``/f-string/
+    ``json.dumps`` call site in this codebase keep working unchanged even
+    though extract_blocks now returns a richer object (issue #81)."""
+    path = _simple_docx(tmp_path)
+    _, _, label = extract_blocks(path)
+
+    assert isinstance(label, str)
+    assert f"extractor={label}" == "extractor=legacy"
+    assert json.dumps({"extractor": label}) == '{"extractor": "legacy"}'
+    assert {"legacy": 1}.get(label) == 1  # hashable/usable as a dict key like any str
+
+
+# ---------------------------------------------------------------------------
+# ExtractionCache round-tripping of reason/fallback_from (issue #81) —
+# "detail" is deliberately NEVER round-tripped (in-memory-only, see
+# ExtractorLabel's docstring: it embeds the absolute source path).
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_cache_roundtrips_reason_and_fallback_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    _, _, written = extract_blocks(path, cache=cache)
+    assert written.reason == "backend-error"
+    assert written.fallback_from == "docling"
+    assert written.detail is not None
+
+    # A fresh ExtractionCache instance (load-on-init from disk) must still
+    # report the reason/fallback_from correctly — but never the detail.
+    reloaded = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _, _, cached = reloaded.get(path)
+    assert cached == "legacy"
+    assert cached.reason == "backend-error"
+    assert cached.fallback_from == "docling"
+    assert cached.detail is None, "detail must never be round-tripped through the cache"
+
+
+def test_extraction_cache_does_not_persist_detail_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The raw exception text (which embeds the absolute source path, and
+    therefore the counterparty/entity name baked into the corpus folder
+    structure) must never reach the on-disk extraction_cache.jsonl at all —
+    not just be unreadable via get() (issue #81)."""
+    path = _simple_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    extract_blocks(path, cache=cache)
+
+    record = json.loads(cache_path.read_text().splitlines()[0])
+    assert "detail" not in record["verdict"], "detail must never be persisted to disk"
+    assert record["verdict"]["reason"] == "backend-error"
+    assert record["verdict"]["fallback_from"] == "docling"
+
+
+def test_extraction_cache_get_tolerates_pre_81_entry_without_reason_key(
+    tmp_path: Path,
+) -> None:
+    """A cache VALUE written before issue #81 (no "reason"/"fallback_from"
+    keys at all) must still load without raising KeyError — get() falls back
+    to None for both via ``dict.get``. This is a shape-completeness
+    guarantee only; it does NOT assert reason=None is the correct real-world
+    contract for a genuinely warm pre-#81 cache — the format-version bump
+    below (test_extraction_cache_format_version_bump_misses_pre_81_key)
+    means a REAL pre-#81 entry can never actually be looked up this way in
+    practice, since its key no longer matches."""
+    path = _simple_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    canonical_text = "Alpha Corp shall indemnify Beta Ltd for direct damages."
+    pre_81_value = {
+        "canonical_text": canonical_text,
+        "blocks": [
+            {"block_id": "b0", "page": 0, "char_span": [0, len(canonical_text)]},
+        ],
+        "extractor": "legacy",
+        # No "reason"/"fallback_from" keys — exactly the pre-#81 shape.
+    }
+    cache._store.put(extraction._extraction_cache_payload(path), pre_81_value)
+
+    cached = cache.get(path)
+    assert cached is not None, "loading a pre-#81-shaped entry must not raise KeyError"
+    _, _, label = cached
+    assert label == "legacy"
+    assert label.reason is None
+    assert label.fallback_from is None
+
+
+def test_extraction_cache_format_version_bump_misses_pre_81_key(tmp_path: Path) -> None:
+    """A cache entry filed under the PRE-#81 format_version ("1") must MISS
+    under the current code (format_version "2") — the invalidation mechanism
+    that keeps config.extraction.max_fallback/corpus_manifest.json/review
+    flags from silently staying blind on any corpus ever extracted before
+    this fix (issue #81). Hardcodes "1" (rather than calling
+    _extraction_cache_payload, which would pick up today's real value)
+    specifically to simulate genuine on-disk pre-#81 state.
+    """
+    path = _simple_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    assert extraction._EXTRACTION_CACHE_FORMAT_VERSION != "1", (
+        "this test's premise requires the current format version to have moved on from '1'"
+    )
+
+    pre_81_key_payload = {
+        "file_sha256": extraction._sha256_file(path),
+        "format_version": "1",
+        "extractor_env": "legacy",
+    }
+    canonical_text = "Alpha Corp shall indemnify Beta Ltd for direct damages."
+    cache._store.put(
+        pre_81_key_payload,
+        {
+            "canonical_text": canonical_text,
+            "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, len(canonical_text)]}],
+            "extractor": "legacy",
+        },
+    )
+
+    # Same file, same extractor_env — differs ONLY in format_version — must
+    # be an unconditional miss under the real (bumped) key.
+    assert cache.get(path, extractor="legacy") is None

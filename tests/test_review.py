@@ -38,6 +38,10 @@ def _write_obs(tmp_path: pathlib.Path, observations: list[dict]) -> None:
     (tmp_path / "observations.jsonl").write_text(lines, encoding="utf-8")
 
 
+def _write_manifest(tmp_path: pathlib.Path, documents: list[dict]) -> None:
+    (tmp_path / "corpus_manifest.json").write_text(json.dumps(documents), encoding="utf-8")
+
+
 def _flags_of_kind(flags: list[ReviewFlag], kind: str) -> list[ReviewFlag]:
     return [f for f in flags if f.kind == kind]
 
@@ -298,6 +302,142 @@ def test_multiple_observations_multiple_flags(tmp_path: pathlib.Path) -> None:
     assert len(matched) == 2
     doc_ids = {f.document_id for f in matched}
     assert doc_ids == {"doc-A", "doc-B"}
+
+
+# ---------------------------------------------------------------------------
+# corpus_manifest.json / version_ingest (issues #89, #81)
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_failed_version_emits_warn(tmp_path: pathlib.Path) -> None:
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "doc-fail",
+                "version_ingest": [
+                    {"version": "v1", "status": "failed", "error": "boom", "extractor": "docx"},
+                ],
+            }
+        ],
+    )
+    flags = review_out_dir(tmp_path)
+    matched = _flags_of_kind(flags, "version_ingest_failed")
+    assert len(matched) == 1
+    assert matched[0].severity == "warn"
+    assert matched[0].stage == "ingest"
+    assert matched[0].document_id == "doc-fail"
+    assert "boom" in matched[0].detail
+
+
+def test_manifest_ok_version_no_flag(tmp_path: pathlib.Path) -> None:
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "doc-ok",
+                "version_ingest": [
+                    {"version": "v1", "status": "ok", "error": None, "extractor": "docx"},
+                ],
+            }
+        ],
+    )
+    flags = review_out_dir(tmp_path)
+    assert _flags_of_kind(flags, "version_ingest_failed") == []
+    assert _flags_of_kind(flags, "version_ingest_fallback") == []
+
+
+@pytest.mark.parametrize("reason", ["env-missing", "backend-error"])
+def test_manifest_fallback_version_emits_info(tmp_path: pathlib.Path, reason: str) -> None:
+    """A version that WAS mined, but via a real extraction degradation
+    (env-missing/backend-error), gets an advisory info flag distinct from an
+    actual ingest failure (issue #81) — the version isn't missing, just
+    possibly lower-fidelity."""
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "doc-fallback",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": reason,
+                    },
+                ],
+            }
+        ],
+    )
+    flags = review_out_dir(tmp_path)
+    matched = _flags_of_kind(flags, "version_ingest_fallback")
+    assert len(matched) == 1
+    assert matched[0].severity == "info"
+    assert matched[0].stage == "ingest"
+    assert matched[0].document_id == "doc-fallback"
+    assert _flags_of_kind(flags, "version_ingest_failed") == []
+
+
+def test_manifest_declared_legacy_reason_no_fallback_flag(tmp_path: pathlib.Path) -> None:
+    """reason="declared" (a deliberate config choice, not a degradation) must
+    NOT produce an advisory fallback flag — only env-missing/backend-error do."""
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "doc-declared",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "declared",
+                    },
+                ],
+            }
+        ],
+    )
+    flags = review_out_dir(tmp_path)
+    assert _flags_of_kind(flags, "version_ingest_fallback") == []
+
+
+def test_manifest_fallback_detail_never_embeds_a_detail_key(tmp_path: pathlib.Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #81): the fallback flag's message
+    must be built ONLY from the closed `reason` enum and the already-safe
+    `version`/`document_id` strings — never from a `version_ingest[].detail`
+    key (which must never exist on a persisted entry in the first place —
+    see extraction.ExtractorLabel.detail and pipeline.py's version_ingest
+    construction)."""
+    _write_manifest(
+        tmp_path,
+        [
+            {
+                "document_id": "doc-fallback",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "backend-error",
+                        # No "detail" key — this must never be present on a
+                        # real manifest, but even if some future bug wrote
+                        # one, this test's fixture omitting it proves
+                        # _check_manifest doesn't require/read it.
+                    },
+                ],
+            }
+        ],
+    )
+    flags = review_out_dir(tmp_path)
+    matched = _flags_of_kind(flags, "version_ingest_fallback")
+    assert len(matched) == 1
+    # The flag text is fully derivable from reason/version/document_id alone.
+    assert "backend-error" not in matched[0].detail, (
+        "the raw reason enum value should be translated to human text, not echoed verbatim"
+    )
 
 
 # ---------------------------------------------------------------------------

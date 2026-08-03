@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -23,11 +24,15 @@ from playbook_engine.deviation_classifier import RiskDelta
 from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import (
+    _VERSION_INGEST_SCHEMA_KEYS,
     AssemblyError,
+    _sanitize_corpus_documents_for_schema,
     assemble_playbook,
     write_playbook,
 )
 from playbook_engine.validator import validate_document
+
+_REPO_ROOT = Path(__file__).parent.parent
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -726,3 +731,128 @@ def test_assemble_digest_matches_recompute_over_stripped_playbook() -> None:
         corpus_docs=[_corpus_doc("deal_001"), _corpus_doc("deal_002"), _corpus_doc("deal_003")],
     )
     assert playbook["digest"] == build_digest(playbook)
+
+
+# ---------------------------------------------------------------------------
+# version_ingest schema stripping (issue #81) — corpus_manifest.json/
+# ExtractorLabel gained a "reason" field that the published OPF schema does
+# not (and, per additionalProperties:false, must not) accept.
+# ---------------------------------------------------------------------------
+
+
+def _version_ingest_schema_properties(schema_filename: str) -> set[str]:
+    schema = json.loads((_REPO_ROOT / "spec" / schema_filename).read_text(encoding="utf-8"))
+    props = schema["properties"]["corpus"]["properties"]["documents"]["items"]["properties"][
+        "version_ingest"
+    ]["items"]["properties"]
+    return set(props)
+
+
+def test_version_ingest_schema_keys_matches_schema_0_3() -> None:
+    """_VERSION_INGEST_SCHEMA_KEYS (the strip-list assemble_playbook applies
+    to every version_ingest entry) must stay in sync with
+    spec/playbook.schema-0.3.json's actual property set — the schema
+    assemble_playbook's self-validation ACTUALLY enforces (issue #81:
+    _OPF_VERSION is hardcoded to "0.3"). Used as a strip-list, drift in the
+    OTHER direction (a future schema addition silently stripped from every
+    published playbook) would otherwise fail silently — this test exists so
+    that drift fails LOUDLY instead, at test time.
+    """
+    assert (
+        _version_ingest_schema_properties("playbook.schema-0.3.json") == _VERSION_INGEST_SCHEMA_KEYS
+    )
+
+
+def test_version_ingest_schema_keys_matches_schema_0_2() -> None:
+    """Same guard against spec/playbook.schema-0.2.json — identical shape to
+    0.3 today, but assemble_playbook's whitelist isn't itself version-aware,
+    so both must agree."""
+    assert (
+        _version_ingest_schema_properties("playbook.schema-0.2.json") == _VERSION_INGEST_SCHEMA_KEYS
+    )
+
+
+def test_version_ingest_schema_keys_has_no_additional_engine_only_fields() -> None:
+    """Sanity check on the guard itself: "reason" (an engine-internal-only
+    field the schema does not accept) must NOT be in the whitelist, or the
+    strip would be a no-op for the exact field this ticket introduced."""
+    assert "reason" not in _VERSION_INGEST_SCHEMA_KEYS
+
+
+def test_sanitize_corpus_documents_strips_reason_from_version_ingest() -> None:
+    corpus_documents = [
+        {
+            "document_id": "deal_001",
+            "in_scope": True,
+            "version_ingest": [
+                {
+                    "version": "v1",
+                    "status": "ok",
+                    "error": None,
+                    "extractor": "legacy",
+                    "reason": "backend-error",
+                }
+            ],
+        }
+    ]
+    sanitized = _sanitize_corpus_documents_for_schema(corpus_documents)
+    assert sanitized[0]["version_ingest"][0] == {
+        "version": "v1",
+        "status": "ok",
+        "error": None,
+        "extractor": "legacy",
+    }
+    # Every other field on the document dict survives untouched.
+    assert sanitized[0]["document_id"] == "deal_001"
+    assert sanitized[0]["in_scope"] is True
+    # The original input is not mutated.
+    assert "reason" in corpus_documents[0]["version_ingest"][0]
+
+
+def test_sanitize_corpus_documents_tolerates_missing_version_ingest() -> None:
+    """A document with no version_ingest key at all (e.g. an out-of-scope
+    document shape predating issue #89) must pass through unchanged, not
+    raise."""
+    corpus_documents = [{"document_id": "deal_001", "in_scope": True}]
+    sanitized = _sanitize_corpus_documents_for_schema(corpus_documents)
+    assert sanitized == corpus_documents
+
+
+def test_assemble_playbook_strips_reason_and_still_validates() -> None:
+    """End-to-end: a corpus_documents entry carrying "reason" (as
+    corpus_manifest.json now does — issue #81) must not break
+    assemble_playbook's self-validation — additionalProperties:false on
+    version_ingest.items would otherwise reject the whole document."""
+    corpus_docs = [
+        {
+            **_corpus_doc("deal_001"),
+            "version_ingest": [
+                {
+                    "version": "v1",
+                    "status": "ok",
+                    "error": None,
+                    "extractor": "legacy",
+                    "reason": "backend-error",
+                },
+                {
+                    "version": "v2",
+                    "status": "ok",
+                    "error": None,
+                    "extractor": "docling",
+                    "reason": None,
+                },
+            ],
+        }
+    ]
+    playbook = _minimal_playbook(corpus_docs=corpus_docs)
+
+    result = validate_document(playbook)
+    errors = [str(e) for e in result.errors if e.blocking]
+    assert errors == [], f"Blocking validation errors: {errors}"
+
+    published_ingest = playbook["corpus"]["documents"][0]["version_ingest"]
+    assert all("reason" not in vi for vi in published_ingest), (
+        "reason must never reach the published playbook.opf.json"
+    )
+    assert published_ingest[0]["extractor"] == "legacy"
+    assert published_ingest[1]["extractor"] == "docling"
