@@ -551,6 +551,88 @@ def test_config_fingerprint_differs_across_extractor_env(
     )
 
 
+def test_config_fingerprint_differs_across_declared_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #61 stage-cache config fingerprint must also carry the
+    config-DECLARED extractor (issue #80), independently of issue #79's
+    ``extractor_env`` bare PATH check.
+
+    ``extractor_env`` (issue #79) is ``extraction.detect_extractor`` — a
+    ``shutil.which("docling")`` PATH check that never looks at config, so it
+    is constant across an "auto"/"docling"/"legacy" config switch on the
+    SAME host. Before this fix, that made ``config_fp`` blind to
+    ``config.extraction.extractor`` (issue #80) entirely: flipping a corpus
+    from ``extraction: {extractor: auto}`` to ``extraction: {extractor:
+    legacy}`` on a docling-equipped host left every #61 per-doc stage-cache
+    key unchanged, so ``store.get_or_compute``/the batch pre-pass's
+    ``store.contains`` would replay the "auto"-declared (docling-derived)
+    L1-L4 result verbatim instead of busting the cache — the legacy-forcing
+    declaration would silently do nothing on a warm cache.
+
+    Drives three real ``mine_corpus`` runs over the same corpus/out_dir with
+    ``shutil.which`` monkeypatched to report docling present THE WHOLE TIME
+    (so the issue #79 ``extractor_env`` field's own answer never moves —
+    any fingerprint change observed here must come solely from the declared
+    config value) and inspects the #61 ``ArtifactStore`` index directly —
+    entries are never evicted, so a same-declaration repeat run must add
+    ZERO new keys and a declared-extractor switch must add exactly one new
+    key per document. Uses only the default stub judges and the
+    deterministic RTF ingest path (no ``use_llm_segmentation``) — like
+    ``test_config_fingerprint_differs_across_extractor_env`` above, this
+    corpus never itself calls docling/legacy extraction, so any
+    behavioural difference observed here comes solely from ``config_fp``.
+    """
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/docling" if cmd == "docling" else None
+    )
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    index_path = out_dir / ".cache" / "index.json"
+
+    # Run 1 — declared "auto" (the _make_corpus default: no extraction:
+    # section at all, so ExtractionConfig().extractor == "auto").
+    assert cfg.extraction.extractor == "auto"
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_auto_1 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    assert len(keys_auto_1) == 2, (
+        f"expected one stage-cache key per document (deal-alpha, deal-beta), got {keys_auto_1}"
+    )
+
+    # Run 2 — SAME declared value, no manual cache-busting: an unchanged
+    # declaration must produce a STABLE fingerprint, i.e. a pure cache
+    # replay that adds no new keys.
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_auto_2 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    assert keys_auto_2 == keys_auto_1, (
+        "a repeat run with the SAME declared extractor must not add new stage-cache "
+        f"keys — the fingerprint must be stable within one declaration; got {keys_auto_2}"
+    )
+
+    # Run 3 — SAME corpus/out_dir, and the host PATH check still reports
+    # docling present (monkeypatch unchanged, so issue #79's extractor_env
+    # field does NOT move), but the config now declares "legacy": must bust
+    # the #61 stage cache for every document (a NEW key per doc) rather than
+    # replaying the "auto"-declared entries verbatim now that config demands
+    # the legacy adapters instead.
+    cfg.extraction.extractor = "legacy"
+    mine_corpus(
+        corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
+    )
+    keys_legacy = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
+    new_keys = keys_legacy - keys_auto_1
+    assert len(new_keys) == 2, (
+        "switching the DECLARED extractor (auto -> legacy) with the host PATH-check "
+        "environment held constant must produce a NEW stage-cache key per document, "
+        f"not replay the auto-declared entries verbatim; index now has {keys_legacy}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Issue #243 — config_fp must fold in the template's classification OUTCOME,
 # not just the template file's content hash, so a template-pending -> template-

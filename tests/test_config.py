@@ -681,3 +681,152 @@ def test_existing_fixture_configs_still_load_with_strict_key_checking() -> None:
     keep loading cleanly now that unknown keys are rejected."""
     cfg = load_config(AFFILIATION_CONFIG)
     assert isinstance(cfg, EngineConfig)
+
+
+# ---------------------------------------------------------------------------
+# extraction (issue #80) — declarable extractor with fail-loud semantics
+# ---------------------------------------------------------------------------
+
+
+def test_no_extraction_block_defaults_to_auto(tmp_path: Path) -> None:
+    """No ``extraction:`` section (every existing fixture) -> ``extractor``
+    stays "auto" (today's shutil.which-based behavior, unchanged) and
+    ``max_fallback`` stays unbounded (None)."""
+    path = _minimal_config(tmp_path)
+    cfg = load_config(path)
+    assert cfg.extraction.extractor == "auto"
+    assert cfg.extraction.max_fallback is None
+
+
+def test_extraction_block_parsed(tmp_path: Path) -> None:
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+extraction:
+  extractor: legacy
+  max_fallback: 3
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.extraction.extractor == "legacy"
+    assert cfg.extraction.max_fallback == 3
+
+
+def test_extraction_extractor_docling_parsed(tmp_path: Path) -> None:
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+extraction:
+  extractor: docling
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.extraction.extractor == "docling"
+    assert cfg.extraction.max_fallback is None
+
+
+def test_extraction_max_fallback_null_is_explicit_default(tmp_path: Path) -> None:
+    """An explicit ``max_fallback: null`` must parse identically to omitting
+    the key entirely (both mean "unbounded")."""
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+extraction:
+  extractor: auto
+  max_fallback: null
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.extraction.max_fallback is None
+
+
+def _extraction_config(tmp_path: Path, extraction_yaml: str) -> Path:
+    """Build a minimal config with a custom ``extraction:`` block appended
+    (mirrors this file's ``_minimal_config`` shape, plus *extraction_yaml*)."""
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    return _write_config(
+        tmp_path,
+        f"""
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+{extraction_yaml}""",
+    )
+
+
+def test_extraction_invalid_extractor_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, "extraction:\n  extractor: turbo\n")
+    with pytest.raises(ConfigError, match="extraction.extractor"):
+        load_config(path)
+
+
+def test_extraction_not_mapping_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, "extraction: not-a-mapping\n")
+    with pytest.raises(ConfigError, match="config.extraction must be a mapping"):
+        load_config(path)
+
+
+def test_extraction_unknown_key_raises(tmp_path: Path) -> None:
+    """A typo'd ``extraction.extractr`` (for ``extractor``) must be rejected
+    outright, not silently ignored — mirrors the segmentation/classification
+    unknown-key tests above (issue #53's strict key checking)."""
+    path = _extraction_config(tmp_path, "extraction:\n  extractr: docling\n")
+    with pytest.raises(ConfigError, match="extraction.extractr.*extraction.extractor"):
+        load_config(path)
+
+
+def test_extraction_max_fallback_negative_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, "extraction:\n  max_fallback: -1\n")
+    with pytest.raises(ConfigError, match="max_fallback"):
+        load_config(path)
+
+
+def test_extraction_max_fallback_not_an_integer_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, 'extraction:\n  max_fallback: "three"\n')
+    with pytest.raises(ConfigError, match="max_fallback"):
+        load_config(path)
+
+
+def test_extraction_max_fallback_bool_raises(tmp_path: Path) -> None:
+    """``True``/``False`` must not silently pass the ``int`` check — Python's
+    ``bool`` is an ``int`` subclass (mirrors the ``min_evidence_n``/
+    ``ambiguity_threshold`` bool guards above)."""
+    path = _extraction_config(tmp_path, "extraction:\n  max_fallback: true\n")
+    with pytest.raises(ConfigError, match="max_fallback"):
+        load_config(path)
+
+
+def test_extraction_max_fallback_zero_is_valid(tmp_path: Path) -> None:
+    """``max_fallback: 0`` (no fallback tolerated at all) is a valid,
+    non-negative integer — only negative values are rejected."""
+    path = _extraction_config(tmp_path, "extraction:\n  max_fallback: 0\n")
+    cfg = load_config(path)
+    assert cfg.extraction.max_fallback == 0

@@ -78,6 +78,28 @@ Config schema (YAML):
                                       # Defaults to clause_classifier.AUTO_CLASSIFY_THRESHOLD
                                       # (0.85). Must satisfy
                                       # 0 < ambiguity_threshold <= auto_classify_threshold <= 1.
+  extraction:                        # optional; omit entirely to keep today's
+                                      # shutil.which-based auto-detection unchanged
+                                      # (issue #80 — "a corpus cannot say 'I require
+                                      # docling'")
+    extractor: docling                # docling | legacy | auto (default "auto").
+                                      # "docling" fails loudly (ConfigError/
+                                      # ExtractionError), before any file is
+                                      # touched, if the docling binary is not on
+                                      # PATH — no silent downgrade to the legacy
+                                      # adapters (no OCR, no heading detection).
+                                      # "legacy" forces the legacy per-format
+                                      # adapters even when docling IS installed
+                                      # (deterministic, container-free runs).
+                                      # Only meaningful when segmentation.llm is
+                                      # on — the deterministic ingest path never
+                                      # calls the docling/legacy extractor.
+    max_fallback: null                # optional non-negative integer, or null
+                                      # (default) for unbounded. Reserved for a
+                                      # follow-up ticket that caps how many
+                                      # per-file docling->legacy fallbacks a run
+                                      # tolerates before failing; this version
+                                      # only parses/validates/stores the value.
 """
 
 from __future__ import annotations
@@ -193,6 +215,31 @@ class ClassificationConfig:
 
 
 @dataclass
+class ExtractionConfig:
+    """Config-declarable extractor environment (issue #80).
+
+    Mirrors the ``segmentation``/``classification`` defaulting pattern: both
+    fields default so a config with no ``extraction:`` section (every
+    existing fixture) is byte-for-byte unchanged in behavior — ``extractor``
+    stays ``"auto"`` (today's ``shutil.which``-based preference between
+    docling and the legacy adapters), and ``max_fallback`` stays unbounded
+    (``None``).
+
+    Only meaningful when ``segmentation.llm`` is on: the deterministic
+    ingest path (``docx_ingester``/``pdf_ingester``/``rtf_ingester``) never
+    calls :func:`~playbook_engine.extraction.extract_blocks`, so a declared
+    extractor has nothing to govern there.
+    """
+
+    extractor: str = "auto"  # "docling" | "legacy" | "auto"
+    # None means unbounded (today's behavior — no cap on per-file
+    # docling->legacy fallbacks). Enforcement is a follow-up ticket; this
+    # only parses/validates/stores the value so the config section lands
+    # once (issue #80).
+    max_fallback: int | None = None
+
+
+@dataclass
 class EngineConfig:
     agreement_type: AgreementType
     baseline: BaselineConfig
@@ -201,6 +248,7 @@ class EngineConfig:
     perspective: PerspectiveConfig
     segmentation: SegmentationConfig
     classification: ClassificationConfig
+    extraction: ExtractionConfig
     config_path: Path  # absolute path to the config file itself
 
 
@@ -246,6 +294,7 @@ TOP_LEVEL_KEYS = frozenset(
         "perspective",
         "segmentation",
         "classification",
+        "extraction",
     }
 )
 AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
@@ -254,6 +303,14 @@ PROVENANCE_KEYS = frozenset({"our_party_aliases", "known_entities", "min_evidenc
 PERSPECTIVE_KEYS = frozenset({"party", "counterparty_type"})
 SEGMENTATION_KEYS = frozenset({"llm", "batch", "cache", "normalize_trail", "model", "agent"})
 CLASSIFICATION_KEYS = frozenset({"ambiguity_threshold", "auto_classify_threshold"})
+EXTRACTION_KEYS = frozenset({"extractor", "max_fallback"})
+# Valid values for extraction.extractor — duplicated (not imported) from
+# extraction._VALID_EXTRACTORS to avoid a config.py <-> extraction.py import
+# cycle (extraction.py imports agent_judge, which imports config.py for
+# AgreementType); mirrors this module's existing SEGMENTATION_KEYS/
+# CLASSIFICATION_KEYS convention of owning its own validation vocabulary as
+# plain literals rather than importing it from the module it describes.
+_VALID_EXTRACTORS = frozenset({"docling", "legacy", "auto"})
 
 
 def unknown_key_message(
@@ -515,6 +572,28 @@ def load_config(path: Path) -> EngineConfig:
         auto_classify_threshold=auto_classify_threshold_raw,
     )
 
+    # --- extraction (issue #80) ---
+    extr_raw = raw.get("extraction", {})
+    if not isinstance(extr_raw, dict):
+        raise ConfigError("config.extraction must be a mapping")
+    _check_unknown_keys(extr_raw, EXTRACTION_KEYS, "extraction")
+
+    extractor_raw = extr_raw.get("extractor", "auto")
+    if not isinstance(extractor_raw, str) or extractor_raw not in _VALID_EXTRACTORS:
+        raise ConfigError(
+            "extraction.extractor must be one of 'docling', 'legacy', or 'auto' "
+            f"(got {extractor_raw!r})"
+        )
+
+    max_fallback_raw = extr_raw.get("max_fallback")
+    if max_fallback_raw is not None:
+        if isinstance(max_fallback_raw, bool) or not isinstance(max_fallback_raw, int):
+            raise ConfigError("extraction.max_fallback must be a non-negative integer or null")
+        if max_fallback_raw < 0:
+            raise ConfigError("extraction.max_fallback must be a non-negative integer or null")
+
+    extraction = ExtractionConfig(extractor=extractor_raw, max_fallback=max_fallback_raw)
+
     return EngineConfig(
         agreement_type=agreement_type,
         baseline=baseline,
@@ -527,5 +606,6 @@ def load_config(path: Path) -> EngineConfig:
         perspective=perspective,
         segmentation=segmentation,
         classification=classification,
+        extraction=extraction,
         config_path=path.resolve(),
     )

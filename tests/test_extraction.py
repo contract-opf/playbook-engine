@@ -1028,3 +1028,170 @@ def test_extract_blocks_refresh_failure_still_negative_caches_without_prior_succ
     with pytest.raises(ext.ExtractionError, match="cached failure"):
         ext.extract_blocks(pdf, cache=cache)
     assert calls["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Declared extractor (issue #80): extract_blocks(extractor="docling" |
+# "legacy" | "auto") — config-declarable environment with fail-loud
+# semantics. "auto" (the default) is exactly today's behavior; the tests
+# above (which never pass `extractor=`) already pin that. These tests cover
+# the two NEW declared values.
+# ---------------------------------------------------------------------------
+
+
+def test_declared_docling_unavailable_raises_before_any_file_io(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extractor="docling"`` on a docling-less host must raise
+    ``ExtractionError`` immediately — before any file I/O — so even a path
+    that does not exist on disk fails with the docling-missing message, not
+    a "file not found" message (issue #80's "raised before any file I/O"
+    acceptance criterion)."""
+    monkeypatch.setattr(extraction.shutil, "which", lambda _cmd: None)
+    missing_path = tmp_path / "does-not-exist.docx"
+    assert not missing_path.exists()
+
+    with pytest.raises(ExtractionError, match="docling") as exc_info:
+        extract_blocks(missing_path, extractor="docling")
+    assert "file not found" not in str(exc_info.value)
+
+
+def test_declared_docling_unavailable_message_names_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fail-loud error must name both the config line and the remedy
+    (issue #80's acceptance criterion), not just say "unavailable"."""
+    path = _simple_docx(tmp_path)
+    monkeypatch.setattr(extraction.shutil, "which", lambda _cmd: None)
+
+    with pytest.raises(ExtractionError) as exc_info:
+        extract_blocks(path, extractor="docling")
+    message = str(exc_info.value)
+    assert "extraction.extractor" in message
+    assert "docling" in message
+    assert "PATH" in message
+    assert "legacy" in message or "auto" in message  # the remedy is named
+
+
+def test_declared_docling_available_uses_docling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _simple_docx(tmp_path)
+    _mock_docling_subprocess(monkeypatch, "# Title\n\nBody text.\n", stem=path.stem)
+
+    canonical_text, _blocks, extractor = extract_blocks(path, extractor="docling")
+    assert extractor == "docling"
+    assert "Title" in canonical_text
+
+
+def test_declared_legacy_forces_legacy_even_when_docling_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extractor="legacy"`` must skip docling entirely even when it IS on
+    PATH — deterministic, container-free runs (issue #80's acceptance
+    criterion)."""
+    path = _simple_docx(tmp_path)
+    calls = _mock_docling_subprocess(monkeypatch, "# SHOULD NOT BE USED\n", stem=path.stem)
+
+    canonical_text, _blocks, extractor = extract_blocks(path, extractor="legacy")
+    assert extractor == "legacy"
+    assert calls == [], "declared legacy must never invoke the docling subprocess"
+    assert "Indemnification" in canonical_text  # real legacy-adapter DOCX heading
+
+
+def test_invalid_extractor_value_raises(tmp_path: Path) -> None:
+    path = _simple_docx(tmp_path)
+    with pytest.raises(ExtractionError, match="invalid extractor"):
+        extract_blocks(path, extractor="turbo")
+
+
+def test_auto_extractor_default_matches_no_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``extractor="auto"`` (the new parameter's default) must be
+    byte-identical to calling ``extract_blocks`` with no ``extractor``
+    argument at all — "absent section and auto are behaviorally identical
+    to today" (issue #80's acceptance criterion)."""
+    path = _simple_docx(tmp_path)
+    monkeypatch.setattr(extraction, "detect_extractor", lambda p: "legacy")
+
+    explicit_auto = extract_blocks(path, extractor="auto")
+    no_arg = extract_blocks(path)
+    assert explicit_auto == no_arg
+
+
+def test_declared_extractor_cache_keys_do_not_collide_across_environments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run declaring ``extractor="legacy"`` on a docling-equipped host must
+    not share a cache key with a declared ``extractor="docling"`` extraction
+    of the SAME file — else a later docling-declared (or auto, which also
+    resolves to docling here) run would silently replay the lower-quality
+    legacy content under the docling label. This is the same class of bug
+    issue #77 closed for auto-detected environments, now for the DECLARED
+    override (issue #80) — a bare ``detect_extractor(path)`` PATH check
+    would wrongly key both entries under "docling" since docling is on PATH
+    throughout this test.
+    """
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls = _mock_docling_subprocess(
+        monkeypatch, "# DOCLING HEADING\n\nDocling body.\n", stem=path.stem
+    )
+
+    # Force legacy, even though docling is on PATH throughout this test.
+    legacy_text, _, legacy_extractor = extract_blocks(path, cache=cache, extractor="legacy")
+    assert legacy_extractor == "legacy"
+    assert calls == [], "declared legacy must never invoke docling"
+    assert "DOCLING HEADING" not in legacy_text
+
+    # Now declare docling explicitly for the SAME file: must actually run
+    # docling, not replay the legacy-declared cache entry.
+    docling_text, _, docling_extractor = extract_blocks(path, cache=cache, extractor="docling")
+    assert docling_extractor == "docling"
+    assert len(calls) == 1, "the docling-declared run must actually invoke docling"
+    assert "DOCLING HEADING" in docling_text
+    assert docling_text != legacy_text
+
+    # Both entries persist independently, each reachable under its own
+    # declared environment.
+    legacy_hit = cache.get(path, extractor="legacy")
+    assert legacy_hit is not None and legacy_hit[2] == "legacy"
+    assert legacy_hit[0] == legacy_text
+    docling_hit = cache.get(path, extractor="docling")
+    assert docling_hit is not None and docling_hit[2] == "docling"
+    assert docling_hit[0] == docling_text
+
+
+def test_declared_extractor_failure_scoped_to_declared_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A negative-cached failure under a declared ``"legacy"`` run must not
+    block a subsequent declared ``"docling"`` run for the same file — mirrors
+    ``test_extraction_failure_retried_under_better_extractor`` for the
+    DECLARED-extractor dimension rather than PATH auto-detection (issue
+    #80).
+    """
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake scanned pdf")
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+
+    def _fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    monkeypatch.setattr(extraction.shutil, "which", _fake_which)
+    monkeypatch.setattr(extraction, "_extract_legacy_lines", lambda p, s: [])
+
+    with pytest.raises(ExtractionError):
+        extract_blocks(pdf, cache=cache, extractor="legacy")
+
+    # Same declared environment: fails fast from the negative cache.
+    with pytest.raises(ExtractionError, match="cached failure"):
+        extract_blocks(pdf, cache=cache, extractor="legacy")
+
+    # Declared docling for the SAME file: the legacy-declared failure must
+    # NOT block this — docling actually runs and succeeds.
+    monkeypatch.setattr(extraction, "_extract_docling_lines", lambda p: [("Recovered.", 0)])
+    canonical_text, _, extractor = extract_blocks(pdf, cache=cache, extractor="docling")
+    assert extractor == "docling"
+    assert "Recovered." in canonical_text
