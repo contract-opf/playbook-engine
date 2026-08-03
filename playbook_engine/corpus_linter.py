@@ -18,6 +18,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from playbook_engine.config import (
     AGREEMENT_TYPE_KEYS,
     BASELINE_KEYS,
     CLASSIFICATION_KEYS,
+    EXTRACTION_KEYS,
     PERSPECTIVE_KEYS,
     PROVENANCE_KEYS,
     SEGMENTATION_KEYS,
@@ -43,6 +45,13 @@ from playbook_engine.pipeline import (
 
 _MIN_VERSIONS_FOR_COMPARISON = 2
 _IGNORED_STEMS = frozenset({"hints"})  # hints.yaml is intentional, not a stray file
+
+# Valid values for extraction.extractor (issue #82) — duplicated as a literal
+# rather than imported from extraction._VALID_EXTRACTORS/config._VALID_EXTRACTORS,
+# mirroring config.py's own documented precedent (its comment directly above
+# its copy of this same set) of each module owning its validation vocabulary
+# instead of reaching into another module's private constant.
+_VALID_EXTRACTORS = frozenset({"docling", "legacy", "auto"})
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +152,17 @@ def lint_corpus(
         report.add("ok", "HAS_DOCUMENTS", f"{len(doc_dirs)} document subdirectory(s) found")
 
     total_supported = 0
+    # Lower-cased suffixes across every discovered version file in the
+    # corpus (e.g. {".docx", ".pdf"}) — collected here, alongside the
+    # existing per-doc-dir walk, so the extraction-environment checks below
+    # (issue #82) know whether a missing docling/pandoc binary matters for
+    # THIS corpus without re-walking the tree.
+    corpus_suffixes: set[str] = set()
     for doc_dir in doc_dirs:
         _lint_doc_dir(doc_dir, report)
-        total_supported += len(_discover_versions(doc_dir))
+        versions = _discover_versions(doc_dir)
+        total_supported += len(versions)
+        corpus_suffixes.update(vf.suffix.lower() for vf in versions)
 
     if doc_dirs and total_supported == 0:
         report.add(
@@ -160,7 +177,7 @@ def lint_corpus(
     # Config (optional)
     # -----------------------------------------------------------------------
     if config_path is not None:
-        _lint_config(config_path, report)
+        _lint_config(config_path, report, corpus_suffixes)
 
     return report
 
@@ -280,8 +297,15 @@ def _lint_duplicate_stems(doc_dir: Path, version_files: list[Path], report: Lint
         )
 
 
-def _lint_config(config_path: Path, report: LintReport) -> None:
-    """Check the engine config YAML."""
+def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str]) -> None:
+    """Check the engine config YAML.
+
+    ``corpus_suffixes``: lower-cased extensions across every version file in
+    the corpus (``lint_corpus``'s per-doc-dir walk, done once and passed in
+    rather than re-walked here) — used by the extraction-environment checks
+    below (issue #82) to scope the docling/pandoc PDF/RTF checks to corpora
+    that actually contain those formats.
+    """
     if not config_path.exists():
         report.add(
             "error", "CONFIG_NOT_FOUND", f"Config file not found: {config_path}", config_path
@@ -325,6 +349,7 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
         ("perspective", PERSPECTIVE_KEYS),
         ("segmentation", SEGMENTATION_KEYS),
         ("classification", CLASSIFICATION_KEYS),
+        ("extraction", EXTRACTION_KEYS),
     ):
         section_raw = raw.get(section_key)
         if not isinstance(section_raw, dict):
@@ -482,3 +507,152 @@ def _lint_config(config_path: Path, report: LintReport) -> None:
             "docs/PLAN-FIRST.md.",
             config_path,
         )
+
+    # extraction environment (issue #82): lint-corpus is the documented
+    # preflight tool (see the ANTHROPIC_API_KEY gate directly above, which
+    # these are modeled on), so it must also catch a broken docling/pandoc
+    # story before mine/compile burns LLM budget mining a corpus that just
+    # went through a silently degraded backend -- the Jul 14 host run
+    # (161/161 legacy, no OCR, no heading structure) is exactly the run a
+    # 200ms preflight check here would have stopped.
+    #
+    # Gating: extraction.extract_blocks (docling/pdfplumber/pandoc) is only
+    # ever reached from the LLM-segmentation path
+    # (pipeline._compute_doc_result's use_llm_segmentation branch ->
+    # _llm_segment_file). The deterministic ingest path
+    # (_ingest_file_tracked -> ingest_docx/ingest_rtf/ingest_pdf, backed by
+    # python-docx/striprtf/pdfplumber directly) never calls it -- see
+    # ExtractionConfig's own docstring in config.py ("a declared extractor
+    # has nothing to govern" there) -- so these checks must be gated the
+    # same way the real runtime preflight is (cli._llm_segmentation_kwargs,
+    # and segment_cmd's inline copy of it) or they misfire on every
+    # deterministic-path corpus. Concretely: this repo's own
+    # examples/judge-fixture/ corpus ships three .rtf files with no
+    # segmentation: section at all -- an ungated CONFIG_EXTRACTION_RTF_NO_PANDOC
+    # would fire on any docling+pandoc-less host and break the documented
+    # quickstart's "no errors, 2 warning(s)" marker
+    # (tests/test_quickstart.py), the same failure mode
+    # tests/test_cli.py::test_mine_docling_declared_without_segmentation_llm_never_checked
+    # already guards against for the runtime preflight. ``agent`` is OR'd
+    # with ``llm`` (not AND-NOT'd like the credentials gate above) because
+    # this mirrors load_config's own resolution
+    # (``llm=bool(seg_raw.get("llm")) or agent_seg``, config.py) -- the
+    # agent path still calls extract_blocks, it just segments key-free once
+    # extraction is done.
+    #
+    # Config reading: reads the raw ``extraction`` mapping the same way
+    # every other section in this function does (raw YAML, not a resolved
+    # EngineConfig) so one broken section doesn't collapse this function's
+    # independent, per-field reporting down to load_config's first
+    # ConfigError.
+    #
+    # Shape validation: a value load_config would reject -- ``extraction:``
+    # present but not a mapping, or ``extraction.extractor`` present but
+    # outside the docling/legacy/auto vocabulary load_config uses
+    # (config.py's EXTRACTION_KEYS/_VALID_EXTRACTORS -- this module's own
+    # _VALID_EXTRACTORS copy above) -- is reported as an ERROR here,
+    # mirroring the CONFIG_PROVENANCE_INVALID / CONFIG_ALIASES_INVALID
+    # pattern above: this is precisely the raw-vs-resolved gap that bit #68,
+    # and lint-corpus must never say "OK" about a config ``mine``/``compile``
+    # will refuse to load (the same invariant the provenance section above
+    # states explicitly). The CONFIG_UNKNOWN_KEY check above already flags
+    # an unknown key inside extraction: (e.g. a typo'd ``extractr``); this
+    # catches the section being the wrong shape entirely, or ``extractor``
+    # holding a value outside the allowed vocabulary (e.g. a typo'd
+    # ``doclng``).
+    #
+    # This shape check runs unconditionally -- deliberately NOT nested under
+    # ``extraction_relevant`` below -- because load_config validates
+    # extraction: regardless of segmentation.llm/agent. Only the
+    # docling/pandoc environment checks further down are gated on
+    # extraction_relevant: those ask "is the environment broken for the
+    # extraction that would actually run", which is meaningless when
+    # extract_blocks is never reached (see the Gating note above).
+    extr_shape = raw.get("extraction", {})
+    if not isinstance(extr_shape, dict):
+        report.add(
+            "error",
+            "CONFIG_EXTRACTION_INVALID",
+            f"extraction must be a mapping, got {type(extr_shape).__name__}.",
+            config_path,
+        )
+    else:
+        extractor_declared = extr_shape.get("extractor", "auto")
+        if not isinstance(extractor_declared, str) or extractor_declared not in _VALID_EXTRACTORS:
+            report.add(
+                "error",
+                "CONFIG_EXTRACTION_INVALID_EXTRACTOR",
+                "extraction.extractor must be one of 'docling', 'legacy', or "
+                f"'auto' (got {extractor_declared!r}).",
+                config_path,
+            )
+
+    extraction_relevant = isinstance(seg, dict) and (bool(seg.get("llm")) or bool(seg.get("agent")))
+
+    if extraction_relevant:
+        # A value load_config would reject is already reported as an error
+        # above; it falls back to "auto" here so these environment checks
+        # still run against a sane default instead of skipping outright.
+        extr = raw.get("extraction", {})
+        extractor_raw = extr.get("extractor", "auto") if isinstance(extr, dict) else "auto"
+        if extractor_raw not in _VALID_EXTRACTORS:
+            extractor_raw = "auto"
+
+        docling_present = shutil.which("docling") is not None
+
+        if extractor_raw == "docling" and not docling_present:
+            report.add(
+                "error",
+                "CONFIG_EXTRACTION_DOCLING_MISSING",
+                "extraction.extractor is set to 'docling' but the docling "
+                "binary was not found on PATH. Install docling, run this "
+                "corpus inside the project's container (see Dockerfile), or "
+                "set extraction.extractor to 'legacy' or 'auto' (or omit "
+                "the extraction: section) to use the legacy adapters "
+                "instead.",
+                config_path,
+            )
+
+        if extractor_raw == "auto" and not docling_present and ".pdf" in corpus_suffixes:
+            report.add(
+                "warning",
+                "CONFIG_EXTRACTION_AUTO_PDF_NO_DOCLING",
+                "docling was not found on PATH and this corpus contains "
+                ".pdf file(s). extraction.extractor defaults to 'auto', "
+                "which falls back to the legacy pdfplumber adapter (no "
+                "OCR) for PDFs -- scanned/image-only PDFs will yield "
+                "garbage or no text. Install docling for better PDF "
+                "extraction, or set extraction.extractor: legacy to accept "
+                "this deliberately and silence the warning.",
+                config_path,
+            )
+
+        # A declared "legacy" always uses the pandoc-backed legacy RTF
+        # adapter, even when docling IS on PATH --
+        # extraction._resolve_extractor_env resolves a declared "legacy" to
+        # "legacy" verbatim regardless of docling's availability (that's the
+        # whole point: a deterministic, container-free run). "auto" only
+        # reaches that same pandoc-backed adapter when docling is absent. A
+        # declared "docling" never reaches it: either docling is present and
+        # handles the RTF file directly, or docling is absent and the
+        # CONFIG_EXTRACTION_DOCLING_MISSING error above already fires and
+        # blocks the run before any file is touched -- a second, redundant
+        # RTF-specific error here would misname which fix actually unblocks
+        # the corpus.
+        resolves_rtf_via_legacy = extractor_raw == "legacy" or (
+            extractor_raw == "auto" and not docling_present
+        )
+        if ".rtf" in corpus_suffixes and resolves_rtf_via_legacy and shutil.which("pandoc") is None:
+            report.add(
+                "error",
+                "CONFIG_EXTRACTION_RTF_NO_PANDOC",
+                "This corpus contains .rtf file(s) and the extraction "
+                "environment resolves to the legacy adapters "
+                "(extraction.extractor is 'legacy', or 'auto' with docling "
+                "not on PATH), but pandoc was not found on PATH. The "
+                "legacy RTF adapter requires pandoc and raises "
+                "ExtractionError at mine/compile time without it. Install "
+                "pandoc (e.g. `brew install pandoc` or `apt-get install "
+                "pandoc`), or install docling.",
+                config_path,
+            )
