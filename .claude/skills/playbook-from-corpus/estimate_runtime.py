@@ -59,7 +59,14 @@ import sys
 # own cache-hit probe would keep matching pre-#81 keys that the real engine
 # no longer does, over-reporting "already extracted" and under-estimating
 # the ETA for a corpus whose warm cache the real run will actually miss.
-_EXTRACTION_CACHE_FORMAT_VERSION = "2"
+#
+# Bumped to "3" alongside extraction._EXTRACTION_CACHE_FORMAT_VERSION again
+# (issue #84: a redline DOCX docling failure is now retried on a normalized
+# copy before falling back to legacy — see docx_normalizer.py — so the
+# correct output for the SAME file/environment changed). Same rationale as
+# the #81 bump above: without moving in lockstep, this probe would keep
+# matching pre-#84 keys the real engine no longer does.
+_EXTRACTION_CACHE_FORMAT_VERSION = "3"
 
 # Per-version wall-clock (seconds), docling on CPU. Born-digital = model
 # cold-load + convert; scanned = the same plus RapidOCR over page images,

@@ -551,6 +551,172 @@ def test_extract_docling_failure_unparseable_file_still_raises(
 
 
 # ---------------------------------------------------------------------------
+# docling DOCX crash -> normalize-and-retry before legacy (issue #84)
+#
+# docling 2.x's DOCX backend crashes on tracked-changes/comment nodes
+# (``etree.QName`` on a comment factory) — exactly what redline drafts
+# contain, the highest-value documents in a negotiation corpus. A DOCX
+# docling failure must now be retried once on a pre-normalized copy (see
+# playbook_engine.docx_normalizer) BEFORE falling back to the legacy adapter
+# — recovering real docling structure (headings as blocks) for redlines
+# instead of degrading to the legacy adapter, which has no heading detection
+# at all.
+# ---------------------------------------------------------------------------
+
+
+def test_docling_failure_on_tracked_docx_recovers_via_normalized_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The acceptance criterion: a tracked-changes DOCX that makes docling
+    raise is extracted via docling (on the normalized copy), not legacy —
+    the block stream must show real docling structure (a heading as its own
+    block), and the returned extractor label must show NO degradation at
+    all (this is not counted as a ``backend-error`` fallback)."""
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        target = Path(cmd[2])
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        if len(calls) == 1:
+            # First attempt targets the ORIGINAL tracked-changes file and
+            # crashes, mirroring docling 2.x's real etree.QName-on-comment
+            # failure on redlines.
+            raise subprocess.CalledProcessError(1, cmd, stderr="etree.QName crash on w:ins")
+        # Second attempt targets the normalized copy and succeeds, with real
+        # docling structure (a heading) the legacy adapter cannot produce.
+        (outdir / f"{target.stem}.md").write_text(
+            "# Obligations\n\nParty A shall promptly provide services.\n", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    canonical_text, blocks, extractor = extract_blocks(path)
+
+    assert len(calls) == 2, "docling must be retried once on the normalized copy"
+    assert calls[0][2] == str(path), "first attempt must target the original file"
+    assert calls[1][2] != str(path), (
+        "retry must target the normalized temp copy, not the original file"
+    )
+    assert not Path(calls[1][2]).exists(), "the normalized temp copy must be cleaned up"
+
+    assert extractor == "docling", "must recover via docling structure, not degrade to legacy"
+    assert extractor.reason is None
+    assert extractor.fallback_from is None
+    assert extractor.detail is None
+
+    assert "Obligations" in canonical_text
+    assert blocks[0].text == "Obligations"  # docling heading -> its own block
+
+
+def test_docling_failure_on_docx_falls_back_to_legacy_when_retry_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When docling fails on BOTH the original and the normalized copy, the
+    original per-file legacy fallback still runs unchanged (regression
+    guard: the new retry must never swallow a genuine double failure)."""
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    canonical_text, blocks, extractor = extract_blocks(path)
+
+    assert len(calls) == 2, "both the original and normalized-copy attempts must be made"
+    assert calls[0][2] == str(path)
+    assert calls[1][2] != str(path)
+
+    assert extractor == "legacy"
+    assert extractor.reason == "backend-error"
+    assert extractor.fallback_from == "docling"
+    # Legacy DOCX adapter still captures the accepted-changes text (issue #85).
+    assert "Party A shall promptly provide services" in canonical_text
+    assert "to client" not in canonical_text
+
+
+def test_docling_failure_on_pdf_does_not_attempt_normalized_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The normalize-and-retry recovery is DOCX-specific: a PDF docling
+    failure must fall back to legacy in exactly one subprocess call, exactly
+    as before this ticket."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    path = tmp_path / "doc.pdf"
+    path.write_bytes(b"%PDF-1.4 fake content")  # not a real PDF; legacy fails too
+
+    with pytest.raises(ExtractionError):
+        extract_blocks(path)
+
+    assert len(calls) == 1, "non-DOCX docling failures must not trigger the normalize retry"
+
+
+def test_docling_failure_on_unparseable_docx_still_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new retry must not mask the final raise: a ``.docx`` that is not
+    actually a valid DOCX fails docling, fails the normalize attempt
+    (python-docx cannot open it either — the failure is caught broadly, not
+    just ``ExtractionError``), and then fails the legacy adapter too —
+    ``extract_blocks`` must still raise, preserving the
+    skip-on-unrecoverable contract."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    path = tmp_path / "not_a_real.docx"
+    path.write_bytes(b"this is not a docx file at all")
+
+    with pytest.raises(ExtractionError):
+        extract_blocks(path)
+
+    # Only the ORIGINAL attempt ever reaches docling: normalize_tracked_docx
+    # itself raises trying to open the garbage bytes, before a second
+    # docling invocation could happen.
+    assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
 # Unsupported types / general errors
 # ---------------------------------------------------------------------------
 
@@ -1429,3 +1595,89 @@ def test_extraction_cache_format_version_bump_misses_pre_81_key(tmp_path: Path) 
     # Same file, same extractor_env — differs ONLY in format_version — must
     # be an unconditional miss under the real (bumped) key.
     assert cache.get(path, extractor="legacy") is None
+
+
+def test_extraction_cache_format_version_bump_misses_pre_84_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache entry filed under the PRE-#84 format_version ("2") for a
+    tracked-changes DOCX must MISS under the current code (format_version
+    "3") — proving the issue #84 fix (normalize-and-retry recovers docling
+    structure for redlines) actually reaches a corpus extracted before it
+    landed, instead of silently replaying the stale docling->legacy fallback
+    this exact file was cached under pre-fix.
+
+    The planted entry mirrors real pre-#84 on-disk state: the KEY's
+    ``extractor_env`` is "docling" (the environment the file was extracted
+    UNDER, not the post-fallback adapter — see the pipeline.py comment added
+    in d08b895), while the stored VALUE's ``extractor`` is "legacy" with
+    ``reason="backend-error"``/``fallback_from="docling"`` — exactly what a
+    live per-file docling crash on a redline produced before this fix.
+    Hardcodes "2" (rather than referencing _EXTRACTION_CACHE_FORMAT_VERSION,
+    which now reads "3") specifically to simulate genuine on-disk pre-#84
+    state — mirrors test_extraction_cache_format_version_bump_misses_pre_81_key's
+    pattern for the #81 bump.
+    """
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+    cache_path = tmp_path / "extraction_cache.jsonl"
+    cache = ExtractionCache(cache_path)
+
+    assert extraction._EXTRACTION_CACHE_FORMAT_VERSION not in ("1", "2"), (
+        "this test's premise requires the current format version to have moved on from '2'"
+    )
+
+    stale_text = "Party A shall provide services to client."
+    pre_84_key_payload = {
+        "file_sha256": extraction._sha256_file(path),
+        "format_version": "2",
+        "extractor_env": "docling",
+    }
+    cache._store.put(
+        pre_84_key_payload,
+        {
+            "canonical_text": stale_text,
+            "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, len(stale_text)]}],
+            "extractor": "legacy",
+            "reason": "backend-error",
+            "fallback_from": "docling",
+        },
+    )
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else None
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        target = Path(cmd[2])
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        if len(calls) == 1:
+            # First attempt targets the ORIGINAL tracked-changes file and
+            # crashes, mirroring docling 2.x's real etree.QName-on-comment
+            # failure on redlines.
+            raise subprocess.CalledProcessError(1, cmd, stderr="etree.QName crash on w:ins")
+        # Second attempt targets the normalized copy and succeeds, with real
+        # docling structure (a heading) the legacy adapter cannot produce.
+        (outdir / f"{target.stem}.md").write_text(
+            "# Obligations\n\nParty A shall promptly provide services.\n", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    canonical_text, blocks, extractor = extract_blocks(path, cache=cache)
+
+    assert len(calls) == 2, (
+        "a warm pre-#84 cache entry must not short-circuit extraction with the "
+        "stale legacy/backend-error result — the normalize-and-retry must "
+        "still actually run against docling"
+    )
+    assert extractor == "docling", "must recover via docling, not replay the cached legacy label"
+    assert extractor.reason is None
+    assert extractor.fallback_from is None
+    assert "Obligations" in canonical_text
+    assert blocks[0].text == "Obligations"
