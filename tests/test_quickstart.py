@@ -188,6 +188,41 @@ def test_quickstart_commands_run(quickstart_run: _QuickstartRun) -> None:
         "but semantically empty (viewer renders a blank page; see issue #200)"
     )
 
+    # issue #93: the quickstart now walks the first control-ladder rung — a
+    # Posture interview (answered non-interactively from a committed fixture
+    # file) runs after `project`, so the compiled playbook should carry >=2
+    # interview-authored Floor invariants (the sacred_clauses answer's two
+    # ';'-separated items) instead of shipping evidence-only.
+    invariants = doc.get("floor", {}).get("invariants", [])
+    assert len(invariants) >= 2, (
+        f"quickstart's posture interview should promote >=2 interview-authored "
+        f"Floor invariants (issue #93); found {len(invariants)}: {invariants}"
+    )
+    assert all("posture interview" in inv.get("rationale", "") for inv in invariants), (
+        f"expected every quickstart Floor invariant to be attributed to the "
+        f"posture interview (issue #93): {invariants}"
+    )
+
+    # The rendered prompt is the walkthrough's final payoff — assert against
+    # the artifact `render-prompt --out` wrote, NOT stdout (its stdout is only
+    # `wrote ...`; examples/README.md's render-prompt step has always used
+    # --out, so stdout was never the artifact — issue #93).
+    prompt_path = quickstart_run.out_dir / "review-prompt.md"
+    assert prompt_path.exists(), f"quickstart did not produce {prompt_path}"
+    prompt_text = prompt_path.read_text(encoding="utf-8")
+    assert "## HARD LINES (Floor)" in prompt_text
+    assert "no hard lines defined" not in prompt_text, (
+        "rendered prompt's HARD LINES section should be populated by the "
+        "interview step, not the empty-Floor marker (issue #93)"
+    )
+    assert "no posture yet" not in prompt_text, (
+        "rendered prompt's POSTURE section should be populated by the interview step (issue #93)"
+    )
+    assert "ADVISORY ONLY" not in prompt_text, (
+        "rendered prompt should no longer show the advisory-only banner now "
+        "that the Floor and Posture are populated (issue #93)"
+    )
+
 
 def test_quickstart_expected_output_markers(
     _readme_text: str, quickstart_run: _QuickstartRun

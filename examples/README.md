@@ -11,7 +11,8 @@
 
 ## Quickstart: judge-fixture → playbook
 
-This walks you from a fresh clone to a validating `playbook.opf.json`, using the
+This walks you from a fresh clone to a validating `playbook.opf.json` with
+populated HARD LINES and POSTURE — the product at full strength — using the
 committed synthetic fixture at [`judge-fixture/`](judge-fixture/) — **no
 `ANTHROPIC_API_KEY` required**. Total wall time: well under a minute on the
 fixture. Run every command below from the repo root.
@@ -110,7 +111,28 @@ Playbook written: out/quickstart-demo/playbook.opf.json
 OK  out/quickstart-demo/playbook.opf.json
 ```
 
-### 5. Validate
+### 5. Run the Posture interview
+
+Authors the OPF Posture from a short GC interview — six canonical
+questions, answered here from a committed fixture file so the walkthrough
+stays non-interactive (`--answers-file` skips the terminal prompt entirely).
+This is the first rung of the [control
+ladder](../docs/ADOPTING.md#how-much-control-do-you-want): the `sacred_clauses`
+answer is promoted directly into `floor.invariants` — a human (here, the
+fixture file) authoring hard lines outright, no compiled candidate to
+review first.
+
+```sh
+playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
+```
+
+Expected output:
+
+```text
+OK  posture.version=1 written to out/quickstart-demo/playbook.opf.json
+```
+
+### 6. Validate
 
 ```sh
 playbook validate out/quickstart-demo/playbook.opf.json
@@ -122,7 +144,7 @@ Expected output — the playbook is schema-valid:
 OK  out/quickstart-demo/playbook.opf.json
 ```
 
-### 6. View it
+### 7. View it
 
 Renders a self-contained, no-network review HTML with per-clause comment
 boxes:
@@ -140,10 +162,14 @@ OK  out/quickstart-demo/playbook.review.html
 Open `out/quickstart-demo/playbook.review.html` in a browser to see the
 result.
 
-### 7. Render a review prompt (optional)
+### 8. Render a review prompt (optional)
 
 Composes Evidence + Posture + Floor into a review-ready system prompt — pure
-Markdown, pastable into any chat LLM alongside a contract to review:
+Markdown, pastable into any chat LLM alongside a contract to review. Step 5's
+interview means the `## HARD LINES (Floor)` and `## NEGOTIATION POSTURE
+(soft)` sections below now carry real, binding content instead of the
+empty-section markers — and, since the playbook is no longer advisory-only,
+`render-prompt` no longer prints its advisory-only WARN:
 
 ```sh
 playbook render-prompt out/quickstart-demo/playbook.opf.json --out out/quickstart-demo/review-prompt.md
@@ -153,16 +179,6 @@ Expected output (stdout — the artifact):
 
 ```text
 wrote out/quickstart-demo/review-prompt.md
-```
-
-Expected stderr (not part of the artifact — printed alongside the stdout
-above): the fixture playbook is advisory-only by design (no hard lines, no
-posture — see step 4's compiled `playbook.opf.json`), so `render-prompt`
-also prints a one-line WARN here. This is expected on this walkthrough, not
-a sign anything went wrong:
-
-```text
-WARN playbook.opf.json: advisory-only playbook (no hard lines, no posture) — nothing in the rendered prompt is binding
 ```
 <!-- quickstart:end -->
 
@@ -177,7 +193,7 @@ until this file is updated to match.
 
 ## Docker variant
 
-Same six steps, run inside the reproducible Docker image instead of a local
+Same seven steps, run inside the reproducible Docker image instead of a local
 venv (see the main README for why you'd pick Docker for a real corpus):
 
 ```sh
@@ -202,6 +218,11 @@ docker run --rm -it \
   -v "$PWD/examples/judge-fixture":/work/corpus:ro \
   -v "$PWD/out/quickstart-demo":/work/out \
   playbook-engine project /work/out --config /work/corpus/config.yaml
+
+docker run --rm -it \
+  -v "$PWD/examples/judge-fixture":/work/corpus:ro \
+  -v "$PWD/out/quickstart-demo":/work/out \
+  playbook-engine posture interview /work/out --answers-file /work/corpus/posture-answers.json
 
 docker run --rm -it \
   -v "$PWD/out/quickstart-demo":/work/out \
