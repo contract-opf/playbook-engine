@@ -182,7 +182,13 @@ from docx import Document
 
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.artifact_store import _sha256_file
-from playbook_engine.docx_ingester import _extract_para_text, _iter_body_blocks
+from playbook_engine.docx_ingester import (
+    DocxIngesterError,
+    TrackedChanges,
+    _extract_para_text,
+    _iter_body_blocks,
+    ingest_docx,
+)
 from playbook_engine.docx_normalizer import normalize_tracked_docx
 from playbook_engine.segmentation_grounding import Block
 
@@ -1076,6 +1082,73 @@ def _extract_docx_lines(path: Path) -> list[tuple[str, int]]:
         if text:
             lines.append((text, 0))
     return lines
+
+
+def extract_tracked_changes(path: Path) -> TrackedChanges | None:
+    """Harvest *path*'s DOCX tracked-changes side-channel (issue #85).
+
+    ``extract_blocks`` prefers docling for DOCX whenever it's on ``PATH``
+    (see the module docstring), and docling only ever sees Markdown — it has
+    no notion of ``w:ins``/``w:del`` at all. ``_extract_docx_lines`` (the
+    legacy adapter) *does* walk the raw XML via ``_extract_para_text``, but
+    only runs when docling is unavailable, declared off, or fails outright
+    (and even then, discards the ``TrackedChange`` list it computes per
+    paragraph — see that function). So neither of ``extract_blocks``'s two
+    adapters is a seam callers can hang tracked-changes capture off of
+    without making it depend on which one happened to run for this file.
+
+    This function is independent of that choice entirely: it re-walks
+    *path* itself via :func:`playbook_engine.docx_ingester.ingest_docx` —
+    the SAME parse the deterministic (non-LLM) ingestion path already uses
+    to populate its own ``tracked_by_vid`` entries (see
+    ``pipeline._ingest_file_tracked``) — so an LLM-segmented version gets
+    the identical side-channel a deterministically-segmented version of the
+    same file would, regardless of whether docling or the legacy adapter
+    produced its canonical text/blocks.
+
+    MUST be called on *path* itself, never a normalized copy: docling's
+    per-file redline retry (:func:`_retry_docling_on_normalized_docx`, issue
+    #84) normalizes a TEMP copy — accepting insertions, rejecting deletions,
+    stripping comment markup — before re-attempting docling on it, which
+    deletes exactly the ``w:ins``/``w:del`` nodes this function harvests.
+    That temp path is entirely internal to ``extract_blocks`` and never
+    escapes this module, so any caller that (like the pipeline) only ever
+    holds the original corpus source path already satisfies this.
+
+    ``document_id``/``version`` on the returned ``TrackedChanges`` are left
+    blank: this module has no notion of corpus document identity (mirrors
+    ``extract_blocks(path)``'s own signature, which also takes no document
+    id), and no consumer of ``TrackedChanges`` reads those two fields — only
+    ``.changes`` (see ``tracked_changes_overlay.enrich_clause_diff``).
+
+    ``clause_path`` on each returned ``TrackedChange`` comes straight from
+    ``ingest_docx``'s deterministic clause-numbering (heading style /
+    explicit numeric prefix / generated sequential path — see
+    ``docx_ingester``'s module docstring). For a document whose clause
+    boundaries the LLM segmenter groups the same way (the common case for a
+    cleanly-numbered agreement), this lines up with the LLM tree's own
+    ``clause_path`` and lets ``enrich_clause_diff`` find candidates; for a
+    document where the two disagree, matching degrades exactly the way
+    cross-version text-similarity matching already does elsewhere in
+    ``tracked_changes_overlay.py`` (best-effort, not guaranteed) — mapping
+    tracked-change positions onto the LLM's own segmentation is out of scope
+    here (see issue #85's Notes: no char_span/coordinate translation either).
+
+    Returns ``None`` for non-DOCX paths (no tracked-changes concept) —
+    mirrors ``pipeline._ingest_file_tracked``'s convention for RTF/PDF. A
+    DOCX with no ``w:ins``/``w:del`` elements still returns a
+    ``TrackedChanges`` with an empty ``changes`` list (not ``None``) — same
+    convention.
+
+    Raises:
+        ExtractionError: *path* is not a valid/openable DOCX.
+    """
+    if path.suffix.lower() != ".docx":
+        return None
+    try:
+        return ingest_docx(path, document_id="", version="").tracked
+    except DocxIngesterError as exc:
+        raise ExtractionError(f"cannot open DOCX: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------

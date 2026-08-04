@@ -64,6 +64,7 @@ from playbook_engine.extraction import (
     ExtractorLabel,
     detect_extractor,
     extract_blocks,
+    extract_tracked_changes,
 )
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
@@ -363,6 +364,38 @@ def _ingest_file_tracked(
     if ext == ".pdf":
         return ingest_pdf(path, document_id, version).tree, None
     raise ValueError(f"Unsupported file extension {ext!r}; expected .docx, .pdf, or .rtf")
+
+
+def _llm_tracked_changes(vf: Path, progress: Callable[[str], None]) -> TrackedChanges | None:
+    """Best-effort DOCX tracked-changes side-channel for an LLM-segmented version (issue #85).
+
+    The deterministic branch of ``_compute_doc_result`` gets its
+    ``tracked_by_vid`` entry "for free" from ``_ingest_file_tracked``, since
+    that same call also builds the version's ``ClauseTree``. The
+    LLM-segmentation branches build their tree via
+    :mod:`playbook_engine.llm_segmentation_stage`/``_ground_batch_result``
+    instead, which never touches ``docx_ingester`` at all — so this calls
+    :func:`~playbook_engine.extraction.extract_tracked_changes` directly on
+    *vf* to fill that gap, independent of whichever adapter
+    (``extract_blocks``'s docling or legacy path) produced this version's
+    canonical text/blocks.
+
+    Unlike the deterministic branch — where a failure here means the whole
+    version has no usable tree either, so letting it propagate is correct —
+    an LLM-segmented version's tree has ALREADY been produced successfully
+    by the time this runs. Tracked-changes attribution is a bonus signal
+    (see ``tracked_changes_overlay.py``'s module docstring: "It degrades
+    silently for PDFs, clean DOCX files, and any version pair where no
+    tracked-changes data was captured"), so a DOCX that ``python-docx``
+    cannot open here (but docling could, upstream) must not retroactively
+    fail an otherwise-successful version — any exception is caught, logged
+    via *progress*, and degrades to ``None``, exactly like a PDF/RTF version.
+    """
+    try:
+        return extract_tracked_changes(vf)
+    except Exception as exc:  # noqa: BLE001 — bonus signal, must never fail the version
+        progress(f"    WARNING: {vf.name}: tracked-changes side-channel unavailable ({exc})")
+        return None
 
 
 def _discover_versions(doc_dir: Path) -> list[Path]:
@@ -952,11 +985,13 @@ def _attribution_for_diff(
     history — that would require enriching each *consecutive* diff instead
     of the net diff, which observation_builder does not model today.
 
-    Returns ``None`` when there is no side-channel at all (PDF/RTF, clean
-    DOCX, or an LLM-segmented version — see ``_compute_doc_result``'s
-    ``tracked_by_vid`` docstring), when the diff has no hunks (added/removed/
-    unchanged clauses), or when no hunk matched a tracked change closely
-    enough (see ``tracked_changes_overlay._MATCH_THRESHOLD``).
+    Returns ``None`` when there is no side-channel at all (PDF/RTF, a clean
+    DOCX with no ``w:ins``/``w:del`` elements, or a DOCX ``python-docx``
+    could not open — see ``_compute_doc_result``'s ``tracked_by_vid``
+    comment; this applies equally regardless of segmentation mode since
+    issue #85), when the diff has no hunks (added/removed/unchanged
+    clauses), or when no hunk matched a tracked change closely enough (see
+    ``tracked_changes_overlay._MATCH_THRESHOLD``).
     """
     if tracked_changes is None or not clause_diff.hunks:
         return None
@@ -1406,10 +1441,12 @@ def _compute_doc_result(
     # L1: Ingest + segment each version
     version_trees: dict[str, ClauseTree] = {}
     llm_taxonomy_by_path: dict[str, dict[str, str | None]] = {}
-    # Populated only on the deterministic DOCX path — LLM-segmented versions
-    # have no tracked-changes capture yet (extraction.py has no w:ins/w:del
-    # handling), so those versions are simply absent here and
-    # tracked_by_vid.get(vid) below returns None (issue #88).
+    # Populated on every branch below — the deterministic DOCX path gets it
+    # "for free" from _ingest_file_tracked, and both LLM-segmentation
+    # branches independently re-parse the ORIGINAL source file via
+    # _llm_tracked_changes/extract_tracked_changes (issue #85). Still a plain
+    # dict.get(vid)-returns-None affair for RTF/PDF versions and any DOCX
+    # python-docx cannot open (issue #88).
     tracked_by_vid: dict[str, TrackedChanges | None] = {}
     # Per-version ingest status (issue #89): every version FILE FOUND gets an
     # entry here, "ok" or "failed" — this is what lets corpus_manifest.json
@@ -1448,6 +1485,7 @@ def _compute_doc_result(
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
                 extractor_label = extraction.extractor_label
+                tracked_by_vid[vid] = _llm_tracked_changes(vf, progress)
             elif use_llm_segmentation:
                 tree, tax_by_path, extractor_label = _llm_segment_file(
                     vf,
@@ -1462,6 +1500,7 @@ def _compute_doc_result(
                     extractor=config.extraction.extractor,
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
+                tracked_by_vid[vid] = _llm_tracked_changes(vf, progress)
             else:
                 raw_tree, tracked = _ingest_file_tracked(vf, doc_id, vid)
                 tree = segment(raw_tree)
