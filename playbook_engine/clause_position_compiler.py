@@ -201,6 +201,15 @@ class ObservedPosition:
     is exactly the "acceptable alternative language" lawyers need verbatim,
     not a fragment. Optional in the OPF schema; defaults to ``text_summary``
     when not supplied.
+
+    ``search_snippet`` (issue #95) carries a short, already-pseudonymized,
+    already-truncated verbatim excerpt (see ``Observation.search_snippet``)
+    for a reviewer to Ctrl+F in the source document. Serialised as
+    ``x_search_snippet`` — the sanctioned ``^x_`` extension point on the OPF
+    ``observation`` schema (``$defs.observation`` — closed, but its
+    ``patternProperties`` accepts any ``x_``-prefixed key with no schema
+    edit) — since the citation this observation points at
+    (``$defs.citation``) is itself closed with no such escape hatch.
     """
 
     text_summary: str
@@ -211,6 +220,7 @@ class ObservedPosition:
     outcome: str
     precedent_count: int = 1
     full_text: str = ""
+    search_snippet: str = ""
     # Negotiation dynamics (issue #177, OPF §3.5.3) — copied from the source
     # Observation; optional-when-underivable, so to_dict() emits the keys
     # only when set (never null placeholders).
@@ -239,6 +249,11 @@ class ObservedPosition:
             d["observed_at"] = self.observed_at
         if self.counterparty_ref is not None:
             d["counterparty_ref"] = self.counterparty_ref
+        # search_snippet is optional/best-effort (issue #95) — omitted
+        # (never a null/"" placeholder) when there was no clause text to
+        # excerpt from, mirroring the dynamics fields above.
+        if self.search_snippet:
+            d["x_search_snippet"] = self.search_snippet
         return d
 
 
@@ -792,6 +807,7 @@ def _obs_to_observed_position(
     return ObservedPosition(
         text_summary=obs.text_summary,
         full_text=obs.full_text,
+        search_snippet=obs.search_snippet,
         example_ref=OPFCitation(
             document_id=obs.citation.document_id,
             version=obs.citation.version,

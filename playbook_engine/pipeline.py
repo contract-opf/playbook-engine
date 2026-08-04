@@ -97,6 +97,7 @@ from playbook_engine.observation_builder import (
     read_round_moves_jsonl,
     round_move_from_dict,
     truncate_move_summaries,
+    truncate_search_snippets,
     write_observations_jsonl,
     write_round_moves_jsonl,
 )
@@ -908,6 +909,7 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 taxonomy_id=raw["taxonomy_id"],
                 text_summary=raw["text_summary"],
                 full_text=raw.get("full_text", raw["text_summary"]),
+                search_snippet=raw.get("search_snippet") or "",
                 citation=ObservationCitation(
                     document_id=cit["document_id"],
                     version=cit["version"],
@@ -1082,13 +1084,22 @@ def _pseudonymize_observations(
 ) -> list[Observation]:
     """Return *observations* with clause text and every document id aliased.
 
-    Rewrites ``text_summary``, ``full_text``, ``citation.document_id``, and the
-    document-id segment of ``observation_id`` for every known entity name
-    (issues #153, #182) — ``Observation``/``ObservationCitation`` are frozen
-    dataclasses, so a fresh copy is built per row via ``dataclasses.replace``
-    rather than mutated in place. Pseudonymizing ``observation_id`` here (not
-    just the citation) keeps the id free of raw counterparty names and keeps it
+    Rewrites ``text_summary``, ``full_text``, ``search_snippet``,
+    ``citation.document_id``, and the document-id segment of
+    ``observation_id`` for every known entity name (issues #153, #182, #95)
+    — ``Observation``/``ObservationCitation`` are frozen dataclasses, so a
+    fresh copy is built per row via ``dataclasses.replace`` rather than
+    mutated in place. Pseudonymizing ``observation_id`` here (not just the
+    citation) keeps the id free of raw counterparty names and keeps it
     consistent with the aliased ``citation.document_id``.
+
+    ``search_snippet`` is still UNTRUNCATED at this point (see
+    ``Observation.search_snippet``'s docstring) — it is pseudonymized here
+    alongside ``text_summary``/``full_text`` while whole, and only capped to
+    its final short-phrase length afterward, by
+    ``truncate_search_snippets``. Never reorder those two steps: truncating
+    first can bisect a known-entity name mid-word and defeat this function's
+    whole-word alias match, leaking the fragment.
     """
     out: list[Observation] = []
     for obs in observations:
@@ -1109,6 +1120,7 @@ def _pseudonymize_observations(
                 ),
                 text_summary=pseudonymize_text(obs.text_summary, known_entities, registry),
                 full_text=pseudonymize_text(obs.full_text, known_entities, registry),
+                search_snippet=pseudonymize_text(obs.search_snippet, known_entities, registry),
                 citation=new_citation,
             )
         )
@@ -2756,8 +2768,15 @@ def mine_corpus(
         _atomic_json_write(trail, trail_dir / f"{out_doc_id}.json")
 
     # Write intermediates
+    #
+    # search_snippet (issue #95) is truncated to its final short-phrase length
+    # HERE — unconditionally, regardless of whether known_entities pseudonymization
+    # ran above — never earlier: truncating before pseudonymization can bisect
+    # a known-entity name mid-word and defeat the whole-word alias match in
+    # _pseudonymize_observations, leaking the fragment (same class of bug the
+    # round_moves truncation below already guards against for change_summary).
     scope_log.write(out_dir / "scope.json")
-    write_observations_jsonl(all_observations, obs_path)
+    write_observations_jsonl(truncate_search_snippets(all_observations), obs_path)
     # Round moves (issue #177) — written post-pseudonymization like
     # observations.jsonl; project_playbook reads it back for the
     # negotiation_trail (absent file → no trail, e.g. a pre-#177 store).
@@ -2767,7 +2786,7 @@ def mine_corpus(
     write_round_moves_jsonl(truncate_move_summaries(all_round_moves), out_dir / "round_moves.jsonl")
     # Persist template observations so project_playbook can read them without re-ingesting.
     template_obs_path = out_dir / "template_observations.jsonl"
-    write_observations_jsonl(t_observations, template_obs_path)
+    write_observations_jsonl(truncate_search_snippets(t_observations), template_obs_path)
     _atomic_json_write(corpus_documents, manifest_path)
     if store is not None:
         progress(
@@ -2884,13 +2903,26 @@ def project_playbook(
             "Run 'playbook mine' on a non-empty corpus first."
         )
 
-    all_observations = _restore_observations(raw_observations)
+    # search_snippet (issue #95) is capped here, not just at mine-write time
+    # (pipeline.py's mine_corpus, ~lines 2779/2789): a store mined before
+    # search_snippet existed carries no key for it, so _restore_observations
+    # defaults it to the UNTRUNCATED full_text (Observation.__post_init__).
+    # Re-running truncate_search_snippets on read makes project_playbook
+    # correct against such a legacy store too, whether it runs right after
+    # mine_corpus in the same process or as the separate `playbook project`
+    # command against an older store. Safe to apply post-restore with no
+    # re-pseudonymization: whatever full_text/search_snippet already
+    # persisted to observations.jsonl went through _pseudonymize_observations
+    # before it was written, so it is already born-safe; this is a pure
+    # length cap, and _shape_search_snippet is idempotent on values already
+    # capped by a fresh store's own mine-time truncation.
+    all_observations = truncate_search_snippets(_restore_observations(raw_observations))
     progress(f"  loaded {len(all_observations)} observations, {len(corpus_documents)} docs")
 
     # Read persisted template observations — no ingest or judge calls.
     template_obs_path = out_dir / "template_observations.jsonl"
     raw_t_observations = read_observations_jsonl(template_obs_path)
-    t_observations = _restore_observations(raw_t_observations)
+    t_observations = truncate_search_snippets(_restore_observations(raw_t_observations))
     if t_observations:
         progress(f"  loaded {len(t_observations)} template observation(s) from store")
 

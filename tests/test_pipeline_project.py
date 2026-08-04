@@ -1319,3 +1319,104 @@ def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Pa
         "the signed version's own clause at path 2 must keep its own "
         f"confidence; got {signed_path_2[0]['confidence']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #95 fix round 1: project_playbook must cap x_search_snippet even for
+# a legacy store that predates the search_snippet field (no key at all in
+# observations.jsonl).
+# ---------------------------------------------------------------------------
+
+# Indemnification body is deliberately long (> _SEARCH_SNIPPET_MAX) so the
+# premise -- that there is something to truncate -- is verifiable, not
+# assumed. A filled "By:" signature line (signed_detector.py's
+# single_signature basis) makes this single-version document detected as
+# executed: without it outcome != "signed" and compile_clause_positions
+# withholds the observation from observed_positions entirely, which would
+# make the assertions below pass vacuously on an empty list.
+_LEGACY_STORE_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify and hold harmless Beta University from and "
+    r"against any and all third-party claims, losses, damages, and expenses "
+    r"of every kind arising out of or relating to this agreement or the "
+    r"placement programme described herein.\par "
+    r"2. Governing Law\par "
+    r"This agreement is governed by the laws of the State of California.\par "
+    r"3. Signatures\par "
+    r"By: Alice Smith\par "
+)
+
+
+def test_project_playbook_caps_search_snippet_for_legacy_store_missing_key(
+    tmp_path: Path,
+) -> None:
+    """A store mined before search_snippet existed (no key in
+    observations.jsonl at all) must still compile a capped x_search_snippet.
+
+    Regression guard for issue #95 fix round 1: ``_restore_observations``
+    defaults a missing ``search_snippet`` to the UNTRUNCATED ``full_text``
+    (``Observation.__post_init__``). ``mine_corpus`` always caps before
+    writing (its two ``truncate_search_snippets`` call sites), but
+    ``project_playbook`` previously fed the restored observations straight
+    into ``compile_clause_positions``/``compile_clause_library`` with no
+    cap of its own. Running ``playbook project`` (a documented separate
+    workflow step, ``cli.py``'s ``project`` command) against such a legacy
+    store therefore emitted the ENTIRE clause text as ``x_search_snippet``
+    in the shareable OPF tier instead of a short phrase.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _LEGACY_STORE_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+
+    from playbook_engine.observation_builder import _SEARCH_SNIPPET_MAX
+
+    obs_path = out_dir / "observations.jsonl"
+    raw_observations = [
+        json.loads(line)
+        for line in obs_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(len(o["full_text"]) > _SEARCH_SNIPPET_MAX for o in raw_observations), (
+        "premise: at least one observation's full_text must exceed the snippet "
+        f"cap ({_SEARCH_SNIPPET_MAX}) or this test proves nothing"
+    )
+
+    # Simulate a pre-#95 store: strip the search_snippet key entirely, as a
+    # store mined by older code would never have written it.
+    for o in raw_observations:
+        o.pop("search_snippet", None)
+    obs_path.write_text("\n".join(json.dumps(o) for o in raw_observations) + "\n", encoding="utf-8")
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+
+    snippet_values = [
+        op.get("x_search_snippet")
+        for clause in playbook["evidence"]["clauses"]
+        for op in clause.get("observed_positions", [])
+        if op.get("x_search_snippet")
+    ]
+    assert snippet_values, "expected at least one compiled x_search_snippet"
+    assert all(len(s) <= _SEARCH_SNIPPET_MAX for s in snippet_values), (
+        f"every compiled x_search_snippet must be capped at {_SEARCH_SNIPPET_MAX} "
+        f"chars, even when restored from a legacy store missing the "
+        f"search_snippet key; got lengths={[len(s) for s in snippet_values]}"
+    )

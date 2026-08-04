@@ -40,6 +40,14 @@ from playbook_engine.tracked_changes_overlay import HunkEnrichment, enrich_claus
 
 _TEXT_SUMMARY_MAX = 200
 
+# Target cap for Observation.search_snippet (issue #95) — "a phrase," not a
+# paragraph: ~40-100 chars / roughly 5-15 words is enough for a reviewer to
+# Ctrl+F the source document, short enough to read as a search anchor rather
+# than a second text_summary. See truncate_search_snippets() for why this cap
+# is applied separately from — and strictly after — full_text/search_snippet
+# pseudonymization, never at construction time.
+_SEARCH_SNIPPET_MAX = 100
+
 
 # Minimum author-string length for the author-in-alias containment direction.
 # DOCX w:author values are frequently initials or short handles ("Al", "IT");
@@ -179,6 +187,25 @@ class Observation:
                          our_standard.text, acceptable_if, and fallback/
                          rejected language must resolve from — never
                          text_summary.
+        search_snippet:  Short verbatim excerpt near the citation's location,
+                         for a reviewer to Ctrl+F in the source document
+                         (issue #95 — replaces the page-number approach from
+                         #86, since docling/DOCX/RTF extraction never
+                         populates a real page). Defaults to ``full_text``
+                         when not supplied (via ``__post_init__``), mirroring
+                         ``full_text``'s own default-from-``text_summary``
+                         cascade — every construction site that already sets
+                         ``full_text`` gets a snippet source for free. Kept
+                         UNTRUNCATED at construction, exactly like
+                         ``RoundMove.change_summary`` (see
+                         ``_summarize_move``'s docstring): truncating a raw
+                         clause-text excerpt before it is pseudonymized can
+                         bisect a counterparty name mid-word and defeat the
+                         whole-word aliasing match, leaking the fragment. The
+                         pipeline pseudonymizes this field alongside
+                         ``full_text`` and only then calls
+                         ``truncate_search_snippets`` to cap its length —
+                         never the other way around.
     """
 
     observation_id: str
@@ -193,6 +220,7 @@ class Observation:
     basis: str | None = None
     attribution: HunkEnrichment | None = None
     full_text: str = ""
+    search_snippet: str = ""
     # Negotiation dynamics (issue #177, OPF §3.5.3) — all optional-when-
     # underivable, never fabricated. proposed_by/observed_at derive from the
     # tracked-changes side-channel in build_observations; counterparty_ref
@@ -206,6 +234,8 @@ class Observation:
         if not self.full_text:
             # frozen dataclass — object.__setattr__ is the sanctioned escape hatch.
             object.__setattr__(self, "full_text", self.text_summary)
+        if not self.search_snippet:
+            object.__setattr__(self, "search_snippet", self.full_text)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -230,6 +260,11 @@ class Observation:
             d["observed_at"] = self.observed_at
         if self.counterparty_ref is not None:
             d["counterparty_ref"] = self.counterparty_ref
+        # search_snippet (issue #95): present only when there is real clause
+        # text to excerpt from — an empty string (no clause text available)
+        # is omitted rather than round-tripped as a useless "" entry.
+        if self.search_snippet:
+            d["search_snippet"] = self.search_snippet
         return d
 
 
@@ -331,6 +366,69 @@ def truncate_move_summaries(
         if len(m.change_summary) > limit
         else m
         for m in moves
+    ]
+
+
+def _shape_search_snippet(text: str, limit: int) -> str:
+    """Pick one line of *text* and cap it at *limit* chars (issue #95).
+
+    ``full_text``/``search_snippet`` routinely spans multiple lines —
+    ``segmenter.py``'s ``"\\n".join(lines_list).strip()`` is the norm for a
+    clause with sub-paragraphs (indemnification, limitation-of-liability),
+    not the exception. Collapsing the WHOLE block onto one line via
+    ``" ".join(text.split())`` (the prior behaviour) rebuilds the string
+    from its words and stops being a literal substring of the source the
+    moment there is more than one line: Word/PDF Ctrl+F does not match
+    across a paragraph mark, so a collapsed multi-line snippet is
+    unfindable in the source document — defeating the whole point of this
+    field.
+
+    Instead this takes the FIRST NON-EMPTY LINE verbatim: only
+    ``str.strip()`` is applied to it, which trims solely from the ends, so
+    the result is always a contiguous slice of *text*, never a rebuilt
+    string. Only if that line still exceeds *limit* is it trimmed back to
+    the last word boundary within the cap, so the excerpt reads as "a
+    phrase," not a word fragment — that trim is itself a plain slice, so
+    the result is a genuine substring of *text* all the way through (Ctrl+F
+    really does find it). Falls back to a hard cut only when the first
+    token alone exceeds *limit* (no space to trim back to).
+    """
+    line = ""
+    for candidate in text.splitlines():
+        stripped = candidate.strip()
+        if stripped:
+            line = stripped
+            break
+    if len(line) <= limit:
+        return line
+    truncated = line[:limit]
+    last_space = truncated.rfind(" ")
+    if last_space > 0:
+        truncated = truncated[:last_space]
+    return truncated.rstrip()
+
+
+def truncate_search_snippets(
+    observations: list[Observation], limit: int = _SEARCH_SNIPPET_MAX
+) -> list[Observation]:
+    """Cap each observation's ``search_snippet`` at *limit* chars for the store.
+
+    Mirrors ``truncate_move_summaries`` exactly, including WHY this is a
+    separate, unconditional step rather than folded into
+    ``_pseudonymize_observations``: pseudonymization only runs when
+    ``config.provenance.known_entities`` is configured, but every corpus —
+    aliased or not — still needs its snippet capped down to a short phrase,
+    so the pipeline calls this unconditionally, after (never as part of) the
+    conditional pseudonymization pass. Per ``Observation.search_snippet``'s
+    docstring and ``_summarize_move``'s (the analogous ``change_summary``
+    field): a post-aliasing slice cannot expose a raw counterparty name,
+    because by the time this runs the name is already gone from
+    ``search_snippet`` — truncating before aliasing is what bisects a name
+    and defeats the whole-word match.
+    """
+    return [
+        dataclasses.replace(o, search_snippet=_shape_search_snippet(o.search_snippet, limit))
+        for o in observations
     ]
 
 
