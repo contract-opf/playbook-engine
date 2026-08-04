@@ -174,9 +174,17 @@ class ClauseTree:
         # Duplicate check (invariant 1) — visit every node.
         for node in self.all_nodes():
             if node.clause_path in seen:
-                raise ClauseTreeError(
-                    f"Duplicate clause_path {node.clause_path!r} in tree for document {self.document_id!r}"
-                )
+                # Deliberately omits self.document_id (issue #83): on the
+                # batch-segmentation path (pipeline._ground_batch_result)
+                # this tree's document_id is the real, raw document id, and
+                # this message can end up persisted verbatim into
+                # corpus_manifest.json/playbook.opf.json via
+                # segmentation_qa.SegmentationQAError's "tree gate: ..." wrap
+                # for a quarantined document — see that class's docstring.
+                # The caller (mine_corpus's quarantine handler) already
+                # records the document_id separately, so nothing is lost by
+                # leaving it out here.
+                raise ClauseTreeError(f"Duplicate clause_path {node.clause_path!r} in tree")
             seen.add(node.clause_path)
 
         # Structural invariants — walk the tree with parent context.

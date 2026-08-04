@@ -535,7 +535,21 @@ def _build_needs_attention(
     # document id with its reason.
     quarantine = quarantine or []
     if quarantine:
-        manifest_count = len(manifest or {})
+        # issue #83: a QA-quarantined document can now ALSO carry a partial
+        # (zero-observation) entry in corpus_manifest.json — see
+        # pipeline._build_quarantine_corpus_doc — appended so its extractor
+        # label/QA status survive for audit visibility. manifest_count here
+        # must keep meaning "documents that actually contributed playbook
+        # content", so exclude any manifest entry whose document_id is ALSO
+        # in quarantine.json — otherwise a quarantined document's partial
+        # record would double-count as if the compiled playbook covered it
+        # too. Both files key on document_id the same way (both are written
+        # AFTER the pipeline's born-safe pseudonymization pass — see
+        # pipeline.mine_corpus — quarantine.json used to be written before
+        # it, which is what made this comparison a no-op until that was
+        # fixed), so this holds whether or not known_entities is configured.
+        quarantined_ids = {q.get("document_id") for q in quarantine}
+        manifest_count = len((manifest or {}).keys() - quarantined_ids)
         item_num += 1
         items.append(
             {

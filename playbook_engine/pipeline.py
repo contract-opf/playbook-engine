@@ -1339,6 +1339,136 @@ def _our_aliases_match_any_tree(trees: Iterable[ClauseTree], aliases: list[str])
 # ---------------------------------------------------------------------------
 
 
+def _build_version_ingest_list(
+    version_files: list[Path], version_ingest: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """One entry per version FILE FOUND, in discovery order (issue #89).
+
+    A version absent from *version_ingest* — its try/except in
+    ``_compute_doc_result``'s per-version loop never ran, including a version
+    that loop had not reached yet when a ``SegmentationQAError`` aborted it
+    (issue #83) — gets the "not attempted" default fill. Shared by
+    ``_compute_doc_result``'s normal return path and
+    ``_build_quarantine_corpus_doc`` below so both build this list the same
+    way: a failed/unattempted extraction or segmentation is a durable
+    manifest record, not just a progress-line WARNING a cache hit wouldn't
+    even re-print.
+    """
+    return [
+        {
+            "version": vf.stem,
+            **version_ingest.get(
+                vf.stem,
+                {
+                    "status": "unknown",
+                    "error": "not attempted",
+                    "extractor": None,
+                    "reason": None,
+                },
+            ),
+        }
+        for vf in version_files
+    ]
+
+
+def _build_quarantine_corpus_doc(
+    doc_id: str,
+    version_files: list[Path],
+    version_ingest: dict[str, dict[str, Any]],
+    sha256_by_vid: dict[str, str],
+    media_type_by_vid: dict[str, str],
+) -> dict[str, Any]:
+    """Build a PARTIAL ``corpus_documents`` entry for a document quarantined
+    mid-L1 by a ``SegmentationQAError`` (issue #83).
+
+    Attached to the exception (see ``SegmentationQAError.partial_corpus_doc``)
+    by ``_compute_doc_result``'s per-version ``except`` block and read back by
+    ``mine_corpus``'s quarantine handler, so a document whose L1 loop never
+    reaches the scope gate/normal ``corpus_doc`` construction below still
+    gets *some* durable record in ``corpus_manifest.json`` — before this fix,
+    only ``quarantine.json`` recorded the failure, at document granularity,
+    with no per-version status and no extractor.
+
+    This is explicitly a SNAPSHOT of how far L1 got, not a fabricated
+    complete document record — every field below is chosen so nothing
+    downstream can mistake it for a normal, fully-scope-gated document:
+
+    - ``in_scope=False`` with a fixed, generic ``scope_rationale`` explaining
+      the quarantine (never a real scope decision — the scope gate requires a
+      successfully-ingested first version and never runs here). Both the
+      schema's own ``in_scope==false`` conditional and
+      ``validator._check_out_of_scope_rationale`` (OPF §3.6) already REQUIRE
+      exactly this pairing for any non-in-scope document, so this satisfies
+      that existing fail-closed gate rather than needing to loosen it.
+      Deliberately does NOT interpolate the QA error text: ``scope_rationale``
+      passes straight through
+      ``playbook_assembler._sanitize_corpus_documents_for_schema`` into the
+      PUBLISHED playbook untouched (that function only rewrites
+      ``version_ingest``) — keeping it a fixed string is one less place that
+      would need auditing for leaked content.
+    - ``x_quarantined=True`` — the sanctioned ``x_`` extension point
+      (spec/playbook.schema-0.3.json's ``corpus.documents.items``; NOT
+      stripped by ``playbook_assembler._sanitize_corpus_documents_for_schema``,
+      which only rewrites ``version_ingest`` entries) gives a downstream
+      consumer an explicit, unambiguous way to recognize "quarantined
+      partial record" without parsing ``scope_rationale`` text — on top of
+      ``quarantine.json`` (unchanged shape by this fix, beyond aliasing its
+      ``document_id`` — see ``mine_corpus``) remaining the canonical list of
+      quarantined document_ids.
+    - ``versions``/``versions_mined`` count only the versions THIS loop
+      already recorded an "ok" ``version_ingest`` row for before the
+      failure — same "versions successfully ingested, not files found"
+      meaning ``_compute_doc_result``'s normal corpus_doc uses, and the same
+      "versions_mined > 0 with zero observations" shape an out-of-scope
+      document already has today (a scope-gated-out document contributes no
+      observations either) — so nothing downstream needs new handling for
+      that combination.
+    - ``version_ingest`` (via ``_build_version_ingest_list``) carries the
+      failing version's true ``status="failed"``/QA ``error``/``extractor``/
+      ``reason`` (issue #81 shape) plus an "ok" row for every version
+      already mined and a "not attempted" row for every version this loop
+      never reached — this is the field the ticket's acceptance criteria is
+      actually about. ``error`` is a message built only from gate
+      names/offsets/lengths (see ``SegmentationQAError``'s docstring) —
+      never a raw slice of source content — so it is safe to persist here
+      unbounded, for operator diagnosis.
+    - ``version_files`` (content addresses) for every version file THIS loop
+      has reached so far — ``sha256_by_vid``/``media_type_by_vid`` are
+      populated up front for the current file before extraction is
+      attempted each iteration, so a version not yet reached simply has no
+      entry yet (guarded below, same pattern the out-of-scope path uses).
+    - Zero observations: this document contributes none (L2-L4 never ran),
+      so no clause position/floor/posture content can ever be attributed to
+      a quarantined document regardless of what its corpus_doc entry says —
+      ``mine_corpus`` never extends ``all_observations`` for it.
+    """
+    versions_mined = sum(1 for v in version_ingest.values() if v.get("status") == "ok")
+    return {
+        "document_id": doc_id,
+        "provenance": "counterparty_paper",
+        "in_scope": False,
+        "scope_rationale": (
+            "QA-quarantined during extraction/segmentation — scope was never "
+            "determined. See corpus_manifest.json's version_ingest for the "
+            "QA error."
+        ),
+        "versions": versions_mined,
+        "versions_mined": versions_mined,
+        "versions_found": len(version_files),
+        "version_ingest": _build_version_ingest_list(version_files, version_ingest),
+        "version_files": [
+            {
+                "version": i + 1,
+                "sha256": sha256_by_vid[vf.stem],
+                "media_type": media_type_by_vid[vf.stem],
+            }
+            for i, vf in enumerate(version_files)
+            if vf.stem in sha256_by_vid
+        ],
+        "x_quarantined": True,
+    }
+
+
 def _compute_doc_result(
     doc_id: str,
     doc_dir: Path,
@@ -1550,7 +1680,7 @@ def _compute_doc_result(
                 # ExtractorLabel.reason (issue #81).
                 "reason": extractor_label.reason if extractor_label is not None else None,
             }
-        except SegmentationQAError:
+        except SegmentationQAError as exc:
             # Fail loud, by design: a QA-gate failure on the LLM path must
             # never be swallowed into a per-file warning + skipped version —
             # that would silently drop a version rather than flag the
@@ -1561,6 +1691,40 @@ def _compute_doc_result(
             # run — see mine_corpus's ``quarantined`` handling. Every other
             # exception below (extraction/ingest failure, malformed source)
             # keeps the pre-existing "skip this one version file" behavior.
+            #
+            # issue #83: record THIS version's failure into version_ingest —
+            # same shape as the "ok" row above and the generic-failure row
+            # below — so the extractor that produced the failing stream isn't
+            # erased. That alone is not enough for it to reach
+            # corpus_manifest.json: this function's own locals (including
+            # version_ingest) are discarded the instant this exception
+            # unwinds past its caller, so a PARTIAL corpus_doc snapshot
+            # (however far L1 got — this vid's failure, every earlier vid's
+            # "ok" row, every later vid's not-yet-attempted default) is built
+            # now and attached to the exception for mine_corpus's quarantine
+            # handler to append to corpus_documents (see
+            # SegmentationQAError.partial_corpus_doc and
+            # _build_quarantine_corpus_doc). The document is still
+            # quarantined — this restores audit visibility, it does not
+            # change the fail-loud contract above. ``str(exc)`` is safe to
+            # persist unbounded: every SegmentationQAError message is built
+            # only from gate names/offsets/lengths, never a raw slice of
+            # source content (see that class's docstring).
+            if extractor_label is not None:
+                extractor = extractor_label.extractor
+            version_ingest[vid] = {
+                "status": "failed",
+                "error": str(exc),
+                "extractor": extractor,
+                "reason": extractor_label.reason if extractor_label is not None else None,
+            }
+            exc.partial_corpus_doc = _build_quarantine_corpus_doc(
+                doc_id,
+                version_files,
+                version_ingest,
+                sha256_by_vid,
+                media_type_by_vid,
+            )
             raise
         except Exception as exc:  # noqa: BLE001
             progress(f"    WARNING: {vf.name}: {exc}")
@@ -1615,21 +1779,7 @@ def _compute_doc_result(
     # version_ingest (issue #89): one entry per version FILE FOUND, in discovery
     # order, so a failed extraction/segmentation is a durable manifest record —
     # not just a progress-line WARNING that a cache hit wouldn't even re-print.
-    version_ingest_list = [
-        {
-            "version": vf.stem,
-            **version_ingest.get(
-                vf.stem,
-                {
-                    "status": "unknown",
-                    "error": "not attempted",
-                    "extractor": None,
-                    "reason": None,
-                },
-            ),
-        }
-        for vf in version_files
-    ]
+    version_ingest_list = _build_version_ingest_list(version_files, version_ingest)
 
     corpus_doc: dict[str, Any] = {
         "document_id": doc_id,
@@ -2601,6 +2751,25 @@ def mine_corpus(
             reason = f"{type(exc).__name__}: {exc}"
             progress(f"    QUARANTINED {doc_id}: {reason}")
             quarantined.append({"document_id": doc_id, "reason": reason})
+            # issue #83: a SegmentationQAError raised from inside
+            # _compute_doc_result's per-version loop carries a partial
+            # corpus_doc snapshot (see _build_quarantine_corpus_doc) —
+            # append it so this document's extractor label and QA status
+            # still reach corpus_manifest.json instead of the document
+            # vanishing from it entirely. quarantine.json (this document_id
+            # was just appended to the in-memory `quarantined` list above;
+            # the file itself is written later, see below) stays the
+            # canonical list of quarantined document_ids either way — this
+            # only adds a second, richer record.
+            # NormalizeTrailError/HintsError never carry this attribute (it
+            # defaults to None on the base class) — a cross-version
+            # normalization failure or a malformed hints.yaml has no single
+            # failing version to attribute an extractor to, and extending
+            # partial-record support to those is out of scope for this fix,
+            # so today's behavior (no corpus_documents entry) is unchanged
+            # for those two.
+            if isinstance(exc, SegmentationQAError) and exc.partial_corpus_doc is not None:
+                corpus_documents.append(exc.partial_corpus_doc)
             continue
 
         if result is None:
@@ -2648,12 +2817,12 @@ def mine_corpus(
         alias_match_flags.append(result.get("our_alias_matched"))
         progress(f"    {len(doc_obs)} observation(s)")
 
-    # Fail loud but isolated: surface every quarantined document prominently and
-    # persist the reasons so a reviewer can act on them. Always rewritten (even
-    # when empty), same as every other run-level artifact (observations.jsonl,
-    # corpus_manifest.json, scope.json) — otherwise a stale quarantine.json from
-    # a prior run keeps flagging documents that a subsequent clean run resolved.
-    _atomic_json_write(quarantined, out_dir / "quarantine.json")
+    # Fail loud but isolated: surface every quarantined document prominently.
+    # This log line names the RAW document_id (console/error output, same
+    # convention the fallback-budget message below uses — not subject to the
+    # born-safe pseudonymization contract persisted artifacts uphold).
+    # quarantine.json itself is written further below, AFTER the born-safe
+    # pseudonymization pass (issue #83) — see the comment there for why.
     if quarantined:
         ids = ", ".join(q["document_id"] for q in quarantined)
         progress(
@@ -2743,6 +2912,27 @@ def mine_corpus(
             scope_entry.document_id = pseudonymize_document_id(
                 scope_entry.document_id, known_entities, entity_registry
             )
+        # quarantine.json's document_id (issue #83): aliased with the same
+        # registry so it matches corpus_manifest.json's document_id exactly.
+        # A QA-quarantined document can now ALSO carry a partial
+        # corpus_documents entry (see _build_quarantine_corpus_doc above),
+        # and a consumer that cross-references the two files by document_id
+        # (e.g. aar._build_needs_attention, to avoid double-counting a
+        # quarantined document as if it were also successfully mined) would
+        # otherwise never find a match — quarantine.json used to be written
+        # BEFORE this pass ran, so it kept the raw, un-aliased id even when
+        # corpus_manifest.json's matching entry was aliased. Aliasing here
+        # also removes the raw counterparty name from quarantine.json's
+        # document_id field as a side effect.
+        quarantined = [
+            {
+                **q,
+                "document_id": pseudonymize_document_id(
+                    q["document_id"], known_entities, entity_registry
+                ),
+            }
+            for q in quarantined
+        ]
         write_holdout_map(out_dir / "alias_map.json", entity_registry)
 
     # Materialise trails now (issue #182): after the pseudonymization pass so the
@@ -2768,6 +2958,15 @@ def mine_corpus(
         _atomic_json_write(trail, trail_dir / f"{out_doc_id}.json")
 
     # Write intermediates
+    #
+    # quarantine.json (issue #83): always rewritten (even when empty), same
+    # as every other run-level artifact below — otherwise a stale
+    # quarantine.json from a prior run keeps flagging documents a subsequent
+    # clean run resolved. Written here (after the pseudonymization pass
+    # above, alongside the other post-pseudonymization artifacts) rather
+    # than immediately after the per-document loop, so its document_id is
+    # aliased exactly like corpus_manifest.json's — see the aliasing above.
+    _atomic_json_write(quarantined, out_dir / "quarantine.json")
     #
     # search_snippet (issue #95) is truncated to its final short-phrase length
     # HERE — unconditionally, regardless of whether known_entities pseudonymization
