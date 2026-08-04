@@ -32,6 +32,20 @@ Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
 
+### 2026-08-03 — clause-tree `ClauseNode` gains optional `page` (issue #86)
+
+`spec/clause-tree.schema.json`'s `$defs.ClauseNode` gained an optional
+`page` property (`integer >= 1`, or `null`) recording the 1-based source
+page the clause begins on, mirroring `playbook_engine/clause_tree.py`'s
+new `ClauseNode.page`. Additive/optional — older serialized clause-tree
+files with no `page` key still validate and load unchanged. This is the
+intermediate clause-tree artifact ("intermediate artifact, not OPF" per
+the schema's own `description`), not `playbook.schema-0.3.json` — no
+`opf_version`/`digest_version` bump, and the file is intentionally outside
+the **Current pins** table's CI-enforced hash check above (that table, and
+`tests/test_spec_consistency.py::test_spec_changelog_pins_every_schema`,
+cover only `playbook.schema*.json`).
+
 ### 2026-07-29 — sibling-id uniqueness is now a blocking normative rule (issue #70)
 
 OPF-SPEC §3.13 (new): `evidence.clauses[].id`, `evidence.clause_library[].concept_id`,

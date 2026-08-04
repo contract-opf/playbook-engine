@@ -325,6 +325,100 @@ def test_node_null_heading_preserved() -> None:
     assert tree.nodes[0].heading is None
 
 
+# ---------------------------------------------------------------------------
+# #86 — page (optional, additive)
+# ---------------------------------------------------------------------------
+
+
+def test_page_defaults_to_none() -> None:
+    node = _leaf("1", "text")
+    assert node.page is None
+
+
+def test_page_round_trips() -> None:
+    node = ClauseNode(clause_path="1", heading=None, text="text", char_span=(0, 4), page=3)
+    tree = ClauseTree(document_id="d", version="v1", source_file="f.pdf", nodes=[node])
+    restored = ClauseTree.from_json(tree.to_json())
+    assert restored.nodes[0].page == 3
+
+
+def test_page_absent_key_loads_as_none() -> None:
+    """Older serialized trees (no 'page' key at all) must still load."""
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2]}],
+    }
+    tree = ClauseTree.from_dict(data)
+    assert tree.nodes[0].page is None
+
+
+def test_page_explicit_null_preserved() -> None:
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2], "page": None}],
+    }
+    tree = ClauseTree.from_dict(data)
+    assert tree.nodes[0].page is None
+
+
+def test_page_wrong_type_raises() -> None:
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2], "page": "three"}],
+    }
+    with pytest.raises(ClauseTreeError, match="'page' must be a positive integer"):
+        ClauseTree.from_dict(data)
+
+
+def test_page_zero_raises() -> None:
+    """0 is the extractor's 'unpaginated' sentinel — callers must map it to
+    None before it reaches ClauseNode (segmentation_grounding.build() does
+    this); a literal 0 surviving into serialized data is a producer bug."""
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2], "page": 0}],
+    }
+    with pytest.raises(ClauseTreeError, match="'page' must be a positive integer"):
+        ClauseTree.from_dict(data)
+
+
+def test_page_negative_raises() -> None:
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2], "page": -1}],
+    }
+    with pytest.raises(ClauseTreeError, match="'page' must be a positive integer"):
+        ClauseTree.from_dict(data)
+
+
+def test_page_bool_raises() -> None:
+    """fix-round-1 (#86): ``bool`` is a subclass of ``int`` in Python but a
+    distinct type in JSON Schema — a literal ``page: true`` must be
+    rejected here too, or a round-tripped ``to_dict()``/JSON serialization
+    of it fails spec/clause-tree.schema.json's
+    ``"type": ["integer", "null"]`` (JSON Schema does not accept a boolean
+    where ``integer`` is required, even though
+    ``isinstance(True, int) is True`` in Python)."""
+    data: dict[str, Any] = {
+        "document_id": "d",
+        "version": "v1",
+        "source_file": "f",
+        "nodes": [{"clause_path": "1", "text": "hi", "char_span": [0, 2], "page": True}],
+    }
+    with pytest.raises(ClauseTreeError, match="'page' must be a positive integer"):
+        ClauseTree.from_dict(data)
+
+
 def test_deeply_nested_round_trip() -> None:
     """Three levels deep round-trips without data loss."""
     n111 = _leaf("1.1.1", "Deep leaf", start=30)
@@ -474,6 +568,16 @@ def test_load_directory_raises(tmp_path: Path) -> None:
 def test_simple_tree_validates_against_schema() -> None:
     schema = json.loads(CLAUSE_TREE_SCHEMA_PATH.read_text(encoding="utf-8"))
     tree_dict = _simple_tree().to_dict()
+    jsonschema.validate(instance=tree_dict, schema=schema)  # must not raise
+
+
+def test_tree_with_page_validates_against_schema() -> None:
+    """#86: a node carrying a real page number is still schema-valid."""
+    schema = json.loads(CLAUSE_TREE_SCHEMA_PATH.read_text(encoding="utf-8"))
+    node = ClauseNode(clause_path="1", heading=None, text="t", char_span=(0, 1), page=5)
+    tree_dict = ClauseTree(
+        document_id="d", version="v1", source_file="f.pdf", nodes=[node]
+    ).to_dict()
     jsonschema.validate(instance=tree_dict, schema=schema)  # must not raise
 
 

@@ -156,3 +156,73 @@ def test_empty_segmentation_yields_empty_tree() -> None:
     result = _ground(text, blocks, [])
     assert result.tree.nodes == []
     assert result.taxonomy_by_path == {}
+
+
+# ---------------------------------------------------------------------------
+# #86 — page threaded from the start block
+# ---------------------------------------------------------------------------
+
+
+def test_grounds_tree_sets_page_from_start_block() -> None:
+    blocks = [
+        Block(block_id="b0", page=1, char_span=(0, 5), text="first"),
+        Block(block_id="b1", page=2, char_span=(6, 12), text="second"),
+    ]
+    text = "first\nsecond"
+    nodes = [
+        SegNode("n1", None, 1, "A", None, "b0", "b0"),
+        SegNode("n2", None, 2, "B", None, "b1", "b1"),
+    ]
+    result = _ground(text, blocks, nodes)
+    assert result.tree.nodes[0].page == 1
+    assert result.tree.nodes[1].page == 2
+
+
+def test_grounds_tree_maps_unpaginated_zero_to_none() -> None:
+    """page=0 (RTF/docling — 'not paginated') must surface as None, matching
+    ClauseNode.page's documented contract."""
+    text, blocks = _stream(["only block"])  # _stream() always uses page=0
+    nodes = [SegNode("n1", None, 1, None, None, "b0", "b0")]
+    result = _ground(text, blocks, nodes)
+    assert result.tree.nodes[0].page is None
+
+
+def test_grounds_tree_records_start_page_when_span_crosses_pages() -> None:
+    """A clause can legitimately span a page break — only the START page is
+    recorded (the page the clause begins on), never the end block's page."""
+    blocks = [
+        Block(block_id="b0", page=3, char_span=(0, 5), text="first"),
+        Block(block_id="b1", page=4, char_span=(6, 12), text="second"),
+    ]
+    text = "first\nsecond"
+    nodes = [SegNode("n1", None, 1, "Combined", None, "b0", "b1")]
+    result = _ground(text, blocks, nodes)
+    assert result.tree.nodes[0].page == 3
+
+
+def test_grounds_tree_page_on_parent_survives_child_truncation() -> None:
+    """A parent node's page comes from its own start block and must be
+    unaffected by the end-truncation applied when a parent's nominal range
+    encloses its first child's range (see build()'s truncation comment)."""
+    text, base_blocks = _stream(
+        [
+            "Indemnification clause text here",
+            "sub clause a text",
+            "Governing Law clause text",
+        ]
+    )
+    pages = [7, 7, 8]
+    blocks = [
+        Block(block_id=b.block_id, page=p, char_span=b.char_span, text=b.text)
+        for b, p in zip(base_blocks, pages, strict=True)
+    ]
+    nodes = [
+        SegNode("n1", None, 1, "Indemnification", "indemnification", "b0", "b1"),
+        SegNode("n1a", "n1", 1, None, "indemnification", "b1", "b1"),
+        SegNode("n2", None, 2, "Governing Law", "governing_law", "b2", "b2"),
+    ]
+    result = _ground(text, blocks, nodes)
+    roots = result.tree.nodes
+    assert roots[0].page == 7
+    assert roots[0].children[0].page == 7
+    assert roots[1].page == 8

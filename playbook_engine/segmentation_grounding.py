@@ -147,6 +147,12 @@ def ground_segmentation(
     # --- Resolve each node's char_span + verbatim text from its block range.
     span_by_node: dict[str, tuple[int, int]] = {}
     text_by_node: dict[str, str] = {}
+    # A clause can span multiple pages (its blocks may cross a page break), so
+    # only the START page is recorded — the page the clause begins on — never
+    # derived from end_block_id. Block.page is "0 when not paginated" (RTF,
+    # docling today); that maps to None here so ClauseNode.page's contract
+    # ("None = unpaginated/unknown") holds regardless of extractor.
+    page_by_node: dict[str, int | None] = {}
     for n in seg_nodes:
         if n.start_block_id not in block_by_id:
             raise GroundingError(f"node {n.node_id!r}: unknown start_block_id {n.start_block_id!r}")
@@ -154,8 +160,10 @@ def ground_segmentation(
             raise GroundingError(f"node {n.node_id!r}: unknown end_block_id {n.end_block_id!r}")
         if pos_by_id[n.start_block_id] > pos_by_id[n.end_block_id]:
             raise GroundingError(f"node {n.node_id!r}: start_block after end_block in stream order")
-        start = block_by_id[n.start_block_id].char_span[0]
+        start_block = block_by_id[n.start_block_id]
+        start = start_block.char_span[0]
         end = block_by_id[n.end_block_id].char_span[1]
+        page_by_node[n.node_id] = start_block.page or None
         if not (0 <= start <= end <= text_len):
             raise GroundingError(
                 f"node {n.node_id!r}: span [{start}, {end}] out of bounds "
@@ -230,6 +238,7 @@ def ground_segmentation(
                     heading=n.heading,
                     text=text,
                     char_span=(start, end),
+                    page=page_by_node[n.node_id],
                     children=children,
                 )
             )
