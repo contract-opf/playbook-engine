@@ -105,16 +105,16 @@ required busywork. Think of it as a ladder: climb as many rungs as the
 deal, or your risk tolerance, calls for.
 
 - **Rung 0 — ship it as-is (0 min).** Stop right after `playbook
-  validate`. An evidence-only playbook — no Posture, no Floor — is a
-  complete, legitimate OPF document; it's exactly what the
-  [quickstart](../examples/README.md) produces. Evidence is **advisory
-  by contract** (OPF-SPEC.md §5): the app reading it reasons over the
-  history and is free to weigh it however its own rules see fit — a
-  review engine's system prompt, a human reviewer's judgment. `playbook
-  render-prompt` says so loudly rather than silently: an evidence-only
-  playbook's rendered prompt opens with an **ADVISORY ONLY — NOTHING
-  BELOW IS BINDING** banner instead of quietly shipping unmarked
-  guidance. Stopping here is a real endpoint, not an unfinished state.
+  validate`, before running the Posture interview. An evidence-only
+  playbook — no Posture, no Floor — is a complete, legitimate OPF
+  document. Evidence is **advisory by contract** (OPF-SPEC.md §5): the
+  app reading it reasons over the history and is free to weigh it
+  however its own rules see fit — a review engine's system prompt, a
+  human reviewer's judgment. `playbook render-prompt` says so loudly
+  rather than silently: an evidence-only playbook's rendered prompt
+  opens with an **ADVISORY ONLY — NOTHING BELOW IS BINDING** banner
+  instead of quietly shipping unmarked guidance. Stopping here is a
+  real endpoint, not an unfinished state.
 
 - **Rung 1 — say what you want (~10 min).** `playbook posture interview`
   asks six questions — rounds, leverage, risk appetite, sacred clauses,

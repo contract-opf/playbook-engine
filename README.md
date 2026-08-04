@@ -29,20 +29,26 @@ The quickstart runs the full pipeline over a committed synthetic corpus
 with canned judgments, from fresh clone to a validating playbook:
 
 ```sh
-python3 -m venv .venv && source .venv/bin/activate && make install
+python3 -m venv .venv
+source .venv/bin/activate
+make install
 playbook lint-corpus examples/judge-fixture/corpus --config examples/judge-fixture/config.yaml
 mkdir -p out/quickstart-demo
 playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canned-verdicts.jsonl
 playbook mine examples/judge-fixture/corpus --config examples/judge-fixture/config.yaml --out out/quickstart-demo
 playbook project out/quickstart-demo --config examples/judge-fixture/config.yaml
+playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
 playbook validate out/quickstart-demo/playbook.opf.json
-playbook render-prompt out/quickstart-demo/playbook.opf.json
+playbook view render out/quickstart-demo
+playbook render-prompt out/quickstart-demo/playbook.opf.json --out out/quickstart-demo/review-prompt.md
 ```
 
-That last command is the payoff: it composes the playbook into a
-**review-ready system prompt** you can paste into any chat LLM next to a
-contract you're reviewing. [examples/README.md](examples/README.md) walks
-through every step's expected output, plus the Docker variant.
+The payoff is that last command: it composes the playbook — now carrying
+the hard lines and posture the interview step above authored — into a
+**review-ready system prompt**, written to `out/quickstart-demo/review-prompt.md`,
+ready to paste into any chat LLM next to a contract you're reviewing.
+[examples/README.md](examples/README.md) walks through every step's
+expected output, plus the Docker variant.
 
 Ready for your own agreements? See **[docs/ADOPTING.md](docs/ADOPTING.md)**
 — the path from a messy folder of deals to a curated, publishable playbook.
