@@ -461,6 +461,43 @@ def test_move_summaries_truncate_after_pseudonymization_boundary() -> None:
     assert all(len(m.change_summary) <= 200 for m in truncated)
 
 
+def test_search_snippets_truncate_after_pseudonymization_boundary() -> None:
+    """Mirrors test_move_summaries_truncate_after_pseudonymization_boundary
+    for the sibling search_snippet field (issue #95): build_observations
+    keeps search_snippet untruncated (== full_text) so a subsequent
+    pipeline pseudonymization pass can whole-word-match a known entity name
+    in full before anything is sliced; observation_builder.
+    truncate_search_snippets applies the short-phrase cap only afterward —
+    never the other way around (see that function's docstring, and
+    Observation.search_snippet's)."""
+    from playbook_engine.observation_builder import truncate_search_snippets
+
+    long_name = "Alpha Corporation Holdings, LLC"
+    diff = ClauseDiff(
+        taxonomy_id="indemnification",
+        clause_path_before="1",
+        clause_path_after="1",
+        kind="modified",
+        hunks=(),
+        text_before="original",
+        text_after=("indemnify " + long_name + " against everything ") * 20,
+        clause_version_before="v1",
+        clause_version_after="v2",
+    )
+    observations = build_observations(
+        "deal-1",
+        2,
+        "our_paper",
+        [(diff, DeviationResult("substantive", RiskDelta("worse", "minor"), basis="judge"))],
+        reversals=[],
+    )
+    assert long_name in observations[0].search_snippet  # untruncated: survives to the aliasing pass
+    assert observations[0].search_snippet == observations[0].full_text
+
+    truncated = truncate_search_snippets(observations)
+    assert all(len(o.search_snippet) <= 100 for o in truncated)
+
+
 def test_export_profile_covers_negotiation_trail() -> None:
     """negotiation_trail.change_summary quotes raw clause text and must be
     in the export profile's judged free-text surface (issue #146 contract)."""
@@ -480,3 +517,24 @@ def test_export_profile_covers_negotiation_trail() -> None:
     trail_paths = [s.path for s in samples if "negotiation_trail" in s.path]
     assert trail_paths, "trail change_summary missing from the judged surface"
     assert locations[trail_paths[0]][1] == "negotiation_trail"
+
+
+def test_export_profile_covers_search_snippet() -> None:
+    """observed_positions[].x_search_snippet quotes raw clause text near a
+    citation's location, exactly as residue-prone as text_summary/full_text
+    (issue #95's MANDATORY residue-judgment wiring) — must be in the export
+    profile's judged free-text surface alongside its two siblings."""
+    from playbook_engine.export_profile import _FREE_TEXT_FIELDS, _extract_text_samples
+
+    assert "x_search_snippet" in _FREE_TEXT_FIELDS
+
+    doc = _load_minimal()
+    doc["evidence"]["clauses"][0]["observed_positions"][0]["x_search_snippet"] = (
+        "Mutual indemnification, negligence-based."
+    )
+    samples, locations = _extract_text_samples(doc)
+    snippet_paths = [s.path for s in samples if s.path.endswith("x_search_snippet")]
+    assert snippet_paths, "x_search_snippet missing from the judged free-text surface"
+    loc = locations[snippet_paths[0]]
+    assert loc[1] == "observed_positions"
+    assert loc[3] == "x_search_snippet"

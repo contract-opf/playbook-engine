@@ -519,6 +519,105 @@ def test_observed_positions_provenance_preserved() -> None:
 
 
 # ---------------------------------------------------------------------------
+# search_snippet threading (issue #95)
+# ---------------------------------------------------------------------------
+
+
+def test_observed_positions_search_snippet_preserved() -> None:
+    """_obs_to_observed_position carries the source Observation's
+    (already-pseudonymized, already-truncated) search_snippet through
+    unchanged onto ObservedPosition."""
+    obs = Observation(
+        observation_id="deal_001/v2/8",
+        taxonomy_id="indemnification",
+        text_summary="Mutual indemnification.",
+        full_text="Mutual indemnification, negligence-based, full clause text.",
+        search_snippet="Mutual indemnification, negligence-based",
+        citation=ObservationCitation(
+            document_id="deal_001", version="v2", clause_path="8", char_span=None
+        ),
+        deviation="none",
+        risk_delta=_NEUTRAL.to_dict(),
+        provenance="our_paper",
+        outcome="signed",
+    )
+    positions = _compile([obs], [])
+    assert (
+        positions[0].observed_positions[0].search_snippet
+        == "Mutual indemnification, negligence-based"
+    )
+
+
+def test_to_dict_observed_positions_include_x_search_snippet_when_present() -> None:
+    obs = Observation(
+        observation_id="deal_001/v2/8",
+        taxonomy_id="indemnification",
+        text_summary="Mutual indemnification.",
+        search_snippet="a short searchable phrase",
+        citation=ObservationCitation(
+            document_id="deal_001", version="v2", clause_path="8", char_span=None
+        ),
+        deviation="none",
+        risk_delta=_NEUTRAL.to_dict(),
+        provenance="our_paper",
+        outcome="signed",
+    )
+    positions = _compile([obs], [])
+    op_dict = positions[0].to_dict()["observed_positions"][0]
+    assert op_dict["x_search_snippet"] == "a short searchable phrase"
+
+
+def test_to_dict_observed_positions_omit_x_search_snippet_when_no_clause_text() -> None:
+    """No text_summary/full_text/search_snippet at all → the OPF dict omits
+    x_search_snippet entirely (never a null/"" placeholder) — schema
+    validation stays green with no schema edit precisely because this is an
+    optional x_-prefixed key, not a required one."""
+    obs = Observation(
+        observation_id="deal_001/v2/8",
+        taxonomy_id="indemnification",
+        text_summary="",
+        citation=ObservationCitation(
+            document_id="deal_001", version="v2", clause_path="8", char_span=None
+        ),
+        deviation="none",
+        risk_delta=_NEUTRAL.to_dict(),
+        provenance="our_paper",
+        outcome="signed",
+    )
+    positions = _compile([obs], [])
+    op_dict = positions[0].to_dict()["observed_positions"][0]
+    assert "x_search_snippet" not in op_dict
+
+
+def test_rollup_fallback_carries_search_snippet() -> None:
+    """fallbacks/rejected share _obs_to_observed_position with
+    observed_positions, so a worse-risk our-paper fallback also carries its
+    search_snippet through to summary.fallbacks[].x_search_snippet."""
+    t_obs = _template_obs("indemnification")
+    obs = Observation(
+        observation_id="deal_001/v2/8",
+        taxonomy_id="indemnification",
+        text_summary="We accept liability up to the aggregate fees paid.",
+        search_snippet="We accept liability up to the aggregate fees paid",
+        citation=ObservationCitation(
+            document_id="deal_001", version="v2", clause_path="8", char_span=None
+        ),
+        deviation="substantive",
+        risk_delta=_WORSE_MINOR.to_dict(),
+        provenance="our_paper",
+        outcome="signed",
+    )
+    positions = _compile([obs], [t_obs])
+    assert len(positions[0].rollup.fallbacks) == 1
+    assert (
+        positions[0].rollup.fallbacks[0].search_snippet
+        == "We accept liability up to the aggregate fees paid"
+    )
+    fallback_dict = positions[0].to_dict()["summary"]["fallbacks"][0]
+    assert fallback_dict["x_search_snippet"] == "We accept liability up to the aggregate fees paid"
+
+
+# ---------------------------------------------------------------------------
 # rollup.position derivation
 # ---------------------------------------------------------------------------
 

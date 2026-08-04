@@ -496,6 +496,120 @@ def test_compiled_artifact_carries_alias_not_raw_entity_name(tmp_path: Path) -> 
     assert mode == 0o600
 
 
+def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boundary(
+    tmp_path: Path,
+) -> None:
+    """Regression (issue #95): the compiled playbook's new
+    x_search_snippet field must go through the SAME born-safe
+    pseudonymization as text_summary/full_text — never the raw entity name,
+    only the alias (modeled on
+    test_compiled_artifact_carries_alias_not_raw_entity_name above).
+
+    The known entity name below is deliberately positioned to straddle
+    observation_builder._SEARCH_SNIPPET_MAX, the snippet's truncation cap: a
+    truncate-before-pseudonymize implementation would cut the multi-word
+    entity name apart mid-phrase, leaving a fragment (e.g. "Wintermoor" with
+    no "Polytechnic Institute" following) that the whole-word/whole-phrase
+    pseudonymization regex cannot recognize and therefore does not replace —
+    exactly the leak class documented in
+    observation_builder._summarize_move's docstring for the sibling
+    change_summary field. A fixture where the name sits nowhere near the
+    truncation boundary would not exercise this failure mode at all.
+    """
+    from playbook_engine.observation_builder import _SEARCH_SNIPPET_MAX
+
+    entity = "Wintermoor Polytechnic Institute"
+    prefix = "Alpha Corp shall indemnify " + ("word " * 10)
+    assert len(prefix) < _SEARCH_SNIPPET_MAX < len(prefix) + len(entity), (
+        "fixture must position the entity name straddling the snippet truncation cap "
+        f"(cap={_SEARCH_SNIPPET_MAX}, prefix={len(prefix)}, "
+        f"prefix+entity={len(prefix) + len(entity)})"
+    )
+    body_text = (
+        r"1. Indemnification\par "
+        rf"{prefix}{entity} against third-party claims "
+        r"arising from the placement programme.\par "
+        r"2. Governing Law\par "
+        r"This agreement is governed by the laws of the State of Example.\par "
+        # Filled signature block (signed_detector.py's single_signature basis)
+        # so this single-version document is detected as executed — an
+        # undetected signature means outcome="unsigned" (issue #83), which
+        # compile_clause_positions withholds from observed_positions
+        # entirely, and the x_search_snippet assertions below would then
+        # pass vacuously on an empty evidence.clauses rather than proving
+        # anything.
+        r"3. Signatures\par "
+        r"By: Alice Smith\par "
+    )
+
+    corpus_dir = tmp_path / "corpus"
+    (corpus_dir / "deal-001").mkdir(parents=True)
+    _write_rtf(corpus_dir / "deal-001" / "v1.rtf", body_text)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {
+            "our_party_aliases": ["Alpha Corp"],
+            "known_entities": [entity],
+        },
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    registry_path = tmp_path / "entity_registry.json"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=registry_path,
+    )
+
+    reg = EntityRegistry.load(registry_path)
+    alias = reg.alias_for(entity)
+
+    observations = [
+        json.loads(line)
+        for line in (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    snippet_obs = [o for o in observations if "indemnif" in o["full_text"].lower()]
+    assert snippet_obs, "expected the indemnification clause to yield an observation"
+    for o in snippet_obs:
+        assert o.get("search_snippet"), "expected a derived search_snippet"
+        assert entity not in o["search_snippet"], "raw entity name leaked into search_snippet"
+        # Bisection-specific check: no fragment of the multi-word name (e.g.
+        # "Wintermoor" alone, with "Polytechnic Institute" truncated away)
+        # survives either — that fragment is precisely what a
+        # truncate-before-pseudonymize bug would leave behind.
+        assert "Wintermoor" not in o["search_snippet"]
+        assert alias in o["search_snippet"]
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    playbook_text = json.dumps(playbook)
+    assert entity not in playbook_text
+    assert "Wintermoor" not in playbook_text
+
+    snippet_values = [
+        op.get("x_search_snippet")
+        for clause in playbook["evidence"]["clauses"]
+        for op in clause.get("observed_positions", [])
+        if op.get("x_search_snippet")
+    ]
+    assert snippet_values, "expected the compiled playbook to carry at least one x_search_snippet"
+    assert any(alias in s for s in snippet_values)
+    assert not any(entity in s or "Wintermoor" in s for s in snippet_values)
+
+
 def test_alias_stable_across_two_mine_corpus_runs(tmp_path: Path) -> None:
     """Re-running mine_corpus against a fresh out_dir but the SAME entity
     registry path must assign the identical alias to the same entity name.

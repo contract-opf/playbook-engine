@@ -16,6 +16,7 @@ from playbook_engine.observation_builder import (
     ObservationCitation,
     build_observations,
     read_observations_jsonl,
+    truncate_search_snippets,
     write_observations_jsonl,
 )
 from playbook_engine.reversal_detector import ReversalRecord
@@ -508,6 +509,162 @@ def test_observation_to_dict_includes_full_text() -> None:
     )
     d = obs.to_dict()
     assert d["full_text"] == "the real, untruncated clause text"
+
+
+# ---------------------------------------------------------------------------
+# search_snippet defaulting + serialization (issue #95)
+# ---------------------------------------------------------------------------
+
+
+def test_observation_search_snippet_defaults_to_full_text() -> None:
+    """Callers that don't pass search_snippet explicitly get search_snippet
+    == full_text (untruncated), mirroring full_text's own default-from-
+    text_summary cascade — this is what lets every existing Observation
+    construction site (build_observations, pipeline.py's template path)
+    populate a snippet source for free, with no changes at those sites."""
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="short",
+        full_text="the real, untruncated clause text",
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    assert obs.search_snippet == "the real, untruncated clause text"
+
+
+def test_observation_search_snippet_defaults_to_text_summary_when_no_full_text() -> None:
+    """With neither full_text nor search_snippet passed, both cascade from
+    text_summary — the same two-step __post_init__ chain full_text alone
+    already exercises."""
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="short text",
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    assert obs.search_snippet == "short text"
+
+
+def test_observation_search_snippet_explicit_value_not_overridden() -> None:
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="short",
+        full_text="the real, untruncated clause text",
+        search_snippet="a hand-picked excerpt",
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    assert obs.search_snippet == "a hand-picked excerpt"
+
+
+def test_observation_to_dict_includes_search_snippet_when_set() -> None:
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="short",
+        full_text="the real, untruncated clause text",
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    d = obs.to_dict()
+    assert d["search_snippet"] == "the real, untruncated clause text"
+
+
+def test_observation_to_dict_omits_search_snippet_when_no_clause_text() -> None:
+    """No text_summary/full_text/search_snippet at all (empty clause) →
+    search_snippet cascades to "" and to_dict() omits the key entirely,
+    never a useless "" placeholder — same convention as proposed_by/
+    observed_at/counterparty_ref above."""
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="",
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    assert obs.search_snippet == ""
+    assert "search_snippet" not in obs.to_dict()
+
+
+def test_build_observations_search_snippet_matches_full_text_untruncated() -> None:
+    """At construction time (build_observations), search_snippet must equal
+    the untruncated full_text — NOT a pre-truncated fragment. Truncation to
+    the short ~40-100 char phrase happens later, in
+    observation_builder.truncate_search_snippets, which the pipeline calls
+    strictly AFTER pseudonymization (see that function's docstring)."""
+    long_text = f"Alpha Corp shall indemnify Acme University against claims. {'X' * 150}"
+    diffs = [(_cd("ind", text_after=long_text), _dr())]
+    obs = build_observations("doc1", "v2", "our_paper", diffs, [])
+    assert obs[0].search_snippet == long_text
+    assert obs[0].search_snippet == obs[0].full_text
+
+
+def test_truncate_search_snippets_multiline_clause_stays_substring_of_full_text() -> None:
+    """A multi-line clause (the norm for indemnification / limitation-of-
+    liability clauses with sub-paragraphs -- segmenter.py's ClauseNode.text
+    is built via ``"\\n".join(lines_list).strip()``) must still yield a
+    search_snippet that is a genuine verbatim substring of full_text after
+    truncate_search_snippets runs.
+
+    Regression guard: the prior _shape_search_snippet collapsed ALL
+    whitespace -- including embedded newlines -- via
+    ``" ".join(text.split())``, which rebuilds the string from its words and
+    is therefore not guaranteed to appear anywhere in the untouched source
+    text. Word/PDF Ctrl+F does not match across a paragraph mark, so a
+    collapsed multi-line snippet was unfindable in the source document,
+    defeating this field's entire purpose. Every existing search_snippet
+    fixture (elsewhere in this file and in test_dynamics_fields.py /
+    test_entity_registry.py) is single-line, so none of them exercise this.
+    """
+    full_text = (
+        "Alpha Corp shall indemnify and hold harmless the counterparty "
+        "from and against:\n"
+        "any and all third-party claims, losses, and expenses arising out "
+        "of or relating to this agreement."
+    )
+    assert "\n" in full_text, "premise: fixture clause spans more than one line"
+
+    obs = Observation(
+        observation_id="doc1/v2/1",
+        taxonomy_id="ind",
+        text_summary="short",
+        full_text=full_text,
+        citation=ObservationCitation("doc1", "v2", "1", None),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+    assert obs.search_snippet == full_text, "premise: search_snippet defaults to full_text"
+
+    truncated = truncate_search_snippets([obs])
+    snippet = truncated[0].search_snippet
+
+    assert snippet, "expected a non-empty snippet"
+    assert snippet in full_text, (
+        "search_snippet must be a genuine verbatim substring of full_text "
+        f"(so Ctrl+F in the source document finds it); got snippet={snippet!r} "
+        f"which is not a substring of full_text={full_text!r}"
+    )
+    assert "\n" not in snippet, "a single-line excerpt should never itself carry a newline"
 
 
 # ---------------------------------------------------------------------------

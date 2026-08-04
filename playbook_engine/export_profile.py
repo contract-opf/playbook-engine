@@ -67,10 +67,14 @@ _BASIS_VALUES = frozenset({"judge", "stub", "judge_error"})
 
 # Free-text fields on each ``observed_positions[]`` entry that may carry
 # semantic residue. ``full_text`` (issue #105) is the untruncated clause
-# text; ``text_summary`` is the ≤200-char display truncation. Both are
-# judged independently since a rewrite of one must not silently leave the
-# other unexamined.
-_FREE_TEXT_FIELDS: tuple[str, ...] = ("text_summary", "full_text")
+# text; ``text_summary`` is the ≤200-char display truncation; ``x_search_snippet``
+# (issue #95) is a short verbatim excerpt near the citation's location —
+# deterministically pseudonymized/truncated at mine time same as the other
+# two, but sampled here independently since a rewrite of one must not
+# silently leave the others unexamined by this SEPARATE semantic-residue
+# judgment pass (deterministic alias substitution and LLM-judged residue are
+# independent lines of defense, not substitutes for each other).
+_FREE_TEXT_FIELDS: tuple[str, ...] = ("text_summary", "full_text", "x_search_snippet")
 
 # ClauseConcept (``evidence.clause_library[]``) free-text fields (issue #188
 # gap analysis item 1) — human-authored prose describing an accepted clause
@@ -138,7 +142,8 @@ def _extract_text_samples(
     Full free-text surface (issue #188 gap analysis item 1 — everything
     residue sampling missed before this issue is now covered):
 
-      - ``observed_positions[].text_summary`` / ``.full_text`` (issue #146)
+      - ``observed_positions[].text_summary`` / ``.full_text`` /
+        ``.x_search_snippet`` (issues #146, #95)
       - ``negotiation_trail[].change_summary`` (issue #177 — quotes raw
         clause text verbatim, exactly as residue-prone as an observation)
       - ``clauses[].our_standard.text``
