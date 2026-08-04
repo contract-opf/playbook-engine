@@ -235,6 +235,122 @@ def test_taxonomy_gate_failure_on_out_of_enum_id() -> None:
         _run(text, blocks, nodes, ["indemnification", "governing_law"])
 
 
+def test_taxonomy_gate_failure_still_echoes_identifier_shaped_typo() -> None:
+    """issue #97: a rejected ``taxonomy_id`` that IS identifier-shaped (the
+    common, useful case — a near-miss typo) is still echoed verbatim, so the
+    taxonomy gate stays debuggable in the case that actually happens."""
+    text, blocks = _stream(["a clause"])
+    nodes = [SegNode("n1", None, 1, None, "confidentialty", "b0", "b0")]
+    with pytest.raises(SegmentationQAError, match="taxonomy gate") as exc_info:
+        _run(text, blocks, nodes, ["confidentiality"])
+    assert "'confidentialty'" in str(exc_info.value)
+
+
+def test_taxonomy_gate_failure_redacts_non_identifier_rejected_id() -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #97). A rejected ``taxonomy_id``
+    is LLM-assigned and reached only when it is OUTSIDE the allowed
+    vocabulary — i.e. by construction, the one case that reaches this
+    message is exactly the case where the model's output is unconstrained.
+    Since #83, this message is persisted verbatim into
+    ``corpus_manifest.json``'s ``version_ingest[].error`` for a quarantined
+    document, so arbitrary model output had a path into the compiled
+    artifact.
+
+    The rejected id here glues a (synthetic) entity name to a trailing
+    "_2023" suffix with NO separating space — the same word-boundary-
+    defeating shape issue #96 proved defeats
+    ``entity_registry._fuzzy_name_pattern``'s whole-word ``(?<!\\w)NAME(?!\\w)``
+    scrub (underscore is a ``\\w`` character). This proves the fix closes the
+    leak at the source (never emitting the raw value), not by relying on
+    that scrub, which cannot catch a glued token.
+    """
+    text, blocks = _stream(["a clause"])
+    entity_name = "Fictional University"
+    rejected_id = f"{entity_name}_2023"
+    nodes = [SegNode("n1", None, 1, None, rejected_id, "b0", "b0")]
+    with pytest.raises(SegmentationQAError, match="taxonomy gate") as exc_info:
+        _run(text, blocks, nodes, ["confidentiality"])
+    message = str(exc_info.value)
+    assert rejected_id not in message, "raw rejected taxonomy_id must never be echoed verbatim"
+    assert entity_name not in message, "raw entity name must never survive inside the message"
+    # Acceptance criterion: still diagnostically useful — a placeholder names
+    # the withheld value's length.
+    assert f"{len(rejected_id)} chars" in message
+    # Acceptance criterion: still names the offending clause path.
+    assert "'1'" in message
+
+
+def test_taxonomy_gate_failure_on_non_string_rejected_id() -> None:
+    """REGRESSION (issue #97 fix round 1). The taxonomy gate's structured-
+    output schema does not actually guarantee ``taxonomy_id`` is a ``str``
+    (``llm_segmenter._parse_seg_nodes`` assigns ``raw["taxonomy_id"]`` with
+    no type check into a plain, unvalidated ``SegNode`` dataclass), so a
+    model that violates its own schema — returning a JSON number, for
+    instance — reaches ``_check_taxonomy`` with a non-``str``
+    ``taxonomy_id``.
+
+    Before the fix, ``_safe_taxonomy_id_repr`` called
+    ``_TAXONOMY_ID_SHAPE_RE.fullmatch(taxonomy_id)`` unguarded, which raises
+    ``TypeError: expected string or bytes-like object`` on a non-``str``
+    value — turning this fail-loud ``SegmentationQAError`` (document
+    quarantined, visible in ``quarantine.json``/``corpus_manifest.json``)
+    into an uncaught ``TypeError`` that escapes ``run_gates``/
+    ``segment_verify_repair`` (they catch only ``SegmentationQAError``) and
+    is instead swallowed by ``pipeline._compute_doc_result``'s broad
+    ``except Exception`` as a per-file warning — silently dropping the
+    version (see ``test_taxonomy_gate_non_string_id_quarantines_with_taxonomy_reason``
+    in test_pipeline_llm_seg.py for the full end-to-end blast radius). This
+    test pins the gate-level contract: a non-``str`` rejected id must still
+    raise ``SegmentationQAError``, never ``TypeError``.
+    """
+    text, blocks = _stream(["a clause"])
+    # A JSON number, exactly as a schema-violating model response would
+    # decode via ``json.loads`` — not a string a test author typed by hand.
+    nodes = [SegNode("n1", None, 1, None, 1234, "b0", "b0")]  # type: ignore[arg-type]
+    with pytest.raises(SegmentationQAError, match="taxonomy gate") as exc_info:
+        _run(text, blocks, nodes, ["confidentiality"])
+    message = str(exc_info.value)
+    # Acceptance criterion: still diagnostically useful — names the type of
+    # the withheld value instead of crashing.
+    assert "non-string value, type int" in message
+    # Acceptance criterion: still names the offending clause path.
+    assert "'1'" in message
+
+
+def test_taxonomy_gate_failure_on_unhashable_rejected_id() -> None:
+    """REGRESSION (issue #97 fix round 2). The round-1 fix above guards
+    ``_safe_taxonomy_id_repr`` against a non-``str`` ``taxonomy_id``, but
+    ``_check_taxonomy`` itself evaluates ``taxonomy_id not in allowed``
+    against a ``set`` BEFORE ever calling ``_safe_taxonomy_id_repr`` — so an
+    UNHASHABLE non-``str`` value (a ``list``/``dict``, e.g. a model
+    assigning two taxonomy categories to one node — a highly plausible
+    schema violation, unlike an arbitrary scalar) still raised an uncaught
+    ``TypeError: unhashable type`` at that membership test, never even
+    reaching ``_safe_taxonomy_id_repr``'s ``isinstance`` guard. That
+    ``TypeError`` escapes ``run_gates``/``segment_verify_repair`` (they
+    catch only ``SegmentationQAError``) and is instead swallowed by
+    ``pipeline._compute_doc_result``'s broad ``except Exception`` as a
+    per-file warning — silently dropping the version (see
+    ``test_taxonomy_gate_list_id_quarantines_with_taxonomy_reason`` in
+    test_pipeline_llm_seg.py for the full end-to-end blast radius). This
+    test pins the gate-level contract: an unhashable rejected id must still
+    raise ``SegmentationQAError``, never ``TypeError``.
+    """
+    text, blocks = _stream(["a clause"])
+    # A JSON array, exactly as a schema-violating model response would
+    # decode via ``json.loads`` (e.g. assigning two categories at once) —
+    # not a string a test author typed by hand.
+    nodes = [SegNode("n1", None, 1, None, ["indemnification", "governing_law"], "b0", "b0")]  # type: ignore[arg-type]
+    with pytest.raises(SegmentationQAError, match="taxonomy gate") as exc_info:
+        _run(text, blocks, nodes, ["confidentiality"])
+    message = str(exc_info.value)
+    # Acceptance criterion: still diagnostically useful — names the type of
+    # the withheld value instead of crashing.
+    assert "non-string value, type list" in message
+    # Acceptance criterion: still names the offending clause path.
+    assert "'1'" in message
+
+
 # ---------------------------------------------------------------------------
 # segment_verify_repair — verify/repair loop
 # ---------------------------------------------------------------------------
