@@ -17,6 +17,13 @@ actual cited file and verify its bytes by content address:
    can open the cited clause; raise ``CitationResolutionError`` on a hash
    mismatch or a missing/unaddressable citation.
 
+``ResolvedCitation`` also exposes an optional ``page``, but that is a
+consumer-side convenience, not part of the compiled OPF citation shape:
+OPF-SPEC §10.1 excludes citations from the ``x_*`` extension mechanism, so
+no producer in this codebase ever writes ``page`` into ``example_ref`` —
+it stays ``None`` from real data (see ``test_resolve_citation_roundtrip``)
+unless a non-conformant/foreign playbook dict happens to carry the key.
+
 Consumers copy this algorithm; ``playbook resolve-citation`` (cli.py) is
 its command-line face.
 """
@@ -45,13 +52,15 @@ class ResolvedCitation:
     file_path: Path
     clause_path: str | None
     char_span: tuple[int, int] | None
+    page: int | None = None
 
     def describe(self) -> str:
         span = f" chars [{self.char_span[0]}, {self.char_span[1]}]" if self.char_span else ""
         clause = f" clause {self.clause_path}" if self.clause_path else ""
+        page = f" page {self.page}" if self.page is not None else ""
         return (
             f"{self.document_id} v{self.version} -> {self.file_path}"
-            f"{clause}{span} (verified {self.sha256})"
+            f"{clause}{span} (verified {self.sha256}){page}"
         )
 
 
@@ -163,6 +172,18 @@ def resolve_citation(
         )
 
     char_span = ref.get("char_span")
+    # ``page`` is permanently outside the compiled OPF citation shape: spec/
+    # playbook.schema-0.3.json's $defs.citation is closed
+    # (additionalProperties: false), OPF-SPEC §10.1 excludes citations from
+    # the x_* extension mechanism, and §11 freezes 0.3 against shape
+    # changes — no producer in this codebase sets it, and none conformantly
+    # can (see the module docstring). Read defensively only so a
+    # non-conformant/foreign playbook dict carrying a stray "page" key
+    # degrades to None instead of raising; a wrong-typed or out-of-range
+    # value (bool, 0, negative) is likewise treated as absent rather than
+    # trusted, mirroring ClauseNode.page's 1-based-or-None contract.
+    page = ref.get("page")
+    page_valid = isinstance(page, int) and not isinstance(page, bool) and page >= 1
     return ResolvedCitation(
         document_id=document_id,
         version=version,
@@ -170,4 +191,5 @@ def resolve_citation(
         file_path=found,
         clause_path=ref.get("clause_path"),
         char_span=tuple(char_span) if char_span else None,
+        page=page if page_valid else None,
     )

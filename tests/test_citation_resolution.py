@@ -20,6 +20,7 @@ from click.testing import CliRunner
 
 from playbook_engine.citation_resolver import (
     CitationResolutionError,
+    ResolvedCitation,
     resolve_citation,
 )
 from playbook_engine.cli import cli
@@ -140,6 +141,11 @@ def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path])
     assert resolved.clause_path == ref["clause_path"]
     if ref.get("char_span"):
         assert list(resolved.char_span) == ref["char_span"]
+    # #86: the compiled citation object (spec/playbook.schema-0.3.json's
+    # closed $defs.citation) never carries a "page" key (see
+    # citation_resolver's module docstring) — resolve_citation() must
+    # default to None rather than crash or fabricate a value.
+    assert resolved.page is None
 
 
 def test_resolve_citation_tamper_fails(
@@ -197,6 +203,80 @@ def test_resolve_citation_cli_roundtrip(compiled: tuple[Path, dict[str, Any], Pa
     assert result.exit_code == 0, result.output
     assert "verified sha256:" in result.output
     assert "file:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# #86 — ResolvedCitation.page / describe()
+# ---------------------------------------------------------------------------
+
+_SHA_A = "sha256:" + "a" * 64
+
+
+def _resolved(*, page: int | None) -> ResolvedCitation:
+    return ResolvedCitation(
+        document_id="doc",
+        version=1,
+        sha256=_SHA_A,
+        file_path=Path("/corpus/doc/v1.pdf"),
+        clause_path="1.2",
+        char_span=(10, 20),
+        page=page,
+    )
+
+
+def test_resolved_citation_describe_includes_page_when_present() -> None:
+    assert _resolved(page=5).describe() == (
+        f"doc v1 -> /corpus/doc/v1.pdf clause 1.2 chars [10, 20] (verified {_SHA_A}) page 5"
+    )
+
+
+def test_resolved_citation_describe_unchanged_when_page_absent() -> None:
+    """Byte-identical to the pre-#86 format when page is None."""
+    assert _resolved(page=None).describe() == (
+        f"doc v1 -> /corpus/doc/v1.pdf clause 1.2 chars [10, 20] (verified {_SHA_A})"
+    )
+
+
+def _with_example_ref_page(playbook: dict[str, Any], page_value: Any) -> dict[str, Any]:
+    """Deep-copy *playbook* with a raw ``page`` key injected into the first
+    clause's first observation's ``example_ref`` — simulating a hand-edited/
+    foreign playbook dict (the compiled schema is closed, so no producer in
+    this codebase ever writes this key) to exercise resolve_citation()'s
+    defensive page gate."""
+    doc: dict[str, Any] = json.loads(json.dumps(playbook))
+    doc["evidence"]["clauses"][0]["observed_positions"][0]["example_ref"]["page"] = page_value
+    return doc
+
+
+@pytest.mark.parametrize("bad_page", [0, -3, True, "5"])
+def test_resolve_citation_rejects_invalid_page(
+    compiled: tuple[Path, dict[str, Any], Path], bad_page: Any
+) -> None:
+    """fix-round-1 (#86): a hand-edited/foreign citation carrying a
+    zero/negative/wrong-typed 'page' — including ``True``, which
+    ``isinstance(x, int)`` alone accepts because ``bool`` subclasses
+    ``int`` — must resolve to ``page=None``, never be trusted verbatim."""
+    corpus_dir, playbook, _ = compiled
+    clause_id = playbook["evidence"]["clauses"][0]["id"]
+    tampered = _with_example_ref_page(playbook, bad_page)
+
+    resolved = resolve_citation(tampered, clause_id, 0, corpus_dir)
+
+    assert resolved.page is None
+
+
+def test_resolve_citation_accepts_valid_page(
+    compiled: tuple[Path, dict[str, Any], Path],
+) -> None:
+    """A hand-edited/foreign citation carrying a valid positive-int page is
+    passed through unchanged."""
+    corpus_dir, playbook, _ = compiled
+    clause_id = playbook["evidence"]["clauses"][0]["id"]
+    tampered = _with_example_ref_page(playbook, 7)
+
+    resolved = resolve_citation(tampered, clause_id, 0, corpus_dir)
+
+    assert resolved.page == 7
 
 
 def _load_minimal() -> dict[str, Any]:

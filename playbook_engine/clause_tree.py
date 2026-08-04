@@ -10,6 +10,10 @@ Terminology (matches docs/ARCHITECTURE.md L1 description):
   text         — body text of this node (not including children)
   char_span    — (start, end) character indices in the document's full
                  normalized text (exclusive end, like Python slice notation)
+  page         — 1-based source page the clause begins on, or None when
+                 unpaginated/unknown (optional; today only the legacy PDF
+                 extractor path supplies real values — see
+                 segmentation_grounding.build())
   children     — ordered list of child ClauseNode objects
 """
 
@@ -34,6 +38,7 @@ class ClauseNode:
     heading: str | None
     text: str
     char_span: tuple[int, int]
+    page: int | None = None
     children: list[ClauseNode] = field(default_factory=list)
 
     def is_leaf(self) -> bool:
@@ -45,6 +50,7 @@ class ClauseNode:
             "heading": self.heading,
             "text": self.text,
             "char_span": list(self.char_span),
+            "page": self.page,
             "children": [c.to_dict() for c in self.children],
         }
 
@@ -74,6 +80,12 @@ class ClauseNode:
             raise ClauseTreeError(
                 f"clause_path {data.get('clause_path')!r}: 'heading' must be a string or null"
             )
+        page = data.get("page")
+        if page is not None and (not isinstance(page, int) or isinstance(page, bool) or page < 1):
+            raise ClauseTreeError(
+                f"clause_path {data.get('clause_path')!r}: 'page' must be a positive integer"
+                f" or null, got {page!r}"
+            )
         children_raw = data.get("children", [])
         if not isinstance(children_raw, list):
             raise ClauseTreeError(
@@ -89,6 +101,7 @@ class ClauseNode:
             heading=heading,
             text=text,
             char_span=(start, end),
+            page=page,
             children=[ClauseNode.from_dict(c) for c in children_raw],
         )
 

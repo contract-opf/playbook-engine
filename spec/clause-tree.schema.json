@@ -54,6 +54,11 @@
           "minItems": 2,
           "maxItems": 2
         },
+        "page": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "1-based source page the clause begins on, or null when unpaginated or unknown."
+        },
         "children": {
           "type": "array",
           "description": "Ordered child ClauseNode objects.",
