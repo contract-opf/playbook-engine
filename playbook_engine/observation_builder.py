@@ -164,12 +164,12 @@ class Observation:
         attribution:     Word tracked-changes author/date attribution for this
                          clause's hunks (issue #88), or ``None`` when no
                          tracked-changes side-channel matched — PDF/RTF, a
-                         clean DOCX, an LLM-segmented document (no
-                         w:ins/w:del capture on that path yet), or a DOCX
-                         redline whose text didn't match closely enough (see
-                         ``tracked_changes_overlay``). This is a bonus
-                         signal, never a requirement — most observations
-                         will have ``attribution=None``.
+                         clean DOCX, a DOCX ``python-docx`` could not open, or
+                         a DOCX redline whose text didn't match closely
+                         enough (see ``tracked_changes_overlay``). Captured
+                         the same way regardless of segmentation mode (issue
+                         #85). This is a bonus signal, never a requirement —
+                         most observations will have ``attribution=None``.
         full_text:       The untruncated clause text (issue #105). Defaults
                          to ``text_summary`` when not supplied (via
                          ``__post_init__``) so existing callers/tests that

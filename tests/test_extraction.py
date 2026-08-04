@@ -18,6 +18,7 @@ from docx import Document
 from lxml import etree
 
 from playbook_engine import extraction
+from playbook_engine.docx_ingester import ingest_docx
 from playbook_engine.extraction import ExtractionCache, ExtractionError, extract_blocks
 from playbook_engine.segmentation_grounding import Block
 
@@ -161,6 +162,61 @@ def test_legacy_docx_captures_tracked_insertions_and_tables(tmp_path: Path) -> N
     assert "Fee" in canonical_text
     assert "Training" in canonical_text
     assert "$100/hour" in canonical_text
+
+
+# ---------------------------------------------------------------------------
+# extract_tracked_changes — the side-channel itself (issue #85)
+#
+# Distinct from the regression above: that one guards canonical_text/blocks
+# (the extract_blocks legacy adapter must not silently DROP tracked-insertion
+# TEXT). This one guards the separate author/date METADATA side-channel that
+# extract_blocks's three call sites have no seam for — extract_tracked_changes
+# is the new, independent helper the pipeline's LLM-segmentation branches call
+# to get it (see pipeline._llm_tracked_changes).
+# ---------------------------------------------------------------------------
+
+
+def test_extract_tracked_changes_matches_docx_ingester(tmp_path: Path) -> None:
+    """extract_tracked_changes must match ingest_docx's own parse of the
+    identical fixture — same authors, dates, inserted/deleted text,
+    clause_path, and char_span (issue #85's acceptance criterion) — even
+    though it re-parses the file independently via a separate call, not by
+    sharing ingest_docx's result object.
+    """
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+    expected = ingest_docx(path, document_id="", version="").tracked
+
+    actual = extraction.extract_tracked_changes(path)
+
+    assert actual is not None
+    assert actual.to_dict() == expected.to_dict()
+    # The acceptance criterion, spelled out explicitly: authors + inserted text.
+    insertions = [c for c in actual.changes if c.change_type == "insertion"]
+    assert any(c.author == "Alice" and "promptly" in c.text for c in insertions), (
+        "Alice's inserted text must be captured"
+    )
+    deletions = [c for c in actual.changes if c.change_type == "deletion"]
+    assert any(c.author == "Bob" for c in deletions), "Bob's deletion must be captured"
+
+
+def test_extract_tracked_changes_none_for_non_docx(tmp_path: Path) -> None:
+    """RTF/PDF have no tracked-changes concept — must return None, not raise
+    (mirrors pipeline._ingest_file_tracked's convention for those formats)."""
+    path = tmp_path / "agreement.rtf"
+    path.write_text(r"{\rtf1\ansi\deff0 Hello\par}", encoding="utf-8")
+    assert extraction.extract_tracked_changes(path) is None
+
+
+def test_extract_tracked_changes_empty_for_clean_docx(tmp_path: Path) -> None:
+    """A DOCX with no w:ins/w:del elements returns an EMPTY TrackedChanges,
+    not None — same convention as ingest_docx's own DocxIngestResult.tracked.
+    """
+    path = _simple_docx(tmp_path)
+    result = extraction.extract_tracked_changes(path)
+    assert result is not None
+    assert result.changes == []
 
 
 # ---------------------------------------------------------------------------

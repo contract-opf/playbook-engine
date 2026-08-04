@@ -55,6 +55,7 @@ from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import (
     PipelineError,
     _classified_from_taxonomy_by_path,
+    _llm_tracked_changes,
     mine_corpus,
     project_playbook,
 )
@@ -1634,3 +1635,149 @@ def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
         "replayed — a genuine live extraction must have run and correctly recorded the "
         "backend-error fallback"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #85: the DOCX tracked-changes side-channel must reach tracked_by_vid
+# (and therefore tracked_changes_overlay) on the LLM-segmentation path too —
+# previously only the deterministic branch of _compute_doc_result ever built
+# it (issue #88's own regression guard, test_pipeline_project.py's
+# test_docx_redline_observation_carries_tracked_changes_attribution, only
+# exercises that deterministic branch).
+# ---------------------------------------------------------------------------
+
+
+# Heading text -> taxonomy_id for the (unnumbered) DOCX fixtures in
+# test_pipeline_project.py (_docx_no_tracked_changes/_docx_with_tracked_insertion):
+# two Heading-1 paragraphs, "Obligations" then "Governing Law". Neither has an
+# explicit numeric prefix, so BOTH docx_ingester.ingest_docx (the tracked-changes
+# side-channel's own parse) and segmentation_grounding.build() (the LLM tree's
+# clause_path) independently assign sequential paths by sibling order alone —
+# "1" then "2" — so they land on the same clause_path without this fixture
+# needing numbered headings.
+_DOCX_HEADING_TAXONOMY = {
+    "Obligations": "relationship_of_parties",
+    "Governing Law": "governing_law",
+}
+
+
+def _docx_fake_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Pair consecutive (heading, body) blocks into clause nodes.
+
+    Same block-pairing shape as _fake_segment_fn above, adapted to the
+    unnumbered DOCX heading fixtures (see _DOCX_HEADING_TAXONOMY).
+    """
+    del canonical_text
+    nodes: list[SegNode] = []
+    for order, i in enumerate(range(0, len(blocks), 2), start=1):
+        heading_block, body_block = blocks[i], blocks[i + 1]
+        nodes.append(
+            SegNode(
+                node_id=f"n{order}",
+                parent_id=None,
+                order=order,
+                heading=heading_block.text,
+                taxonomy_id=_DOCX_HEADING_TAXONOMY.get(heading_block.text),
+                start_block_id=heading_block.block_id,
+                end_block_id=body_block.block_id,
+                start_quote=heading_block.text[:10],
+                end_quote=body_block.text[-10:],
+            )
+        )
+    return nodes
+
+
+def test_llm_tracked_changes_returns_side_channel_for_tracked_docx(tmp_path: Path) -> None:
+    """Direct unit coverage for pipeline._llm_tracked_changes: a
+    tracked-changes DOCX yields a non-None TrackedChanges, with no warning
+    logged on a clean parse.
+    """
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+    messages: list[str] = []
+
+    result = _llm_tracked_changes(path, messages.append)
+
+    assert result is not None
+    assert any(c.author == "Alice" for c in result.changes)
+    assert messages == []
+
+
+def test_llm_tracked_changes_degrades_to_none_on_unreadable_docx(tmp_path: Path) -> None:
+    """A DOCX python-docx cannot open must degrade to None + a progress
+    warning, never raise — an LLM-segmented version's tree has already been
+    produced successfully by the time this best-effort call runs, so a
+    failure here must not retroactively fail the whole version.
+    """
+    path = tmp_path / "corrupt.docx"
+    path.write_bytes(b"not a real docx")
+    messages: list[str] = []
+
+    result = _llm_tracked_changes(path, messages.append)
+
+    assert result is None
+    assert len(messages) == 1
+    assert "tracked-changes side-channel unavailable" in messages[0]
+
+
+def test_llm_segmented_docx_carries_tracked_changes_attribution(tmp_path: Path) -> None:
+    """A tracked-change insertion in a DOCX segmented via the LLM path must
+    still reach tracked_by_vid and, through it, tracked_changes_overlay.
+
+    Regression guard for issue #85: previously the LLM-segmentation branches
+    of _compute_doc_result never populated tracked_by_vid at all, so this
+    attribution was structurally absent on every LLM-segmented corpus — the
+    entire real-world case, since the deterministic path is the exception.
+    Mirrors test_pipeline_project.py's
+    test_docx_redline_observation_carries_tracked_changes_attribution (issue
+    #88), routed through use_llm_segmentation=True with a fake segment_fn
+    instead of the deterministic path.
+    """
+    from tests.test_pipeline_project import _docx_no_tracked_changes, _docx_with_tracked_insertion
+
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-002"
+    deal_dir.mkdir(parents=True)
+    _docx_no_tracked_changes(deal_dir, "v1.docx")
+    _docx_with_tracked_insertion(deal_dir, "v2.docx")
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_docx_fake_segment_fn,
+    )
+
+    raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
+    deal_obs = [o for o in raw_obs if o["citation"]["document_id"] == "deal-002"]
+    assert deal_obs, "deal-002 must have observations"
+
+    attributed = [o for o in deal_obs if o.get("attribution") is not None]
+    assert attributed, (
+        "LLM-segmented DOCX must carry tracked-changes attribution — "
+        f"got attributions={[o.get('attribution') for o in deal_obs]}"
+    )
+    assert attributed[0]["attribution"] == {
+        "author": "Alice",
+        "date": "2024-03-15T10:00:00Z",
+        "tracked_type": "insertion",
+    }
