@@ -2924,12 +2924,39 @@ def mine_corpus(
         # corpus_manifest.json's matching entry was aliased. Aliasing here
         # also removes the raw counterparty name from quarantine.json's
         # document_id field as a side effect.
+        #
+        # quarantine.json's reason (issue #96, defense in depth): HintsError
+        # and SegmentationQAError are both already built to never embed raw
+        # source content at the source (see version_orderer.HintsError's
+        # docstring and segmentation_qa._check_coverage), so for those two
+        # this pass is a second, redundant layer, not the primary control.
+        # It IS load-bearing for any OTHER exception type reaching this
+        # quarantine handler whose message happens to embed a known entity
+        # name as an ordinary, whole-word-matchable token — e.g. a future
+        # NormalizeTrailError raised from a caller-supplied
+        # normalize_trail_fn (see
+        # test_quarantine_reason_defense_in_depth_pseudonymization_fires).
+        # Whole-word match only (entity_registry._fuzzy_name_pattern) — a
+        # name glued to a trailing word character defeats it, which is
+        # exactly why the source-level "never embed it" fix on
+        # HintsError/SegmentationQAError is not optional and this pass alone
+        # would not have been enough for either of them.
+        #
+        # This reason text is read back by aar._load_quarantine /
+        # _build_needs_attention (playbook_engine/aar.py:576, which embeds
+        # it verbatim into "needs_attention" reasons for the after-action
+        # report) — quarantine.json plus that report are reason's only
+        # consumers. It never reaches corpus_manifest.json, playbook.opf.json,
+        # or review.json: review.write_review reads scope.json/trail/
+        # observations.jsonl/corpus_manifest.json only and never opens
+        # quarantine.json at all.
         quarantined = [
             {
                 **q,
                 "document_id": pseudonymize_document_id(
                     q["document_id"], known_entities, entity_registry
                 ),
+                "reason": pseudonymize_text(q["reason"], known_entities, entity_registry),
             }
             for q in quarantined
         ]

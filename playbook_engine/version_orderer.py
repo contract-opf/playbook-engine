@@ -196,6 +196,28 @@ class HintsError(ValueError):
     discarded the correction (the previous ``return cls()`` on any
     exception) would defeat that whole human-in-the-loop story without any
     signal to the person who wrote the file.
+
+    PRIVACY (issue #96): every message this class raises names hints.yaml by
+    its bare filename only (``path.name``, e.g. "hints.yaml"), never the
+    full path it was loaded from, and never any text read out of the file
+    itself (see ``Hints.load`` and ``_yaml_error_detail``). A caller
+    (``pipeline.mine_corpus``) persists ``str(this)`` verbatim into
+    ``quarantine.json``'s ``reason`` field for a quarantined document, and
+    from there it also reaches the after-action report
+    (``aar._build_needs_attention`` embeds it into "needs_attention"
+    reasons). *path*'s parent directory is the document folder, typically
+    named after the counterparty, and hints.yaml's own content can likewise
+    contain a counterparty name (e.g. a mistyped ``order:`` entry). Either
+    would leak the raw name even on a corpus with
+    ``provenance.known_entities`` configured — pseudonymization rewrites
+    known-entity names it can find as whole words, not arbitrary path or
+    file-content text, and a name glued to a trailing word character (e.g.
+    an underscore-joined year suffix — a realistic corpus-folder or
+    YAML-alias naming convention, not a contrived one) silently defeats
+    that whole-word match (see ``entity_registry._fuzzy_name_pattern``'s
+    ``(?<!\w)NAME(?!\w)`` boundary). The caller already has the quarantine
+    record's own ``document_id`` to say WHICH document failed; these
+    messages only need to say HOW.
     """
 
 
@@ -227,6 +249,51 @@ def _strip_hint_ext(value: str) -> str:
     if p.suffix.lower() in _HINT_EXTENSIONS:
         return p.stem
     return value
+
+
+def _yaml_error_detail(exc: yaml.YAMLError) -> str:
+    """Summarize *exc* without embedding any of hints.yaml's SOURCE CONTENT
+    (issue #96).
+
+    Two independent leak vectors, both closed the same way — report only
+    the exception's TYPE plus a bare 1-based line/column, and nothing read
+    out of hints.yaml itself:
+
+    1. ``str(exc)``: every error ``yaml.safe_load`` practically raises here
+       (``ScannerError``/``ParserError``/``ComposerError``/
+       ``ConstructorError`` — all ``MarkedYAMLError`` subclasses) builds its
+       ``__str__`` by calling ``Mark.get_snippet()``, which quotes the
+       actual line of hints.yaml text around the failure — trivially
+       unsafe, so this function never calls ``str(exc)`` or ``str(mark)``.
+    2. ``exc.problem`` ALONE — even without the snippet — is ALSO unsafe.
+       It reads as a fixed grammar-violation phrase in the common case, but
+       several PyYAML branches build it with ``%r`` around a token taken
+       straight from the document being parsed, e.g. composer.py's
+       ``"found undefined alias %r" % anchor`` and constructor.py's
+       ``"could not determine a constructor for the tag %r"``. hints.yaml's
+       documented grammar (docs/CORPUS-LAYOUT.md) never uses YAML
+       anchors/aliases/tags, but ``yaml.safe_load`` still SCANS the full
+       YAML grammar regardless of what's documented (``SafeLoader`` only
+       restricts which Python types get *constructed*, never which syntax
+       gets *scanned/parsed*), so a hand-typed slip like ``order:
+       [*Northwind_2023]`` reaches this branch for real. Worse, a name
+       glued to a trailing suffix this way (a realistic corpus-folder/
+       YAML-alias naming convention) defeats
+       ``entity_registry._fuzzy_name_pattern``'s whole-word
+       ``(?<!\w)NAME(?!\w)`` boundary check (``_`` is itself a ``\w``
+       character), so ``pipeline.mine_corpus``'s downstream defense-in-depth
+       pseudonymization pass over quarantine.json's ``reason`` field cannot
+       be relied on to catch this either — it must be closed here, at the
+       source, not by scrubbing harder downstream.
+
+    ``mark.line``/``mark.column`` are always safe to report: plain integers
+    computed from parse position, independent of hints.yaml's content.
+    """
+    if isinstance(exc, yaml.MarkedYAMLError):
+        mark = exc.problem_mark
+        if mark is not None:
+            return f"{type(exc).__name__} (line {mark.line + 1}, column {mark.column + 1})"
+    return type(exc).__name__
 
 
 @dataclass
@@ -267,23 +334,31 @@ class Hints:
         any file extension (see ``_strip_hint_ext``) so hints written per
         docs/CORPUS-LAYOUT.md's example (extensions included) actually match
         the engine's file-stem version ids.
+
+        PRIVACY (issue #96): every ``HintsError`` raised below names the
+        file by its bare ``path.name`` ("hints.yaml"), never the full
+        *path* (see ``HintsError``'s own docstring for why), and never
+        echoes hints.yaml's own content verbatim: the "not valid YAML"
+        branch reports only ``_yaml_error_detail(exc)`` — never ``str(exc)``
+        or ``exc.problem`` directly — and the invalid-``provenance`` branch
+        reports only the offending value's TYPE, never the value itself.
         """
         if not path.exists():
             return cls()
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as exc:
-            raise HintsError(f"{path}: not valid YAML: {exc}") from exc
+            raise HintsError(f"{path.name}: not valid YAML: {_yaml_error_detail(exc)}") from exc
         if data is None:
             data = {}
         if not isinstance(data, dict):
             raise HintsError(
-                f"{path}: expected a YAML mapping at the top level, got {type(data).__name__}"
+                f"{path.name}: expected a YAML mapping at the top level, got {type(data).__name__}"
             )
         order = data.get("order")
         if order is not None:
             if not isinstance(order, list):
-                raise HintsError(f"{path}: 'order' must be a list, got {type(order).__name__}")
+                raise HintsError(f"{path.name}: 'order' must be a list, got {type(order).__name__}")
             order = [_strip_hint_ext(v) for v in order]
         signed_version = data.get("signed_version") or None
         if signed_version is not None:
@@ -292,15 +367,21 @@ class Hints:
         if provenance is not None and (
             not isinstance(provenance, str) or provenance not in _PROVENANCE_VALUES
         ):
+            # issue #96: report the allowed values and the actual value's
+            # TYPE only, never the value itself — provenance is read
+            # straight out of hints.yaml, so a counterparty name typed
+            # there by mistake (or a value merely containing one) must not
+            # be echoed into quarantine.json's reason field, same reasoning
+            # as _yaml_error_detail above.
             raise HintsError(
-                f"{path}: 'provenance' must be one of {sorted(_PROVENANCE_VALUES)}, "
-                f"got {provenance!r}"
+                f"{path.name}: 'provenance' must be one of {sorted(_PROVENANCE_VALUES)}, "
+                f"got {type(provenance).__name__}"
             )
         timestamps = data.get("timestamps") or {}
         if not isinstance(timestamps, dict) or not all(
             isinstance(k, str) and isinstance(v, str) for k, v in timestamps.items()
         ):
-            raise HintsError(f"{path}: 'timestamps' must be a mapping of string to string")
+            raise HintsError(f"{path.name}: 'timestamps' must be a mapping of string to string")
         return cls(
             order=order,
             timestamps=timestamps,
