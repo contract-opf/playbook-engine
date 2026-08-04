@@ -42,13 +42,18 @@ import yaml
 from playbook_engine import extraction
 from playbook_engine import pipeline as pipeline_module
 from playbook_engine import publisher as publisher_module
-from playbook_engine.aar import build_after_action_data, build_after_action_report
+from playbook_engine.aar import (
+    build_after_action_data,
+    build_after_action_report,
+    write_after_action_report,
+)
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
 from playbook_engine.entity_registry import EntityRegistry
 from playbook_engine.extraction import ExtractionCache, extract_blocks
 from playbook_engine.llm_segmenter_batch import (
+    NormalizeTrailError,
     NormalizeTrailResult,
     SegmentationVerdictCache,
     segment_documents_batch,
@@ -351,6 +356,59 @@ def _make_mixed_corpus_with_known_entities(
     bad_dir = corpus_dir / quarantined_doc_id
     bad_dir.mkdir(parents=True)
     _write_rtf(bad_dir / "v1.rtf", _BAD_DOC_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"], "known_entities": known_entities},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    return corpus_dir, config_path, out_dir
+
+
+#: Default malformed hints.yaml (unbalanced flow-sequence bracket) — content
+#: has nothing to do with any entity name, so this isolates the
+#: path-embedding leak (issue #96) from any unrelated leak surface in the
+#: YAML parser's own message (see callers below that override
+#: hints_yaml_text to exercise those other surfaces deliberately).
+_GENERIC_MALFORMED_HINTS_YAML = "order: [v1, v2\nsigned_version: v1\n"
+
+
+def _make_mixed_corpus_with_malformed_hints(
+    tmp_path: Path,
+    quarantined_doc_id: str,
+    known_entities: list[str],
+    hints_yaml_text: str = _GENERIC_MALFORMED_HINTS_YAML,
+) -> tuple[Path, Path, Path]:
+    """Two documents: "deal-001" mines cleanly (_V1_BODY, deterministic
+    path — no LLM segmentation needed since ``Hints.load`` runs on both
+    paths), and a second, named *quarantined_doc_id*, whose ``hints.yaml``
+    is malformed (issue #96) — ``HintsError`` propagates and quarantines
+    only this document. Shaped like ``_make_mixed_corpus_with_known_entities``
+    (a real second document with real content is required: unlike
+    ``SegmentationQAError``, ``HintsError`` carries no ``partial_corpus_doc``
+    — see pipeline.py's quarantine handler — so a single-document corpus
+    would leave BOTH observations.jsonl and corpus_manifest.json empty and
+    ``project_playbook`` would refuse to compile at all
+    (``PipelineError: Observation store is empty``), before this fix is even
+    exercised).
+    """
+    corpus_dir = tmp_path / "corpus"
+    good_dir = corpus_dir / "deal-001"
+    good_dir.mkdir(parents=True)
+    _write_rtf(good_dir / "v1.rtf", _V1_BODY)
+
+    bad_dir = corpus_dir / quarantined_doc_id
+    bad_dir.mkdir(parents=True)
+    _write_rtf(bad_dir / "v1.rtf", _V1_BODY)
+    (bad_dir / "hints.yaml").write_text(hints_yaml_text, encoding="utf-8")
 
     cfg = {
         "agreement_type": {
@@ -885,6 +943,413 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [_ENTITY_LEAK_NAME], "sanity: the entity really was registered"
     assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+# A document folder named after a known entity, glued directly to a trailing
+# "_2023" with NO space/separator before the underscore (issue #96 regression
+# test). Underscore counts as a \w character, so this is deliberately chosen
+# to defeat entity_registry._fuzzy_name_pattern's (?<!\w)NAME(?!\w) whole-word
+# boundary check on the trailing side — a realistic corpus-folder naming
+# convention (underscore-joined year suffix), not a contrived one. This
+# proves the regression test below is load-bearing on version_orderer's
+# "never embed the path" fix itself, not incidentally saved by pipeline.py's
+# separate defense-in-depth pseudonymization pass over quarantine.json's
+# reason text (see that pass's own comment in pipeline.py: never make the
+# scrub load-bearing — mirrors the #83/#95 precedent this ticket (#96) cites).
+_HINTS_LEAK_ENTITY_NAME = "Fictional University"
+_HINTS_LEAK_DOC_ID = f"{_HINTS_LEAK_ENTITY_NAME}_2023"
+
+
+def test_hints_error_never_leaks_raw_entity_name_via_path(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96). version_orderer.Hints.load
+    used to raise HintsError with the full hints.yaml path embedded in the
+    message (e.g. f"{path}: not valid YAML: {exc}"). That path is
+    <corpus>/<document-folder>/hints.yaml, and the document folder is
+    typically named after the counterparty (doc_id == doc_dir.name, per
+    pipeline._compute_doc_result) — so a document quarantined by a malformed
+    hints.yaml, in a corpus where the document folder is named after a
+    provenance.known_entities entry, used to write the raw entity name
+    straight into quarantine.json's reason field — even though #83 already
+    aliases quarantine.json's document_id field separately — and from there
+    into the after-action report too (aar._load_quarantine ->
+    _build_needs_attention embeds quarantine's reason verbatim; see
+    playbook_engine/aar.py:576). (HintsError carries no partial_corpus_doc —
+    unlike SegmentationQAError — so it never reaches corpus_manifest.json at
+    all; see _make_mixed_corpus_with_malformed_hints.) This fix instead
+    names the file by its bare filename ("hints.yaml"), never embedding the
+    document-folder path, so no alias-matching edge case is needed to keep
+    the name out (see version_orderer.HintsError's own docstring for why
+    this specific folder name defeats the defense-in-depth scrub, proving
+    this isn't a scrub-only fix).
+    """
+    corpus_dir, config_path, out_dir = _make_mixed_corpus_with_malformed_hints(
+        tmp_path, _HINTS_LEAK_DOC_ID, known_entities=[_HINTS_LEAK_ENTITY_NAME]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # issue #83 precedent: read the WRITTEN quarantine.json, not an in-memory dict.
+    quarantine_text = (out_dir / "quarantine.json").read_text(encoding="utf-8")
+    quarantine = json.loads(quarantine_text)
+    assert len(quarantine) == 1
+    assert _HINTS_LEAK_ENTITY_NAME not in quarantine_text, (
+        "raw entity name must never reach quarantine.json via a malformed "
+        "hints.yaml's HintsError, whose message used to embed the full "
+        "hints.yaml path (whose parent directory is the document folder, "
+        "typically named after the counterparty)"
+    )
+    # Sanity: the dangerous input really did trigger HintsError on the
+    # malformed-YAML path (not some other quarantine reason) — otherwise this
+    # test would vacuously pass without exercising the code this fix touched.
+    reason = quarantine[0]["reason"]
+    assert reason.startswith("HintsError:")
+    # Acceptance criterion: diagnostically useful — a human can still tell
+    # HOW the file was malformed even with the path gone. WHICH document is
+    # still identifiable via the record's own document_id field (#83).
+    assert "not valid YAML" in reason
+    assert "hints.yaml" in reason
+
+    # corpus_manifest.json never gets an entry for the quarantined document at
+    # all (HintsError carries no partial_corpus_doc — see the docstring
+    # above); this just confirms the surviving "deal-001" entry doesn't
+    # incidentally carry the other document's entity name either.
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    assert _HINTS_LEAK_ENTITY_NAME not in manifest_text
+
+    # The after-action report IS the verified second consumer of
+    # quarantine.json's reason field (aar._load_quarantine ->
+    # _build_needs_attention, playbook_engine/aar.py:576, embeds q["reason"]
+    # verbatim into "needs_attention" reasons) — read the WRITTEN
+    # report.md/report.json, not an in-memory dict.
+    write_after_action_report(out_dir, out_dir / "report.md")
+    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
+    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
+    assert _HINTS_LEAK_ENTITY_NAME not in report_md
+    assert _HINTS_LEAK_ENTITY_NAME not in report_json
+
+    # Belt-and-braces (issue #96 review correction: an earlier attempt's
+    # comments overstated this as THE documented propagation path — it
+    # isn't; the after-action report above is). playbook.opf.json has no
+    # quarantine section and review.write_review reads scope.json/trail/
+    # observations.jsonl/corpus_manifest.json only, never quarantine.json —
+    # so neither artifact was ever reachable by this leak. These assertions
+    # stay true either way; they just aren't proof of anything this fix
+    # changed.
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
+    assert _HINTS_LEAK_ENTITY_NAME not in published_text
+    assert _HINTS_LEAK_ENTITY_NAME not in json.dumps(playbook), (
+        "double-check the in-memory dict too"
+    )
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert _HINTS_LEAK_ENTITY_NAME not in review_text
+
+    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
+    # must find zero hits — the compiled playbook must already be born-safe
+    # by the time it reaches publish.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [_HINTS_LEAK_ENTITY_NAME], (
+        "sanity: the entity really was registered"
+    )
+    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_hints_error_never_leaks_raw_entity_name_via_yaml_content_snippet(
+    tmp_path: Path,
+) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96, fix round 1). HintsError's
+    "not valid YAML" branch used to interpolate ``{exc}`` (the underlying
+    ``yaml.YAMLError``) in full, and PyYAML's own ``__str__`` embeds a raw
+    snippet of hints.yaml's SOURCE CONTENT around the parse error via
+    ``Mark.get_snippet()`` (e.g. '...line 1, column 8:\\n order: [Fictional
+    University_2023_v1.do ... \\n           ^...'). This is a leak vector the
+    {path}->{path.name} fix alone does NOT address (it only touches the
+    path, never {exc}) — so this test uses a document folder that carries
+    NO entity name at all (isolating it from the {path} leak covered by the
+    test above) and instead puts the entity name INSIDE hints.yaml's own
+    malformed ``order:`` content, GLUED directly to a trailing
+    "_2023_v1.docx" suffix with no separating space — the extension-
+    inclusive ``order:`` convention docs/CORPUS-LAYOUT.md documents, and the
+    same glued shape ``_HINTS_LEAK_DOC_ID`` uses above to defeat
+    ``entity_registry._fuzzy_name_pattern``'s whole-word boundary check.
+
+    Because that glued form has no true word boundary on its trailing side,
+    pipeline.py's defense-in-depth pseudonymization pass over
+    quarantine.json's ``reason`` field CANNOT catch it (``\\s+``-joined
+    whole-word matching cannot cross "y_2023"). So this vector can only be
+    closed by never embedding the parser's raw snippet in the first place
+    (``version_orderer._yaml_error_detail``, built from the exception's
+    TYPE plus line/column only, never ``str(exc)``) — not by the scrub.
+    """
+    entity_name = "Fictional University"
+    hints_yaml_text = f"order: [{entity_name}_2023_v1.docx, unterminated\n"
+    corpus_dir, config_path, out_dir = _make_mixed_corpus_with_malformed_hints(
+        tmp_path, "deal-002", known_entities=[entity_name], hints_yaml_text=hints_yaml_text
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # issue #83 precedent: read the WRITTEN quarantine.json, not an in-memory dict.
+    quarantine_text = (out_dir / "quarantine.json").read_text(encoding="utf-8")
+    quarantine = json.loads(quarantine_text)
+    assert len(quarantine) == 1
+    reason = quarantine[0]["reason"]
+    # Sanity: the dangerous input really did trigger HintsError on the
+    # malformed-YAML path (not some other quarantine reason) — otherwise
+    # this test would vacuously pass without exercising the branch this fix
+    # touched.
+    assert reason.startswith("HintsError:")
+    assert "not valid YAML" in reason
+    assert "hints.yaml" in reason
+    assert entity_name not in quarantine_text, (
+        "raw entity name must never reach quarantine.json via HintsError's "
+        "'not valid YAML' branch, even when glued to a trailing suffix that "
+        "defeats the whole-word defense-in-depth scrub — this vector must "
+        "be closed at the source, not rely on the scrub"
+    )
+    # Acceptance criterion: diagnostically useful — a human can still tell
+    # HOW the file was malformed (down to line/column) even with the raw
+    # snippet gone.
+    assert "line" in reason and "column" in reason
+
+    write_after_action_report(out_dir, out_dir / "report.md")
+    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
+    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
+    assert entity_name not in report_md
+    assert entity_name not in report_json
+
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    assert entity_name not in manifest_text
+
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
+    assert entity_name not in published_text
+    assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert entity_name not in review_text
+
+    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
+    # must find zero hits — the compiled playbook must already be born-safe
+    # by the time it reaches publish.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [entity_name], "sanity: the entity really was registered"
+    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_hints_error_never_leaks_raw_entity_name_via_yaml_problem_token(
+    tmp_path: Path,
+) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96, fix round 2 — the leak the
+    round-1 fix MISSED). Even with ``str(exc)``'s raw source snippet gone
+    (see the sibling ``..._via_yaml_content_snippet`` test above),
+    ``yaml.YAMLError.problem`` ALONE is not safe to interpolate either: it
+    reads as a fixed grammar-violation phrase in the common case, but
+    PyYAML's ``composer.py`` builds it with ``%r`` around a token taken
+    straight from the document being parsed for an undefined-alias
+    reference: ``"found undefined alias %r" % anchor``. hints.yaml's
+    documented grammar (docs/CORPUS-LAYOUT.md) never uses YAML
+    anchors/aliases, but ``yaml.safe_load`` still SCANS the full YAML
+    grammar regardless of what's documented (``SafeLoader`` only restricts
+    which Python types get *constructed*, never which syntax gets
+    *scanned/parsed*), so a hand-typed slip like this (a plausible
+    copy/paste error, not the documented grammar) reaches this branch for
+    real.
+
+    Uses the REQUIRED glued form ``order: [*Northwind_2023]`` (NOT
+    ``order: [*Northwind]``) — a single-word known entity name
+    ("Northwind") glued directly to a trailing "_2023" year suffix with NO
+    separating space, mirroring the same document-folder/order-list naming
+    convention the sibling tests above use. This is deliberate: the
+    un-glued form is the ONE token shape
+    ``entity_registry._fuzzy_name_pattern``'s whole-word
+    ``(?<!\\w)NAME(?!\\w)`` boundary CAN match, so a fixture using it would
+    only prove the defense-in-depth scrub works (see
+    ``test_quarantine_reason_defense_in_depth_pseudonymization_fires``
+    below, which proves exactly that with a DIFFERENT exception type), not
+    that THIS vector is closed at the source. The glued form defeats that
+    boundary (``_`` is itself a ``\\w`` character) and can only be closed
+    by ``version_orderer._yaml_error_detail`` never embedding ``problem``
+    in the first place — confirmed by mutation in this ticket's own
+    verification (reverting ONLY ``_yaml_error_detail``'s body to include
+    ``exc.problem`` reproduces the raw name in quarantine.json).
+    """
+    entity_name = "Northwind"
+    corpus_dir, config_path, out_dir = _make_mixed_corpus_with_malformed_hints(
+        tmp_path,
+        "deal-002",
+        known_entities=[entity_name],
+        hints_yaml_text=f"order: [*{entity_name}_2023]\n",
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # issue #83 precedent: read the WRITTEN quarantine.json, not an in-memory dict.
+    quarantine_text = (out_dir / "quarantine.json").read_text(encoding="utf-8")
+    quarantine = json.loads(quarantine_text)
+    assert len(quarantine) == 1
+    reason = quarantine[0]["reason"]
+    # Sanity: the dangerous input really did trigger HintsError on the
+    # undefined-alias path (not some other quarantine reason) — otherwise
+    # this test would vacuously pass without exercising the branch this fix
+    # touched.
+    assert reason.startswith("HintsError:")
+    assert "not valid YAML" in reason
+    assert entity_name not in quarantine_text, (
+        "raw entity name must never reach quarantine.json via HintsError's "
+        "'not valid YAML' branch, even via an accidental YAML alias "
+        "reference glued to a trailing suffix that defeats the whole-word "
+        "defense-in-depth scrub — this vector must be closed at the "
+        "source, not rely on the scrub"
+    )
+    # Acceptance criterion: diagnostically useful — a human can still tell
+    # HOW the file was malformed (down to line/column) even with the raw
+    # token gone.
+    assert "line" in reason and "column" in reason
+
+    write_after_action_report(out_dir, out_dir / "report.md")
+    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
+    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
+    assert entity_name not in report_md
+    assert entity_name not in report_json
+
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
+    assert entity_name not in published_text
+    assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert entity_name not in review_text
+
+    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
+    # must find zero hits — the compiled playbook must already be born-safe
+    # by the time it reaches publish.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [entity_name], "sanity: the entity really was registered"
+    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_quarantine_reason_defense_in_depth_pseudonymization_fires(tmp_path: Path) -> None:
+    """issue #96 (defense in depth): ``pipeline.mine_corpus``'s
+    pseudonymization pass over ``quarantine.json``'s ``reason`` field had
+    ZERO regression coverage before this fix — every quarantine-reason
+    privacy test above (both ``test_hints_error_never_leaks_raw_entity_
+    name_via_*`` tests, and #83's ``test_quarantine_error_never_leaks_raw_
+    entity_name``) deliberately uses a name GLUED to trailing characters
+    specifically so ``entity_registry._fuzzy_name_pattern``'s whole-word
+    boundary check cannot fire — proving the source-level "never embed it"
+    fixes work even when the scrub can't help, but never exercising the
+    scrub itself. So that line could be deleted (or silently broken) and
+    the rest of the suite would still pass, even though issue #96
+    explicitly requires it ("do this as well, not instead") as the
+    catch-all for a FUTURE exception type whose message embeds a name in a
+    form the scrub CAN match.
+
+    ``NormalizeTrailError`` (llm_segmenter_batch.py) is exactly such a
+    type: unlike ``HintsError`` (fixed at the source by this issue),
+    nothing about its message is specific to hints.yaml, so a
+    caller-injected ``normalize_trail_fn`` can raise it with an arbitrary
+    message — here, one that embeds a known entity name as a normal,
+    space-separated, word-bounded token (the injection pattern mirrors
+    ``test_mine_corpus_forwards_normalize_trail_opt_in`` above). That is
+    precisely the shape the scrub CAN catch, so this test proves it
+    actually does, in the written artifact — not merely that the raw name
+    is absent (which the alias-presence assertion below distinguishes from
+    a scrub that merely deleted or corrupted the name).
+
+    NOTE: this issue's own investigation (see its "Out of scope" item)
+    already verified that ``NormalizeTrailError``'s REAL call sites in
+    llm_segmenter_batch.py build only structural messages (indices/keys/
+    block types; ``json.JSONDecodeError.__str__`` omits the document body)
+    — none of them actually embed source content today. This test's
+    injected message is a deliberately adversarial STAND-IN that proves the
+    catch-all mechanism itself works, not a claim that a real call site is
+    unsafe.
+
+    Mutation-proof (per issue #96's Notes): with the rest of this fix
+    applied, reverting ONLY pipeline.py's
+    ``"reason": pseudonymize_text(q["reason"], known_entities, entity_registry)``
+    line back to ``"reason": q["reason"]`` makes this test fail with the raw
+    entity name present in quarantine.json.
+    """
+    entity_name = "Fictional University"
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=True)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cfg.provenance.known_entities = [entity_name]
+
+    def _raising_normalize_fn(
+        version_trees: dict[str, ClauseTree],
+        taxonomy_by_version: dict[str, dict[str, str | None]],
+    ) -> NormalizeTrailResult:
+        raise NormalizeTrailError(f"model response is not valid JSON: {entity_name} sent bad JSON")
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+        normalize_trail_across_versions=True,
+        normalize_trail_fn=_raising_normalize_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # issue #83 precedent: read the WRITTEN quarantine.json, not an in-memory dict.
+    quarantine_text = (out_dir / "quarantine.json").read_text(encoding="utf-8")
+    quarantine = json.loads(quarantine_text)
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    reason = quarantine[0]["reason"]
+    # Sanity: the dangerous input really did trigger NormalizeTrailError (not
+    # some other quarantine reason) — otherwise this test would vacuously
+    # pass without exercising the code this fix touched.
+    assert reason.startswith("NormalizeTrailError:")
+    assert "sent bad JSON" in reason, "diagnostically useful: failure mode text must survive"
+    assert entity_name not in quarantine_text, (
+        "raw entity name must never reach quarantine.json's reason field, "
+        "even from an exception type this issue does not otherwise fix at "
+        "the source — this is exactly what the defense-in-depth "
+        "pseudonymization pass exists to catch"
+    )
+    # Prove the scrub actually FIRED (substituted the alias in), not merely
+    # that the raw name is absent — e.g. from an unrelated corruption.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [entity_name], "sanity: the entity really was registered"
+    alias = next(a for a, name in registry.alias_map().items() if name == entity_name)
+    assert alias in reason, "the scrub must substitute the alias in, not merely delete the name"
 
 
 def test_quarantine_and_manifest_document_ids_reconcile_across_pseudonymization(

@@ -701,6 +701,160 @@ def test_hints_load_non_string_timestamp_value_raises(tmp_path: Path) -> None:
         Hints.load(p)
 
 
+def test_hints_load_error_never_embeds_document_folder_path(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96). Every HintsError message
+    must name hints.yaml by its bare filename, never the full path it was
+    loaded from.
+
+    In production *path* is ``<corpus>/<document-folder>/hints.yaml``, and
+    the document folder is typically named after the counterparty
+    (``doc_id == doc_dir.name`` — see ``pipeline._compute_doc_result``), so
+    embedding the full path would put the raw counterparty name straight
+    into ``quarantine.json``'s ``reason`` field (``f"{type(exc).__name__}:
+    {exc}"``, persisted verbatim by ``pipeline.mine_corpus``'s quarantine
+    handler, and from there into the after-action report too — see
+    ``aar._build_needs_attention``) even on a corpus with
+    ``provenance.known_entities`` configured. The folder name here is glued
+    directly to a trailing suffix with no separator, so it would ALSO
+    defeat a whole-word pseudonymization scrub applied downstream — proving
+    this fix removes the leak at the source rather than depending on that
+    scrub (see ``entity_registry._fuzzy_name_pattern``'s docstring on the
+    boundary edge case, and #83/#95's precedent: never make the scrub
+    load-bearing).
+    """
+    deal_dir = tmp_path / "corpus" / "Fictional University_2023"
+    deal_dir.mkdir(parents=True)
+    p = deal_dir / "hints.yaml"
+    p.write_text("order: [v1, v2\nsigned_version: v1\n", encoding="utf-8")  # unbalanced bracket
+    with pytest.raises(HintsError) as excinfo:
+        Hints.load(p)
+    message = str(excinfo.value)
+    assert "Fictional University" not in message
+    assert str(deal_dir) not in message
+    assert str(p) not in message
+    # Diagnostically useful: still names the file (bare) and the failure mode.
+    assert message.startswith("hints.yaml:")
+    assert "not valid YAML" in message
+
+
+def test_hints_load_yaml_error_never_embeds_source_content(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96, fix round 1). HintsError's
+    "not valid YAML" branch used to interpolate ``{exc}`` (``str()`` of the
+    underlying ``yaml.YAMLError``) in full. PyYAML's own ``__str__`` embeds a
+    raw snippet of hints.yaml's SOURCE CONTENT around the parse error via
+    ``Mark.get_snippet()`` — a leak vector the path -> ``path.name`` fix
+    (see the test above) does NOT address, since it only touches the path,
+    never ``{exc}``.
+
+    Here the document folder is NOT named after the entity (isolating this
+    from the path vector above); instead the entity name is glued directly
+    to a trailing "_2023_v1.docx" suffix INSIDE the malformed ``order:``
+    list itself — the extension-inclusive convention docs/CORPUS-LAYOUT.md
+    documents, and the same glued shape the test above uses to defeat
+    ``entity_registry._fuzzy_name_pattern``'s whole-word boundary check. A
+    whole-word pseudonymization scrub applied downstream (pipeline.py's
+    defense-in-depth pass over quarantine.json's ``reason``) cannot catch
+    this glued form either, so this vector can only be closed here, at the
+    source, by never interpolating the parser's raw snippet at all.
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("order: [Fictional University_2023_v1.docx, unterminated\n", encoding="utf-8")
+    with pytest.raises(HintsError) as excinfo:
+        Hints.load(p)
+    message = str(excinfo.value)
+    assert "Fictional University" not in message
+    # Diagnostically useful: still names the file, the failure mode, and a
+    # line/column locating the parse failure.
+    assert message.startswith("hints.yaml:")
+    assert "not valid YAML" in message
+    assert "line" in message and "column" in message
+
+
+def test_hints_load_yaml_error_never_embeds_problem_token(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96, fix round 2 — the leak the
+    round-1 fix MISSED). Even with ``str(exc)``'s raw source snippet gone
+    (see the sibling ``..._never_embeds_source_content`` test above),
+    ``yaml.YAMLError.problem`` ALONE is not safe to interpolate either: it
+    reads as a fixed grammar-violation phrase in the common case, but
+    several PyYAML branches build it with ``%r`` around a token taken
+    straight from the document being parsed.
+
+    hints.yaml's documented grammar (docs/CORPUS-LAYOUT.md) never uses YAML
+    anchors/aliases, but ``yaml.safe_load`` still SCANS the full YAML
+    grammar regardless of what's documented (``SafeLoader`` only restricts
+    which Python types get *constructed*, never which syntax gets
+    *scanned/parsed*) — so a hand-typed slip like ``order:
+    [*Fictional_University_2023]`` (a plausible copy/paste error, not the
+    documented grammar) reaches ``composer.py``'s
+    ``"found undefined alias %r" % anchor``, raising ``ComposerError`` with
+    ``problem == "found undefined alias 'Fictional_University_2023'"`` —
+    the raw entity name, glued to a trailing "_2023" suffix with NO
+    separating space, exactly like the folder-name and order-list vectors
+    above. Because the glued form has no true word boundary on its trailing
+    side, a whole-word pseudonymization scrub applied downstream
+    (pipeline.py's defense-in-depth pass over quarantine.json's ``reason``)
+    cannot catch it either — proving this vector, like the other two, must
+    be closed here, at the source, not relied upon to be scrubbed later.
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("order: [*Fictional_University_2023]\n", encoding="utf-8")
+    with pytest.raises(HintsError) as excinfo:
+        Hints.load(p)
+    message = str(excinfo.value)
+    assert "Fictional_University" not in message
+    assert "Fictional" not in message
+    # Diagnostically useful: still names the file, the failure mode, and a
+    # line/column locating the parse failure.
+    assert message.startswith("hints.yaml:")
+    assert "not valid YAML" in message
+    assert "line" in message and "column" in message
+
+
+def test_hints_load_yaml_error_never_embeds_undefined_tag_token(tmp_path: Path) -> None:
+    """issue #96, fix round 2: a second reachable ``problem``-embeds-a-token
+    shape, distinct from the undefined-alias branch above — a custom YAML
+    tag (``constructor.py``'s ``"could not determine a constructor for the
+    tag %r"``). Same reasoning as the sibling test: closed at the source by
+    never interpolating ``problem``, not by relying on a downstream scrub
+    that a glued suffix would defeat anyway.
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("order: !Fictional_University_2023 [v1]\n", encoding="utf-8")
+    with pytest.raises(HintsError) as excinfo:
+        Hints.load(p)
+    message = str(excinfo.value)
+    assert "Fictional_University" not in message
+    assert "Fictional" not in message
+    assert message.startswith("hints.yaml:")
+    assert "not valid YAML" in message
+
+
+def test_hints_load_invalid_provenance_never_embeds_raw_value(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #96, fix round 1). The invalid-
+    ``provenance`` HintsError used to interpolate the raw ``provenance``
+    value read out of hints.yaml (``got {provenance!r}``) straight into its
+    message — persisted verbatim into ``quarantine.json``'s ``reason`` field
+    by ``pipeline.mine_corpus``. A ``provenance`` value that happens to be
+    (or contain) a counterparty name would leak it exactly like the path and
+    YAML-parser vectors this issue closes elsewhere in this module. The
+    message now reports only the allowed values and the actual value's
+    type, never the value itself.
+    """
+    p = tmp_path / "hints.yaml"
+    p.write_text("provenance: Fictional University_2023\n", encoding="utf-8")
+    with pytest.raises(HintsError) as excinfo:
+        Hints.load(p)
+    message = str(excinfo.value)
+    assert "Fictional University" not in message
+    assert "Fictional University_2023" not in message
+    # Diagnostically useful: still names the file, the field, and the
+    # allowed set.
+    assert message.startswith("hints.yaml:")
+    assert "provenance" in message
+    assert "counterparty_paper" in message
+    assert "our_paper" in message
+
+
 def test_hints_load_empty_file_returns_empty_hints(tmp_path: Path) -> None:
     """An existing-but-empty hints.yaml (yaml.safe_load returns None) is not
     malformed — it's a valid, empty document — so it must return empty Hints,
