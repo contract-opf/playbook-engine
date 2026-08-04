@@ -249,6 +249,115 @@ def _gate_failing_segment_fn(canonical_text: str, blocks: list[Block]) -> list[S
     ]
 
 
+#: A (synthetic) known-entity name glued directly to a trailing "_2023" with
+#: NO space/separator before the underscore (issue #97 regression test) —
+#: the same word-boundary-defeating shape issue #96 proved defeats
+#: entity_registry._fuzzy_name_pattern's (?<!\w)NAME(?!\w) whole-word
+#: boundary check (underscore is a \w character). Used as an out-of-enum
+#: taxonomy_id below so the taxonomy gate rejects it — proving the fix
+#: (segmentation_qa._safe_taxonomy_id_repr) closes the leak at the source
+#: rather than relying on that scrub, which cannot catch a glued token.
+_TAXONOMY_LEAK_ENTITY_NAME = "Fictional University"
+_TAXONOMY_LEAK_REJECTED_ID = f"{_TAXONOMY_LEAK_ENTITY_NAME}_2023"
+
+
+def _taxonomy_leak_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Segment as ONE node spanning every block — passes grounding,
+    coverage, reconstruction, and tree trivially (a single leaf whose span
+    is the entire canonical text has nothing to conflict with) — but
+    assigns an out-of-enum ``taxonomy_id`` (``_TAXONOMY_LEAK_REJECTED_ID``),
+    so the run fails ONLY the taxonomy gate (issue #97 regression test),
+    deterministically on every repair attempt.
+    """
+    del canonical_text
+    return [
+        SegNode(
+            node_id="n1",
+            parent_id=None,
+            order=1,
+            heading=blocks[0].text,
+            taxonomy_id=_TAXONOMY_LEAK_REJECTED_ID,
+            start_block_id=blocks[0].block_id,
+            end_block_id=blocks[-1].block_id,
+        )
+    ]
+
+
+#: A non-``str`` (JSON-number-shaped) rejected ``taxonomy_id`` (issue #97
+#: fix round 1 regression test) — exactly the shape a model response that
+#: violates its own structured-output schema for this field can produce at
+#: runtime (``llm_segmenter._parse_seg_nodes`` assigns
+#: ``raw["taxonomy_id"]`` with no type check into a plain, unvalidated
+#: ``SegNode`` dataclass). Used as an out-of-enum taxonomy_id so the
+#: taxonomy gate rejects it, proving
+#: ``segmentation_qa._safe_taxonomy_id_repr``'s ``isinstance`` guard keeps
+#: this a fail-loud ``SegmentationQAError`` (document quarantined) rather
+#: than an uncaught ``TypeError`` that ``pipeline._compute_doc_result``'s
+#: broad ``except Exception`` swallows into a per-file warning.
+_TAXONOMY_NON_STRING_REJECTED_ID = 1234
+
+
+def _taxonomy_non_string_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Segment as ONE node spanning every block — passes grounding,
+    coverage, reconstruction, and tree trivially (a single leaf whose span
+    is the entire canonical text has nothing to conflict with) — but
+    assigns a non-``str`` ``taxonomy_id`` (``_TAXONOMY_NON_STRING_REJECTED_ID``),
+    so the run fails ONLY the taxonomy gate (issue #97 fix round 1
+    regression test), deterministically on every repair attempt.
+    """
+    del canonical_text
+    return [
+        SegNode(
+            node_id="n1",
+            parent_id=None,
+            order=1,
+            heading=blocks[0].text,
+            taxonomy_id=_TAXONOMY_NON_STRING_REJECTED_ID,  # type: ignore[arg-type]
+            start_block_id=blocks[0].block_id,
+            end_block_id=blocks[-1].block_id,
+        )
+    ]
+
+
+#: An UNHASHABLE (JSON-array-shaped) rejected ``taxonomy_id`` (issue #97 fix
+#: round 2 regression test) — a highly plausible schema violation (a model
+#: assigning two taxonomy categories to one node), and exactly the shape
+#: that defeated the round-1 fix: ``_check_taxonomy`` evaluated
+#: ``taxonomy_id not in allowed`` against a ``set`` BEFORE ever calling
+#: ``segmentation_qa._safe_taxonomy_id_repr``, so a ``list`` (unhashable)
+#: raised an uncaught ``TypeError: unhashable type`` at that membership
+#: test — never even reaching the round-1 fix's ``isinstance`` guard. Used
+#: as an out-of-enum taxonomy_id so the taxonomy gate rejects it, proving
+#: the round-2 fix (checking ``isinstance`` in ``_check_taxonomy`` itself,
+#: before the ``set`` lookup) keeps this a fail-loud ``SegmentationQAError``
+#: (document quarantined) rather than an uncaught ``TypeError`` that
+#: ``pipeline._compute_doc_result``'s broad ``except Exception`` swallows
+#: into a per-file warning.
+_TAXONOMY_LIST_REJECTED_ID = ["indemnification", "governing_law"]
+
+
+def _taxonomy_list_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Segment as ONE node spanning every block — passes grounding,
+    coverage, reconstruction, and tree trivially (a single leaf whose span
+    is the entire canonical text has nothing to conflict with) — but
+    assigns an unhashable ``taxonomy_id`` (``_TAXONOMY_LIST_REJECTED_ID``),
+    so the run fails ONLY the taxonomy gate (issue #97 fix round 2
+    regression test), deterministically on every repair attempt.
+    """
+    del canonical_text
+    return [
+        SegNode(
+            node_id="n1",
+            parent_id=None,
+            order=1,
+            heading=blocks[0].text,
+            taxonomy_id=_TAXONOMY_LIST_REJECTED_ID,  # type: ignore[arg-type]
+            start_block_id=blocks[0].block_id,
+            end_block_id=blocks[-1].block_id,
+        )
+    ]
+
+
 def _fail_only_second_version_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
     """Succeed via ``_fake_segment_fn`` for _V1_BODY's content, fail every QA
     gate for _V2_BODY's content (distinguished by its "Signatures" clause,
@@ -943,6 +1052,233 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [_ENTITY_LEAK_NAME], "sanity: the entity really was registered"
     assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_taxonomy_gate_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #97). The taxonomy gate
+    (``segmentation_qa._check_taxonomy``) used to echo a REJECTED
+    ``taxonomy_id`` verbatim via ``!r``. That value is LLM-assigned, and the
+    gate fires precisely when it is OUTSIDE the allowed vocabulary — so the
+    one case that reaches this message is the case where the model returned
+    something unconstrained. Since #83, a ``SegmentationQAError`` message is
+    persisted verbatim into ``corpus_manifest.json``'s
+    ``version_ingest[].error`` for a quarantined document, and that file is
+    compiled straight into ``playbook.opf.json`` — so arbitrary model output
+    had a path into the compiled artifact.
+
+    ``_taxonomy_leak_segment_fn`` assigns ``_TAXONOMY_LEAK_REJECTED_ID`` —
+    ``_TAXONOMY_LEAK_ENTITY_NAME`` glued directly to a trailing "_2023" with
+    NO separating space, the same shape issue #96 proved defeats
+    ``entity_registry._fuzzy_name_pattern``'s whole-word boundary scrub —
+    proving this fix closes the leak at the source
+    (``segmentation_qa._safe_taxonomy_id_repr``) rather than relying on that
+    scrub, which cannot catch a glued token.
+    """
+    corpus_dir, config_path, out_dir = _make_single_doc_corpus_with_known_entities(
+        tmp_path, "deal-001", _BAD_DOC_BODY, known_entities=[_TAXONOMY_LEAK_ENTITY_NAME]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_taxonomy_leak_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+
+    # issue #83 precedent: read the WRITTEN corpus_manifest.json, not an
+    # in-memory dict.
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    row = manifest[0]["version_ingest"][0]
+    assert row["status"] == "failed"
+    assert _TAXONOMY_LEAK_ENTITY_NAME not in manifest_text, (
+        "raw entity name must never reach corpus_manifest.json via the "
+        "taxonomy gate's rejected-id message"
+    )
+    assert _TAXONOMY_LEAK_REJECTED_ID not in manifest_text
+    # Sanity: the dangerous input really did trigger the taxonomy gate (not
+    # some other gate) — otherwise this test would vacuously pass without
+    # exercising the code this fix touched.
+    assert "taxonomy gate" in row["error"]
+    assert "not in the allowed taxonomy_ids" in row["error"]
+    # Acceptance criterion: the message still names the offending clause path.
+    assert "'1'" in row["error"]
+    # Acceptance criterion: still diagnostically useful — the placeholder
+    # names the withheld value's length even though it withholds the value.
+    assert f"{len(_TAXONOMY_LEAK_REJECTED_ID)} chars" in row["error"]
+
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
+    assert _TAXONOMY_LEAK_ENTITY_NAME not in published_text
+    assert _TAXONOMY_LEAK_ENTITY_NAME not in json.dumps(playbook), (
+        "double-check the in-memory dict too"
+    )
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert _TAXONOMY_LEAK_ENTITY_NAME not in review_text
+
+    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
+    # must find zero hits — the compiled playbook must already be born-safe
+    # by the time it reaches publish.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [_TAXONOMY_LEAK_ENTITY_NAME], (
+        "sanity: the entity really was registered"
+    )
+    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_taxonomy_gate_non_string_id_quarantines_with_taxonomy_reason(tmp_path: Path) -> None:
+    """REGRESSION (issue #97 fix round 1). Before this fix,
+    ``segmentation_qa._safe_taxonomy_id_repr`` called
+    ``_TAXONOMY_ID_SHAPE_RE.fullmatch(taxonomy_id)``/``len(taxonomy_id)``
+    unguarded, both of which raise ``TypeError`` on a non-``str``
+    ``taxonomy_id`` — exactly the value a model response that violates its
+    own structured-output schema for this field can produce
+    (``llm_segmenter._parse_seg_nodes`` assigns ``raw["taxonomy_id"]`` with
+    no type check into a plain, unvalidated ``SegNode`` dataclass).
+
+    That ``TypeError`` escapes ``run_gates``/``segment_verify_repair`` (they
+    catch only ``SegmentationQAError``) and used to be caught by
+    ``pipeline._compute_doc_result``'s broad ``except Exception`` as a
+    per-version warning instead — on this single-version document, that
+    means ``_compute_doc_result`` returns ``None`` (no version survived), so
+    ``mine_corpus`` quarantines it under the WRONG, generic reason "all
+    versions failed extraction/ingest" and ``corpus_manifest.json`` is
+    written as ``[]`` — the document's extractor label and QA status vanish
+    entirely, exactly what issue #83 existed to prevent (see
+    ``pipeline.py``'s ``except SegmentationQAError`` comment: "a QA-gate
+    failure on the LLM path must never be swallowed into a per-file warning
+    + skipped version"). This test proves the fix restores that fail-loud
+    contract: a clean ``SegmentationQAError`` naming the taxonomy gate, with
+    the #83 partial record intact in ``corpus_manifest.json``.
+    """
+    corpus_dir, config_path, out_dir = _make_single_doc_corpus_with_known_entities(
+        tmp_path, "deal-001", _BAD_DOC_BODY, known_entities=[]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_taxonomy_non_string_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # Acceptance criterion (core regression): quarantined with a
+    # TAXONOMY-GATE reason, not the generic "all versions failed
+    # extraction/ingest" a swallowed TypeError used to produce.
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    reason = quarantine[0]["reason"]
+    assert "SegmentationQAError" in reason
+    assert "taxonomy gate" in reason
+    assert "all versions failed extraction/ingest" not in reason
+
+    # Acceptance criterion (issue #83 partial record): corpus_manifest.json
+    # must NOT be "[]" — the document's extractor label and QA status must
+    # survive, exactly what a swallowed TypeError used to erase.
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    assert manifest != [], (
+        "corpus_manifest.json must not be empty — a swallowed TypeError "
+        "used to make the document vanish from it entirely"
+    )
+    assert [d["document_id"] for d in manifest] == ["deal-001"]
+    row = manifest[0]["version_ingest"][0]
+    assert row["status"] == "failed"
+    assert "taxonomy gate" in row["error"]
+    assert "not in the allowed taxonomy_ids" in row["error"]
+    # The placeholder still names the withheld value's type, proving the
+    # gate went through _safe_taxonomy_id_repr's guarded path rather than
+    # crashing (or, worse, blindly echoing the raw model value).
+    assert "non-string value, type int" in row["error"]
+
+
+def test_taxonomy_gate_list_id_quarantines_with_taxonomy_reason(tmp_path: Path) -> None:
+    """REGRESSION (issue #97 fix round 2). The round-1 fix above guards
+    ``segmentation_qa._safe_taxonomy_id_repr`` against a non-``str``
+    ``taxonomy_id``, but that guard was unreachable for an UNHASHABLE value:
+    ``_check_taxonomy`` evaluated ``taxonomy_id not in allowed`` against a
+    ``set`` BEFORE ever calling ``_safe_taxonomy_id_repr``, so a ``list``
+    (e.g. a model assigning two taxonomy categories to one node — a highly
+    plausible schema violation, unlike an arbitrary scalar) raised an
+    uncaught ``TypeError: unhashable type`` at that membership test.
+
+    That ``TypeError`` escapes ``run_gates``/``segment_verify_repair`` (they
+    catch only ``SegmentationQAError``) and used to be caught by
+    ``pipeline._compute_doc_result``'s broad ``except Exception`` as a
+    per-version warning instead — on this single-version document, that
+    means ``_compute_doc_result`` returns ``None`` (no version survived), so
+    ``mine_corpus`` quarantines it under the WRONG, generic reason "all
+    versions failed extraction/ingest" and ``corpus_manifest.json`` is
+    written as ``[]`` — the document's extractor label and QA status vanish
+    entirely, exactly what issue #83 existed to prevent (see
+    ``pipeline.py``'s ``except SegmentationQAError`` comment: "a QA-gate
+    failure on the LLM path must never be swallowed into a per-file warning
+    + skipped version"). This test proves the round-2 fix (checking
+    ``isinstance`` in ``_check_taxonomy`` itself, before the ``set`` lookup)
+    restores that fail-loud contract for an unhashable id too: a clean
+    ``SegmentationQAError`` naming the taxonomy gate, with the #83 partial
+    record intact in ``corpus_manifest.json``.
+    """
+    corpus_dir, config_path, out_dir = _make_single_doc_corpus_with_known_entities(
+        tmp_path, "deal-001", _BAD_DOC_BODY, known_entities=[]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_taxonomy_list_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    # Acceptance criterion (core regression): quarantined with a
+    # TAXONOMY-GATE reason, not the generic "all versions failed
+    # extraction/ingest" a swallowed TypeError used to produce.
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    reason = quarantine[0]["reason"]
+    assert "SegmentationQAError" in reason
+    assert "taxonomy gate" in reason
+    assert "all versions failed extraction/ingest" not in reason
+
+    # Acceptance criterion (issue #83 partial record): corpus_manifest.json
+    # must NOT be "[]" — the document's extractor label and QA status must
+    # survive, exactly what a swallowed TypeError used to erase.
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    assert manifest != [], (
+        "corpus_manifest.json must not be empty — a swallowed TypeError "
+        "used to make the document vanish from it entirely"
+    )
+    assert [d["document_id"] for d in manifest] == ["deal-001"]
+    row = manifest[0]["version_ingest"][0]
+    assert row["status"] == "failed"
+    assert "taxonomy gate" in row["error"]
+    assert "not in the allowed taxonomy_ids" in row["error"]
+    # The placeholder still names the withheld value's type, proving the
+    # gate went through _safe_taxonomy_id_repr's guarded path rather than
+    # crashing (or, worse, blindly echoing the raw model value).
+    assert "non-string value, type list" in row["error"]
 
 
 # A document folder named after a known entity, glued directly to a trailing

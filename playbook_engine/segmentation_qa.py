@@ -68,6 +68,7 @@ there is no deterministic-segmenter fallback, by design.
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -95,15 +96,34 @@ class SegmentationQAError(Exception):
 
     Every message raised by this module is built from gate names, node/clause
     identifiers, and character OFFSETS/LENGTHS only — never a slice of
-    ``canonical_text`` itself (issue #83). This is deliberate, not incidental:
-    a caller (:mod:`playbook_engine.pipeline`) persists ``str(this)`` into
+    ``canonical_text`` itself (issue #83) and never unconstrained model
+    output (issue #97: the taxonomy gate's rejected ``taxonomy_id`` — the
+    one non-structural, LLM-assigned value a message here can carry, and not
+    even guaranteed to be a ``str`` — is echoed verbatim only when it is
+    identifier-shaped; a non-identifier string, or any non-``str`` value, is
+    replaced by a placeholder instead, see ``_safe_taxonomy_id_repr``.
+    ``_check_taxonomy`` itself checks ``isinstance(taxonomy_id, str)`` before
+    its allowed-vocabulary ``set`` lookup — not ``_safe_taxonomy_id_repr`` —
+    because an unhashable ``list``/``dict`` value would otherwise raise
+    ``TypeError`` on that lookup before ``_safe_taxonomy_id_repr`` is ever
+    called; see that gate for the type check's actual location, and
+    ``_safe_taxonomy_id_repr`` for how the withheld value is rendered). The
+    identifier-shaped case is a KNOWINGLY-ACCEPTED residual, not an absolute
+    guarantee: identifier shape does not rule out a normalized/snake_cased
+    entity name, and neither the whole-word pseudonymizer
+    (``entity_registry._fuzzy_name_pattern``) nor the publish backstop
+    (``publisher._entity_backstop_scan``) reliably catches one — see
+    ``_safe_taxonomy_id_repr`` for the reproduced case.
+    This is deliberate, not incidental: a caller
+    (:mod:`playbook_engine.pipeline`) persists ``str(this)`` into
     ``corpus_manifest.json``'s ``version_ingest[].error`` for a quarantined
     document, and that file is compiled straight into ``playbook.opf.json``.
-    A raw source-text slice there could smuggle an unpseudonymized
-    counterparty name (or any other confidential content) past the born-safe
-    pipeline entirely — pseudonymization only rewrites known, whole-word
-    matches, and a length-only truncation downstream is not a substitute
-    (see the ticket for the reproduced regression this guards against).
+    A raw source-text slice — or arbitrary model prose — there could smuggle
+    an unpseudonymized counterparty name (or any other confidential content)
+    past the born-safe pipeline entirely — pseudonymization only rewrites
+    known, whole-word matches, and a length-only truncation downstream is
+    not a substitute (see the ticket for the reproduced regression this
+    guards against).
 
     ``partial_corpus_doc`` (issue #83): ``None`` for every error as raised by
     this module — no call site here sets it. It exists so a caller that
@@ -247,19 +267,120 @@ def _check_tree(canonical_text: str, tree: ClauseTree) -> None:
 # Gate 5 — taxonomy
 # ---------------------------------------------------------------------------
 
+#: Shape of a legitimate ``taxonomy_id`` (see e.g. spec/taxonomy/cuad-base.yaml
+#: and taxonomy_inductor._to_entry_id: lowercase snake_case slugs, max 60-64
+#: chars). This gate only ever sees a REJECTED id — by construction, the one
+#: case reaching ``_check_taxonomy``'s error branch is a ``taxonomy_id`` the
+#: model assigned that is NOT in the allowed vocabulary, i.e. unconstrained
+#: LLM output (issue #97). Bounding the echoed value to this shape keeps the
+#: common, useful case (a near-miss typo, e.g. "confidentialty") debuggable
+#: while refusing to ever echo arbitrary model prose.
+_TAXONOMY_ID_SHAPE_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+
+def _safe_taxonomy_id_repr(taxonomy_id: object) -> str:
+    """Bound a REJECTED ``taxonomy_id`` for the taxonomy gate's message.
+
+    Only ever called on a value that has already failed the
+    allowed-vocabulary check (see ``_check_taxonomy``) — i.e. unconstrained
+    LLM output, and not even guaranteed to be a ``str``: the structured-
+    output schema is never enforced at parse time
+    (``llm_segmenter._parse_seg_nodes`` assigns ``raw["taxonomy_id"]``
+    straight through with no type check, into a plain, unvalidated
+    ``SegNode`` dataclass), so a JSON number/boolean/list/dict can reach
+    the taxonomy gate (issue #97). Both the shape regex and ``len()`` below
+    raise ``TypeError`` on a non-``str`` value, so this function's own
+    ``isinstance(taxonomy_id, str)`` check (below) must run before either —
+    that is what keeps a *hashable* non-``str`` value (``int``/``bool``/
+    ``float``) safe once it reaches here.
+
+    A ``list``/``dict`` value never reaches this function at all, and this
+    function's own ``isinstance`` check is NOT what protects against one:
+    ``_check_taxonomy``'s ``taxonomy_id not in allowed`` tests membership
+    against a ``set``, and a ``list``/``dict`` is unhashable, so THAT
+    membership test itself raises ``TypeError: unhashable type`` — before
+    this function is ever called. The fix for that (issue #97 fix round 2)
+    lives at the actual failure site: ``_check_taxonomy`` now checks
+    ``not isinstance(taxonomy_id, str)`` FIRST, short-circuiting
+    ``taxonomy_id not in allowed`` via ``or`` for every non-``str`` value
+    (hashable or not), so the set-membership test never runs on one.
+    Without that upstream guard, the uncaught ``TypeError`` bypasses the
+    taxonomy gate's fail-loud ``SegmentationQAError`` contract entirely
+    (``run_gates``/``segment_verify_repair`` catch only
+    ``SegmentationQAError``) and is instead swallowed by
+    ``pipeline._compute_doc_result``'s broad ``except Exception`` as a
+    per-version warning — silently dropping the offending version (or, on
+    a single-version document, the whole document) instead of quarantining
+    it for review.
+
+    If it is a ``str`` and still identifier-shaped
+    (``_TAXONOMY_ID_SHAPE_RE``), echo it quoted exactly as before: this is
+    the common, useful case (a near-miss typo like ``"confidentialty"`` for
+    ``"confidentiality"``) a human debugging the taxonomy needs to see.
+    This is a KNOWINGLY-ACCEPTED residual, not a safety guarantee —
+    identifier shape does NOT rule out a normalized/snake_cased entity
+    name: e.g. ``"fictional_university_2023"`` is identifier-shaped, would
+    be echoed verbatim, and is caught by neither the whole-word
+    pseudonymizer (``entity_registry._fuzzy_name_pattern`` skips a name
+    glued to an adjacent ``\\w`` character, including its own underscores)
+    nor the publish backstop (``publisher._entity_backstop_scan`` —
+    defeated the same way: underscores also survive its
+    punctuation-stripping normalization, so neither the padded-substring
+    nor the collapsed check fires). The ticket accepts this bound anyway —
+    it is what keeps the near-miss-typo case debuggable; a future change to
+    widen or narrow ``_TAXONOMY_ID_SHAPE_RE`` should re-examine this
+    trade-off, not assume the shape is name-safe.
+
+    Anything else — a non-identifier-shaped ``str``, or any non-``str``
+    value at all — is replaced with a placeholder instead of echoed. This
+    is the same "never embed it" principle that governs this module's
+    coverage gate (issue #83) and the ``hints.yaml`` error path (issue
+    #96): a scrub or a length cap AFTER interpolating the raw value is not
+    a substitute for never emitting it — the whole-word alias scrub a
+    caller may layer on top (``entity_registry._fuzzy_name_pattern``)
+    silently skips a name glued to an adjacent ``\\w`` character (e.g. an
+    underscore-joined suffix like ``"Acme Corp_2023"``), so this bound must
+    hold on its own.
+    """
+    if isinstance(taxonomy_id, str):
+        if _TAXONOMY_ID_SHAPE_RE.fullmatch(taxonomy_id):
+            return repr(taxonomy_id)
+        return f"<non-identifier value, {len(taxonomy_id)} chars>"
+    return f"<non-string value, type {type(taxonomy_id).__name__}>"
+
 
 def _check_taxonomy(taxonomy_by_path: dict[str, str | None], taxonomy_ids: list[str]) -> None:
     """Gate: every non-``null`` assigned ``taxonomy_id`` is an allowed id.
 
     Raises:
         SegmentationQAError: naming the clause path and the out-of-enum id.
+                              The id itself is echoed only when it is
+                              identifier-shaped — see
+                              :func:`_safe_taxonomy_id_repr` (issue #97):
+                              a rejected id is unconstrained LLM output by
+                              construction, and this message can end up
+                              persisted in corpus_manifest.json/
+                              playbook.opf.json for a quarantined document.
     """
     allowed = set(taxonomy_ids)
     for clause_path, taxonomy_id in taxonomy_by_path.items():
-        if taxonomy_id is not None and taxonomy_id not in allowed:
+        # ``not isinstance(..., str) or ... not in allowed``, in that order:
+        # ``allowed`` is a ``set``, so ``taxonomy_id not in allowed`` requires
+        # ``taxonomy_id`` to be hashable — a ``list``/``dict`` (a plausible
+        # schema violation the model can produce, e.g. assigning two
+        # categories to one node) is not, and raises ``TypeError:
+        # unhashable type`` there. Checking ``isinstance`` first makes the
+        # ``or`` short-circuit for every non-``str`` value (hashable or
+        # not) before that membership test ever runs, so an unhashable
+        # value still reaches the ``raise`` below (and
+        # ``_safe_taxonomy_id_repr``) instead of escaping as an uncaught
+        # ``TypeError`` (issue #97 fix round 2).
+        if taxonomy_id is not None and (
+            not isinstance(taxonomy_id, str) or taxonomy_id not in allowed
+        ):
             raise SegmentationQAError(
                 f"taxonomy gate: clause {clause_path!r} has taxonomy_id "
-                f"{taxonomy_id!r} which is not in the allowed taxonomy_ids"
+                f"{_safe_taxonomy_id_repr(taxonomy_id)} which is not in the allowed taxonomy_ids"
             )
 
 
