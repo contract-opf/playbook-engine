@@ -41,10 +41,12 @@ import yaml
 
 from playbook_engine import extraction
 from playbook_engine import pipeline as pipeline_module
-from playbook_engine.aar import build_after_action_data
+from playbook_engine import publisher as publisher_module
+from playbook_engine.aar import build_after_action_data, build_after_action_report
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
+from playbook_engine.entity_registry import EntityRegistry
 from playbook_engine.extraction import ExtractionCache, extract_blocks
 from playbook_engine.llm_segmenter_batch import (
     NormalizeTrailResult,
@@ -120,6 +122,46 @@ _HEADING_TAXONOMY = {
     "1. Indemnification": "indemnification",
     "2. Governing Law": "governing_law",
 }
+
+# A second, unrelated document used by the mixed-corpus tests below (issue
+# #83) — deliberately NOT in _HEADING_TAXONOMY (its heading is "1.
+# Confidentiality", never "1. Indemnification"/"2. Governing Law") so
+# _dispatching_segment_fn routes it to the always-gate-failing fake by
+# content alone (segment_fn's contract has no doc_id parameter — see
+# segmentation_qa.segment_verify_repair's docstring). A distinct fictional
+# counterparty name (Gamma Industries) from _V1_BODY/_V2_BODY's Alpha
+# Corp/Beta University keeps the two documents' provenance unambiguous.
+_BAD_DOC_BODY = (
+    r"1. Confidentiality\par "
+    r"Gamma Industries shall keep all disclosed information confidential.\par "
+)
+
+# A QA-quarantined document whose body names a configured
+# provenance.known_entities entry as the LITERAL FIRST TOKEN of the
+# paragraph that _gate_failing_segment_fn leaves uncovered (issue #83
+# regression test). _gate_failing_segment_fn covers only the FIRST block
+# (the heading paragraph), so the coverage gate's "trailing" uncovered text
+# begins with a real newline immediately followed by this paragraph's first
+# word — extract_blocks (RTF via pandoc) separates \par paragraphs with a
+# single "\n", not a space, so there is no whitespace of any kind between
+# that newline and the entity name. This is deliberately NOT prefixed with
+# any lead-in text (e.g. "Held by ..."): an earlier attempt at this fix used
+# such a prefix specifically to keep the entity name from being the first
+# token, which sidesteps rather than tests the dangerous case — a raw
+# newline followed immediately by a known-entity name is exactly the input
+# that broke a whole-word alias scrub built on Python's repr() (a leading
+# "\n" renders as the two literal characters backslash+"n", and that
+# trailing "n" reads as a word character immediately before the name,
+# defeating a (?<!\w) boundary check). This fix instead never embeds the raw
+# gap text in the QA error message at all (segmentation_qa._check_coverage),
+# so this input must produce no leak regardless of that matching edge case.
+_ENTITY_LEAK_NAME = "Fictional University"
+_ENTITY_LEAK_BODY = (
+    r"1. Confidentiality\par "
+    rf"{_ENTITY_LEAK_NAME} shall retain all right, title, and interest in the "
+    r"disclosed materials, and no license or other right is granted except as "
+    r"expressly set forth in this section.\par "
+)
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +244,35 @@ def _gate_failing_segment_fn(canonical_text: str, blocks: list[Block]) -> list[S
     ]
 
 
+def _fail_only_second_version_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Succeed via ``_fake_segment_fn`` for _V1_BODY's content, fail every QA
+    gate for _V2_BODY's content (distinguished by its "Signatures" clause,
+    absent from _V1_BODY) — lets a two-version single-document corpus
+    quarantine only its SECOND version, so by the time the
+    SegmentationQAError fires, ``_compute_doc_result``'s per-version loop has
+    already recorded a genuine "ok" row for the first version (issue #83:
+    exercises more than the degenerate zero-versions-mined case
+    ``test_gate_failing_segment_fn_quarantines_document`` covers).
+    """
+    if "Signatures" in canonical_text:
+        return _gate_failing_segment_fn(canonical_text, blocks)
+    return _fake_segment_fn(canonical_text, blocks)
+
+
+def _dispatching_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Route to ``_fake_segment_fn`` for _V1_BODY-shaped content (identified
+    by its "Indemnification" heading), to ``_gate_failing_segment_fn`` for
+    anything else (issue #83's mixed-corpus tests below) — one ``mine_corpus``
+    call with a SINGLE ``llm_segment_fn`` exercising a corpus where one
+    document mines cleanly and another is QA-quarantined. Dispatches on
+    content because ``segment_fn``'s contract has no doc_id/version
+    parameter to key on directly.
+    """
+    if "Indemnification" in canonical_text:
+        return _fake_segment_fn(canonical_text, blocks)
+    return _gate_failing_segment_fn(canonical_text, blocks)
+
+
 # ---------------------------------------------------------------------------
 # Corpus + config factory
 # ---------------------------------------------------------------------------
@@ -224,6 +295,71 @@ def _make_corpus(tmp_path: Path, *, two_versions: bool) -> tuple[Path, Path, Pat
         "baseline": {"template": None},
         "taxonomy": str(_TAXONOMY_PATH),
         "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    return corpus_dir, config_path, out_dir
+
+
+def _make_single_doc_corpus_with_known_entities(
+    tmp_path: Path, doc_id: str, body: str, known_entities: list[str]
+) -> tuple[Path, Path, Path]:
+    """Single-document/single-version corpus, parameterized on the document
+    folder name, RTF *body*, and ``provenance.known_entities`` (issue #83) —
+    for tests that need control over exactly what a QA-gate failure's error
+    message embeds, and/or whether the document folder itself is named after
+    a known entity.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / doc_id
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", body)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"], "known_entities": known_entities},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    return corpus_dir, config_path, out_dir
+
+
+def _make_mixed_corpus_with_known_entities(
+    tmp_path: Path, quarantined_doc_id: str, known_entities: list[str]
+) -> tuple[Path, Path, Path]:
+    """Two documents: "deal-001" mines cleanly (_V1_BODY), and a second,
+    named *quarantined_doc_id*, whose only version fails every QA gate
+    (issue #83) — for exercising ``mine_corpus``/``build_after_action_data``
+    on a corpus that quarantines only PART of itself, with
+    ``provenance.known_entities`` configured. Pair with
+    ``_dispatching_segment_fn``.
+    """
+    corpus_dir = tmp_path / "corpus"
+    good_dir = corpus_dir / "deal-001"
+    good_dir.mkdir(parents=True)
+    _write_rtf(good_dir / "v1.rtf", _V1_BODY)
+
+    bad_dir = corpus_dir / quarantined_doc_id
+    bad_dir.mkdir(parents=True)
+    _write_rtf(bad_dir / "v1.rtf", _BAD_DOC_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"], "known_entities": known_entities},
     }
     config_path = tmp_path / "playbook.config.yaml"
     config_path.write_text(yaml.dump(cfg), encoding="utf-8")
@@ -501,6 +637,18 @@ def test_gate_failing_segment_fn_quarantines_document(tmp_path: Path) -> None:
     rather than silently degrading the tree, silently dropping the version, or
     aborting the whole run. Here the only document fails, so the run completes
     with zero observations but a populated quarantine.json.
+
+    Also (issue #83): the quarantined version must still get a durable
+    corpus_manifest.json row — status="failed", the QA error text, and a
+    non-None extractor — instead of the extractor label being erased and the
+    version falling through to the "not attempted" default fill (the version
+    WAS attempted: extraction succeeded and segmentation ran, only the QA
+    gate failed). Checked against the WRITTEN manifest file on disk, not an
+    in-memory dict — asserting on the in-memory structure is precisely the
+    gap that made an earlier attempt at this fix a silent no-op. The
+    document must remain visibly quarantined, never masquerade as a normal
+    scope-gated document: in_scope=False + scope_rationale (OPF §3.6) and an
+    explicit x_quarantined marker.
     """
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
@@ -522,6 +670,288 @@ def test_gate_failing_segment_fn_quarantines_document(tmp_path: Path) -> None:
     quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
     assert [q["document_id"] for q in quarantine] == ["deal-001"]
     assert "SegmentationQAError" in quarantine[0]["reason"]
+
+    # issue #83 — read the WRITTEN corpus_manifest.json, not an in-memory dict.
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    assert [d["document_id"] for d in manifest] == ["deal-001"]
+    doc = manifest[0]
+    assert doc["in_scope"] is False
+    assert doc["scope_rationale"]
+    assert doc["x_quarantined"] is True
+    assert doc["versions_mined"] == 0, "no version ingested successfully before the QA failure"
+    assert [v["version"] for v in doc["version_ingest"]] == ["v1"]
+    row = doc["version_ingest"][0]
+    assert row["status"] == "failed"
+    assert row["extractor"] == "rtf", (
+        "extractor must survive even though segmentation never succeeded"
+    )
+    assert "reason" in row  # issue #81 shape preserved (None: no ExtractorLabel resolved)
+    assert row["reason"] is None
+    # Same QA error text quarantine.json recorded (minus the exception type
+    # name prefix quarantine.json's f"{type(exc).__name__}: {exc}" adds).
+    assert quarantine[0]["reason"] == f"SegmentationQAError: {row['error']}"
+    # The error text is built only from gate names/offsets/lengths, never a
+    # raw slice of source content (issue #83) — assert the shape rather than
+    # just "some non-empty string", so a future regression that re-embeds
+    # canonical_text is caught here too, not just by the dedicated
+    # entity-leak test below.
+    assert "coverage gate" in row["error"]
+    assert "char(s) uncovered" in row["error"]
+
+
+def test_gate_failing_segment_fn_quarantine_preserves_earlier_successful_version(
+    tmp_path: Path,
+) -> None:
+    """issue #83: when only a LATER version fails QA, the quarantined
+    document's partial corpus_manifest.json record must still carry the
+    EARLIER version's genuine "ok" row alongside the failing version's row —
+    proving the partial record is a snapshot of everything this loop got
+    through, not just the one version that failed.
+    """
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=True)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fail_only_second_version_segment_fn,
+    )
+
+    assert not read_observations_jsonl(out_dir / "observations.jsonl"), (
+        "the quarantined document must contribute no observations, even "
+        "though its first version individually ingested fine"
+    )
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    doc = manifest[0]
+    assert doc["in_scope"] is False
+    assert doc["x_quarantined"] is True
+    assert doc["versions_mined"] == 1, "v1 ingested fine before v2's QA failure aborted L1"
+    rows_by_version = {v["version"]: v for v in doc["version_ingest"]}
+    assert set(rows_by_version) == {"v1", "v2"}
+    assert rows_by_version["v1"]["status"] == "ok"
+    assert rows_by_version["v1"]["extractor"] is not None
+    assert rows_by_version["v2"]["status"] == "failed"
+    assert rows_by_version["v2"]["extractor"] == "rtf"
+    assert quarantine[0]["reason"] == f"SegmentationQAError: {rows_by_version['v2']['error']}"
+
+
+def test_quarantined_document_partial_record_survives_compile(tmp_path: Path) -> None:
+    """issue #83 amendment guardrail: a quarantined document's partial
+    corpus_doc must not corrupt or masquerade through ``project_playbook``'s
+    assemble+validate — the compile/publish path the amendment explicitly
+    calls out. A mixed corpus (one document mines cleanly, the other is
+    QA-quarantined) must still produce a valid ``playbook.opf.json``: the
+    quarantined document contributes zero evidence, is excluded from the
+    in-scope stat, and its ``version_ingest`` survives
+    ``playbook_assembler._sanitize_corpus_documents_for_schema`` (which
+    strips engine-internal keys like "reason" before publication) without
+    tripping schema/normative validation.
+    """
+    corpus_dir, config_path, out_dir = _make_mixed_corpus_with_known_entities(
+        tmp_path, "deal-002", known_entities=[]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_dispatching_segment_fn,
+    )
+
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-002"]
+
+    # Observations only ever cite the document that actually mined.
+    raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
+    assert raw_obs, "the successfully-mined document must still contribute observations"
+    assert {o["citation"]["document_id"] for o in raw_obs} == {"deal-001"}
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    by_id = {d["document_id"]: d for d in manifest}
+    assert set(by_id) == {"deal-001", "deal-002"}
+    assert by_id["deal-001"]["in_scope"] is True
+    assert "x_quarantined" not in by_id["deal-001"]
+    assert by_id["deal-002"]["in_scope"] is False
+    assert by_id["deal-002"]["x_quarantined"] is True
+
+    # project_playbook self-validates (assemble_playbook -> validate_document)
+    # and raises AssemblyError on any blocking failure — must not raise.
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    assert validate_document(playbook).ok
+
+    docs_by_id = {d["document_id"]: d for d in playbook["corpus"]["documents"]}
+    assert docs_by_id["deal-002"]["in_scope"] is False
+    assert docs_by_id["deal-002"]["x_quarantined"] is True
+    assert docs_by_id["deal-002"]["scope_rationale"]
+    # Sanitized for publication (issue #81's stripping contract): only the
+    # closed schema key set survives on each version_ingest entry — "reason"
+    # (engine-internal) must NOT leak into the published playbook.
+    for vi in docs_by_id["deal-002"]["version_ingest"]:
+        assert set(vi) <= {"version", "status", "error", "extractor"}
+
+    # The quarantined document must not inflate playbook-level stats as if
+    # it were a normal scope-gated document.
+    assert playbook["corpus"]["stats"]["documents_total"] == 2
+    assert playbook["corpus"]["stats"]["documents_in_scope"] == 1
+
+    # No clause position in the published evidence can trace back to the
+    # quarantined document — it produced zero observations, so none of its
+    # content can appear as evidence.
+    cited_doc_ids = {
+        obs["example_ref"]["document_id"]
+        for clause in playbook["evidence"]["clauses"]
+        for obs in clause.get("observed_positions", [])
+    }
+    assert "deal-002" not in cited_doc_ids
+
+
+def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
+    """CRITICAL PRIVACY REQUIREMENT (issue #83). A QA-quarantined document's
+    version_ingest[].error carries the SegmentationQAError message verbatim.
+    Before this fix, the coverage gate's message embedded a raw slice of
+    source text (``canonical_text[cursor:]``, rendered with ``!r``) — so with
+    ``provenance.known_entities`` configured, a QA-quarantined document whose
+    body names that entity as the FIRST TOKEN of the uncovered text (see
+    ``_ENTITY_LEAK_BODY``'s docstring for exactly why that specific shape
+    matters) leaked the RAW counterparty name into corpus_manifest.json,
+    playbook.opf.json, AND review.json — and would trip publisher's hard,
+    unsuppressible step-4 entity backstop on compile. This fix instead never
+    embeds a raw text slice in the QA error message at all (see
+    ``segmentation_qa._check_coverage``), so no alias-matching edge case can
+    reintroduce this leak. corpus_manifest.json is never length-truncated
+    (there is no length cap anywhere in this fix — the message is already
+    short, gate-name/offset/length-only), so proving the raw name is absent
+    there specifically proves the fix is "never embed it", not "truncate it
+    small enough not to notice".
+    """
+    corpus_dir, config_path, out_dir = _make_single_doc_corpus_with_known_entities(
+        tmp_path, "deal-001", _ENTITY_LEAK_BODY, known_entities=[_ENTITY_LEAK_NAME]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_gate_failing_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+
+    # issue #83: read the WRITTEN corpus_manifest.json, not an in-memory dict.
+    manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    row = manifest[0]["version_ingest"][0]
+    assert row["status"] == "failed"
+    assert _ENTITY_LEAK_NAME not in manifest_text, (
+        "raw entity name must never reach corpus_manifest.json via a "
+        "quarantined document's version_ingest[].error"
+    )
+    # Sanity: the dangerous input really did trigger the coverage gate's
+    # trailing-gap path (not some other gate) — otherwise this test would
+    # vacuously pass without exercising the code this fix touched.
+    assert "coverage gate" in row["error"]
+    assert "trailing gap" in row["error"]
+
+    playbook = project_playbook(out_dir, cfg, taxonomy)
+    published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
+    assert _ENTITY_LEAK_NAME not in published_text
+    assert _ENTITY_LEAK_NAME not in json.dumps(playbook), "double-check the in-memory dict too"
+
+    write_review(out_dir)
+    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
+    assert _ENTITY_LEAK_NAME not in review_text
+
+    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
+    # must find zero hits — the compiled playbook must already be born-safe
+    # by the time it reaches publish.
+    registry = EntityRegistry.load(tmp_path / "registry.json")
+    known_entity_names = list(registry.alias_map().values())
+    assert known_entity_names == [_ENTITY_LEAK_NAME], "sanity: the entity really was registered"
+    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+
+
+def test_quarantine_and_manifest_document_ids_reconcile_across_pseudonymization(
+    tmp_path: Path,
+) -> None:
+    """issue #83 (item 2 — regression, reproduced): quarantine.json used to
+    be written BEFORE the born-safe pseudonymization pass, carrying the RAW
+    document_id, while corpus_manifest.json is written after and carries the
+    ALIASED id. A quarantined document now ALSO gets a partial
+    corpus_manifest.json entry (see pipeline._build_quarantine_corpus_doc),
+    and a consumer that cross-references the two files by document_id (e.g.
+    aar._build_needs_attention, to avoid double-counting a quarantined
+    document as if the compiled playbook covered it too) could never
+    recognize the overlap while the ids were spelled differently — silently
+    OVERSTATING coverage. Exercised end-to-end through the real pipeline
+    (not a hand-written manifest/quarantine fixture) with the quarantined
+    document's folder actually NAMED after the known entity, so this proves
+    the pipeline reconciles the ids — not just that aar.py's arithmetic is
+    correct given already-matching inputs.
+    """
+    entity_name = "Fictional University"
+    corpus_dir, config_path, out_dir = _make_mixed_corpus_with_known_entities(
+        tmp_path, entity_name, known_entities=[entity_name]
+    )
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_dispatching_segment_fn,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+    assert len(quarantine) == 1
+    quarantined_id = quarantine[0]["document_id"]
+    assert quarantined_id != entity_name
+    assert "fictional" not in quarantined_id.lower(), (
+        "quarantine.json's document_id must be aliased, not the raw entity-derived slug"
+    )
+    assert entity_name not in (out_dir / "quarantine.json").read_text(encoding="utf-8")
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    manifest_ids = [d["document_id"] for d in manifest]
+    assert len(manifest_ids) == 2
+    assert quarantined_id in manifest_ids, (
+        "quarantine.json's (aliased) document_id must match corpus_manifest.json's "
+        "partial-record entry EXACTLY — otherwise a consumer that cross-references "
+        "the two files by document_id can never recognize the overlap"
+    )
+
+    # aar.build_after_action_data's coverage line must not double-count the
+    # quarantined document's own partial manifest entry as "covered".
+    data = build_after_action_data(out_dir)
+    summary = [
+        i for i in data["needs_attention"] if any("quarantined vs" in r for r in i["reasons"])
+    ]
+    assert len(summary) == 1
+    # Exactly ONE document (deal-001) genuinely contributed playbook content;
+    # the quarantined document's own partial record must not inflate this to 2.
+    assert any("covers 1 of 2" in r for r in summary[0]["reasons"]), summary[0]["reasons"]
+    report = build_after_action_report(out_dir)
+    assert "covers 1 of 2" in report
 
 
 # ---------------------------------------------------------------------------

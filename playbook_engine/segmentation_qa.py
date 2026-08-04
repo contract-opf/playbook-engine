@@ -53,8 +53,8 @@ via :func:`inspect.signature` (checked once, before the loop) and passes it
 on every subsequent call. This is what makes a repair an actual repair
 rather than "same model, same input, hope sampling differs": the injected
 callable can fold the previous gate failure's detail (e.g. "gap [3812,
-4102) before node 7 contains: ...") into its next prompt. A ``segment_fn``
-that only accepts the base two-argument shape keeps working unchanged — the
+4102) before node 7, 290 char(s) uncovered") into its next prompt. A
+``segment_fn`` that only accepts the base two-argument shape keeps working unchanged — the
 third argument is never forced on it. A production caller binds
 ``segment_fn`` to :func:`~playbook_engine.llm_segmenter.segment_document`
 with ``taxonomy_ids`` and ``client``/``model`` already fixed (e.g. via a
@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
+from typing import Any
 
 from playbook_engine.clause_tree import ClauseTree, ClauseTreeError
 from playbook_engine.segmentation_grounding import (
@@ -91,7 +92,35 @@ class SegmentationQAError(Exception):
     :func:`segment_verify_repair` when every attempt (initial + repairs) still
     fails. By design there is no fallback: a QA failure means the document is
     flagged for human review, never silently degraded to a worse tree.
+
+    Every message raised by this module is built from gate names, node/clause
+    identifiers, and character OFFSETS/LENGTHS only — never a slice of
+    ``canonical_text`` itself (issue #83). This is deliberate, not incidental:
+    a caller (:mod:`playbook_engine.pipeline`) persists ``str(this)`` into
+    ``corpus_manifest.json``'s ``version_ingest[].error`` for a quarantined
+    document, and that file is compiled straight into ``playbook.opf.json``.
+    A raw source-text slice there could smuggle an unpseudonymized
+    counterparty name (or any other confidential content) past the born-safe
+    pipeline entirely — pseudonymization only rewrites known, whole-word
+    matches, and a length-only truncation downstream is not a substitute
+    (see the ticket for the reproduced regression this guards against).
+
+    ``partial_corpus_doc`` (issue #83): ``None`` for every error as raised by
+    this module — no call site here sets it. It exists so a caller that
+    catches an already-raised instance (``pipeline._compute_doc_result``) can
+    staple on a partial ``corpus_documents`` entry snapshot (however far L1
+    got before this failure) before re-raising the SAME instance, for
+    ``pipeline.mine_corpus``'s quarantine handler to read back and append to
+    ``corpus_manifest.json``. Declared here (rather than on a pipeline-local
+    wrapper exception raised in its place) so the bare ``raise`` that
+    re-propagates the same instance out of ``_compute_doc_result`` keeps the
+    original traceback and leaves ``quarantine.json``'s
+    ``f"{type(exc).__name__}: {exc}"`` reason text byte-identical — a
+    wrapping subclass would change the type name a caller sees; a freshly
+    constructed replacement instance would change the traceback.
     """
+
+    partial_corpus_doc: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +144,14 @@ def _check_coverage(canonical_text: str, tree: ClauseTree) -> None:
     Raises:
         SegmentationQAError: on a coverage gap (non-whitespace text not
                               claimed by any node's span) or an overlap
-                              between two node spans.
+                              between two node spans. The message reports
+                              only the gap's character OFFSETS and its
+                              uncovered LENGTH — never the gap text itself
+                              (issue #83: this message can end up persisted
+                              in corpus_manifest.json/playbook.opf.json for a
+                              quarantined document, so it must never carry a
+                              raw slice of source content — see
+                              SegmentationQAError's docstring).
     """
     nodes = sorted(tree.all_nodes(), key=lambda n: n.char_span)
 
@@ -131,15 +167,15 @@ def _check_coverage(canonical_text: str, tree: ClauseTree) -> None:
         if gap.strip():
             raise SegmentationQAError(
                 f"coverage gate: gap [{cursor}, {start}) before node "
-                f"{node.clause_path!r} contains non-whitespace text: {gap!r}"
+                f"{node.clause_path!r}, {len(gap.strip())} char(s) uncovered"
             )
         cursor = max(cursor, end)
 
     trailing = canonical_text[cursor:]
     if trailing.strip():
         raise SegmentationQAError(
-            f"coverage gate: trailing gap [{cursor}, {len(canonical_text)}) after the "
-            f"last node contains non-whitespace text: {trailing!r}"
+            f"coverage gate: trailing gap [{cursor}, {len(canonical_text)}), "
+            f"{len(trailing.strip())} char(s) uncovered"
         )
 
 

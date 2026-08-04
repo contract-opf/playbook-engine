@@ -616,6 +616,52 @@ def test_quarantine_count_compared_against_manifest(tmp_path: Path) -> None:
     assert "covers 2 of 4" in report
 
 
+def test_quarantine_count_excludes_documents_also_present_in_manifest(tmp_path: Path) -> None:
+    """issue #83: a QA-quarantined document can now ALSO get a PARTIAL
+    (zero-observation) entry in corpus_manifest.json — see
+    pipeline._build_quarantine_corpus_doc — so manifest and quarantine.json
+    are no longer guaranteed-disjoint sets of document_ids the way
+    ``test_quarantine_count_compared_against_manifest`` above assumes. The
+    "covers X of Y" coverage line must still count only genuinely-mined
+    documents — a quarantined document's partial record must not
+    double-count as if the compiled playbook covered it too.
+
+    This is a fast, isolated check of aar.py's counting arithmetic given
+    ALREADY-matching document_ids (a hand-written fixture, unlike the
+    real pipeline, has no pseudonymization boundary to get wrong) —
+    tests/test_pipeline_llm_seg.py's
+    test_quarantine_and_manifest_document_ids_reconcile_across_pseudonymization
+    covers the end-to-end case where the ids must first be RECONCILED by
+    the pipeline before this arithmetic ever sees them.
+    """
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [
+            {"document_id": "deal-alice"},
+            {"document_id": "deal-bob"},
+            # A quarantined document's PARTIAL record — present in BOTH
+            # corpus_manifest.json and quarantine.json, exactly like
+            # pipeline.mine_corpus now produces for a SegmentationQAError.
+            {"document_id": "deal-carol", "in_scope": False, "x_quarantined": True},
+        ],
+    )
+    _write_quarantine(
+        out_dir,
+        [{"document_id": "deal-carol", "reason": "SegmentationQAError: gate failed"}],
+    )
+    data = build_after_action_data(out_dir)
+    summary = [
+        i for i in data["needs_attention"] if any("quarantined vs" in r for r in i["reasons"])
+    ]
+    assert len(summary) == 1
+    # 2 genuinely-mined documents (deal-alice, deal-bob) — deal-carol's
+    # partial record must NOT inflate this to 3.
+    assert any("covers 2 of 3" in r for r in summary[0]["reasons"])
+    report = build_after_action_report(out_dir)
+    assert "covers 2 of 3" in report
+
+
 def test_no_quarantine_file_no_quarantine_items(tmp_path: Path) -> None:
     """Without quarantine.json the report mentions no quarantined documents."""
     out_dir = _make_out_dir(tmp_path)
