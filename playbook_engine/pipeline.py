@@ -1707,9 +1707,21 @@ def _compute_doc_result(
             # _build_quarantine_corpus_doc). The document is still
             # quarantined — this restores audit visibility, it does not
             # change the fail-loud contract above. ``str(exc)`` is safe to
-            # persist unbounded: every SegmentationQAError message is built
-            # only from gate names/offsets/lengths, never a raw slice of
-            # source content (see that class's docstring).
+            # persist unbounded for THIS class's own coverage/reconstruction/
+            # tree/taxonomy gates (proven at their own source to carry only
+            # gate names, node/clause identifiers, and OFFSETS/LENGTHS — see
+            # that class's docstring) — but NOT yet for the grounding gate:
+            # this ``except`` also catches a ``GroundingError`` wrapped
+            # verbatim (segmentation_qa.py's ``run_gates``/
+            # ``segment_verify_repair``, e.g. ``f"grounding gate: {exc}"``),
+            # whose own 8 raise sites (segmentation_grounding.py:158,160,
+            # 162,169,179,181,191,203) interpolate the model's own
+            # unconstrained ``node_id``/``start_block_id``/``end_block_id``/
+            # ``parent_id`` (no enum/pattern in llm_segmenter.py's schema,
+            # unlike ``taxonomy_id``). That gap is real and open — reported,
+            # not fixed, in issue #98's rescope comment, which records the
+            # verified line list for its own follow-up ticket (not yet
+            # filed); this diff does not close it.
             if extractor_label is not None:
                 extractor = extractor_label.extractor
             version_ingest[vid] = {
@@ -1732,7 +1744,29 @@ def _compute_doc_result(
                 extractor = extractor_label.extractor
             version_ingest[vid] = {
                 "status": "failed",
-                "error": str(exc),
+                # NEVER str(exc) here (issue #98) — this is a catch-all for
+                # every OTHER exception extraction/ingest can raise (the
+                # SegmentationQAError branch above is handled separately —
+                # see its own comment above for exactly what is, and is NOT,
+                # proven safe to persist there; the grounding gate it can
+                # wrap is a known-open gap, not a proven-safe sibling):
+                # ExtractionError/DocxIngesterError/PdfIngesterError/
+                # RtfIngesterError messages routinely embed the absolute source
+                # path (extraction.py's own "file not found: {path}"/
+                # "extraction yielded no text: {path}"/docling messages
+                # interpolate it directly; python-docx's PackageNotFoundError
+                # does too, confirmed empirically), and SegmentationLLMError can
+                # embed a JSON-parse snippet of the model's own response. None
+                # of that is provably structural, so only the exception TYPE is
+                # safe to persist. This field is not a diagnostic sink:
+                # version_ingest[].error is schema-sanctioned straight into the
+                # PUBLISHED playbook.opf.json (_VERSION_INGEST_SCHEMA_KEYS,
+                # playbook_assembler.py), and is echoed verbatim by
+                # review.py._check_manifest, inspection_report.py's
+                # _version_ingest_review_flags, and aar.py's needs-attention
+                # section — one unsafe write here leaks through all four
+                # persisted artifacts at once.
+                "error": type(exc).__name__,
                 "extractor": extractor,
                 "reason": extractor_label.reason if extractor_label is not None else None,
             }

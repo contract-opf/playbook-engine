@@ -94,16 +94,18 @@ class SegmentationQAError(Exception):
     fails. By design there is no fallback: a QA failure means the document is
     flagged for human review, never silently degraded to a worse tree.
 
-    Every message raised by this module is built from gate names, node/clause
-    identifiers, and character OFFSETS/LENGTHS only — never a slice of
-    ``canonical_text`` itself (issue #83) and never unconstrained model
-    output (issue #97: the taxonomy gate's rejected ``taxonomy_id`` — the
-    one non-structural, LLM-assigned value a message here can carry, and not
-    even guaranteed to be a ``str`` — is echoed verbatim only when it is
-    identifier-shaped; a non-identifier string, or any non-``str`` value, is
-    replaced by a placeholder instead, see ``_safe_taxonomy_id_repr``.
-    ``_check_taxonomy`` itself checks ``isinstance(taxonomy_id, str)`` before
-    its allowed-vocabulary ``set`` lookup — not ``_safe_taxonomy_id_repr`` —
+    Every message raised by this module's own coverage/reconstruction/tree/
+    taxonomy gates is built from gate names, node/clause identifiers, and
+    character OFFSETS/LENGTHS only — never a slice of ``canonical_text``
+    itself (issue #83) and never unconstrained model output beyond the
+    taxonomy gate's shape-gated exception (issue #97: the taxonomy gate's
+    rejected ``taxonomy_id`` — the one non-structural, LLM-assigned value
+    THOSE FOUR gates' messages can carry, and not even guaranteed to be a
+    ``str`` — is echoed verbatim only when it is identifier-shaped; a
+    non-identifier string, or any non-``str`` value, is replaced by a
+    placeholder instead, see ``_safe_taxonomy_id_repr``. ``_check_taxonomy``
+    itself checks ``isinstance(taxonomy_id, str)`` before its
+    allowed-vocabulary ``set`` lookup — not ``_safe_taxonomy_id_repr`` —
     because an unhashable ``list``/``dict`` value would otherwise raise
     ``TypeError`` on that lookup before ``_safe_taxonomy_id_repr`` is ever
     called; see that gate for the type check's actual location, and
@@ -114,7 +116,23 @@ class SegmentationQAError(Exception):
     (``entity_registry._fuzzy_name_pattern``) nor the publish backstop
     (``publisher._entity_backstop_scan``) reliably catches one — see
     ``_safe_taxonomy_id_repr`` for the reproduced case.
-    This is deliberate, not incidental: a caller
+
+    This guarantee does NOT extend to the grounding gate. A
+    :class:`~playbook_engine.segmentation_grounding.GroundingError` is
+    wrapped into a ``SegmentationQAError`` — and so IS "a message raised by
+    this module" in the sense that matters to a caller inspecting
+    ``str(exc)`` — by :func:`run_gates` (``f"grounding gate: {exc}"``) and,
+    on repair exhaustion, by :func:`segment_verify_repair`
+    (``f"...last failure: {last_error}"``). ``GroundingError``'s own 8 raise
+    sites (``segmentation_grounding.py``:158,160,162,169,179,181,191,203)
+    interpolate the model's own unconstrained ``node_id``/
+    ``start_block_id``/``end_block_id``/``parent_id`` — plain strings with
+    no ``enum``/``pattern`` in ``llm_segmenter.py``'s schema, unlike
+    ``taxonomy_id``. This is a real, open residual — reported but
+    deliberately not fixed (issue #98's rescope comment, which records the
+    verified line list for its own follow-up ticket, not yet filed).
+
+    Being careful here is deliberate, not incidental: a caller
     (:mod:`playbook_engine.pipeline`) persists ``str(this)`` into
     ``corpus_manifest.json``'s ``version_ingest[].error`` for a quarantined
     document, and that file is compiled straight into ``playbook.opf.json``.
