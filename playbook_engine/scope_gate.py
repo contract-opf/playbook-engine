@@ -218,10 +218,32 @@ def scope_gate(
         # failure is NOT a verdict — setting in_scope=True here keeps the document
         # in the pipeline so it can be routed for human review (§P1.5 / §2 error
         # model).  Callers must inspect basis="judge_error" to route it.
+        #
+        # NEVER interpolate str(exc) here (issue #98): scope_rationale is not a
+        # diagnostic sink. This basis="judge_error" branch always sets
+        # in_scope=True, so its rationale does NOT reach corpus_manifest.json/
+        # playbook.opf.json's corpus.documents[].scope_rationale (pipeline.py
+        # only copies that field for basis where in_scope=False) — but it DOES
+        # reach scope.json UNCONDITIONALLY (pipeline.py's per-document loop
+        # calls scope_log.record(...) for every scope_decision regardless of
+        # in_scope), and from there is echoed into the inspection report
+        # (inspection_report._load_scope / _render_document) and the AAR's
+        # report.md (aar._build_corpus_coverage). `judge` is an arbitrary
+        # ScopeJudge delegate — an LLM call in production — so `exc`'s message
+        # is not provably structural (it can carry a JSON-parse snippet of the
+        # model's own response, an SDK error embedding request content, or
+        # worse); only the exception TYPE is safe to persist. This branch is
+        # reachable whenever an unwrapped delegate is judged directly, e.g.
+        # no_cache=True (as `playbook judge` forces) bypasses the
+        # BatchedScopeJudge wrapper that already gets this right — see
+        # judgment.py's _scope_error_decision(), whose safe, generic phrasing
+        # this mirrors — and matches the two sibling judges' own already-safe
+        # except-blocks (clause_classifier.py discards `exc` entirely;
+        # deviation_classifier.py uses a fixed literal rationale).
         return ScopeDecision(
             in_scope=True,
             scope_rationale=(
-                f"Scope judge raised an unexpected error: {type(exc).__name__}: {exc}. "
+                f"Scope judge raised an unexpected error ({type(exc).__name__}). "
                 "Document retained and flagged for review."
             ),
             scope_confidence=0.0,

@@ -332,7 +332,20 @@ def test_scope_gate_judge_raises_returns_judge_error() -> None:
     # Document must be RETAINED (not dropped) — fail-closed is the bug P1.5 fixes.
     assert decision.in_scope is True
     assert decision.scope_confidence == 0.0
-    assert "LLM service unavailable" in decision.scope_rationale
+    # issue #98: for this basis="judge_error" branch, scope_rationale does
+    # NOT reach corpus_manifest.json/playbook.opf.json's
+    # corpus.documents[].scope_rationale — pipeline.py only copies that
+    # field when in_scope=False, and judge_error always sets in_scope=True
+    # (see scope_gate.py:224-231). It DOES reach scope.json
+    # UNCONDITIONALLY (pipeline.py's per-document loop calls
+    # scope_log.record(...) regardless of in_scope), and from there the
+    # inspection report and the AAR's report.md. Either way, the judge's
+    # raw exception message must never survive into it — only the
+    # exception TYPE is safe. RaisingJudge raises
+    # RuntimeError("LLM service unavailable"); the type name is expected,
+    # the message text is a regression guard against re-embedding it.
+    assert "RuntimeError" in decision.scope_rationale
+    assert "LLM service unavailable" not in decision.scope_rationale
 
 
 def test_scope_gate_judge_error_rationale_not_empty() -> None:
