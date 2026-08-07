@@ -1,15 +1,23 @@
 """Tests for the signed-copy detector.
 
-SECURITY NOTE: All fixtures use programmatically constructed ClauseTree
-objects with synthetic text.  No real agreement files are referenced.
+SECURITY NOTE: Fixtures are either programmatically constructed ClauseTree
+objects or RTF documents written as Python string literals at test runtime
+(see the absorbed-trailer section, which must go through a real ingester to
+reproduce its bug).  No real agreement files are committed or referenced.
 Party names use fictional identifiers only ("Alice Corp", "Beta Ltd",
-"Party A", "Party B", "Alice", "Bob").
+"AlphaCorp Holdings", "Beta Industries", "Party A", "Party B", "Alice",
+"Bob", "Dana Reyes", "Morgan Ellery").
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
+from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.signed_detector import (
+    _SIG_HEADING,
+    _SIG_TRAILER,
     AMBIGUITY_THRESHOLD,
     SignedJudge,
     SignedStatus,
@@ -641,3 +649,224 @@ def test_signed_judge_verdict_replaces_low_confidence_result() -> None:
     assert result.signed is True
     assert result.basis == "llm"
     assert result.confidence == 0.88
+
+
+# ---------------------------------------------------------------------------
+# Regression: execution trailer absorbed into the preceding numbered clause
+#
+# These fixtures deliberately go through the real RTF ingester rather than
+# building a ClauseTree by hand.  The bug lives in the *interaction* between
+# the ingester (which starts a clause only on a NUMBERED paragraph, so an
+# unnumbered "IN WITNESS WHEREOF …" trailer is appended to the body of the
+# last numbered clause) and the detector (which used to look for signature
+# sections in headings only).  A synthesised tree would dodge the ingester and
+# test nothing.
+#
+# Before the fix all four fixtures below returned
+# SignedStatus(signed=False, basis="no_signature_section", confidence=0.85) —
+# a confident wrong answer, which then withholds every observation for the
+# document downstream (the issue #200 failure mode).
+# ---------------------------------------------------------------------------
+
+_WITNESS_LINE = (
+    r"IN WITNESS WHEREOF, the parties have executed this Agreement as of the "
+    r"date first written above.\par "
+)
+
+
+def _trailer_rtf(tmp_path: Path, trailer: str, name: str = "executed.rtf") -> Path:
+    """Write an RTF of numbered clauses followed by an UNNUMBERED *trailer*."""
+    body = (
+        r"1. Parties and Recitals\par "
+        r"This Agreement is entered into by the parties named below.\par "
+        r"2. Purpose\par "
+        r"The parties wish to exchange confidential information.\par "
+        r"3. Counterparts\par "
+        r"This Agreement may be executed in counterparts.\par " + trailer
+    )
+    content = (
+        r"{\rtf1\ansi\deff0"
+        r"{\fonttbl{\f0\froman\fcharset0 Times New Roman;}}"
+        r"\f0\fs24 " + body + r"}"
+    )
+    dest = tmp_path / name
+    dest.write_text(content, encoding="utf-8")
+    return dest
+
+
+def _assert_trailer_was_absorbed(tree: ClauseTree) -> None:
+    """Guard the fixtures' premise: the trailer must NOT have its own heading.
+
+    If the ingester ever learns to split unnumbered execution trailers into
+    their own node, these fixtures stop exercising the absorbed-trailer path
+    and start passing for the ordinary heading reason instead.  Fail loudly
+    so the fixture gets re-pointed rather than silently going vacuous.
+    """
+    headings = [n.heading for n in tree.all_nodes() if n.heading]
+    assert not any(_SIG_HEADING.search(h) for h in headings), (
+        f"fixture premise broken: a node heading now matches _SIG_HEADING ({headings!r}); "
+        "the trailer is no longer absorbed, so this test no longer covers the bug"
+    )
+
+
+def test_absorbed_slash_s_trailer_is_detected_as_signed(tmp_path: Path) -> None:
+    """Numbered clauses + unnumbered /s/ trailer must read as an executed copy."""
+    path = _trailer_rtf(
+        tmp_path,
+        _WITNESS_LINE + r"AlphaCorp Holdings, Inc.\par "
+        r"By: /s/ Dana Reyes\par "
+        r"Name: Dana Reyes\par "
+        r"Title: Vice President, Legal\par "
+        r"Beta Industries, LLC\par "
+        r"By: /s/ Morgan Ellery\par "
+        r"Name: Morgan Ellery\par "
+        r"Title: General Counsel\par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+
+    result = detect_signed(tree)
+
+    assert result.signed is True, f"executed copy read as unsigned: {result}"
+    assert result.basis == "dual_signatures"
+    assert result.confidence >= AMBIGUITY_THRESHOLD
+
+
+def test_absorbed_wet_signature_trailer_is_detected_as_signed(tmp_path: Path) -> None:
+    """The same trailer with typed names and no /s/ markers must also be caught.
+
+    A full-text /s/ fallback alone would miss this: the only signal is the
+    filled "By:" blocks inside the absorbed trailer, which are reachable only
+    once the trailer's body promotes its clause to a signature node.
+    """
+    path = _trailer_rtf(
+        tmp_path,
+        _WITNESS_LINE + r"AlphaCorp Holdings, Inc.\par "
+        r"By: Dana Reyes\par "
+        r"Title: Vice President, Legal\par "
+        r"Beta Industries, LLC\par "
+        r"By: Morgan Ellery\par "
+        r"Title: General Counsel\par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+
+    result = detect_signed(tree)
+
+    assert result.signed is True, f"executed copy read as unsigned: {result}"
+    assert result.basis == "dual_signatures"
+
+
+def test_absorbed_slash_s_trailer_without_witness_phrase(tmp_path: Path) -> None:
+    """A /s/ block with no execution boilerplate falls back to document-wide /s/.
+
+    Nothing here promotes a node to a signature section, so this exercises the
+    unlocalized fallback — signed, but at the degraded 0.85 rather than the
+    0.90 a localized dual-signature section earns.
+    """
+    path = _trailer_rtf(
+        tmp_path,
+        r"AlphaCorp Holdings, Inc.\par "
+        r"By: /s/ Dana Reyes\par "
+        r"Beta Industries, LLC\par "
+        r"By: /s/ Morgan Ellery\par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+    assert _signature_nodes(tree) == [], "fixture must have no signature section at all"
+
+    result = detect_signed(tree)
+
+    assert result.signed is True, f"executed copy read as unsigned: {result}"
+    assert result.basis == "dual_signatures"
+    assert result.confidence == 0.85, "unlocalized markers must not claim localized confidence"
+
+
+def test_absorbed_unsigned_template_trailer_stays_unsigned(tmp_path: Path) -> None:
+    """An UNSIGNED template with the same shape must still be unsigned.
+
+    The verdict was already correct before the fix, but for the wrong reason
+    ("no_signature_section" — the blocks were never seen at all).  Now the
+    blocks are found and correctly judged blank.
+    """
+    path = _trailer_rtf(
+        tmp_path,
+        _WITNESS_LINE + r"AlphaCorp Holdings, Inc.\par "
+        r"By: _____________________\par "
+        r"Title: _______________\par "
+        r"Beta Industries, LLC\par "
+        r"By: _____________________\par "
+        r"Title: _______________\par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+
+    result = detect_signed(tree)
+
+    assert result.signed is False
+    assert result.basis == "blank_signature_blocks"
+
+
+# ---------------------------------------------------------------------------
+# Guards on the widened matching
+# ---------------------------------------------------------------------------
+
+
+def test_sig_trailer_ignores_ordinary_signature_prose() -> None:
+    """_SIG_TRAILER must not fire on the word "signature" in ordinary body text.
+
+    This is why the body-text match uses the strict _SIG_TRAILER subset rather
+    than _SIG_HEADING: counterparts and notices clauses talk about signatures
+    constantly, and matching them would turn business clauses into signature
+    sections.
+    """
+    for prose in [
+        "Signature pages may be delivered by facsimile or electronic transmission.",
+        "Each notice must bear the authorized signature of an officer.",
+        "Alice Corp shall execute the services described in Schedule A.",
+        "This Agreement may be executed in counterparts.",
+    ]:
+        assert not _SIG_TRAILER.search(prose), f"_SIG_TRAILER must not match: {prose!r}"
+
+
+def test_sig_trailer_body_match_does_not_break_execution_of_services() -> None:
+    """The B3 guard must survive the body-text widening.
+
+    "Execution of Services" is matched by neither the heading rule (anchored)
+    nor the body rule (_SIG_TRAILER omits "execution" entirely).
+    """
+    tree = _tree(
+        _node("1", "Execution of Services", "Alice Corp shall execute the services."),
+        _node("2", "Obligations", "Party A shall deliver."),
+    )
+    assert _signature_nodes(tree) == []
+
+
+def test_single_unlocalized_slash_s_is_ambiguous_and_escalates() -> None:
+    """One /s/ with no signature section is below threshold and reaches the judge.
+
+    A lone unlocalized marker — a stray "/s/" in an exhibit form, say — is
+    genuinely ambiguous, so it must escalate rather than assert.
+    """
+    tree = _tree(_node("1", "Terms", "The parties agree.\n/s/ Alice Smith"))
+    assert _signature_nodes(tree) == []
+
+    bare = detect_signed(tree)
+    assert bare.basis == "electronic_signature"
+    assert bare.confidence < AMBIGUITY_THRESHOLD, "a lone unlocalized marker must escalate"
+
+    verdict = SignedStatus(signed=False, basis="llm", confidence=0.9)
+    judge = _RecordingJudge(verdict)
+    assert detect_signed(tree, signed_judge=judge) is verdict
+    assert len(judge.calls) == 1
+
+
+def test_localized_slash_s_keeps_higher_confidence_than_unlocalized() -> None:
+    """The section-localized path must stay strictly more confident."""
+    localized = detect_signed(_slash_s_tree())
+    tree = _tree(_node("1", "Terms", "/s/ Alice Smith\n/s/ Bob Jones"))
+    assert _signature_nodes(tree) == []
+    unlocalized = detect_signed(tree)
+
+    assert localized.basis == unlocalized.basis == "dual_signatures"
+    assert unlocalized.confidence < localized.confidence
