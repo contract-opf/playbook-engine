@@ -18,8 +18,10 @@ only).  Template placeholders such as ``By: _____________________`` are treated
 as blank (unsigned).
 
 Confidence levels:
-- ≥ 0.90  high — docusign_cert or dual_signatures
-- 0.75–0.89  medium — single filled block or /s/ marker
+- ≥ 0.90  high — docusign_cert, or a dual-signature block localized to a
+  signature section
+- 0.75–0.89  medium — single filled block, or /s/ markers found only in
+  document-wide text with no section to localize them
 - 0.60–0.74  low — ambiguous; LLM arbitration recommended
 
 ``AMBIGUITY_THRESHOLD = 0.70`` marks the boundary below which callers may
@@ -30,6 +32,16 @@ Signature section vs. business-term "execution":
   matches when it IS the heading (e.g. "EXECUTION", "COUNTERPART EXECUTION")
   and not when it appears as a noun in business headings like
   "Execution of Services".
+
+Signature sections that never became their own node:
+  Ingesters that only start a clause on a *numbered* paragraph (RTF, PDF)
+  append an unnumbered execution trailer to the body of whatever clause
+  preceded it, so no node's *heading* is a signature heading and the document
+  reads as ``no_signature_section`` at 0.85 — a confident wrong answer for an
+  executed copy, which then withholds every observation downstream.  Two
+  defences: ``_SIG_TRAILER`` matches a signature section from *body* text, and
+  ``detect_signed`` falls back to document-wide ``/s/`` markers when no
+  signature section is found at all.
 """
 
 from __future__ import annotations
@@ -70,6 +82,19 @@ _ESIGN_PLATFORM = re.compile(
     re.IGNORECASE,
 )
 
+# Execution-trailer phrases strong enough to identify a signature section from
+# *body* text alone — see _signature_nodes.
+#
+# Deliberately a strict subset of _SIG_HEADING: it omits "signatures?" and
+# "execution$" because those are safe only as headings.  Ordinary body prose
+# says "signature" constantly ("signature pages may be delivered by facsimile",
+# "an authorized signature is required"), so matching it against body text
+# would turn half a contract into signature sections.  These two phrases are
+# execution-page boilerplate and essentially never appear elsewhere.
+_TRAILER_ALTS = r"\bin\s+witness\s+whereof\b|\bexecuted\s+as\s+a\s+deed\b"
+
+_SIG_TRAILER = re.compile(rf"(?:{_TRAILER_ALTS})", re.IGNORECASE)
+
 # Heading that introduces a signature block.
 #
 # "execution" is anchored to end-of-string (after optional whitespace) so it
@@ -80,8 +105,7 @@ _SIG_HEADING = re.compile(
     r"(?:"
     r"\bsignatures?\b"
     r"|execution\s*$"
-    r"|\bin\s+witness\s+whereof\b"
-    r"|\bexecuted\s+as\s+a\s+deed\b"
+    rf"|{_TRAILER_ALTS}"
     r")",
     re.IGNORECASE,
 )
@@ -211,6 +235,23 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
     sig_nodes = _signature_nodes(tree)
 
     if not sig_nodes:
+        # No signature section to carve — fall back to document-wide markers.
+        #
+        # Confidences here are degraded relative to the localized path below
+        # (0.90 / 0.80) because nothing corroborates *where* the markers sit:
+        # a stray "/s/" in an unexecuted exhibit form reads the same as a real
+        # execution page.  This is the same discount the _ESIGN_PLATFORM
+        # fallback already takes.  A lone unlocalized marker lands under
+        # AMBIGUITY_THRESHOLD so it escalates instead of asserting.
+        slash_s_count = len(_SLASH_S.findall(full_text))
+        if slash_s_count >= 2:
+            return SignedStatus(signed=True, basis="dual_signatures", confidence=0.85)
+        if slash_s_count == 1:
+            result = SignedStatus(signed=True, basis="electronic_signature", confidence=0.65)
+            if signed_judge is not None and result.confidence < AMBIGUITY_THRESHOLD:
+                return signed_judge.judge(full_text)
+            return result
+
         # Weak e-sign platform mention in body text — low confidence.
         if _ESIGN_PLATFORM.search(full_text):
             result = SignedStatus(signed=True, basis="electronic_signature", confidence=0.65)
@@ -284,11 +325,28 @@ def _node_subtree_text(node: ClauseNode) -> str:
 
 
 def _signature_nodes(tree: ClauseTree) -> list[ClauseNode]:
-    """Return nodes whose heading matches a signature section pattern."""
+    """Return nodes that belong to a signature section.
+
+    A node qualifies on either of two signals:
+
+    - its *heading* matches ``_SIG_HEADING`` — the normal case, where the
+      ingester gave the execution page its own node; or
+    - its *body* matches ``_SIG_TRAILER`` — the absorbed-trailer case, where
+      an unnumbered "IN WITNESS WHEREOF …" block was appended to the preceding
+      numbered clause instead of starting one of its own, leaving no heading to
+      match.
+
+    Matching the body only against the strict ``_SIG_TRAILER`` subset keeps the
+    "Execution of Services" guard intact: the loose ``signatures?`` /
+    ``execution$`` alternatives stay heading-only.
+
+    Widening this can only *add* text to the caller's ``sig_text``, and both
+    the ``By:`` and ``/s/`` counts are monotone in that text, so a document
+    already judged signed cannot be flipped to unsigned by a trailer match.
+    """
     result: list[ClauseNode] = []
     for node in tree.all_nodes():
-        heading = node.heading or ""
-        if _SIG_HEADING.search(heading):
+        if _SIG_HEADING.search(node.heading or "") or _SIG_TRAILER.search(node.text or ""):
             result.append(node)
     return result
 
