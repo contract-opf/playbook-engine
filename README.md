@@ -15,7 +15,7 @@ document, version, and span that proves it**.
 The output is the **[Open Playbook Format (OPF)](docs/OPF-SPEC.md)** — an
 open, versioned, JSON-Schema-validated standard. Any tool that reads OPF
 can use your playbook; you are never locked into this engine, or any
-engine.
+other engine.
 
 ```text
 corpus of agreements  ──►  playbook-engine  ──►  playbook.opf.json
