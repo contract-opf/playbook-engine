@@ -142,7 +142,7 @@ def _all_subcommand_help_text() -> str:
     for group, group_subs in (
         ("view", ("render", "document", "apply")),
         ("posture", ("questions", "interview")),
-        ("floor", ("propose",)),
+        ("floor", ("propose", "sign")),
     ):
         for group_sub in group_subs:
             result = subprocess.run(
