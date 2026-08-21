@@ -14,7 +14,7 @@ import yaml
 from click.testing import CliRunner
 
 from playbook_engine.cli import cli
-from playbook_engine.floor_candidates import derive_interview_q4_candidates
+from playbook_engine.floor_candidates import _Q5_REJECTION_COMMENT, derive_interview_q4_candidates
 from playbook_engine.viewer import _build_index, apply_feedback, render_review_html
 
 # ---------------------------------------------------------------------------
@@ -184,6 +184,7 @@ def _floor_candidate(
     source: str = "reversal",
     citations: list[dict] | None = None,
     decision: str | None = None,
+    comment: str | None = None,
 ) -> dict:
     """A synthetic floor.candidates.json candidate (issue #90 fixtures)."""
     if citations is None:
@@ -197,6 +198,8 @@ def _floor_candidate(
     }
     if decision is not None:
         candidate["decision"] = decision
+    if comment is not None:
+        candidate["comment"] = comment
     return candidate
 
 
@@ -745,6 +748,94 @@ def test_render_html_floor_candidate_rejected_renders_inert(tmp_path: Path) -> N
 
     assert "Proposed hard lines" in html
     assert ">rejected<" in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidate_q5_auto_rejected_stays_live_control(
+    tmp_path: Path,
+) -> None:
+    """issue #105 review finding 1: a candidate the Posture interview's Q5
+    ("flexible_clauses") answer auto-rejected is NOT the same as a human
+    rejection — it must render with its live accept/reject controls intact
+    (recognizable by its ``decision: "rejected"`` PLUS the attributing
+    :data:`_Q5_REJECTION_COMMENT`, vs. a bare human rejection which never
+    carries that comment), unlike ``..._rejected_renders_inert`` above."""
+    _make_opf(tmp_path)
+    _write_floor_candidates(
+        tmp_path,
+        [_floor_candidate(decision="rejected", comment=_Q5_REJECTION_COMMENT)],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Proposed hard lines" in html
+    assert 'class="floor-decision"' in html
+    assert 'value="accept"' in html
+    assert 'value="reject" checked' in html
+    assert _Q5_REJECTION_COMMENT in html
+    # Not rendered as the inert "already rejected" badge a human decision gets.
+    assert ">rejected<" not in html
+
+
+def test_render_html_floor_candidate_q5_auto_rejected_becomes_inert_after_human_confirms(
+    tmp_path: Path,
+) -> None:
+    """issue #105 review round 2 finding 3: a reviewer who AGREES with the
+    Q5 recommendation and explicitly rejects the candidate must be able to
+    record that agreement -- the row must stop re-asking (stop rendering
+    "Recommended reject" with live controls) and become the same inert
+    "rejected" badge a plain human rejection gets."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(
+        tmp_path,
+        [_floor_candidate(decision="rejected", comment=_Q5_REJECTION_COMMENT)],
+    )
+
+    feedback = {"floor": {"cand-001": {"decision": "reject"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+    assert result.floor_rejected == ["cand-001"]
+
+    html = render_review_html(out_dir)
+
+    assert "Proposed hard lines" in html
+    assert ">rejected<" in html
+    assert _Q5_REJECTION_COMMENT not in html
+    assert "Recommended reject" not in html
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidate_q5_auto_rejected_becomes_signed_after_human_accepts(
+    tmp_path: Path,
+) -> None:
+    """issue #105 review round 2 finding 3 (generalized): a reviewer who
+    DISAGREES with the Q5 recommendation and explicitly accepts the
+    candidate must not have the Q5 attribution comment survive the
+    override -- the row must stop re-asking and become the same inert
+    "already signed" badge a plain human accept gets, never a "rejected"
+    row still carrying "named as a willing concession"."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    _write_floor_candidates(
+        tmp_path,
+        [_floor_candidate(decision="rejected", comment=_Q5_REJECTION_COMMENT)],
+    )
+
+    feedback = {"floor": {"cand-001": {"decision": "accept"}}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+    assert result.floor_promoted == ["cand-001"]
+
+    written = json.loads((out_dir / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert "comment" not in written["candidates"][0]
+
+    html = render_review_html(out_dir)
+
+    assert "Proposed hard lines" in html
+    assert ">already signed<" in html
+    assert _Q5_REJECTION_COMMENT not in html
+    assert "Recommended reject" not in html
     assert 'class="floor-decision"' not in html
 
 

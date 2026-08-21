@@ -40,6 +40,7 @@ from click.testing import CliRunner
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import (
+    _Q5_REJECTION_COMMENT,
     FloorCandidateError,
     apply_floor_review,
     candidate_invariant_id,
@@ -50,6 +51,7 @@ from playbook_engine.floor_candidates import (
     promote_floor_candidate,
     promote_interview_q4_invariants,
     propose_floor_candidates,
+    q4_q5_contradictions,
     q4_sentence_shaped_items,
     read_floor_candidates,
     resolve_floor_candidate_decisions,
@@ -660,6 +662,301 @@ def test_read_floor_candidates_file_without_taxonomy_id_loads_unchanged(tmp_path
 
 
 # ---------------------------------------------------------------------------
+# Interview-Q5 ("flexible_clauses") auto-rejection (issue #105)
+# ---------------------------------------------------------------------------
+
+
+def test_q5_matching_taxonomy_auto_rejects_with_attribution() -> None:
+    """A REVERSAL candidate whose taxonomy_id normalizes equal to a Q5 item
+    is auto-rejected with the attributing comment."""
+    observations = [_reversal_observation(taxonomy_id="renewal_notice")]
+    answers = {"flexible_clauses": "renewal notice"}
+
+    result = propose_floor_candidates(observations, answers)
+
+    candidate = result["candidates"][0]
+    assert candidate["decision"] == "rejected"
+    assert candidate["comment"] == (
+        "Posture interview Q5 (flexible_clauses): named as a willing concession."
+    )
+
+
+def test_q5_non_matching_items_are_inert() -> None:
+    """A Q5 item that names a DIFFERENT clause type leaves the candidate
+    pending -- undecided, no comment."""
+    observations = [_reversal_observation(taxonomy_id="uncapped_liability")]
+    answers = {"flexible_clauses": "renewal notice; IP assignment"}
+
+    result = propose_floor_candidates(observations, answers)
+
+    candidate = result["candidates"][0]
+    assert "decision" not in candidate
+    assert "comment" not in candidate
+
+
+def test_q5_multiple_items_semicolon_split() -> None:
+    """Q5 splits on ';' exactly like Q4 (_q4_items) -- each named item
+    independently matches its own candidate."""
+    observations = [
+        _reversal_observation(taxonomy_id="renewal_notice", observation_id="doc-a/2/1"),
+        _reversal_observation(taxonomy_id="ip_assignment", observation_id="doc-a/2/2"),
+        _reversal_observation(taxonomy_id="uncapped_liability", observation_id="doc-a/2/3"),
+    ]
+    answers = {"flexible_clauses": "renewal notice; ip assignment"}
+
+    result = propose_floor_candidates(observations, answers)
+    by_taxonomy = {c["taxonomy_id"]: c for c in result["candidates"]}
+
+    assert by_taxonomy["renewal_notice"]["decision"] == "rejected"
+    assert by_taxonomy["ip_assignment"]["decision"] == "rejected"
+    assert "decision" not in by_taxonomy["uncapped_liability"]
+
+
+def test_q4_promotion_path_unaffected_by_q5_rejection() -> None:
+    """Q5 rejection only ever touches source: reversal candidates -- an
+    interview_q4 candidate (no taxonomy_id at all) is never marked rejected
+    by this mechanism, even if its item text happens to also appear in Q5."""
+    answers = {
+        "sacred_clauses": "IP assignment",
+        "flexible_clauses": "renewal notice",
+    }
+
+    result = propose_floor_candidates([], answers)
+
+    q4_candidate = result["candidates"][0]
+    assert q4_candidate["source"] == "interview_q4"
+    assert "decision" not in q4_candidate
+
+
+def test_q5_match_requires_exact_normalized_equality_not_substring() -> None:
+    """Mutation-guard: a Q5 item that is merely a SUBSTRING/superstring of a
+    taxonomy label must never match -- only exact normalized-slug equality.
+    "renewal" must not match the (broader) "renewal_notice_period" taxonomy,
+    and "auto renewal option" must not match the (narrower) "renewal"
+    taxonomy."""
+    observations = [_reversal_observation(taxonomy_id="renewal_notice_period")]
+    answers = {"flexible_clauses": "renewal"}
+
+    result = propose_floor_candidates(observations, answers)
+    assert "decision" not in result["candidates"][0]
+
+    observations2 = [_reversal_observation(taxonomy_id="renewal")]
+    answers2 = {"flexible_clauses": "auto renewal option"}
+
+    result2 = propose_floor_candidates(observations2, answers2)
+    assert "decision" not in result2["candidates"][0]
+
+
+def test_q5_rejection_never_touches_floor_invariants() -> None:
+    """Spec note (OPF-SPEC.md §3.7 rule 4): the Q5 auto-rejection is a
+    rejection of a PROPOSAL, never a Floor promotion -- propose_floor_candidates
+    never writes floor.invariants at all, and this candidate carries no
+    invariant-shaped output."""
+    observations = [_reversal_observation(taxonomy_id="renewal_notice")]
+    answers = {"flexible_clauses": "renewal notice"}
+
+    result = propose_floor_candidates(observations, answers)
+
+    assert "floor" not in result
+    assert "invariants" not in result
+
+
+class TestWriteFloorCandidatesPriorHumanDecisionWinsOverQ5:
+    """issue #105 Fix: 'the existing prior_decisions carry-over in
+    write_floor_candidates means any prior HUMAN decision always wins over
+    the Q5 auto-rejection.'"""
+
+    def test_prior_human_accept_survives_a_rerun_that_would_otherwise_q5_reject(
+        self, tmp_path: Path
+    ) -> None:
+        doc = {
+            "posture": {
+                "generation": {
+                    "interview": [
+                        {"q": "flexible_clauses", "answer": "renewal notice"},
+                    ]
+                }
+            }
+        }
+
+        # Control: prove the identical observations + Q5 answer WOULD
+        # auto-reject on their own, with no prior human decision in the
+        # way -- otherwise the "survives" assertion below is vacuous (it
+        # would pass even with the Q5 auto-rejection removed entirely).
+        control_dir = tmp_path / "control"
+        control_dir.mkdir()
+        (control_dir / "observations.jsonl").write_text(
+            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
+            encoding="utf-8",
+        )
+        (control_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+        write_floor_candidates(control_dir)
+        control_result = read_floor_candidates(control_dir)
+        assert control_result[0]["decision"] == "rejected"
+
+        obs_path = tmp_path / "observations.jsonl"
+        obs_path.write_text(
+            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+
+        # First run: the Q5 answer is already in force -- the candidate is
+        # auto-rejected WITH the attributing comment attached (issue #105
+        # review round 2 finding 2: reaching this state via write_floor_
+        # candidates + apply_floor_review, rather than a hand-built prior
+        # file that never had a comment in the first place, is the point --
+        # a hand-built prior with no comment can't exercise the "comment
+        # must be dropped" path at all).
+        write_floor_candidates(tmp_path)
+        first = read_floor_candidates(tmp_path)
+        assert first[0]["decision"] == "rejected"
+        assert first[0]["comment"] == _Q5_REJECTION_COMMENT
+        cand_id = first[0]["id"]
+
+        # Human overrides the recommendation and accepts anyway.
+        apply_floor_review(tmp_path, {cand_id: {"decision": "accept"}})
+
+        # Second run: the SAME Q5 answer is still in force -- without the
+        # fix this would re-derive decision=rejected+comment and clobber
+        # the human's accept.
+        write_floor_candidates(tmp_path)
+
+        result = read_floor_candidates(tmp_path)
+        assert result[0]["decision"] == "accepted"
+        assert "comment" not in result[0]
+
+    def test_q5_rejection_comment_survives_a_rerun_that_no_longer_names_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The reverse: a PRIOR run's Q5 auto-rejection (decision +
+        attributing comment) survives a re-run whose Q5 answer no longer
+        names that taxonomy at all (this run derives no fresh comment of its
+        own for that candidate)."""
+        obs_path = tmp_path / "observations.jsonl"
+        obs_path.write_text(
+            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
+            encoding="utf-8",
+        )
+        doc = {
+            "posture": {
+                "generation": {
+                    "interview": [
+                        {"q": "flexible_clauses", "answer": "renewal notice"},
+                    ]
+                }
+            }
+        }
+        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+        write_floor_candidates(tmp_path)
+        first = read_floor_candidates(tmp_path)
+        assert first[0]["decision"] == "rejected"
+        assert first[0]["comment"]
+
+        # Rerun with Q5 answer changed to no longer name renewal_notice.
+        doc["posture"]["generation"]["interview"][0]["answer"] = "IP assignment"
+        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+        write_floor_candidates(tmp_path)
+
+        second = read_floor_candidates(tmp_path)
+        assert second[0]["decision"] == "rejected"
+        assert second[0]["comment"] == first[0]["comment"]
+
+    def test_q5_rejection_never_leaks_onto_a_same_statement_q4_candidate_on_second_run(
+        self, tmp_path: Path
+    ) -> None:
+        """issue #105 review round 2 finding 1 regression: the prior-decision
+        carry-over must be keyed by (statement, source), not statement alone.
+        A contradictory interview (the same clause type named in BOTH Q4
+        "sacred_clauses" and Q5 "flexible_clauses") makes the reversal
+        candidate and the interview_q4 candidate derive the IDENTICAL
+        statement text -- "Do not concede on renewal notice." A second
+        `write_floor_candidates` run must never carry the reversal
+        candidate's Q5 auto-rejection (decision + attributing comment) onto
+        the unrelated, human-authored interview_q4 candidate just because
+        they share a statement."""
+        obs_path = tmp_path / "observations.jsonl"
+        obs_path.write_text(
+            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
+            encoding="utf-8",
+        )
+        doc = {
+            "posture": {
+                "generation": {
+                    "interview": [
+                        {"q": "sacred_clauses", "answer": "renewal notice"},
+                        {"q": "flexible_clauses", "answer": "renewal notice"},
+                    ]
+                }
+            }
+        }
+        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+
+        # First run: derives both candidates, confirms they share a statement.
+        write_floor_candidates(tmp_path)
+        first = read_floor_candidates(tmp_path)
+        by_source = {c["source"]: c for c in first}
+        assert by_source["reversal"]["statement"] == by_source["interview_q4"]["statement"]
+        assert by_source["reversal"]["decision"] == "rejected"
+        assert "decision" not in by_source["interview_q4"]
+
+        # Second run: the carry-over must not cross the source boundary.
+        write_floor_candidates(tmp_path)
+        second = read_floor_candidates(tmp_path)
+        by_source2 = {c["source"]: c for c in second}
+        assert by_source2["reversal"]["decision"] == "rejected"
+        assert "decision" not in by_source2["interview_q4"]
+        assert "comment" not in by_source2["interview_q4"]
+
+
+# ---------------------------------------------------------------------------
+# Q4/Q5 contradictory-interview warning (issue #105 reviewer gate)
+# ---------------------------------------------------------------------------
+
+
+def test_q4_q5_contradictions_empty_when_no_overlap() -> None:
+    answers = {"sacred_clauses": "liability cap", "flexible_clauses": "renewal notice"}
+    assert q4_q5_contradictions(answers) == []
+
+
+def test_q4_q5_contradictions_empty_when_either_unanswered() -> None:
+    assert q4_q5_contradictions(None) == []
+    assert q4_q5_contradictions({"sacred_clauses": "liability cap"}) == []
+    assert q4_q5_contradictions({"flexible_clauses": "renewal notice"}) == []
+
+
+def test_q4_q5_contradictions_fires_on_exact_normalized_overlap() -> None:
+    answers = {"sacred_clauses": "renewal notice", "flexible_clauses": "renewal notice"}
+    warnings = q4_q5_contradictions(answers)
+    assert len(warnings) == 1
+    assert "renewal notice" in warnings[0]
+    assert "sacred_clauses" in warnings[0]
+    assert "flexible_clauses" in warnings[0]
+
+
+def test_q4_q5_contradictions_does_not_fire_on_substring_overlap() -> None:
+    """Mutation-guard: same discipline as the candidate-rejection match --
+    exact normalized equality, never substring."""
+    answers = {"sacred_clauses": "renewal", "flexible_clauses": "auto renewal option"}
+    assert q4_q5_contradictions(answers) == []
+
+
+def test_propose_floor_candidates_surfaces_q4_q5_contradiction_warning() -> None:
+    answers = {"sacred_clauses": "renewal notice", "flexible_clauses": "renewal notice"}
+    result = propose_floor_candidates([], answers)
+    assert result["warnings"]
+    assert "renewal notice" in result["warnings"][0]
+
+
+def test_propose_floor_candidates_omits_warnings_key_when_none() -> None:
+    """Additive key, omitted (never an empty list) when there's nothing to
+    warn about -- the locked empty-input shape stays exact."""
+    result = propose_floor_candidates([], None)
+    assert result == {"candidates": []}
+    assert "warnings" not in result
+
+
+# ---------------------------------------------------------------------------
 # write_floor_candidates — I/O
 # ---------------------------------------------------------------------------
 
@@ -854,6 +1151,39 @@ def test_cli_floor_propose_rejected_candidate_stays_rejected_on_second_run(
     second = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
     assert len(second["candidates"]) == 1
     assert second["candidates"][0]["decision"] == "rejected"
+
+
+def test_cli_floor_propose_prints_q4_q5_contradiction_warning(tmp_path: Path) -> None:
+    """issue #105 review round 2 finding 4: the Reviewer gate's chosen
+    behavior for a contradictory interview (same clause type named in both
+    Q4 "sacred_clauses" and Q5 "flexible_clauses") is a CLI WARN line --
+    this pins that the CLI actually prints it, and that the seam it depends
+    on (write_floor_candidates persisting the additive "warnings" key into
+    floor.candidates.json, for propose_floor_candidates to have produced it
+    from) round-trips through the real file, not just the pure function."""
+    doc = _minimal_v02_doc(
+        posture={
+            "generation": {
+                "interview": [
+                    {"q": "sacred_clauses", "question": "...", "answer": "renewal notice"},
+                    {"q": "flexible_clauses", "question": "...", "answer": "renewal notice"},
+                ]
+            }
+        }
+    )
+    (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    exit_code, output = _invoke("floor", "propose", str(tmp_path))
+
+    assert exit_code == 0, output
+    assert "WARN" in output
+    assert "renewal notice" in output
+    assert "sacred_clauses" in output
+    assert "flexible_clauses" in output
+
+    written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert written["warnings"]
+    assert "renewal notice" in written["warnings"][0]
 
 
 # ---------------------------------------------------------------------------
