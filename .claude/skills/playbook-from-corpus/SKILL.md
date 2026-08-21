@@ -759,7 +759,7 @@ notice. Ranking candidates by "most reversed" surfaces the clauses that get
 *fought over*, and is structurally blind to the clauses that are silently
 *missing* — a clause that is not in the document cannot be reversed, so it
 scores zero on the axis you are sorting by, no matter how badly it is needed.
-Measured on the EIAA corpus: Limitation of Liability appeared in **9 of 43
+Measured on a real corpus: Limitation of Liability appeared in **9 of 43
 documents (20%)** — the single most-absent clause — and drew only 4 mentions
 across 2,662 observations, so a reversal-ranked option set omitted it entirely
 while the user's actual top hard line was *"limitation of liability must always
