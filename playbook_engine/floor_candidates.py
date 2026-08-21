@@ -108,9 +108,11 @@ __all__ = [
     "candidate_q4_invariant_id",
     "derive_interview_q4_candidates",
     "derive_reversal_candidates",
+    "is_q4_item_sentence_shaped",
     "promote_floor_candidate",
     "promote_interview_q4_invariants",
     "propose_floor_candidates",
+    "q4_sentence_shaped_items",
     "read_floor_candidates",
     "resolve_floor_candidate_decisions",
     "sign_floor_invariant",
@@ -341,6 +343,78 @@ def _q4_items(answer: str | None) -> list[str]:
     if not answer or not answer.strip():
         return []
     return [item.strip() for item in answer.split(";") if item.strip()]
+
+
+_Q4_SENTENCE_MARKERS: tuple[str, ...] = (" if ", " unless ", " must ", " shall ", " provided ")
+
+
+def is_q4_item_sentence_shaped(item: str) -> bool:
+    """Whether a Q4 ("sacred_clauses") *item* reads as a full sentence or
+    conditional clause rather than a bare clause-TYPE name (issue #104).
+
+    :func:`promote_interview_q4_invariants` and :func:`_q4_promoted_statement`
+    both assume a Q4 item is a short noun phrase naming a clause type
+    ("uncapped liability", "IP assignment") and wrap it verbatim in "Do not
+    concede on {item}." — a template built for names, not sentences. A
+    *conditional* item the legal owner types free-form — e.g. "limitation
+    of liability, if present, must not be unilateral in the counterparty's
+    favor" — templates into a nonsense invariant that a fail-closed Floor
+    judge then evaluates on every review (issue #104's Problem). This
+    heuristic flags that shape deterministically, with no LLM call, so
+    :func:`promote_interview_q4_invariants` can refuse to template it and
+    ``posture.apply_posture_interview`` can route the legal owner to
+    ``playbook floor sign`` instead — the command that records a statement
+    exactly as typed, no templating (issue #103).
+
+    Heuristic (either condition trips it):
+
+      - *item* is more than 7 words long (``len(item.split()) > 7``) — a
+        bare clause-type name is short; a full sentence usually isn't. The
+        threshold is deliberately ``> 7``, not ``>= 7``: a legitimate, if
+        wordy, clause-TYPE name ("Limitation of liability and
+        consequential damages waiver" — exactly 7 words, no conditional
+        marker) must stay name-shaped (issue #104 reviewer gate: this
+        exact boundary is probed in tests).
+      - *item* contains one of " if ", " unless ", " must ", " shall ",
+        " provided " (case-insensitive; *item* is padded with a leading/
+        trailing space before matching, so a marker at the very start or
+        end of *item* — e.g. an item starting "If present, ...") still
+        matches) — words that show up in conditional/imperative prose, not
+        in a bare clause-type name.
+
+    Deliberately simple and over-inclusive by design: a false positive
+    here costs the legal owner one extra ``playbook floor sign`` command
+    (issue #104's Fix); a false negative ships a garbled invariant into a
+    fail-closed judge, silently, on every review — the asymmetric cost the
+    ticket's Problem section describes.
+    """
+    if len(item.split()) > 7:
+        return True
+    padded = f" {item.lower()} "
+    return any(marker in padded for marker in _Q4_SENTENCE_MARKERS)
+
+
+def q4_sentence_shaped_items(interview_answers: dict[str, str] | None) -> list[str]:
+    """The Q4 ("sacred_clauses") items in *interview_answers* that
+    :func:`is_q4_item_sentence_shaped` flags (issue #104), in the order
+    named — using the exact same split as every other Q4 consumer (see
+    :func:`_q4_items`), so this always agrees with what
+    :func:`promote_interview_q4_invariants` itself skips.
+
+    ``posture.apply_posture_interview`` calls this (separately from
+    :func:`promote_interview_q4_invariants`, which independently applies
+    the same per-item skip while merging into ``floor.invariants``) to
+    build the actionable ``playbook floor sign`` warning for each skipped
+    item — assembled in ``posture.py`` rather than here because that
+    warning needs the run's ``out_dir``, which this module never sees.
+
+    Returns:
+        Sentence-shaped items, in Q4-answer order. Empty when Q4 was not
+        answered (missing, ``None``, or blank), or every named item is
+        name-shaped.
+    """
+    items = _q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID))
+    return [item for item in items if is_q4_item_sentence_shaped(item)]
 
 
 def _q4_statement(item: str) -> str:
@@ -614,6 +688,20 @@ def promote_interview_q4_invariants(
       - a new item (no id collision at all) is appended, in Q4-answer
         order.
 
+    A SENTENCE-SHAPED item (:func:`is_q4_item_sentence_shaped`, issue #104)
+    — a conditional hard line the legal owner typed as prose ("limitation
+    of liability, if present, must not be unilateral in the counterparty's
+    favor"), not a bare clause-type name — is skipped entirely: neither
+    templated nor promoted, and treated exactly like an item this run's
+    answer simply didn't name (see the upsert-never-delete paragraph
+    below), so an EARLIER run's promotion of the same item under a
+    now-sentence-shaped rewording is left untouched rather than deleted.
+    ``posture.apply_posture_interview`` separately calls
+    :func:`q4_sentence_shaped_items` on the same answer to surface an
+    actionable warning naming the exact ``playbook floor sign`` command —
+    this function itself only ever silently skips; it raises no error and
+    emits no warning of its own.
+
     Invariants this run's Q4 answer doesn't name — hand-authored, or
     promoted by an earlier interview run naming a since-dropped item — are
     left exactly as they are: this is an upsert, never a delete, so a legal
@@ -659,6 +747,12 @@ def promote_interview_q4_invariants(
     }
 
     for item in items:
+        if is_q4_item_sentence_shaped(item):
+            # issue #104: a sentence-shaped item is never templated or
+            # promoted — treated as unnamed this run (see docstring above);
+            # posture.apply_posture_interview surfaces the actionable
+            # warning separately, via q4_sentence_shaped_items().
+            continue
         inv_id = _slugify_statement_item(item)
         statement = _q4_promoted_statement(item)
         existing_index = index_by_id.get(inv_id)

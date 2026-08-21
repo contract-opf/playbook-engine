@@ -544,6 +544,92 @@ def test_apply_posture_interview_promotes_q4_into_floor_invariants(tmp_path: Pat
     assert "sacred_clauses" in inv["rationale"]
 
 
+def test_apply_posture_interview_sentence_shaped_q4_item_not_templated_or_promoted(
+    tmp_path: Path,
+) -> None:
+    """Fail-first (issue #104): a sentence-shaped sacred_clauses item must
+    not be templated into a garbled floor.invariants entry."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    sentence_item = (
+        "limitation of liability, if present, must not be unilateral in the counterparty's favor"
+    )
+    answers = {**_ANSWERS, "sacred_clauses": sentence_item}
+    result = apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["floor"] == {}  # no invariant written -- promotion produced nothing
+
+    assert result.warnings
+    assert any(sentence_item in w for w in result.warnings)
+    assert any(f"playbook floor sign {tmp_path}" in w for w in result.warnings)
+    assert any("--statement" in w for w in result.warnings)
+
+
+def test_apply_posture_interview_sentence_shaped_item_stays_verbatim_in_recorded_interview(
+    tmp_path: Path,
+) -> None:
+    """Fail-first (issue #104): the sentence-shaped item is untouched in
+    posture.generation.interview -- only the Floor-promotion path skips
+    it."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    sentence_item = (
+        "limitation of liability, if present, must not be unilateral in the counterparty's favor"
+    )
+    answers = {**_ANSWERS, "sacred_clauses": sentence_item}
+    apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    interview_entries = written["posture"]["generation"]["interview"]
+    sacred_clauses_entry = next(e for e in interview_entries if e["q"] == "sacred_clauses")
+    assert sacred_clauses_entry["answer"] == sentence_item
+
+
+def test_apply_posture_interview_mixed_q4_answer_promotes_name_skips_sentence(
+    tmp_path: Path,
+) -> None:
+    """Fail-first (issue #104): a mixed answer promotes the name-shaped item
+    and skips (with a warning for) the sentence-shaped one."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    sentence_item = (
+        "limitation of liability, if present, must not be unilateral in the counterparty's favor"
+    )
+    answers = {**_ANSWERS, "sacred_clauses": f"Indemnification; {sentence_item}"}
+    result = apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    invariants = written["floor"]["invariants"]
+    assert len(invariants) == 1
+    assert invariants[0]["id"] == "indemnification"
+
+    assert any(sentence_item in w for w in result.warnings)
+
+
+def test_apply_posture_interview_pure_name_q4_answer_yields_no_sentence_shaped_warning(
+    tmp_path: Path,
+) -> None:
+    """Regression (issue #104): pure-name Q4 answers behave exactly as
+    before -- no sentence-shaped warning, normal promotion."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers = {**_ANSWERS, "sacred_clauses": "Liability caps and student-data protection"}
+    result = apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
+
+    assert result.warnings == ()
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert len(written["floor"]["invariants"]) == 1
+
+
 def test_apply_posture_interview_ticket_demo_answers_yield_zero_warnings(tmp_path: Path) -> None:
     """Issue #89 review finding 1 regression: the ticket's own required-
     verification demo answers (``sacred_clauses`` = "Liability caps and

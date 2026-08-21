@@ -46,9 +46,11 @@ from playbook_engine.floor_candidates import (
     candidate_q4_invariant_id,
     derive_interview_q4_candidates,
     derive_reversal_candidates,
+    is_q4_item_sentence_shaped,
     promote_floor_candidate,
     promote_interview_q4_invariants,
     propose_floor_candidates,
+    q4_sentence_shaped_items,
     read_floor_candidates,
     resolve_floor_candidate_decisions,
     sign_floor_invariant,
@@ -493,6 +495,93 @@ def test_promote_q4_refuses_to_overwrite_colliding_hand_authored_id() -> None:
         "rationale": "Signed off by the GC 2026-03-01 after board review.",
         "x_signed_by": "gc@example.com",
     }
+
+
+# ---------------------------------------------------------------------------
+# is_q4_item_sentence_shaped / q4_sentence_shaped_items / sentence-shaped
+# skip in promote_interview_q4_invariants (issue #104)
+# ---------------------------------------------------------------------------
+
+_SENTENCE_SHAPED_ITEM = (
+    "limitation of liability, if present, must not be unilateral in the counterparty's favor"
+)
+
+
+def test_is_q4_item_sentence_shaped_flags_conditional_prose() -> None:
+    assert is_q4_item_sentence_shaped(_SENTENCE_SHAPED_ITEM) is True
+
+
+def test_is_q4_item_sentence_shaped_leaves_bare_names_alone() -> None:
+    assert is_q4_item_sentence_shaped("Indemnification") is False
+    assert is_q4_item_sentence_shaped("uncapped liability") is False
+    assert is_q4_item_sentence_shaped("IP assignment") is False
+
+
+def test_is_q4_item_sentence_shaped_word_count_boundary_is_exclusive() -> None:
+    """Issue #104 reviewer gate: a long-but-legitimate clause-TYPE name —
+    exactly 7 words, no conditional marker — must stay name-shaped. The
+    heuristic's word-count threshold is ``> 7``, not ``>= 7``."""
+    seven_word_name = "Limitation of liability and consequential damages waiver"
+    assert len(seven_word_name.split()) == 7  # guards the boundary this test probes
+    assert is_q4_item_sentence_shaped(seven_word_name) is False
+
+    eight_word_name = seven_word_name + " clause"
+    assert len(eight_word_name.split()) == 8
+    assert is_q4_item_sentence_shaped(eight_word_name) is True
+
+
+def test_is_q4_item_sentence_shaped_catches_each_marker_word() -> None:
+    assert is_q4_item_sentence_shaped("Governing law unless otherwise agreed") is True
+    assert is_q4_item_sentence_shaped("Arbitration shall be binding") is True
+    assert is_q4_item_sentence_shaped("Confidentiality provided the deal closes") is True
+
+
+def test_q4_sentence_shaped_items_returns_only_flagged_items_in_order() -> None:
+    answer = f"Indemnification; {_SENTENCE_SHAPED_ITEM}; IP assignment"
+    assert q4_sentence_shaped_items({"sacred_clauses": answer}) == [_SENTENCE_SHAPED_ITEM]
+
+
+def test_q4_sentence_shaped_items_empty_when_nothing_flagged() -> None:
+    assert q4_sentence_shaped_items({"sacred_clauses": "uncapped liability; IP assignment"}) == []
+    assert q4_sentence_shaped_items(None) == []
+    assert q4_sentence_shaped_items({}) == []
+    assert q4_sentence_shaped_items({"sacred_clauses": "   "}) == []
+
+
+def test_promote_q4_skips_sentence_shaped_item_entirely() -> None:
+    """Fail-first (issue #104): a sentence-shaped item must never be
+    templated or promoted into floor.invariants."""
+    result = promote_interview_q4_invariants(
+        {"sacred_clauses": _SENTENCE_SHAPED_ITEM}, posture_version=1, existing_invariants=[]
+    )
+
+    assert result == []  # neither templated nor promoted -- true skip, not an append
+
+
+def test_promote_q4_mixed_answer_promotes_name_shaped_skips_sentence_shaped() -> None:
+    """Fail-first (issue #104): a mixed answer promotes the name-shaped
+    item as before and skips the sentence-shaped one, without raising."""
+    answer = f"Indemnification; {_SENTENCE_SHAPED_ITEM}"
+
+    result = promote_interview_q4_invariants(
+        {"sacred_clauses": answer}, posture_version=1, existing_invariants=[]
+    )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "indemnification"
+    assert result[0]["statement"] == "Do not concede on Indemnification."
+
+
+def test_promote_q4_pure_name_answer_is_byte_identical_to_pre_fix_behavior() -> None:
+    """Regression (issue #104): an answer made entirely of name-shaped
+    items is unaffected by the sentence-shaped skip."""
+    answers = {"sacred_clauses": "uncapped liability; IP assignment"}
+
+    result = promote_interview_q4_invariants(answers, posture_version=1, existing_invariants=[])
+
+    assert len(result) == 2
+    ids = {inv["id"] for inv in result}
+    assert ids == {"uncapped-liability", "ip-assignment"}
 
 
 # ---------------------------------------------------------------------------
