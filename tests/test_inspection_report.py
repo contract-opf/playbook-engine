@@ -628,10 +628,10 @@ def test_report_dedupes_version_ingest_failure_present_in_both_sources(
     tmp_path: Path,
 ) -> None:
     """A version_ingest failure recorded in BOTH corpus_manifest.json (read
-    directly by ``_version_ingest_review_flags``) and review.json (as written
-    by ``playbook review``'s ``_check_manifest``) must render as a single
-    Needs-Attention row, not two (issue #89 fix-round-1: the two call sites'
-    ``suggested_action`` strings must match verbatim so the dedupe key
+    directly by ``_version_ingest_review_flags``) and a review.json sidecar's
+    flag must render as a single Needs-Attention row, not two (issue #89
+    fix-round-1: the two call sites' ``suggested_action`` strings must match
+    verbatim so the dedupe key
     collapses the cross-source duplicate).
     """
     out_dir = _make_out_dir(tmp_path)
@@ -651,8 +651,8 @@ def test_report_dedupes_version_ingest_failure_present_in_both_sources(
             }
         ],
     )
-    # Mirrors exactly what `playbook review`'s `_check_manifest` writes to
-    # review.json for the identical underlying failure.
+    # Mirrors exactly what a review.json sidecar would carry for the
+    # identical underlying failure.
     _write_review_json(
         out_dir,
         [
@@ -738,7 +738,7 @@ def test_report_dedupes_version_ingest_fallback_present_in_both_sources(
     tmp_path: Path,
 ) -> None:
     """Mirrors test_report_dedupes_version_ingest_failure_present_in_both_sources
-    for the NEW fallback kind (issue #81): review._check_manifest and
+    for the NEW fallback kind (issue #81): a review.json sidecar's flag and
     inspection_report._version_ingest_review_flags must build byte-identical
     suggested_action text for the SAME underlying fallback, or a version
     present in both corpus_manifest.json and review.json renders as two
@@ -762,8 +762,8 @@ def test_report_dedupes_version_ingest_fallback_present_in_both_sources(
             }
         ],
     )
-    # Mirrors exactly what `playbook review`'s `_check_manifest` writes to
-    # review.json for the identical underlying fallback.
+    # Mirrors exactly what a review.json sidecar would carry for the
+    # identical underlying fallback.
     _write_review_json(
         out_dir,
         [

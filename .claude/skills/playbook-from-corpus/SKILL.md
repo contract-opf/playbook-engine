@@ -1047,8 +1047,6 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out
 
 - `REFERENCE.md` — judge prompts, guardrails, and machine-checkable
   done-criteria.
-- [`docs/ORCHESTRATION.md`](../../../docs/ORCHESTRATION.md) — checkpoint/triage
-  vocabulary (artifact-level flags, intervention/escalate decisions).
 - [`docs/QUICK-COMPILE.md`](../../../docs/QUICK-COMPILE.md) — no-LLM smoke
   run: non-engineer corpus layout guide and hints format, stub judges only
   (structurally valid, semantically blank output).

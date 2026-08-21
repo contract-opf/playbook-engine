@@ -1762,10 +1762,9 @@ def _compute_doc_result(
                 # version_ingest[].error is schema-sanctioned straight into the
                 # PUBLISHED playbook.opf.json (_VERSION_INGEST_SCHEMA_KEYS,
                 # playbook_assembler.py), and is echoed verbatim by
-                # review.py._check_manifest, inspection_report.py's
-                # _version_ingest_review_flags, and aar.py's needs-attention
-                # section — one unsafe write here leaks through all four
-                # persisted artifacts at once.
+                # inspection_report.py's _version_ingest_review_flags and
+                # aar.py's needs-attention section — one unsafe write here
+                # leaks through all three persisted artifacts at once.
                 "error": type(exc).__name__,
                 "extractor": extractor,
                 "reason": extractor_label.reason if extractor_label is not None else None,
@@ -2980,10 +2979,8 @@ def mine_corpus(
         # _build_needs_attention (playbook_engine/aar.py:576, which embeds
         # it verbatim into "needs_attention" reasons for the after-action
         # report) — quarantine.json plus that report are reason's only
-        # consumers. It never reaches corpus_manifest.json, playbook.opf.json,
-        # or review.json: review.write_review reads scope.json/trail/
-        # observations.jsonl/corpus_manifest.json only and never opens
-        # quarantine.json at all.
+        # consumers. It never reaches corpus_manifest.json or
+        # playbook.opf.json.
         quarantined = [
             {
                 **q,

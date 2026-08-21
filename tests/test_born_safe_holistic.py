@@ -6,7 +6,7 @@ found and fixed REACTIVELY between 2026-08-02 and 2026-08-04 (#81, #83, #96,
 the durable guard issue #98 asks for: it plants ONE synthetic
 ``provenance.known_entities`` name (``ENTITY_NAME`` below) in every plausible
 input position SIMULTANEOUSLY, runs the real pipeline end-to-end (mine ->
-project -> review -> inspection report -> AAR -> floor propose -> view ->
+project -> inspection report -> AAR -> floor propose -> view ->
 publish), and asserts the raw name survives in NONE of the written artifact
 files — only its alias. A future field that forgets to scrub gets caught
 here instead of by a reviewer's luck.
@@ -127,7 +127,6 @@ from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.inspection_report import write_inspection_report
 from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.playbook_assembler import write_playbook
-from playbook_engine.review import write_review
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.viewer import render_review_html
@@ -315,7 +314,7 @@ def _build_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
     # embed the absolute source path, i.e. this folder name) while v2
     # ingests cleanly, so the document is NOT quarantined and
     # version_ingest[].error is reachable in corpus_manifest.json /
-    # playbook.opf.json / review.json / the inspection report / report.md.
+    # playbook.opf.json / the inspection report / report.md.
     doc_b = corpus_dir / f"{ENTITY_SLUG}-beta"
     doc_b.mkdir(parents=True)
     (doc_b / "v1.docx").write_bytes(b"not a real docx file")
@@ -501,7 +500,6 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
     write_playbook(playbook, out_dir / "playbook.opf.json")  # already written by project_playbook;
     # re-affirms the on-disk file is what we scan below, not the in-memory dict.
 
-    write_review(out_dir)
     write_after_action_report(out_dir, out_dir / "report.md")  # also writes report.json
     write_inspection_report(out_dir, out_dir / "inspection_report.md")
     write_floor_candidates(out_dir)
@@ -537,7 +535,6 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
         ("template_observations.jsonl", out_dir / "template_observations.jsonl"),
         ("round_moves.jsonl", out_dir / "round_moves.jsonl"),
         ("playbook.opf.json", out_dir / "playbook.opf.json"),
-        ("review.json", out_dir / "review.json"),
         ("coherence_flags.json", out_dir / "coherence_flags.json"),
         ("floor.candidates.json", out_dir / "floor.candidates.json"),
         ("report.md (aar)", out_dir / "report.md"),

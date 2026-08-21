@@ -7,6 +7,25 @@ pre-1.0 minor versions may break compatibility).
 
 ## [Unreleased]
 
+- Removed `playbook_engine/eval_harness.py`, `playbook_engine/review.py`,
+  `playbook_engine/review_orchestration.py`, and `docs/ORCHESTRATION.md`
+  (issue #110) — 1,368 lines of CLI-unreachable code: `eval_harness.py` had
+  zero package importers (its own docstring scoped the live-eval run out of
+  its purpose), and `review_orchestration.py` / `review.py` were reachable
+  only from their own dedicated tests, never from `playbook_engine/cli.py`.
+  `review.py`'s `write_review()`/`review.json` artifact was also read by two
+  cross-cutting privacy tests (`tests/test_born_safe_holistic.py`,
+  `tests/test_pipeline_llm_seg.py`) as a redundant secondary check —
+  `review.json` is derived entirely from `scope.json` / `trail/*.json` /
+  `observations.jsonl` / `corpus_manifest.json` / `coherence_flags.json`,
+  each of which those tests already assert directly (`coherence_flags.json`
+  is likewise swept directly by `tests/test_born_safe_holistic.py`), so the
+  coverage is unchanged with those checks removed. `inspection_report.py`'s independent, CLI-reachable
+  `_version_ingest_review_flags` / `_load_review_flags` (an optional,
+  back-compat `review.json` sidecar reader) are untouched. The removed code
+  is recoverable at commit `7737a1e` (the last commit where these files were
+  present) for anyone reviving the eval-harness or checkpoint-orchestration
+  work tracked by issues #151/#152.
 - **Breaking**: Removed the `playbook compile` and `playbook view document`
   CLI commands (issue #109) — both were redundant spellings of existing
   pipelines (`compile`'s options were exactly `mine`'s plus `--stop-after`,

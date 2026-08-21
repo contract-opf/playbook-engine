@@ -191,4 +191,4 @@ ADOPTING.md.
 
 **Playbook has no clauses** — If all clauses are unclassified (taxonomy_id=None), the compiled clauses list will be empty. This usually means the taxonomy doesn't match the document content. Check that your taxonomy covers the agreement type, or switch to a more appropriate taxonomy.
 
-**"Accepted without LLM judgment"** — This is the stub scope judge. Every document was accepted as in-scope. To get real judgment on scope, run the `playbook judge` / `judge-apply` review loop (see docs/ORCHESTRATION.md).
+**"Accepted without LLM judgment"** — This is the stub scope judge. Every document was accepted as in-scope. To get real judgment on scope, run the `playbook judge` / `judge-apply` review loop (see `.claude/skills/playbook-from-corpus/SKILL.md`).

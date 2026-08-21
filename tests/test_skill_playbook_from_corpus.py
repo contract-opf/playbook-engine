@@ -29,17 +29,15 @@ REFERENCE_MD = SKILL_DIR / "REFERENCE.md"
 # auto-discovers project skills under .claude/skills/<name>/SKILL.md).
 OLD_SKILL_DIR = REPO_ROOT / ".claude" / "playbook-from-corpus"
 
-# The other top-level workflow docs (issue #133, moved under docs/ by #174):
-# docs/QUICK-COMPILE.md is the mine/project no-code guide,
-# docs/ORCHESTRATION.md is the Python-API checkpoint loop, and
+# The other top-level workflow doc (issue #133, moved under docs/ by #174):
+# docs/QUICK-COMPILE.md is the mine/project no-code guide, and
 # .claude/skills/playbook-from-corpus/SKILL.md is the companion skill (cites
-# flags across several subcommands, not just mine). All cite `--flag`s in
+# flags across several subcommands, not just mine). Both cite `--flag`s in
 # prose/code fences — if any drifts (e.g. citing a flag that was renamed or
 # removed, as docs/QUICK-COMPILE.md once did with --no-resume vs. the actual
 # --no-cache), this catches it instead of a user hitting "no such option"
 # mid-workflow.
 ROOT_SKILL_MD = REPO_ROOT / "docs" / "QUICK-COMPILE.md"
-ORCHESTRATOR_SKILL_MD = REPO_ROOT / "docs" / "ORCHESTRATION.md"
 # SKILL_MD (.claude/skills/playbook-from-corpus/SKILL.md) is defined above.
 
 _FLAG_PATTERN = re.compile(r"--[a-z][a-z-]*")
@@ -330,10 +328,9 @@ def test_subcommand_help_exits_successfully(subcmd: str) -> None:
 
 @pytest.mark.parametrize(
     "doc_path",
-    [ROOT_SKILL_MD, ORCHESTRATOR_SKILL_MD, SKILL_MD],
+    [ROOT_SKILL_MD, SKILL_MD],
     ids=[
         "docs-QUICK-COMPILE.md",
-        "docs-ORCHESTRATION.md",
         "claude-playbook-from-corpus-SKILL.md",
     ],
 )
