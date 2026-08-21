@@ -150,6 +150,23 @@ def test_reversal_yields_candidate() -> None:
     assert cite.clause_path == "8.1"
 
 
+def test_reversal_candidate_carries_taxonomy_id() -> None:
+    """Issue #102: the group key (the raw taxonomy_id, not the humanized
+    prose it gets flattened into for the statement) survives onto the
+    candidate itself, so a later suppression check can match on it."""
+    observations = [_reversal_observation(taxonomy_id="uncapped_liability")]
+
+    candidates = derive_reversal_candidates(observations)
+
+    assert candidates[0].taxonomy_id == "uncapped_liability"
+
+
+def test_interview_q4_candidate_has_no_taxonomy_id() -> None:
+    """A Q4-named item carries no clause taxonomy — taxonomy_id stays None."""
+    candidates = derive_interview_q4_candidates({"sacred_clauses": "liability caps"})
+    assert candidates[0].taxonomy_id is None
+
+
 def test_reversal_ignores_non_reversed_observations() -> None:
     observations = [_reversal_observation(), _signed_observation()]
 
@@ -501,6 +518,59 @@ def test_empty_corpus_empty_candidates() -> None:
 
 
 # ---------------------------------------------------------------------------
+# taxonomy_id — additive key on FloorCandidate / floor.candidates.json
+# (issue #102)
+# ---------------------------------------------------------------------------
+
+
+def test_propose_floor_candidates_reversal_carries_taxonomy_id() -> None:
+    """Renumbering (propose_floor_candidates rebuilds each FloorCandidate to
+    assign a stable cand-NNN id) must not drop taxonomy_id along the way."""
+    observations = [_reversal_observation(taxonomy_id="uncapped_liability")]
+
+    result = propose_floor_candidates(observations, None)
+
+    assert result["candidates"][0]["taxonomy_id"] == "uncapped_liability"
+
+
+def test_propose_floor_candidates_interview_q4_has_no_taxonomy_id_key() -> None:
+    """Additive key omitted entirely (not written as null) when absent —
+    byte-identical to pre-#102 output for every interview_q4 candidate."""
+    result = propose_floor_candidates([], {"sacred_clauses": "IP assignment"})
+    assert "taxonomy_id" not in result["candidates"][0]
+
+
+def test_write_floor_candidates_round_trips_taxonomy_id(tmp_path: Path) -> None:
+    """write_floor_candidates persists taxonomy_id; read_floor_candidates
+    returns it unchanged."""
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(
+        json.dumps(_reversal_observation(taxonomy_id="limitation_of_liability")) + "\n",
+        encoding="utf-8",
+    )
+
+    write_floor_candidates(tmp_path)
+    candidates = read_floor_candidates(tmp_path)
+
+    assert len(candidates) == 1
+    assert candidates[0]["taxonomy_id"] == "limitation_of_liability"
+
+
+def test_read_floor_candidates_file_without_taxonomy_id_loads_unchanged(tmp_path: Path) -> None:
+    """A floor.candidates.json written before issue #102 (no taxonomy_id key
+    anywhere) must keep loading exactly as before -- the field is additive."""
+    old_style = _floor_candidate()
+    assert "taxonomy_id" not in old_style
+    (tmp_path / "floor.candidates.json").write_text(
+        json.dumps({"candidates": [old_style]}), encoding="utf-8"
+    )
+
+    candidates = read_floor_candidates(tmp_path)
+
+    assert candidates == [old_style]
+
+
+# ---------------------------------------------------------------------------
 # write_floor_candidates — I/O
 # ---------------------------------------------------------------------------
 
@@ -709,16 +779,20 @@ def _floor_candidate(
     rationale: str = "Proposed then reversed before signing in 2 deals.",
     source: str = "reversal",
     citations: list[dict[str, Any]] | None = None,
+    taxonomy_id: str | None = None,
 ) -> dict[str, Any]:
     if citations is None:
         citations = [{"document_id": "doc-a", "version": 2, "clause_path": "8.1"}]
-    return {
+    candidate: dict[str, Any] = {
         "id": id,
         "statement": statement,
         "rationale": rationale,
         "source": source,
         "citations": citations,
     }
+    if taxonomy_id is not None:
+        candidate["taxonomy_id"] = taxonomy_id
+    return candidate
 
 
 def test_candidate_invariant_id_is_a_slug_of_the_statement() -> None:
@@ -955,6 +1029,144 @@ def test_promote_floor_candidate_reversal_source_unaffected_by_q4_guard() -> Non
 
 
 # ---------------------------------------------------------------------------
+# promote_floor_candidate refuses when taxonomy_id already signed under a
+# DIFFERENT, non-slug-matching statement (issue #102)
+# ---------------------------------------------------------------------------
+
+
+def test_promote_floor_candidate_refuses_when_taxonomy_already_signed() -> None:
+    """The real failure from the issue: a hand-authored invariant
+    ("limitation-of-liability-not-unilateral") shares ZERO slug overlap with
+    a reversal candidate's draft statement ("Do not concede on limitation of
+    liability.") -- but both are about the same clause taxonomy. Accepting
+    the candidate must be refused, not appended as a second, conflicting
+    invariant."""
+    hand_authored = {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": "Limitation of liability, if present, must not be unilateral.",
+        "rationale": "Hand-authored via `playbook floor sign`.",
+        "x_taxonomy_id": "limitation_of_liability",
+    }
+    candidate = _floor_candidate(
+        statement="Do not concede on limitation of liability.",
+        taxonomy_id="limitation_of_liability",
+    )
+    # Confirm the premise: no slug overlap between the two ids at all.
+    assert candidate_invariant_id(candidate) != hand_authored["id"]
+
+    with pytest.raises(FloorCandidateError, match="limitation_of_liability"):
+        promote_floor_candidate(candidate, existing_invariants=[hand_authored])
+
+    # Never mutated in place.
+    assert hand_authored == {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": "Limitation of liability, if present, must not be unilateral.",
+        "rationale": "Hand-authored via `playbook floor sign`.",
+        "x_taxonomy_id": "limitation_of_liability",
+    }
+
+
+def test_promote_floor_candidate_taxonomy_none_unaffected_by_taxonomy_guard() -> None:
+    """A candidate with no taxonomy_id (every interview_q4 candidate, and
+    any reversal candidate proposed before issue #102) behaves byte-
+    identically to before: appending never even looks at x_taxonomy_id."""
+    existing = [
+        {
+            "id": "some-other-invariant",
+            "statement": "Some other hand-authored line.",
+            "rationale": "r",
+            "x_taxonomy_id": "unrelated_taxonomy",
+        }
+    ]
+    candidate = _floor_candidate(statement="Never accept uncapped liability.")
+    assert "taxonomy_id" not in candidate
+
+    result = promote_floor_candidate(candidate, existing_invariants=existing)
+
+    assert len(result) == 2
+    new_entry = result[1]
+    assert new_entry["id"] == "never-accept-uncapped-liability"
+    assert "x_taxonomy_id" not in new_entry
+
+
+def test_promote_floor_candidate_stamps_x_taxonomy_id_on_new_entry() -> None:
+    """Promotion stamps taxonomy_id into the invariant entry it creates
+    (as x_taxonomy_id -- spec/playbook.schema-0.3.json's frozen
+    additionalProperties: false forbids a bare taxonomy_id key). This is
+    what lets promote_floor_candidate's own taxonomy guard, and the
+    viewer's classify_floor_candidates, suppress a later CANDIDATE for the
+    same taxonomy against THIS promoted entry. It does NOT protect the
+    reverse direction: sign_floor_invariant (the hand-author path,
+    `playbook floor sign`) has no taxonomy guard at all -- only an
+    id-collision guard -- so a hand-authored invariant for the same
+    taxonomy_id can still be signed alongside this entry, producing two
+    x_taxonomy_id-tagged invariants for the same taxonomy. Out of scope
+    for this ticket (issue #102)."""
+    candidate = _floor_candidate(
+        statement="Do not concede on uncapped liability.",
+        taxonomy_id="uncapped_liability",
+    )
+
+    result = promote_floor_candidate(candidate, existing_invariants=[])
+
+    assert result[0]["x_taxonomy_id"] == "uncapped_liability"
+    assert "taxonomy_id" not in result[0]  # never a bare key
+
+
+def test_promote_floor_candidate_different_taxonomy_not_suppressed() -> None:
+    """A candidate whose taxonomy_id does NOT match any existing invariant's
+    x_taxonomy_id is promoted normally -- the guard is a match, not a mere
+    presence, check."""
+    existing = [
+        {
+            "id": "unrelated-invariant",
+            "statement": "Unrelated hard line.",
+            "rationale": "r",
+            "x_taxonomy_id": "ip_assignment",
+        }
+    ]
+    candidate = _floor_candidate(
+        statement="Do not concede on uncapped liability.",
+        taxonomy_id="uncapped_liability",
+    )
+
+    result = promote_floor_candidate(candidate, existing_invariants=existing)
+
+    assert len(result) == 2
+
+
+def test_promote_floor_candidate_id_collision_takes_priority_over_taxonomy_match() -> None:
+    """Interplay with the issue-#90 FloorCandidateError collision guards
+    (review finding): when BOTH a foreign id collision and a taxonomy match
+    apply to the same candidate, the id-collision guard must fire first --
+    it is checked before the taxonomy guard in promote_floor_candidate, so
+    its message ("refusing to silently overwrite it") is the one raised,
+    not the taxonomy guard's. Locks the documented ordering (the taxonomy
+    guard sits last, after the foreign-id and Q4-id guards) with a test
+    instead of only a docstring."""
+    candidate = _floor_candidate(
+        statement="Do not concede on limitation of liability.",
+        taxonomy_id="limitation_of_liability",
+    )
+    foreign_id_collision = {
+        "id": candidate_invariant_id(candidate),
+        "statement": "An unrelated hand-authored statement with the same slug.",
+        "rationale": "Hand-authored, unrelated to this candidate.",
+    }
+    taxonomy_collision = {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": "Limitation of liability, if present, must not be unilateral.",
+        "rationale": "Hand-authored via `playbook floor sign`.",
+        "x_taxonomy_id": "limitation_of_liability",
+    }
+
+    with pytest.raises(FloorCandidateError, match="refusing to silently overwrite it"):
+        promote_floor_candidate(
+            candidate, existing_invariants=[foreign_id_collision, taxonomy_collision]
+        )
+
+
+# ---------------------------------------------------------------------------
 # resolve_floor_candidate_decisions — pure feedback.json "floor" resolution
 # (issue #90)
 # ---------------------------------------------------------------------------
@@ -1096,6 +1308,37 @@ def test_resolve_floor_decisions_foreign_collision_skipped_not_raised() -> None:
     assert result.invariants_changed is False
     # The candidate's own decision is never marked "accepted" when the
     # promotion itself failed — a reviewer sees an accurate, unresolved state.
+    assert result.candidates_changed is False
+
+
+def test_resolve_floor_decisions_taxonomy_collision_skipped_not_raised() -> None:
+    """Issue #102: same reviewer-gate discipline as the id-collision guard
+    above, applied to the taxonomy_id guard -- resolving a feedback.json
+    against a candidate whose clause taxonomy is already signed under a
+    non-slug-matching statement reports it via skipped (not a raised
+    exception that would abort the rest of the batch), and never marks the
+    candidate's own decision as accepted."""
+    hand_authored = {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": "Limitation of liability, if present, must not be unilateral.",
+        "rationale": "Hand-authored via `playbook floor sign`.",
+        "x_taxonomy_id": "limitation_of_liability",
+    }
+    candidate = _floor_candidate(
+        statement="Do not concede on limitation of liability.",
+        taxonomy_id="limitation_of_liability",
+    )
+
+    result = resolve_floor_candidate_decisions(
+        {"cand-001": {"decision": "accept"}},
+        [candidate],
+        existing_invariants=[hand_authored],
+    )
+
+    assert "floor:cand-001" in result.skipped
+    assert result.promoted == []
+    assert result.invariants == [hand_authored]
+    assert result.invariants_changed is False
     assert result.candidates_changed is False
 
 

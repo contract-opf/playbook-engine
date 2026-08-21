@@ -664,6 +664,7 @@ def _classify_floor_candidates(
     candidates: list[dict[str, Any]],
     invariant_ids: set[str],
     *,
+    invariant_taxonomy_ids: set[str] | None = None,
     raw_candidates: list[dict[str, Any]] | None = None,
 ) -> list[tuple[dict[str, Any], str | None]]:
     """Classify each Floor candidate as ``"signed"``, ``"rejected"``, or
@@ -677,8 +678,10 @@ def _classify_floor_candidates(
     SAME list before alias resolution, positionally paired with
     *candidates* — defaults to *candidates* itself (i.e. identical) when
     the caller has no alias map to apply. *invariant_ids* is the set of
-    ``floor.invariants[].id`` already present in the playbook — the
-    ground-truth signal for the "already signed" inert state.
+    ``floor.invariants[].id`` already present in the playbook, and
+    *invariant_taxonomy_ids* the set of their ``x_taxonomy_id`` values
+    (issue #102; defaults to empty) — together the ground-truth signal for
+    the "already signed" inert state.
 
     The "already signed" id lookup below is always computed from the RAW,
     unresolved candidate — the same input ``apply_feedback`` (and,
@@ -690,14 +693,17 @@ def _classify_floor_candidates(
     reversal's text snippet): the resolved and raw statements differ, so
     their slugs would too, and an already-signed candidate would wrongly
     render as a live control under an alias map (issue #90 review
-    finding 2). Two ids are checked per candidate, both derived from the
-    raw copy: ``floor_candidates.candidate_invariant_id`` (this candidate's
-    own draft statement) and, for a ``source: interview_q4`` candidate,
-    ``floor_candidates.candidate_q4_invariant_id`` — the OTHER id the same
-    Q4-named item already carries if it was promoted directly via
+    finding 2). THREE signals are checked per candidate, all derived from
+    the raw copy: ``floor_candidates.candidate_invariant_id`` (this
+    candidate's own draft statement); for a ``source: interview_q4``
+    candidate, ``floor_candidates.candidate_q4_invariant_id`` — the OTHER id
+    the same Q4-named item already carries if it was promoted directly via
     ``floor_candidates.promote_interview_q4_invariants`` (issue #89), which
     ``candidate_invariant_id`` alone can never match (issue #90 review
-    finding 1).
+    finding 1); and the candidate's ``taxonomy_id`` (``source: reversal``
+    only) against *invariant_taxonomy_ids* — a hand-authored (or otherwise
+    differently-worded) invariant covering the same clause taxonomy under a
+    statement that slugifies to neither of the two ids above (issue #102).
 
     A malformed (non-dict) candidate is silently dropped from the result —
     same as it always has been (issue #90 review finding 5's "no empty
@@ -705,6 +711,8 @@ def _classify_floor_candidates(
     """
     if raw_candidates is None:
         raw_candidates = candidates
+    if invariant_taxonomy_ids is None:
+        invariant_taxonomy_ids = set()
 
     classified: list[tuple[dict[str, Any], str | None]] = []
     for candidate, raw_candidate in zip(candidates, raw_candidates, strict=True):
@@ -712,8 +720,16 @@ def _classify_floor_candidates(
             continue
         raw = raw_candidate if isinstance(raw_candidate, dict) else candidate
         q4_inv_id = candidate_q4_invariant_id(raw)
-        if candidate_invariant_id(raw) in invariant_ids or (
-            q4_inv_id is not None and q4_inv_id in invariant_ids
+        raw_taxonomy_id = raw.get("taxonomy_id")
+        taxonomy_signed = (
+            isinstance(raw_taxonomy_id, str)
+            and raw_taxonomy_id.strip()
+            and raw_taxonomy_id in invariant_taxonomy_ids
+        )
+        if (
+            candidate_invariant_id(raw) in invariant_ids
+            or (q4_inv_id is not None and q4_inv_id in invariant_ids)
+            or taxonomy_signed
         ):
             status: str | None = "signed"
         elif candidate.get("decision") == "rejected":
@@ -1132,8 +1148,20 @@ def render_review_html(
         for inv in floor_invariants
         if isinstance(inv, dict) and isinstance(inv_id := inv.get("id"), str)
     }
+    # issue #102: x_taxonomy_id (see floor_candidates.sign_floor_invariant)
+    # is the OTHER already-signed signal — catches a hand-authored (or
+    # otherwise differently-worded) invariant covering the same clause
+    # taxonomy that invariant_ids' exact-slug match can never see.
+    invariant_taxonomy_ids: set[str] = {
+        tax_id
+        for inv in floor_invariants
+        if isinstance(inv, dict) and isinstance(tax_id := inv.get("x_taxonomy_id"), str)
+    }
     classified_candidates = _classify_floor_candidates(
-        render_candidates, invariant_ids, raw_candidates=floor_candidates
+        render_candidates,
+        invariant_ids,
+        invariant_taxonomy_ids=invariant_taxonomy_ids,
+        raw_candidates=floor_candidates,
     )
     floor_section_html = _render_floor_candidates_section(classified_candidates)
 
