@@ -148,6 +148,7 @@ from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.curation import CurationPin
 from playbook_engine.floor_candidates import (
+    _Q5_REJECTION_COMMENT,
     apply_floor_review,
     candidate_invariant_id,
     candidate_q4_invariant_id,
@@ -613,9 +614,23 @@ def _render_floor_candidate_row(candidate: dict[str, Any], status: str | None) -
     """Render one "Proposed hard lines" row.
 
     *status* is ``"signed"`` (already present in ``floor.invariants`` —
-    inert), ``"rejected"`` (recorded in ``floor.candidates.json`` — inert),
-    or ``None`` (still pending — a live three-way accept/reject/undecided
-    control, default undecided).
+    inert), ``"rejected"`` (a HUMAN rejection recorded in
+    ``floor.candidates.json`` — inert), or ``None`` (still pending — a live
+    three-way accept/reject/undecided control).
+
+    A candidate the Posture interview's Q5 auto-rejected
+    (``_classify_floor_candidates`` recognizes it by
+    :data:`floor_candidates._Q5_REJECTION_COMMENT` and always reports it as
+    pending, never ``"rejected"``, so this branch only ever sees a HUMAN
+    rejection here) still falls into the ``None`` case — issue #105 review
+    finding 1: the auto-rejection's authority is the interview answer, not
+    a human decision, so the row must keep its live controls and surface
+    the recommendation as a reason rather than an inert badge. Only the Q5
+    recommendation pre-checks a radio (``"reject"``, so an unmodified export
+    doesn't silently reverse the pre-marked rejection) — every other
+    ``None``-status candidate, including one whose stored ``"decision"`` is
+    already ``"accepted"``/``"rejected"`` by other means, defaults its radio
+    to ``"undecided"``.
     """
     cand_id = html_lib.escape(str(candidate.get("id", "")))
     statement = html_lib.escape(str(candidate.get("statement", "")))
@@ -639,6 +654,18 @@ def _render_floor_candidate_row(candidate: dict[str, Any], status: str | None) -
         lines.append(f'<div class="clause-meta">{source_html}</div>')
 
     if status is None:
+        q5_recommended = (
+            candidate.get("decision") == "rejected"
+            and candidate.get("comment") == _Q5_REJECTION_COMMENT
+        )
+        if q5_recommended:
+            lines.append(
+                '<div class="clause-meta floor-q5-recommendation">'
+                f"Recommended reject — {html_lib.escape(_Q5_REJECTION_COMMENT)}"
+                "</div>"
+            )
+        reject_attr = " checked" if q5_recommended else ""
+        undecided_attr = "" if q5_recommended else " checked"
         lines.append(
             '<div class="feedback-row">'
             f'<label><input type="radio" class="floor-decision" '
@@ -646,10 +673,10 @@ def _render_floor_candidate_row(candidate: dict[str, Any], status: str | None) -
             f'value="accept"> Accept</label> '
             f'<label><input type="radio" class="floor-decision" '
             f'name="floor-decision-{cand_id}" data-candidate-id="{cand_id}" '
-            f'value="reject"> Reject</label> '
+            f'value="reject"{reject_attr}> Reject</label> '
             f'<label><input type="radio" class="floor-decision" '
             f'name="floor-decision-{cand_id}" data-candidate-id="{cand_id}" '
-            f'value="undecided" checked> Undecided</label> '
+            f'value="undecided"{undecided_attr}> Undecided</label> '
             f'<label>Comment: <input class="floor-comment-input" '
             f'data-candidate-id="{cand_id}" type="text" '
             f'placeholder="Reviewer note…" style="width:30%"></label>'
@@ -671,6 +698,19 @@ def _classify_floor_candidates(
     still pending (``None``) — the single ground-truth classification shared
     by the "Proposed hard lines" checklist rows AND the triage header's
     hard-line counts (issue #91), so the two can never disagree.
+
+    A candidate the Posture interview's Q5 ("flexible_clauses") answer
+    auto-rejected (``floor_candidates.propose_floor_candidates``) is
+    classified ``None`` (pending), never ``"rejected"`` — issue #105 review
+    finding 1: that pre-marked ``"decision": "rejected"`` carries the
+    interview's authority, not a human reviewer's, so the row must stay
+    live (accept/reject controls) rather than render as the inert
+    "rejected" badge a genuine human rejection gets. Recognized by the raw
+    candidate's ``"comment"`` matching
+    :data:`floor_candidates._Q5_REJECTION_COMMENT` exactly — the only way
+    that comment ever lands on a candidate (a human's own reject decision,
+    via ``apply_feedback``, never writes a ``"comment"`` onto the candidate
+    itself).
 
     *candidates* is ``floor.candidates.json``'s ``candidates`` list, already
     alias-resolved by the caller for DISPLAY (statement/rationale/source
@@ -719,6 +759,7 @@ def _classify_floor_candidates(
         if not isinstance(candidate, dict):
             continue
         raw = raw_candidate if isinstance(raw_candidate, dict) else candidate
+        q5_auto_rejected = raw.get("comment") == _Q5_REJECTION_COMMENT
         q4_inv_id = candidate_q4_invariant_id(raw)
         raw_taxonomy_id = raw.get("taxonomy_id")
         taxonomy_signed = (
@@ -732,7 +773,7 @@ def _classify_floor_candidates(
             or taxonomy_signed
         ):
             status: str | None = "signed"
-        elif candidate.get("decision") == "rejected":
+        elif candidate.get("decision") == "rejected" and not q5_auto_rejected:
             status = "rejected"
         else:
             status = None

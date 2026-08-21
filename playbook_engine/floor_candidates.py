@@ -7,12 +7,12 @@ candidate (issue #90).
 OPF-SPEC.md §3.7 rule 4: the compiler MAY propose Floor candidates
 ("every ``outcome: proposed_then_reversed`` in the Evidence is a candidate
 hard line") and §7 marks the interview's Q4 ("sacred_clauses") as seeding
-Floor candidates (see ``posture.py``'s ``seeds_floor_candidates=True``) —
-but the legal owner finalizes, and a *compiler-derived* candidate must
-NEVER be auto-promoted into the signed OPF ``floor.invariants`` (spec rule
-4, "never auto-promote"). Reversal-derived candidates are compiler-derived
-— machine inferences read off the Evidence that no human has seen or
-endorsed — so they stay firmly on the propose-then-sign-off path.
+Floor candidates — but the legal owner finalizes, and a *compiler-derived*
+candidate must NEVER be auto-promoted into the signed OPF
+``floor.invariants`` (spec rule 4, "never auto-promote"). Reversal-derived
+candidates are compiler-derived — machine inferences read off the Evidence
+that no human has seen or endorsed — so they stay firmly on the
+propose-then-sign-off path.
 
 A Q4 answer is different in kind: it is *human-authored* prose the legal
 owner typed directly into the Posture interview, naming their own hard
@@ -28,6 +28,22 @@ into ``floor.invariants`` (via :func:`promote_interview_q4_invariants`,
 called from ``posture.apply_posture_interview`` every time ``playbook
 posture interview`` completes — no separate accept step, because the
 interview answer already carries the legal owner's sign-off).
+
+The interview's Q5 ("flexible_clauses" — "which clause types are you happy
+to concede") is the mirror-image, human-authored signal (issue #105): where
+Q4 names a clause type the legal owner will never give up, Q5 names one
+they've already decided is concession material. A freshly re-derived
+REVERSAL candidate (:func:`derive_reversal_candidates`) whose ``taxonomy_id``
+normalizes equal to a Q5 item is auto-rejected by
+:func:`propose_floor_candidates` — not promoted anywhere, never touching
+``floor.invariants``, just pre-marked ``"decision": "rejected"`` in
+``floor.candidates.json`` so the reviewer isn't asked to re-litigate a
+concession their own interview answer already settled. This is symmetric
+with Q4's direct promotion, not a new exception to spec rule 4: the
+authority for the rejection is the human-authored Q5 answer, not a
+compiler inference, and a candidate a human reviewer previously (or
+subsequently) accepts in ``playbook.review.html`` is never overridden by
+it — see :func:`write_floor_candidates`'s ``prior_decisions`` carry-over.
 
 This module implements:
 
@@ -112,6 +128,7 @@ __all__ = [
     "promote_floor_candidate",
     "promote_interview_q4_invariants",
     "propose_floor_candidates",
+    "q4_q5_contradictions",
     "q4_sentence_shaped_items",
     "read_floor_candidates",
     "resolve_floor_candidate_decisions",
@@ -121,11 +138,16 @@ __all__ = [
 ]
 
 # The Posture interview question that seeds Floor candidates (OPF §7,
-# posture.py's INTERVIEW_QUESTIONS — "sacred_clauses", seeds_floor_candidates
-# =True). Kept as a local constant rather than importing ``posture`` — this
-# module only needs the id string, and staying decoupled from posture.py's
-# templating avoids a needless import-time dependency.
+# posture.py's INTERVIEW_QUESTIONS — "sacred_clauses"). Kept as a local
+# constant rather than importing ``posture`` — this module only needs the id
+# string, and staying decoupled from posture.py's templating avoids a
+# needless import-time dependency.
 INTERVIEW_Q4_ID = "sacred_clauses"
+
+# The Posture interview question that names willing concessions (OPF §7,
+# posture.py's INTERVIEW_QUESTIONS — "flexible_clauses", issue #105). Same
+# local-constant rationale as INTERVIEW_Q4_ID above.
+INTERVIEW_Q5_ID = "flexible_clauses"
 
 _TEXT_SNIPPET_MAX = 80
 
@@ -503,6 +525,87 @@ def derive_interview_q4_candidates(
 
 
 # ---------------------------------------------------------------------------
+# Interview-Q5-sourced auto-rejection (issue #105)
+# ---------------------------------------------------------------------------
+
+# The exact attribution comment stamped onto a REVERSAL candidate
+# propose_floor_candidates auto-rejects because its taxonomy was named in
+# the Posture interview's Q5 ("flexible_clauses") answer. Fixed text (no
+# per-candidate interpolation needed — the candidate's own statement/
+# rationale already say which clause type) so a later caller can recognise
+# "this rejection came from Q5" rather than a human's own reject decision,
+# if that distinction is ever needed.
+_Q5_REJECTION_COMMENT = "Posture interview Q5 (flexible_clauses): named as a willing concession."
+
+
+def _q5_flexible_taxonomy_slugs(interview_answers: dict[str, str] | None) -> set[str]:
+    """Normalized (kebab-slug) forms of every clause type named in the
+    Posture interview's Q5 ("flexible_clauses") answer.
+
+    Same semicolon-split rule as Q4 (:func:`_q4_items`, reused directly
+    rather than duplicated, so Q4 and Q5 always agree on what counts as
+    "one named item") — but Q5 items are compared by NORMALIZED slug, not
+    verbatim text, because the thing they're matched against
+    (:func:`propose_floor_candidates`'s freshly-derived REVERSAL
+    candidates) is a machine-humanized ``taxonomy_id`` like
+    ``"renewal_notice"`` -> ``"renewal notice"``, not free-form prose a
+    legal owner typed. Blank items normalize to nothing and are dropped —
+    an all-punctuation Q5 item can never spuriously match every candidate.
+    """
+    items = _q4_items((interview_answers or {}).get(INTERVIEW_Q5_ID))
+    return {slug for item in items if (slug := _slugify(item, fallback=""))}
+
+
+def q4_q5_contradictions(interview_answers: dict[str, str] | None) -> list[str]:
+    """Human-readable warnings for a clause type named in BOTH the Posture
+    interview's Q4 ("sacred_clauses" — non-negotiable) and Q5
+    ("flexible_clauses" — happy to concede) answers: a self-contradictory
+    interview (issue #105 reviewer gate).
+
+    Deliberately advisory, not a hard error or a behavior override — the
+    same SHOULD-warn, judgment-first philosophy as
+    ``posture.check_posture_floor_conflict`` (Marc Mandel, spec owner,
+    approved 2026-07-31 for the sibling Q4-authorship distinction; see this
+    module's top docstring). Both of Q4's and Q5's OWN, independent effects
+    still happen exactly as if this function didn't exist: Q4's item is
+    still promoted into ``floor.invariants``
+    (``posture.promote_interview_q4_invariants``) and Q5's item still
+    auto-rejects any matching reversal candidate
+    (:func:`propose_floor_candidates`) — this function only surfaces the
+    tension so the legal owner notices and resolves it (reword one of the
+    two answers, or simply accept the auto-rejected candidate anyway in
+    ``playbook.review.html`` — the existing accept/reject checklist already
+    lets a human override an auto-rejection either way).
+
+    Matching is EXACT normalized-slug equality (:func:`_slugify`), never
+    fuzzy/substring — the same discipline :func:`propose_floor_candidates`
+    itself uses for the Q5 rejection match.
+
+    Returns:
+        One message per Q4 item whose slug also appears among the Q5
+        items, in Q4-answer order. Empty when Q4 or Q5 was not answered, or
+        they share no item.
+    """
+    q4_items = _q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID))
+    q5_slugs = _q5_flexible_taxonomy_slugs(interview_answers)
+    if not q4_items or not q5_slugs:
+        return []
+
+    warnings: list[str] = []
+    for item in q4_items:
+        slug = _slugify(item, fallback="")
+        if slug and slug in q5_slugs:
+            warnings.append(
+                f'Posture interview names {item!r} in both Q4 ("{INTERVIEW_Q4_ID}", '
+                f'non-negotiable) and Q5 ("{INTERVIEW_Q5_ID}", happy to concede) — '
+                "contradictory answers. Q4's item is still promoted into "
+                "floor.invariants and Q5 still auto-rejects any matching reversal "
+                "candidate; resolve by editing one of the two answers."
+            )
+    return warnings
+
+
+# ---------------------------------------------------------------------------
 # Combined proposal (pure)
 # ---------------------------------------------------------------------------
 
@@ -537,15 +640,42 @@ def propose_floor_candidates(
     handles I/O, and only a human (or the curation CLI) ever promotes a
     candidate into the signed OPF Floor.
 
+    A freshly-derived REVERSAL candidate (never an interview_q4 one — those
+    carry no ``taxonomy_id`` at all, see :class:`FloorCandidate`) whose
+    ``taxonomy_id`` normalizes equal to a clause type named in the Q5
+    ("flexible_clauses") answer is pre-marked ``"decision": "rejected"``,
+    with an attributing ``"comment"`` (issue #105) — matched by the
+    ``taxonomy_id`` slug. EXACT normalized-slug equality only, never
+    substring/fuzzy — a Q5 item that merely shares a WORD with a taxonomy
+    label (e.g. "renewal" vs. "auto-renewal option") must never match. Spec
+    note (OPF-SPEC.md §3.7 rule 4): this is not the promotion rule 4 bars —
+    nothing is written to ``floor.invariants`` here, and the candidate stays
+    listed and flippable in the review HTML (``viewer._classify_floor_candidates``
+    recognizes the attributing comment and keeps the row's live accept/
+    reject controls instead of the inert "rejected" badge); the
+    auto-rejection's authority is the human-authored Q5 answer, symmetric
+    with Q4's direct-promotion authority (see this module's top docstring).
+    A candidate a human
+    reviewer already decided on a PRIOR run is not this function's concern
+    — see :func:`write_floor_candidates`'s ``prior_decisions`` carry-over,
+    which always overrides whatever this function marks.
+
     Args:
         observations:      Raw observation dicts (see
                            :func:`derive_reversal_candidates`).
-        interview_answers: See :func:`derive_interview_q4_candidates`.
+        interview_answers: See :func:`derive_interview_q4_candidates`. Also
+                           supplies Q5 ("flexible_clauses") for the
+                           auto-rejection above.
 
     Returns:
         ``{"candidates": [...]}`` — reversal-sourced candidates first (in
         first-seen group order), then interview_q4-sourced candidates (in
-        answer order), each assigned a stable ``"cand-NNN"`` id.
+        answer order), each assigned a stable ``"cand-NNN"`` id. Also
+        carries an additive ``"warnings"`` key (issue #105's Q4/Q5
+        contradiction messages, see :func:`q4_q5_contradictions`) — omitted
+        entirely, not written as ``[]``, when there's nothing to warn
+        about, so the locked empty-input shape (``{"candidates": []}``)
+        stays byte-identical to before this key existed.
     """
     all_candidates = derive_reversal_candidates(observations) + derive_interview_q4_candidates(
         interview_answers
@@ -561,7 +691,23 @@ def propose_floor_candidates(
         )
         for i, c in enumerate(all_candidates, start=1)
     ]
-    return {"candidates": [c.to_dict() for c in numbered]}
+    candidate_dicts = [c.to_dict() for c in numbered]
+
+    q5_slugs = _q5_flexible_taxonomy_slugs(interview_answers)
+    if q5_slugs:
+        for candidate, candidate_dict in zip(numbered, candidate_dicts, strict=True):
+            if candidate.source != "reversal" or not candidate.taxonomy_id:
+                continue
+            taxonomy_slug = _slugify(candidate.taxonomy_id, fallback="")
+            if taxonomy_slug in q5_slugs:
+                candidate_dict["decision"] = "rejected"
+                candidate_dict["comment"] = _Q5_REJECTION_COMMENT
+
+    result: dict[str, Any] = {"candidates": candidate_dicts}
+    warnings = q4_q5_contradictions(interview_answers)
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1433,6 +1579,22 @@ def resolve_floor_candidate_decisions(
                 candidate["decision"] = "rejected"
                 result.candidates_changed = True
 
+        # A candidate the Q5 ("flexible_clauses") auto-rejection already
+        # marked "rejected" (attributed via _Q5_REJECTION_COMMENT) can reach
+        # either branch above with its "decision" unchanged — an explicit
+        # human accept OR reject, agreeing or disagreeing with the
+        # recommendation. Either way that comment must be cleared: an
+        # explicit human decision is never attributed to the Q5 comment (see
+        # this function's docstring and write_floor_candidates), and without
+        # clearing it here candidates_changed would stay False when the
+        # decision value didn't change, so the file is never rewritten and
+        # an accepted/re-rejected candidate keeps rendering "Recommended
+        # reject" forever, with the reviewer never able to confirm it away
+        # (issue #105 review round 2 finding 3, generalized to accept).
+        if candidate.get("comment") == _Q5_REJECTION_COMMENT:
+            candidate.pop("comment", None)
+            result.candidates_changed = True
+
     result.invariants_changed = result.invariants != list(existing_invariants or [])
     return result
 
@@ -1471,17 +1633,35 @@ def write_floor_candidates(out_dir: Path) -> Path:
     accepted candidate is separately protected by its presence in
     ``floor.invariants``) is carried over from any prior
     ``floor.candidates.json`` already in *out_dir*, matched by
-    ``statement``: ids are reassigned positionally in derivation order on
-    every call (see :func:`propose_floor_candidates`), so a newly added or
-    removed candidate can shift every later id, but the statement text is
-    the stable identity a re-derived candidate is "the same" proposal by
-    (:func:`candidate_invariant_id` treats it exactly the same way).
-    Without this, re-running ``playbook floor propose`` would silently
-    resurrect every previously-rejected (or previously-accepted) candidate
-    as a fresh, undecided proposal (issue #90 review finding 4). A
-    candidate whose statement no longer recurs (e.g. its reversal evidence
-    disappeared) simply drops its stale decision along with itself — there
-    is nothing left to carry it to.
+    ``(statement, source)``: ids are reassigned positionally in derivation
+    order on every call (see :func:`propose_floor_candidates`), so a newly
+    added or removed candidate can shift every later id, but the statement
+    text is the stable identity a re-derived candidate is "the same"
+    proposal by (:func:`candidate_invariant_id` treats it exactly the same
+    way). ``source`` is part of the match key, not just ``statement``,
+    because an ``interview_q4`` candidate and a ``reversal`` candidate can
+    independently derive the identical statement text (both name the same
+    clause type) — matching on ``statement`` alone would let a Q5
+    auto-rejection recorded against the reversal candidate leak onto the
+    unrelated Q4 one on the next run (issue #105 review round 2 finding 1).
+    Without the carry-over at all, re-running ``playbook floor propose``
+    would silently resurrect every previously-rejected (or
+    previously-accepted) candidate as a fresh, undecided proposal (issue
+    #90 review finding 4). A candidate whose ``(statement, source)`` no
+    longer recurs (e.g. its reversal evidence disappeared) simply drops its
+    stale decision along with itself — there is nothing left to carry it
+    to.
+
+    A prior ``comment`` carries over the same way, alongside ``decision``
+    (issue #105) — this is how a PRIOR run's Q5 ("flexible_clauses")
+    auto-rejection attribution (:data:`_Q5_REJECTION_COMMENT`) survives a
+    re-run whose Q5 answer no longer names that taxonomy (so this run's
+    fresh derivation sets no ``comment`` of its own), and, symmetrically,
+    how a stale Q5 comment is DROPPED the moment a prior HUMAN decision
+    (which never carries a ``comment`` of its own — see
+    :func:`resolve_floor_candidate_decisions`) overrides ``decision`` away
+    from ``"rejected"``: a candidate a reviewer accepted must never keep
+    displaying "named as a willing concession".
 
     Args:
         out_dir: Output directory produced by ``playbook mine``/``project``.
@@ -1504,18 +1684,35 @@ def write_floor_candidates(out_dir: Path) -> Path:
     # its absence never has to be interpreted.
     result["unclassified_reversals_omitted"] = count_unclassified_reversals(observations)
 
-    prior_decisions: dict[str, str] = {
-        c["statement"]: c["decision"]
+    prior_by_statement: dict[tuple[str, str], dict[str, Any]] = {
+        (c["statement"], c["source"]): c
         for c in read_floor_candidates(out_dir)
         if isinstance(c, dict)
         and isinstance(c.get("statement"), str)
+        and isinstance(c.get("source"), str)
         and isinstance(c.get("decision"), str)
     }
-    if prior_decisions:
+    if prior_by_statement:
         for candidate in result["candidates"]:
-            decision = prior_decisions.get(candidate["statement"])
-            if decision is not None:
-                candidate["decision"] = decision
+            prior = prior_by_statement.get((candidate["statement"], candidate.get("source")))
+            if prior is None:
+                continue
+            candidate["decision"] = prior["decision"]
+            prior_comment = prior.get("comment")
+            # A carried-over comment is only ever the Q5 auto-rejection
+            # attribution (a HUMAN decision never carries one — see
+            # resolve_floor_candidate_decisions), so it must never survive
+            # onto a prior decision other than "rejected": a candidate a
+            # reviewer accepted must not keep displaying "named as a
+            # willing concession" (issue #105 review round 2 finding 2).
+            if (
+                prior["decision"] == "rejected"
+                and isinstance(prior_comment, str)
+                and prior_comment.strip()
+            ):
+                candidate["comment"] = prior_comment
+            else:
+                candidate.pop("comment", None)
 
     out_path = out_dir / "floor.candidates.json"
     tmp = out_path.with_suffix(".json.tmp")

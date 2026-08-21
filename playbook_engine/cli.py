@@ -2641,7 +2641,13 @@ def floor_propose_cmd(out_dir: Path) -> None:
 
     out_dir_resolved = out_dir.resolve()
     result_path = write_floor_candidates(out_dir_resolved)
-    candidates = json.loads(result_path.read_text(encoding="utf-8"))["candidates"]
+    written = json.loads(result_path.read_text(encoding="utf-8"))
+    candidates = written["candidates"]
+    # issue #105: a Q4/Q5 contradictory-interview warning (loud, non-blocking
+    # — see floor_candidates.q4_q5_contradictions) — printed regardless of
+    # whether there are any candidates at all.
+    for warning in written.get("warnings", []):
+        click.secho(f"WARN  {warning}", fg="yellow")
 
     if not candidates:
         click.secho(f"OK  {result_path} (0 candidates)", fg="green")

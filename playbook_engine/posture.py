@@ -78,11 +78,15 @@ class InterviewQuestion:
 
     q: str
     question: str
-    seeds_floor_candidates: bool = False
 
 
 # The canonical starter set (3-6 questions; a producer MAY prune or extend —
-# OPF §7). Q4 ("sacred_clauses") seeds Floor candidates; the rest shape the
+# OPF §7). Q4 ("sacred_clauses") seeds Floor candidates (promoted directly by
+# floor_candidates.promote_interview_q4_invariants) and Q5 ("flexible_clauses")
+# auto-rejects matching reversal-derived Floor candidates
+# (floor_candidates.propose_floor_candidates, issue #105) — both identified
+# by their local id constants (INTERVIEW_Q4_ID / INTERVIEW_Q5_ID) in
+# floor_candidates.py, not by any flag on this dataclass; the rest shape the
 # Posture prose directly.
 INTERVIEW_QUESTIONS: tuple[InterviewQuestion, ...] = (
     InterviewQuestion(
@@ -103,7 +107,6 @@ INTERVIEW_QUESTIONS: tuple[InterviewQuestion, ...] = (
     InterviewQuestion(
         "sacred_clauses",
         "Which clause types are non-negotiable regardless of deal value?",
-        seeds_floor_candidates=True,
     ),
     InterviewQuestion(
         "flexible_clauses",
