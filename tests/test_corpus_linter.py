@@ -473,7 +473,7 @@ def test_config_segmentation_llm_no_credentials_returns_error(
 ) -> None:
     """lint-corpus is the documented preflight tool (issue #131) — it must catch
     a missing ANTHROPIC_API_KEY when segmentation.llm is on, not leave that to
-    ``mine``/``compile``/``judge`` at run time."""
+    ``mine``/``judge`` at run time."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     corpus = tmp_path / "corpus"
     (corpus / "deal-alice").mkdir(parents=True)

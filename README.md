@@ -173,7 +173,7 @@ extraction stack is a property of how you installed, not a flag.
 | [`docs/prompts/create-playbook.md`](docs/prompts/create-playbook.md) | The launch prompt for the Claude Code skill path (`claude "$(cat …)"`) |
 | [`docs/PLAN-FIRST.md`](docs/PLAN-FIRST.md) | Running on a Claude plan vs an API key, stage by stage |
 | [`docs/CORPUS-LAYOUT.md`](docs/CORPUS-LAYOUT.md) | How to organize your input directory (and what to do if you can't) |
-| [`docs/QUICK-COMPILE.md`](docs/QUICK-COMPILE.md) | The no-LLM stub smoke run (one-shot `playbook compile`) |
+| [`docs/QUICK-COMPILE.md`](docs/QUICK-COMPILE.md) | The no-LLM stub smoke run (`playbook mine` → `playbook project`) |
 | [`docs/REAL-CORPUS-DERIVATION.md`](docs/REAL-CORPUS-DERIVATION.md) | Plan/execute discipline for a real (confidential) corpus run |
 | [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | The checkpoint-review loop for supervised derivations |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |

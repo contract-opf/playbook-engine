@@ -3,10 +3,10 @@
 Acceptance criteria:
   - The deterministic integration test exercises the non-LLM machinery
     end-to-end on a synthetic corpus:
-      compile --stop-after intermediates
+      compile_corpus(..., stop_after="intermediates")
       → review module emits a seeded flag
       → a hints.yaml is written
-      → re-run --no-cache clears the flag.
+      → re-running compile_corpus(..., no_cache=True) clears the flag.
   - Stub judges only; no network.
 
 SECURITY NOTE: All fixtures are programmatically constructed with synthetic

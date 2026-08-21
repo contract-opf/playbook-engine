@@ -470,7 +470,8 @@ def test_assemble_compiler_stub_watermark_true_when_observation_needs_review() -
     emits basis="needs_review", never "stub" (a judge protocol IS wired, it's
     just the stub default) — so the watermark must also fire on
     "needs_review" (and "judge_error"), not only the strict "stub" basis, or
-    a real default ``playbook compile`` run never watermarks its output."""
+    a real default ``playbook mine`` + ``playbook project`` run never
+    watermarks its output."""
     pb = _minimal_playbook(
         obs_list=[
             _obs("indemnification", basis="needs_review"),

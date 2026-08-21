@@ -23,7 +23,7 @@ from playbook_engine.floor_candidates import (
     write_floor_candidates,
 )
 from playbook_engine.inspection_report import build_inspection_report, write_inspection_report
-from playbook_engine.pipeline import PipelineError, compile_corpus, mine_corpus, project_playbook
+from playbook_engine.pipeline import PipelineError, mine_corpus, project_playbook
 from playbook_engine.playbook_assembler import AssemblyError, write_playbook
 from playbook_engine.posture import (
     INTERVIEW_QUESTIONS,
@@ -50,13 +50,13 @@ def _llm_segmentation_kwargs(
     *,
     stats: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Build the LLM-segmentation kwargs shared by ``mine``, ``compile``, and ``judge``.
+    """Build the LLM-segmentation kwargs shared by ``mine`` and ``judge``.
 
     LLM-first segmentation is config-gated (``segmentation.llm``) so existing
     configs/fixtures with no ``segmentation:`` section are byte-for-byte
     unchanged — the deterministic segmenter remains the default.  Every command
     that segments a corpus MUST build these kwargs the same way: if ``mine``
-    segments via the LLM but ``compile``/``judge`` fall back to the deterministic
+    segments via the LLM but ``judge`` falls back to the deterministic
     segmenter, their clause keys diverge and the judge drain loop can never
     converge against the LLM-segmented observation store.
 
@@ -80,7 +80,7 @@ def _llm_segmentation_kwargs(
                ``judge --plan`` (issue #134) so the plan output can report a
                real segmentation-cost line instead of omitting the largest
                spend in a live run entirely. ``None`` (the default, and what
-               ``mine``/``compile`` always pass) disables collection.
+               ``mine`` always passes) disables collection.
 
     Returns an empty dict when ``segmentation.llm`` is off (deterministic path)
     — ``stats`` is left untouched (stays at caller-supplied zero) in that case.
@@ -318,11 +318,11 @@ def _echo_segmentation_cost_line(stats: dict[str, int], echo: Callable[[str], No
 def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[str, Any]:
     """Wire store-backed judges when a verdict store exists at ``out_dir/judge/verdicts.jsonl``.
 
-    Shared by ``mine`` and ``compile`` (issue #102) — before this, ``compile``
-    never checked for a verdict store at all, so it always ran the stub
-    judges even over an ``out_dir`` where a ``playbook judge`` /
-    ``judge-apply`` round had already populated real verdicts, silently
-    overwriting the judged ``observations.jsonl`` with stub-mode sentinels.
+    Used by ``mine`` (issue #102) — before this, ``mine`` never checked for
+    a verdict store at all, so it always ran the stub judges even over an
+    ``out_dir`` where a ``playbook judge`` / ``judge-apply`` round had
+    already populated real verdicts, silently overwriting the judged
+    ``observations.jsonl`` with stub-mode sentinels.
 
     The verdict-cache layer is bypassed (``no_cache=True``) to prevent stale
     sentinels cached under the stub judges from persisting across rounds —
@@ -382,7 +382,7 @@ def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
     being silently blind (issue #81; previously this function filtered to
     just ``"docling"``/``"legacy"`` and returned early with nothing to show).
     Mirrors the ``segmentation: ...`` echo above so the docling-vs-legacy
-    choice is a first-class part of ``mine``/``compile`` output rather than
+    choice is a first-class part of ``mine`` output rather than
     only a ``logging.info`` line suppressed by default Python logging config
     (issue #129) — a host run without docling silently extracting scanned
     PDFs with no OCR was otherwise invisible to the operator.
@@ -970,162 +970,6 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
     tmp.replace(dest)
 
 
-@cli.command(name="compile")
-@click.argument("corpus_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option(
-    "--config", "config_path", type=click.Path(exists=True, path_type=Path), required=True
-)
-@click.option(
-    "--out",
-    "out_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output directory (default: <corpus_dir>/../out).",
-)
-@click.option(
-    "--no-cache",
-    "no_cache",
-    is_flag=True,
-    default=False,
-    help=(
-        "Disable the stage cache and force a full recompute — including "
-        "re-extraction (docling/pdfplumber/python-docx/pandoc), even if "
-        "extraction_cache.jsonl is warm (issue #78)."
-    ),
-)
-@click.option(
-    "--stop-after",
-    "stop_after",
-    type=click.Choice(["intermediates"]),
-    default=None,
-    help=(
-        "Stop the pipeline after the named checkpoint and skip later stages. "
-        "'intermediates' stops after L1–L4 (scope.json, observations.jsonl, "
-        "corpus_manifest.json, trail/) — playbook.opf.json is NOT written."
-    ),
-)
-@click.option(
-    "--entity-registry",
-    "entity_registry_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help=(
-        "Path to the born-safe entity registry (alias->real-name map). Defaults "
-        "to ~/.cache/playbook-engine/entity_registry.json. Point it into your "
-        "gitignored output dir to keep all sensitive real-name data in one place. "
-        "Only relevant when provenance.known_entities is set."
-    ),
-)
-def compile_playbook(
-    corpus_dir: Path,
-    config_path: Path,
-    out_path: Path | None,
-    no_cache: bool,
-    stop_after: str | None,
-    entity_registry_path: Path | None,
-) -> None:
-    """Compile CORPUS_DIR into a playbook.opf.json.
-
-    Runs the full L1→L5 pipeline: ingest, scope gate, structure, classify,
-    mine deltas, and compile.  LLM stages use conservative stub judges when
-    no real LLM is configured — unless OUT_DIR already has a verdict store at
-    judge/verdicts.jsonl (from a prior ``playbook judge`` + ``judge-apply``
-    round against this out dir), in which case the same store-backed judges
-    ``mine`` uses are wired in instead, so a real judgment round is never
-    silently overwritten by a stub recompute.
-
-    Pass --no-cache to disable the content-addressed stage cache and force a
-    full recompute even if intermediates already exist — this also forces
-    re-extraction (docling/pdfplumber/python-docx/pandoc) even if
-    extraction_cache.jsonl already has a warm entry for a version's current
-    content, so a suspect extraction can be recomputed rather than silently
-    replayed (issue #78). Reads are bypassed; extraction_cache.jsonl is still
-    refreshed with the new result, so a subsequent run without --no-cache
-    stays warm.
-
-    Pass --stop-after intermediates to stop after the L1–L4 intermediates are
-    written, without proceeding to L5 playbook compilation.
-    """
-    try:
-        cfg = load_config(config_path)
-    except ConfigError as exc:
-        click.secho(f"Config error: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    try:
-        taxonomy = load_taxonomy(cfg.taxonomy_path)
-    except TaxonomyError as exc:
-        click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    out_dir = (out_path or corpus_dir.parent / "out").resolve()
-
-    click.echo(f"corpus : {corpus_dir}")
-    click.echo(f"config : {config_path}")
-    click.echo(f"out    : {out_dir}")
-
-    # Segment the same way ``mine``/``judge`` do — otherwise a config with
-    # ``segmentation.llm`` on would compile a deterministically-segmented
-    # playbook that doesn't line up with a mined observation store.
-    try:
-        seg_kwargs = _llm_segmentation_kwargs(cfg, taxonomy, out_dir, click.echo)
-    except ConfigError as exc:
-        click.secho(f"Config error: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    # If a verdict store exists at out_dir/judge/verdicts.jsonl (populated by
-    # ``playbook judge`` + ``judge-apply``), wire in the same store-backed
-    # judges ``mine`` uses — otherwise ``compile`` would run this out_dir's
-    # documents back through the stub judges and silently overwrite the
-    # already-judged observations.jsonl with fabricated stub verdicts
-    # (issue #102). ``_verdict_store_kwargs`` forces no_cache=True when a
-    # store is wired, which deliberately overrides the --no-cache flag's
-    # default (``no_cache``) below.
-    #
-    # ``refresh_extraction`` is sourced directly from the raw ``no_cache``
-    # flag (the operator's literal --no-cache), NOT from whatever
-    # ``compile_kwargs["no_cache"]`` ends up as after the merges below
-    # (issue #78). This matters because ``verdict_kwargs`` can force
-    # ``no_cache=True`` even when the operator did not pass --no-cache (a
-    # verdict store exists) — that override exists to bypass stale L1-L4
-    # stage-cache sentinels, not to declare the extraction suspect, and must
-    # not also force every compile round after a judge round to re-extract/
-    # re-OCR the whole corpus (the exact regression this issue's fix must
-    # avoid — see extraction.py's ExtractionCache docstring).
-    verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
-    compile_kwargs: dict[str, Any] = {
-        "no_cache": no_cache,
-        "refresh_extraction": no_cache,
-        **seg_kwargs,
-        **verdict_kwargs,
-    }
-
-    try:
-        result = compile_corpus(
-            corpus_dir=corpus_dir.resolve(),
-            config=cfg,
-            taxonomy=taxonomy,
-            out_dir=out_dir,
-            stop_after=stop_after,
-            progress=click.echo,
-            entity_registry_path=(entity_registry_path.resolve() if entity_registry_path else None),
-            **compile_kwargs,
-        )
-    except (PipelineError, AssemblyError) as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    _echo_extractor_summary(out_dir, click.echo)
-
-    if stop_after is not None:
-        click.secho(
-            f"OK  stopped after {result['stopped_after']} (no playbook compiled)",
-            fg="green",
-        )
-    else:
-        click.secho(f"OK  {out_dir / 'playbook.opf.json'}", fg="green")
-
-
 @cli.command(name="mine")
 @click.argument("corpus_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1191,8 +1035,7 @@ def mine_cmd(
     stays warm.
 
     Does NOT write playbook.opf.json.  Run ``playbook project`` afterwards
-    to compile the playbook from the store, or use ``playbook compile`` for
-    the combined end-to-end flow.
+    to compile the playbook from the store.
     """
     try:
         cfg = load_config(config_path)
@@ -1212,7 +1055,7 @@ def mine_cmd(
     click.echo(f"config : {config_path}")
     click.echo(f"out    : {out_dir}")
 
-    # Segment the same way ``compile``/``judge`` do.
+    # Segment the same way ``judge`` does.
     try:
         seg_kwargs = _llm_segmentation_kwargs(cfg, taxonomy, out_dir, click.echo)
     except ConfigError as exc:
@@ -1324,7 +1167,7 @@ def lint_corpus_cmd(corpus_dir: Path, config_path: Path | None) -> None:
     """Check CORPUS_DIR layout before a compile run.
 
     Reports errors (blocking) and warnings (advisory) so you can fix the
-    layout before running ``playbook compile``.  Exits 0 when no errors are
+    layout before running ``playbook mine``.  Exits 0 when no errors are
     found, non-zero otherwise.
     """
     report = lint_corpus(corpus_dir, config_path=config_path)
@@ -1365,7 +1208,7 @@ def lint_corpus_cmd(corpus_dir: Path, config_path: Path | None) -> None:
 def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     """Render trail/ and observations.jsonl as a human-readable Markdown report.
 
-    OUT_DIR is the output directory produced by ``playbook compile``.
+    OUT_DIR is the output directory produced by ``playbook mine``.
 
     Lets a lawyer verify the engine's structural inferences — version ordering,
     signed-copy identification, provenance, and per-clause deviations — before
@@ -1642,7 +1485,7 @@ def judge_cmd(
     # generate verdict keys that never match the LLM-segmented observation store
     # and the drain loop cannot converge.  Keyed off the real out_dir so the
     # segmentation AND extraction caches (issue #132) are shared with plan
-    # mode and later ``mine``/``compile`` runs — even though --plan mode below
+    # mode and later ``mine`` runs — even though --plan mode below
     # still writes observations.jsonl/corpus_manifest.json/etc. into an
     # ephemeral TemporaryDirectory (it must never touch the real out_dir's
     # observation store — see its own docstring), the *caches* it reads
@@ -2303,7 +2146,7 @@ def induce_taxonomy_cmd(
     Ingests all agreements in CORPUS_DIR (one sub-directory per agreement,
     using the highest-versioned file per agreement), clusters their clause headings,
     and emits a taxonomy YAML in OPF spec/taxonomy/ format ready for attorney
-    review.  The output is loadable by ``playbook compile --config``.
+    review.  The output is loadable by ``playbook mine --config``.
 
     Clause headings are mapped to CUAD v1 categories automatically (built-in).
     Unmapped headings that appear in enough documents receive status: custom.
@@ -2549,7 +2392,8 @@ def view_render_cmd(out_dir: Path, out_file: Path | None, alias_map_file: Path |
     The HTML file embeds the full playbook JSON, requires no network access,
     and contains per-clause comment boxes plus an Export feedback button.
 
-    OUT_DIR is the output directory produced by ``playbook compile``.
+    OUT_DIR is the output directory produced by ``playbook mine`` followed
+    by ``playbook project``.
     """
     from playbook_engine.viewer import load_alias_map, render_review_html  # noqa: PLC0415
 
@@ -2572,78 +2416,6 @@ def view_render_cmd(out_dir: Path, out_file: Path | None, alias_map_file: Path |
     click.secho(f"OK  {dest}", fg="green")
     if alias_map:
         click.secho(f"  aliases resolved to real names using {alias_map_file}", fg="cyan")
-
-
-@view_group.command(name="document")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option(
-    "--out",
-    "out_file",
-    type=click.Path(path_type=Path),
-    default=None,
-    help=(
-        "Write the HTML to this file (default: <out_dir>/playbook.opf.html). "
-        "Also prints the path on success."
-    ),
-)
-@click.option(
-    "--alias-map",
-    "alias_map_file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "REJECTED — the bundle embeds the canonical pseudonymized JSON and "
-        "takes no alias map. Use 'view render --alias-map' for the "
-        "internal-eyes annotation surface."
-    ),
-)
-def view_document_cmd(out_dir: Path, out_file: Path | None, alias_map_file: Path | None) -> None:
-    """DEPRECATED alias of 'view bundle' — writes OUT_DIR/playbook.opf.html.
-
-    The readable document is no longer a separate artifact: it ships inside
-    the single-file bundle, which is the same document plus a digest summary
-    and the embedded canonical OPF JSON. This alias is kept for one release
-    and no longer emits playbook.document.html.
-
-    Rejects --alias-map by design: the bundle embeds the canonical
-    (pseudonymized) JSON, so resolving real names would both leak them into
-    the shareable artifact and break its content-hash verification. For an
-    internal-eyes copy with real names, use 'view render --alias-map'.
-    """
-    from playbook_engine.document_renderer import render_bundle_html  # noqa: PLC0415
-
-    click.secho(
-        "NOTE: 'view document' is deprecated — use 'view bundle'. The readable "
-        "document now ships inside the single-file bundle (playbook.opf.html); "
-        "playbook.document.html is no longer written.",
-        fg="yellow",
-        err=True,
-    )
-
-    if alias_map_file is not None:
-        click.secho(
-            "ERROR: 'view document' does not accept --alias-map. The bundle "
-            "embeds the canonical pseudonymized OPF JSON; resolving real names "
-            "into it would leak them into the shareable artifact and break "
-            "identity.content_hash verification.\n"
-            "  For internal-eyes review with real names, use:\n"
-            "    playbook view render OUT_DIR --alias-map ALIAS_MAP  "
-            "(writes playbook.review.html)",
-            fg="red",
-            err=True,
-        )
-        raise SystemExit(2)
-
-    resolved = out_dir.resolve()
-    dest = out_file.resolve() if out_file else resolved / "playbook.opf.html"
-
-    try:
-        render_bundle_html(resolved, out_file=dest)
-    except FileNotFoundError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    click.secho(f"OK  {dest}", fg="green")
 
 
 @view_group.command(name="bundle")
@@ -2702,7 +2474,8 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
     honor is reported as not applied rather than counted toward a false
     "OK" (issue #138).
 
-    OUT_DIR is the output directory produced by ``playbook compile``.
+    OUT_DIR is the output directory produced by ``playbook mine`` followed
+    by ``playbook project``.
     FEEDBACK_FILE is the feedback.json produced by the HTML viewer.
     """
     from playbook_engine.viewer import apply_feedback  # noqa: PLC0415
@@ -2796,8 +2569,8 @@ def posture_interview_cmd(out_dir: Path, answers_file: Path | None) -> None:
     concept a Floor invariant protects — a possible Posture-vs-Floor conflict
     for a human to review.
 
-    OUT_DIR must already contain a playbook.opf.json (from 'playbook
-    compile'/'project').
+    OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
+    followed by 'playbook project').
     """
     import datetime  # noqa: PLC0415
     import json  # noqa: PLC0415
@@ -2939,14 +2712,14 @@ def floor_sign_cmd(
     refused — this command never overwrites an existing invariant; edit or
     remove the conflicting one first, or choose a different --id.
 
-    OUT_DIR must already contain a playbook.opf.json (from 'playbook
-    compile'/'project').
+    OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
+    followed by 'playbook project').
     """
     out_dir_resolved = out_dir.resolve()
     opf_path = out_dir_resolved / "playbook.opf.json"
     if not opf_path.exists():
         click.secho(
-            f"ERROR: {opf_path} not found — run 'playbook compile'/'project' first.",
+            f"ERROR: {opf_path} not found — run 'playbook mine' and 'playbook project' first.",
             fg="red",
             err=True,
         )
@@ -3076,8 +2849,8 @@ def curate_cmd(
     Give instructions via repeated ``--command``, a ``--file`` of one
     instruction per line, or both.
 
-    OUT_DIR must already contain a playbook.opf.json (from 'playbook
-    compile'/'project').
+    OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
+    followed by 'playbook project').
     """
     from playbook_engine.chat_curate import apply_curate_commands  # noqa: PLC0415
 

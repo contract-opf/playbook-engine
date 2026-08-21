@@ -78,15 +78,20 @@ Fix every **ERR** item before proceeding. **WARN** items are advisory.
 
 ## Step 2 — Compile the playbook
 
-`playbook compile` is the one-shot convenience wrapper — `mine` + `project`
-in a single command, stub judges throughout. The judged derivation path the
-packaged skill drives runs the stages separately (`mine` → `judge` /
-`judge-apply` → `project`); see [PLAN-FIRST.md](PLAN-FIRST.md).
+Two commands, run in sequence — `mine` (L1–L4: ingest, structure, classify,
+assess) then `project` (L5: roll the observation store up into a validated
+playbook) — stub judges throughout. The judged derivation path the packaged
+skill drives runs the same two stages with a judgment round in between
+(`mine` → `judge` / `judge-apply` → `project`); see
+[PLAN-FIRST.md](PLAN-FIRST.md).
 
 ```bash
-playbook compile ./corpus \
+playbook mine ./corpus \
   --config ./playbook.config.yaml \
   --out ./out
+
+playbook project ./out \
+  --config ./playbook.config.yaml
 ```
 
 This runs the full pipeline. Progress is printed to the console. When it finishes:
@@ -137,7 +142,7 @@ order:
   - v3-fully-executed.pdf
 ```
 
-Then re-run `playbook compile --no-cache` to pick up the hints. Note: `--no-cache` also forces a full re-extraction (docling/pdfplumber/python-docx/pandoc) of the corpus, even if `extraction_cache.jsonl` is already warm — it is not a cheap flag to reach for routinely.
+Then re-run `playbook mine --no-cache` followed by `playbook project` to pick up the hints. Note: `--no-cache` also forces a full re-extraction (docling/pdfplumber/python-docx/pandoc) of the corpus, even if `extraction_cache.jsonl` is already warm — it is not a cheap flag to reach for routinely.
 
 ---
 
@@ -145,10 +150,12 @@ Then re-run `playbook compile --no-cache` to pick up the hints. Note: `--no-cach
 
 ```bash
 # Default: resumes from saved observations (fast)
-playbook compile ./corpus --config ./playbook.config.yaml --out ./out
+playbook mine ./corpus --config ./playbook.config.yaml --out ./out
+playbook project ./out --config ./playbook.config.yaml
 
 # Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if extraction_cache.jsonl is warm
-playbook compile ./corpus --config ./playbook.config.yaml --out ./out --no-cache
+playbook mine ./corpus --config ./playbook.config.yaml --out ./out --no-cache
+playbook project ./out --config ./playbook.config.yaml
 ```
 
 The engine auto-detects corpus changes (new files, modified files) and forces a full re-run even without `--no-cache`.

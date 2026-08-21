@@ -1,4 +1,4 @@
-"""Tests for the CLI entry point, including the ``compile`` command.
+"""Tests for the CLI entry point, including the ``mine`` and ``project`` commands.
 
 SECURITY NOTE: All corpus fixtures are programmatically constructed with
 synthetic text.  No real agreement files are committed or referenced.
@@ -77,7 +77,7 @@ def test_validate_blocking_error_goes_to_stderr_not_stdout(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# Compile command fixture helpers
+# mine/project fixture helpers
 # ---------------------------------------------------------------------------
 
 _RTF_PROLOGUE = (
@@ -162,269 +162,6 @@ def _make_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
 
     out_dir = tmp_path / "out"
     return corpus_dir, config_path, out_dir
-
-
-# ---------------------------------------------------------------------------
-# Compile command: acceptance tests
-# ---------------------------------------------------------------------------
-
-
-def test_compile_produces_schema_valid_playbook(tmp_path: Path) -> None:
-    """Acceptance: compile produces a schema-valid OPF playbook.opf.json."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    assert result.exit_code == 0, f"compile failed:\n{result.output}"
-
-    playbook_path = out_dir / "playbook.opf.json"
-    assert playbook_path.exists(), "playbook.opf.json not written"
-
-    playbook = json.loads(playbook_path.read_text())
-    validation = validate_document(playbook)
-    blocking = [str(e) for e in validation.errors if e.blocking]
-    assert blocking == [], f"Schema validation errors: {blocking}"
-
-
-def test_compile_writes_all_intermediates(tmp_path: Path) -> None:
-    """All expected intermediate files are written."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-
-    assert (out_dir / "observations.jsonl").exists()
-    assert (out_dir / "scope.json").exists()
-    assert (out_dir / "corpus_manifest.json").exists()
-    assert (out_dir / "trail" / "deal-001.json").exists()
-    assert (out_dir / "trail" / "deal-002.json").exists()
-    assert (out_dir / "normalized" / "deal-001" / "v1.clauses.json").exists()
-    assert (out_dir / "normalized" / "deal-001" / "v2.clauses.json").exists()
-    assert (out_dir / "normalized" / "deal-002" / "v1.clauses.json").exists()
-
-
-def test_compile_playbook_opf_version(tmp_path: Path) -> None:
-    """Compiled playbook has opf_version='0.2'."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert pb["opf_version"] == "0.3"
-
-
-def test_compile_corpus_stats_correct(tmp_path: Path) -> None:
-    """Corpus stats reflect the fixture corpus (2 documents, 3 version files)."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    stats = pb["corpus"]["stats"]
-    assert stats["documents_total"] == 2
-    assert stats["documents_in_scope"] == 2
-    assert stats["versions_total"] == 3  # deal-001 has 2, deal-002 has 1
-
-
-def test_compile_exit_code_zero_on_success(tmp_path: Path) -> None:
-    """CLI exits 0 on successful compile."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    assert result.exit_code == 0
-
-
-def test_compile_cache_hit_produces_identical_content(tmp_path: Path) -> None:
-    """Second run with the content-addressed cache produces byte-identical observations."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    # First run — primes the cache.
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    first_content = (out_dir / "observations.jsonl").read_text(encoding="utf-8")
-
-    # Second run — should use the cache and produce identical observations.
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    second_content = (out_dir / "observations.jsonl").read_text(encoding="utf-8")
-    assert second_content == first_content, (
-        "observations.jsonl content must be identical on a cache-hit second run"
-    )
-
-
-def test_compile_no_cache_flag_reruns_pipeline(tmp_path: Path) -> None:
-    """--no-cache disables the stage cache and forces a full recompute."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    first_content = (out_dir / "observations.jsonl").read_text(encoding="utf-8")
-
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-            "--no-cache",
-        ],
-    )
-    assert result.exit_code == 0, f"compile --no-cache exited non-zero: {result.output}"
-    second_content = (out_dir / "observations.jsonl").read_text(encoding="utf-8")
-    # Content must be identical (same corpus, same config → deterministic output).
-    assert second_content == first_content
-
-
-def test_compile_missing_config_exits_nonzero(tmp_path: Path) -> None:
-    """Missing config file causes CLI to exit non-zero."""
-    corpus_dir = tmp_path / "corpus"
-    corpus_dir.mkdir()
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(tmp_path / "nonexistent.yaml"),
-        ],
-    )
-    assert result.exit_code != 0
-
-
-def test_compile_scope_json_contains_both_docs(tmp_path: Path) -> None:
-    """scope.json records a decision for every corpus document."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    scope = json.loads((out_dir / "scope.json").read_text())
-    doc_ids = {d["document_id"] for d in scope["documents"]}
-    assert "deal-001" in doc_ids
-    assert "deal-002" in doc_ids
-
-
-def test_compile_wires_scope_judge_when_verdict_store_exists(tmp_path: Path) -> None:
-    """Issue #102: `compile` must wire store-backed judges — like `mine` does
-    — when OUT_DIR already has a verdict store, never silently recompute with
-    the stub judges and overwrite already-judged observations.jsonl.
-
-    With an empty store, every document is a miss: the store-backed scope
-    judge queues it and raises, which ``scope_gate()`` converts into a
-    retained ``basis="judge_error"`` decision at confidence 0.0. This must
-    NOT be the stub's ``basis="judge"``/confidence 0.5/"stub mode" rationale
-    — before this fix, `compile` never even checked for a verdict store, so
-    it always ran the stub judges regardless of OUT_DIR's contents.
-    """
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    judge_dir = out_dir / "judge"
-    judge_dir.mkdir(parents=True)
-    (judge_dir / "verdicts.jsonl").write_text("", encoding="utf-8")
-
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
-    )
-    assert result.exit_code == 0, f"compile failed:\n{result.output}"
-    assert "store-backed judges active" in result.output
-
-    scope_log = json.loads((out_dir / "scope.json").read_text(encoding="utf-8"))
-    documents = scope_log["documents"]
-    assert documents, "no documents recorded in scope.json"
-    for doc in documents:
-        assert doc["basis"] != "judge" or doc["scope_confidence"] != 0.5, (
-            f"document {doc['document_id']} was auto-accepted by the stub scope judge: {doc}"
-        )
-        assert "stub mode" not in doc["scope_rationale"]
-
-    pending_path = judge_dir / "pending.jsonl"
-    assert pending_path.exists(), "unstored documents must be queued for scope review"
 
 
 # ---------------------------------------------------------------------------
@@ -760,118 +497,55 @@ def test_project_missing_store_exits_nonzero(tmp_path: Path) -> None:
     assert "observations.jsonl" in result.output or "not found" in result.output.lower()
 
 
-def test_project_output_matches_compile(tmp_path: Path) -> None:
-    """mine then project produces an identical corpus stats section as compile."""
-    corpus_dir, config_path, out_dir_compile = _make_corpus(tmp_path)
-    out_dir_split = tmp_path / "out_split"
+def test_project_corpus_stats_correct(tmp_path: Path) -> None:
+    """Corpus stats reflect the fixture corpus (2 documents, 3 version files)."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
-
-    # compile path
     runner.invoke(
         cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir_compile)],
-    )
-
-    # mine + project path
-    runner.invoke(
-        cli,
-        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir_split)],
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
     )
     runner.invoke(
         cli,
-        ["project", str(out_dir_split), "--config", str(config_path)],
+        ["project", str(out_dir), "--config", str(config_path)],
     )
-
-    pb_compile = json.loads((out_dir_compile / "playbook.opf.json").read_text())
-    pb_split = json.loads((out_dir_split / "playbook.opf.json").read_text())
-
-    assert pb_compile["corpus"]["stats"] == pb_split["corpus"]["stats"]
-
-
-# ---------------------------------------------------------------------------
-# compile --stop-after intermediates (issue #55)
-# ---------------------------------------------------------------------------
+    pb = json.loads((out_dir / "playbook.opf.json").read_text())
+    stats = pb["corpus"]["stats"]
+    assert stats["documents_total"] == 2
+    assert stats["documents_in_scope"] == 2
+    assert stats["versions_total"] == 3  # deal-001 has 2, deal-002 has 1
 
 
-def test_compile_stop_after_intermediates_writes_intermediates(tmp_path: Path) -> None:
-    """AC: --stop-after intermediates writes scope.json, observations.jsonl,
-    corpus_manifest.json and trail/ but NOT playbook.opf.json."""
+def test_project_playbook_opf_version(tmp_path: Path) -> None:
+    """Projected playbook has opf_version='0.3'."""
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(
+    runner.invoke(
         cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-            "--stop-after",
-            "intermediates",
-        ],
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
     )
-    assert result.exit_code == 0, f"compile --stop-after intermediates failed:\n{result.output}"
-
-    # Intermediates must be present.
-    assert (out_dir / "scope.json").exists(), "scope.json not written"
-    assert (out_dir / "observations.jsonl").exists(), "observations.jsonl not written"
-    assert (out_dir / "corpus_manifest.json").exists(), "corpus_manifest.json not written"
-    assert (out_dir / "trail" / "deal-001.json").exists(), "trail/deal-001.json not written"
-    assert (out_dir / "trail" / "deal-002.json").exists(), "trail/deal-002.json not written"
-
-    # Playbook must NOT be written.
-    assert not (out_dir / "playbook.opf.json").exists(), (
-        "playbook.opf.json must NOT be written with --stop-after intermediates"
+    runner.invoke(
+        cli,
+        ["project", str(out_dir), "--config", str(config_path)],
     )
+    pb = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert pb["opf_version"] == "0.3"
 
 
-def test_compile_stop_after_intermediates_prints_checkpoint(tmp_path: Path) -> None:
-    """AC: --stop-after intermediates prints the checkpoint reached, not the playbook path."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+def test_compile_is_unknown_command() -> None:
+    """``playbook compile`` was removed (issue #109); it must not resolve."""
     runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-            "--stop-after",
-            "intermediates",
-        ],
-    )
-    assert result.exit_code == 0, f"compile --stop-after intermediates failed:\n{result.output}"
-    assert "stopped after intermediates" in result.output, (
-        f"Expected 'stopped after intermediates' in output, got:\n{result.output}"
-    )
-    assert "playbook.opf.json" not in result.output, (
-        "Output must not mention playbook.opf.json when stopped early"
-    )
+    result = runner.invoke(cli, ["compile"])
+    assert result.exit_code != 0
+    assert "No such command" in result.output
 
 
-def test_compile_full_run_unaffected_by_stop_after_none(tmp_path: Path) -> None:
-    """A full run (no --stop-after) is unchanged: writes playbook.opf.json and prints OK."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+def test_view_document_is_unknown_command() -> None:
+    """``playbook view document`` was removed (issue #109); it must not resolve."""
     runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        [
-            "compile",
-            str(corpus_dir),
-            "--config",
-            str(config_path),
-            "--out",
-            str(out_dir),
-        ],
-    )
-    assert result.exit_code == 0, f"full compile failed:\n{result.output}"
-    assert (out_dir / "playbook.opf.json").exists(), "playbook.opf.json not written"
-    assert "playbook.opf.json" in result.output, (
-        "Full run output must contain playbook.opf.json path"
-    )
+    result = runner.invoke(cli, ["view", "document"])
+    assert result.exit_code != 0
+    assert "No such command" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1121,8 +795,7 @@ def _fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> type[_RecordingAnthropic
     Also sets a dummy ``ANTHROPIC_API_KEY`` (issue #131's credential preflight
     now runs before ``_llm_segmentation_kwargs`` builds these kwargs at all —
     every test that exercises the LLM path needs this set or ``mine``/
-    ``compile``/``judge`` would exit 1 before ever reaching the mocked
-    client)."""
+    ``judge`` would exit 1 before ever reaching the mocked client)."""
     import anthropic
 
     _RecordingAnthropicClient.instances = []
@@ -1159,20 +832,6 @@ def test_mine_preflight_missing_api_key(tmp_path: Path, monkeypatch: pytest.Monk
     assert not (out_dir / "observations.jsonl").exists(), (
         "the preflight must fail before mine_corpus ever runs, so no store is written"
     )
-
-
-def test_compile_preflight_missing_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Same preflight, wired the same way, for ``compile``."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    corpus_dir, config_path, out_dir = _make_llm_corpus(tmp_path, segmentation={"llm": True})
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
-    )
-    assert result.exit_code == 1
-    assert "Traceback" not in result.output
-    assert "ANTHROPIC_API_KEY" in result.output
 
 
 def test_judge_preflight_missing_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1261,26 +920,6 @@ def test_mine_preflight_docling_declared_but_unavailable(
     assert _fake_anthropic.instances == [], (
         "the docling preflight must fail before any anthropic client is constructed"
     )
-
-
-def test_compile_preflight_docling_declared_but_unavailable(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _fake_anthropic: type[_RecordingAnthropicClient],
-) -> None:
-    """Same preflight, wired the same way, for ``compile``."""
-    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
-    corpus_dir, config_path, out_dir = _make_llm_corpus(
-        tmp_path, segmentation={"llm": True}, extraction={"extractor": "docling"}
-    )
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
-    )
-    assert result.exit_code == 1
-    assert "Traceback" not in result.output
-    assert "docling" in result.output
 
 
 def test_judge_preflight_docling_declared_but_unavailable(
@@ -1723,47 +1362,12 @@ def test_mine_segmentation_llm_false_is_unaffected(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ``compile`` and ``judge`` must segment the SAME way ``mine`` does when
-# ``segmentation.llm`` is on. If they fell back to the deterministic segmenter,
-# a compiled playbook (or the judge drain loop's verdict keys) would never line
-# up with the LLM-segmented observation store and the loop could not converge.
-# Proven the same way as the mine tests: the (mocked) anthropic client is
-# constructed only on the LLM path.
+# ``judge`` must segment the SAME way ``mine`` does when ``segmentation.llm``
+# is on. If it fell back to the deterministic segmenter, the judge drain
+# loop's verdict keys would never line up with the LLM-segmented observation
+# store and the loop could not converge. Proven the same way as the mine
+# tests: the (mocked) anthropic client is constructed only on the LLM path.
 # ---------------------------------------------------------------------------
-
-
-def test_compile_segmentation_llm_true_invokes_anthropic_client(
-    tmp_path: Path, _fake_anthropic: type[_RecordingAnthropicClient]
-) -> None:
-    """``segmentation: {llm: true}`` must drive ``compile`` through the LLM
-    segmenter, not the deterministic path (convergence fix)."""
-    corpus_dir, config_path, out_dir = _make_llm_corpus(tmp_path, segmentation={"llm": True})
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
-    )
-    assert result.exit_code == 0, f"compile failed:\n{result.output}"
-    assert "segmentation: llm" in result.output
-    assert len(_fake_anthropic.instances) >= 1, (
-        "compile must construct anthropic.Anthropic on the segmentation.llm path"
-    )
-
-
-def test_compile_without_segmentation_block_never_touches_anthropic(
-    tmp_path: Path, _fake_anthropic: type[_RecordingAnthropicClient]
-) -> None:
-    """Regression: no ``segmentation:`` block -> compile stays deterministic."""
-    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(
-        cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
-    )
-    assert result.exit_code == 0, f"compile failed:\n{result.output}"
-    assert _fake_anthropic.instances == [], (
-        "anthropic.Anthropic must not be constructed when segmentation.llm is absent"
-    )
 
 
 def test_judge_segmentation_llm_true_invokes_anthropic_client(

@@ -486,7 +486,7 @@ def apply_posture_interview(
 
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` (produced
-                       by ``playbook compile``/``project``). Also the
+                       by ``playbook mine``/``project``). Also the
                        directory named in a sentence-shaped item's
                        ``playbook floor sign`` warning, above.
         answers:       Interview answers — see ``generate_posture()``.
@@ -512,7 +512,9 @@ def apply_posture_interview(
     """
     opf_path = out_dir / "playbook.opf.json"
     if not opf_path.exists():
-        raise FileNotFoundError(f"{opf_path} not found — run 'playbook compile'/'project' first.")
+        raise FileNotFoundError(
+            f"{opf_path} not found — run 'playbook mine' and 'playbook project' first."
+        )
     doc = load_opf_file(opf_path)
 
     existing_posture = doc.get("posture") or {}

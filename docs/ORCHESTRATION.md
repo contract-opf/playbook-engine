@@ -17,16 +17,17 @@ never the raw corpus.
 The checkpoint-review loop runs **before** the final
 playbook is compiled, automatically triaging review flags and intervening where possible.
 
-1. **Stops after intermediates** — runs `playbook compile --stop-after intermediates`
-   to produce L1–L4 artifacts without a playbook.
+1. **Stops after intermediates** — runs `compile_corpus(..., stop_after="intermediates")`
+   (the in-process form the orchestrator uses; `playbook mine` is the CLI equivalent) to
+   produce L1–L4 artifacts without a playbook.
 2. **Reviews artifacts** — runs the review module to get structured
    `ReviewFlag` objects and writes `review.json`.
 3. **Triages each flag** — applies the intervention vocabulary to decide
    **PASS | INTERVENE | ESCALATE**.
 4. **Intervenes** — either writes a `hints.yaml` to the relevant document
-   subfolder and/or re-runs the compile with `--no-cache` to pick up the correction.
+   subfolder and/or re-runs `compile_corpus(..., no_cache=True)` to pick up the correction.
 5. **Escalates** — records flags that require human review in the review report.
-6. **Compiles the playbook** — runs the full `playbook compile` to produce `playbook.opf.json`.
+6. **Compiles the playbook** — runs the full `compile_corpus()` to produce `playbook.opf.json`.
 
 > **LLM judge calls are out of scope here.**  The orchestrator gates on artifact-level
 > flags; the judges gate on per-item confidence bands.  Real-LLM behaviour is validated
@@ -156,7 +157,8 @@ Re-run after editing:
 
 ```bash
 # --no-cache also forces re-extraction, even if extraction_cache.jsonl is warm
-playbook compile ./corpus --config ./playbook.config.yaml --out ./out --no-cache
+playbook mine ./corpus --config ./playbook.config.yaml --out ./out --no-cache
+playbook project ./out --config ./playbook.config.yaml
 ```
 
 ---

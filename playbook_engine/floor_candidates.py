@@ -1484,7 +1484,7 @@ def write_floor_candidates(out_dir: Path) -> Path:
     is nothing left to carry it to.
 
     Args:
-        out_dir: Output directory produced by ``playbook compile``/``project``.
+        out_dir: Output directory produced by ``playbook mine``/``project``.
 
     Returns:
         Path to the written ``floor.candidates.json``.

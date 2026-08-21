@@ -2276,7 +2276,7 @@ def mine_corpus(
                               re-extraction (that would re-burn docling OCR
                               timeouts every round — issue #132), so this
                               must be threaded independently. ``cli.py``'s
-                              ``compile`` command sources it from the
+                              ``mine`` command sources it from the
                               operator's own ``--no-cache`` flag (captured
                               before any store-backed-judge override of
                               ``no_cache`` itself); ``playbook judge`` never

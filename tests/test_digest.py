@@ -297,11 +297,16 @@ def _compiled_out_dir(tmp_path: Path) -> Path:
 
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(
+    mine_result = runner.invoke(
         cli,
-        ["compile", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
+        ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
     )
-    assert result.exit_code == 0, result.output
+    assert mine_result.exit_code == 0, mine_result.output
+    project_result = runner.invoke(
+        cli,
+        ["project", str(out_dir), "--config", str(config_path)],
+    )
+    assert project_result.exit_code == 0, project_result.output
     return out_dir
 
 

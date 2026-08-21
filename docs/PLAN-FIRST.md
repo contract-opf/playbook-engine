@@ -16,7 +16,7 @@ here, assume it's deterministic and needs no LLM at all.
 | Stage | Needs `ANTHROPIC_API_KEY`? | Runs on your Claude plan via the skill? | Notes |
 |---|---|---|---|
 | `playbook stage` | No | N/A (deterministic) | Flattens a nested export layout (e.g. CLM `Versions/` folders) and writes `hints.yaml`. No LLM involved. |
-| `playbook lint-corpus` | Only to *check for* the key | N/A (deterministic) | The documented preflight tool: if `segmentation.llm` is on in config and `ANTHROPIC_API_KEY` is unset, this fails loud here — before `mine`/`compile`/`judge` would, and before extraction has ground through the corpus. |
+| `playbook lint-corpus` | Only to *check for* the key | N/A (deterministic) | The documented preflight tool: if `segmentation.llm` is on in config and `ANTHROPIC_API_KEY` is unset, this fails loud here — before `mine`/`judge` would, and before extraction has ground through the corpus. |
 | `playbook mine` — default (deterministic segmentation) | No | N/A (deterministic) | The default L1–L4 skeleton (ingest, scope gate, classification, alignment). No LLM calls, no token spend. |
 | `playbook mine` — `segmentation.llm: true` | **Yes** — real token spend | No | Config-gated opt-in. Every document version is sent to the LLM segmenter (direct Anthropic API call, optionally batched via Message Batches with `batch: true`). There is no deterministic fallback once enabled — an LLM error fails the run rather than silently degrading. This is the one stage that cannot run on a Claude plan alone; it needs `ANTHROPIC_API_KEY` in the environment. |
 | `playbook judge` / `playbook judge-apply` | No | **Yes** | The judgment core. The skill's agent reads `out/judge/pending.jsonl`, makes each classification/deviation/provenance call by reasoning directly (on the operator's own Claude Code plan), and writes a verdicts JSONL that `judge-apply` records. No API key, no direct Anthropic API call — the model doing the judging *is* the Claude Code session running the skill. |
@@ -36,7 +36,7 @@ here, assume it's deterministic and needs no LLM at all.
 - **Everything else is deterministic:** staging, linting, projection, validation, reporting, viewing, curating, and Floor proposals never touch an LLM at all.
 
 If you hit the `ANTHROPIC_API_KEY` preflight error from `lint-corpus` or from
-`mine`/`compile`/`judge`, it means `segmentation.llm` is on in your config —
+`mine`/`judge`, it means `segmentation.llm` is on in your config —
 either set `ANTHROPIC_API_KEY` to run it live, or drop back to the
 deterministic segmenter (remove/disable `segmentation.llm`) and run the rest
 of the pipeline, including all judgment, through the skill on your Claude

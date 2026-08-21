@@ -1816,7 +1816,7 @@ def test_refresh_extraction_forces_reextraction_despite_warm_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """mine_corpus(no_cache=True, refresh_extraction=True) — the shape
-    cli.py's ``compile --no-cache`` produces — must re-invoke the extractor
+    cli.py's ``mine --no-cache`` produces — must re-invoke the extractor
     for a version whose content is already in a warm ``extraction_cache``.
 
     Before the fix, ``no_cache`` only gated the L1-L4 ``ArtifactStore``/

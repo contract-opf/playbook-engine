@@ -30,10 +30,10 @@ REFERENCE_MD = SKILL_DIR / "REFERENCE.md"
 OLD_SKILL_DIR = REPO_ROOT / ".claude" / "playbook-from-corpus"
 
 # The other top-level workflow docs (issue #133, moved under docs/ by #174):
-# docs/QUICK-COMPILE.md is the compile-based no-code guide,
+# docs/QUICK-COMPILE.md is the mine/project no-code guide,
 # docs/ORCHESTRATION.md is the Python-API checkpoint loop, and
 # .claude/skills/playbook-from-corpus/SKILL.md is the companion skill (cites
-# flags across several subcommands, not just compile). All cite `--flag`s in
+# flags across several subcommands, not just mine). All cite `--flag`s in
 # prose/code fences — if any drifts (e.g. citing a flag that was renamed or
 # removed, as docs/QUICK-COMPILE.md once did with --no-resume vs. the actual
 # --no-cache), this catches it instead of a user hitting "no such option"
@@ -130,17 +130,17 @@ def _all_subcommand_help_text() -> str:
     """Concatenated ``--help`` output for every playbook subcommand.
 
     Some workflow docs (e.g. .claude/skills/playbook-from-corpus/SKILL.md) cite
-    flags across several subcommands, not just ``compile`` — checking a
+    flags across several subcommands, not just ``mine`` — checking a
     citation against this combined surface still catches a genuinely
     nonexistent flag (the --no-resume incident) without false-flagging a
     real flag that just belongs to a different subcommand. ``view`` is a
     command GROUP whose own --help lists only subcommand names, so its
     subcommands' help (where flags like --alias-map live) is included too.
     """
-    subcmds = ["compile", *REQUIRED_SUBCOMMANDS]
+    subcmds = list(REQUIRED_SUBCOMMANDS)
     texts = [_subcommand_help(subcmd) for subcmd in subcmds]
     for group, group_subs in (
-        ("view", ("render", "document", "apply")),
+        ("view", ("render", "apply")),
         ("posture", ("questions", "interview")),
         ("floor", ("propose", "sign")),
     ):
@@ -324,7 +324,7 @@ def test_subcommand_help_exits_successfully(subcmd: str) -> None:
 # survives only as a deprecated pipeline.py kwarg) — the real flag is
 # `--no-cache`. None of these docs had its own test coverage, so the drift
 # shipped silently. Checked against the combined --help output of every
-# playbook subcommand (not just `compile`), since some docs cite flags
+# playbook subcommand (not just `mine`), since some docs cite flags
 # belonging to other subcommands too.
 
 
@@ -337,7 +337,7 @@ def test_subcommand_help_exits_successfully(subcmd: str) -> None:
         "claude-playbook-from-corpus-SKILL.md",
     ],
 )
-def test_doc_cited_flags_exist_in_compile_help(doc_path: Path) -> None:
+def test_doc_cited_flags_exist_in_subcommand_help(doc_path: Path) -> None:
     """Every ``--flag`` cited in a workflow doc must exist on some playbook subcommand."""
     assert doc_path.exists(), f"Missing: {doc_path}"
     cited_flags = _extract_cli_flags(doc_path.read_text(encoding="utf-8")) - _NON_PLAYBOOK_FLAGS

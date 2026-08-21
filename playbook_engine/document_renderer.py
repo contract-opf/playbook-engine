@@ -13,8 +13,9 @@ digest summary, plus the canonical OPF JSON and digest embedded as
 machine-readable ``<script type="application/json">`` blocks. The bare
 ``playbook.opf.json`` remains the canonical source of truth on disk.
 :func:`render_document_html` stays as the internal document renderer the
-bundle composes; ``playbook view document`` is a deprecated alias of
-``view bundle`` and writes the bundle.
+bundle composes; it is no longer exposed as its own CLI command (the former
+``playbook view document`` deprecated alias was removed — use ``view
+bundle``).
 
 Both renderings are built by :func:`_render_document_page` from a parsed OPF
 document, with the bundle passing its extra markup through that function's
@@ -640,8 +641,9 @@ def _escape_json_for_script(json_text: str) -> str:
 def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     """Render the single-file OPF bundle: ``playbook.opf.html``.
 
-    The full human document (same body as ``view document``, including the
-    Method & provenance panel), plus a digest summary section, with the
+    The full human document (the same body :func:`render_document_html`
+    produces, including the Method & provenance panel), plus a digest
+    summary section, with the
     CANONICAL OPF JSON and the digest embedded verbatim in
     ``<script type="application/json">`` blocks:
 
@@ -655,9 +657,8 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
 
     Deliberately takes no alias map: the bundle is the shareable artifact and
     embeds the canonical (pseudonymized) JSON; resolving real names into it
-    would both leak and break hash verification. ``playbook view document`` is
-    a deprecated alias for this command and rejects ``--alias-map`` for the
-    same reason — internal-eyes review belongs to ``view render --alias-map``.
+    would both leak and break hash verification. Internal-eyes review with
+    real names belongs to ``view render --alias-map``.
     """
     from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
 
