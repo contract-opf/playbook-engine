@@ -646,6 +646,21 @@ def resolve_citation_cmd(
         "for the backstop to guard."
     ),
 )
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help=(
+        "Path to this corpus's engine config YAML (issue #107). Its "
+        "scan_role_words_extra / scan_stopwords_extra lists are merged into "
+        "the step-5.5 institution gate and the #211 proper-noun sweep on top "
+        "of the engine's agreement-type-neutral defaults — pass the config "
+        "an affiliation (or other domain-flavored) corpus was mined with to "
+        "restore its prior scan leniency. Without this flag, publish uses "
+        "the neutral defaults only."
+    ),
+)
 def publish_cmd(
     playbook_file: Path,
     out_file: Path,
@@ -656,6 +671,7 @@ def publish_cmd(
     redact_terms_file: Path | None,
     entity_registry_path: Path | None,
     allow_empty_registry: bool,
+    config_path: Path | None,
 ) -> None:
     """Produce a party-anonymous public playbook (issue #188).
 
@@ -670,6 +686,12 @@ def publish_cmd(
     No LLM is wired here — this defaults to stub judges (basis="stub"),
     same as every other zero-configuration path in this engine. Wiring a
     real judge is a separate concern (see playbook_engine/export_profile.py).
+
+    Pass --config for a domain-flavored corpus (issue #107): the engine's
+    step-5.5 institution gate and #211 proper-noun sweep default to a
+    neutral vocabulary, and --config's scan_role_words_extra /
+    scan_stopwords_extra restore whatever leniency that corpus's config
+    (e.g. examples/affiliation-config/playbook.config.yaml) declares.
     """
     import datetime  # noqa: PLC0415
     from collections.abc import Sequence  # noqa: PLC0415
@@ -684,6 +706,22 @@ def publish_cmd(
     except Exception as exc:  # noqa: BLE001
         click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+
+    # Issue #107: scan_role_words_extra / scan_stopwords_extra come from the
+    # corpus's own engine config, not a bare vocabulary list — reusing
+    # load_config keeps this the single validated path for those keys (list
+    # of strings; ConfigError on anything else) instead of a second,
+    # divergent parser living here in the CLI.
+    scan_role_words_extra: list[str] = []
+    scan_stopwords_extra: list[str] = []
+    if config_path is not None:
+        try:
+            engine_cfg = load_config(config_path)
+        except ConfigError as exc:
+            click.secho(f"ERROR: could not load config {config_path}: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        scan_role_words_extra = engine_cfg.scan_role_words_extra
+        scan_stopwords_extra = engine_cfg.scan_stopwords_extra
 
     # Real names for the deterministic backstop (step 4): the entity
     # registry's alias -> canonical-name map IS the held-out real-name list
@@ -769,6 +807,8 @@ def publish_cmd(
             keep_dates=keep_dates,
             accept_residue_risk=accept_residue_risk,
             redact_terms=redact_terms,
+            scan_role_words_extra=scan_role_words_extra,
+            scan_stopwords_extra=scan_stopwords_extra,
         )
     except PublishError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)

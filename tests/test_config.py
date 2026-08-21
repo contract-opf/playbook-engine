@@ -13,6 +13,7 @@ from playbook_engine.llm_segmenter import DEFAULT_MODEL
 AFFILIATION_CONFIG = (
     Path(__file__).parent.parent / "examples" / "affiliation-config" / "playbook.config.yaml"
 )
+JUDGE_FIXTURE_CONFIG = Path(__file__).parent.parent / "examples" / "judge-fixture" / "config.yaml"
 TAXONOMY_PATH = Path(__file__).parent.parent / "spec" / "taxonomy" / "affiliation-agreement.yaml"
 
 
@@ -560,8 +561,11 @@ def test_unknown_builtin_taxonomy_raises(tmp_path: Path) -> None:
 
 def test_builtin_scheme_with_empty_name_raises(tmp_path: Path) -> None:
     path = _config_with_taxonomy(tmp_path, '"builtin:"')
-    with pytest.raises(ConfigError, match="'builtin:' scheme requires a name"):
+    with pytest.raises(ConfigError, match="'builtin:' scheme requires a name") as exc_info:
         load_config(path)
+    message = str(exc_info.value)
+    assert "general-commercial.yaml" in message
+    assert "affiliation-agreement.yaml" not in message
 
 
 def test_shipped_affiliation_config_survives_being_copied_elsewhere(tmp_path: Path) -> None:
@@ -830,3 +834,72 @@ def test_extraction_max_fallback_zero_is_valid(tmp_path: Path) -> None:
     path = _extraction_config(tmp_path, "extraction:\n  max_fallback: 0\n")
     cfg = load_config(path)
     assert cfg.extraction.max_fallback == 0
+
+
+# ---------------------------------------------------------------------------
+# scan_role_words_extra / scan_stopwords_extra (issue #107)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_extras_default_to_empty_list(tmp_path: Path) -> None:
+    """A config with neither key (every existing fixture except the shipped
+    affiliation example) keeps the engine's scan defaults unchanged."""
+    path = _minimal_config(tmp_path)
+    cfg = load_config(path)
+    assert cfg.scan_role_words_extra == []
+    assert cfg.scan_stopwords_extra == []
+
+
+def test_scan_extras_parsed_from_config(tmp_path: Path) -> None:
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+scan_role_words_extra: ["educational", "academic", "affiliated", "affiliate"]
+scan_stopwords_extra: ["school", "student", "students", "university", "college"]
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.scan_role_words_extra == ["educational", "academic", "affiliated", "affiliate"]
+    assert cfg.scan_stopwords_extra == ["school", "student", "students", "university", "college"]
+
+
+@pytest.mark.parametrize("config_path", [AFFILIATION_CONFIG, JUDGE_FIXTURE_CONFIG])
+def test_shipped_affiliation_config_carries_scan_extras(config_path: Path) -> None:
+    """Every affiliation-typed config tracked in this repo — the shipped
+    affiliation example AND the judge end-to-end fixture — issue #107's
+    reviewer gate requires each to carry the new keys so its scan behavior
+    is unchanged from before the split."""
+    cfg = load_config(config_path)
+    assert set(cfg.scan_role_words_extra) == {
+        "educational",
+        "academic",
+        "affiliated",
+        "affiliate",
+    }
+    assert set(cfg.scan_stopwords_extra) == {
+        "school",
+        "student",
+        "students",
+        "university",
+        "college",
+    }
+
+
+def test_scan_role_words_extra_not_a_list_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, 'scan_role_words_extra: "educational"\n')
+    with pytest.raises(ConfigError, match="scan_role_words_extra must be a list"):
+        load_config(path)
+
+
+def test_scan_stopwords_extra_not_a_list_raises(tmp_path: Path) -> None:
+    path = _extraction_config(tmp_path, 'scan_stopwords_extra: "university"\n')
+    with pytest.raises(ConfigError, match="scan_stopwords_extra must be a list"):
+        load_config(path)

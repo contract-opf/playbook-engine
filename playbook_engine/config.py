@@ -104,6 +104,27 @@ Config schema (YAML):
                                       # mine_corpus raises PipelineError naming
                                       # the offending (document_id, version,
                                       # reason) tuples (issue #81).
+  scan_role_words_extra: []          # optional list of strings (default []).
+                                      # Agreement-type-specific role/qualifier
+                                      # words merged into playbook_engine.
+                                      # publisher's step-5.5 institution-
+                                      # identity gate on top of its generic,
+                                      # agreement-type-neutral default (e.g.
+                                      # an education corpus's "educational",
+                                      # "academic", "affiliated", "affiliate"
+                                      # — issue #107). Case-insensitive.
+  scan_stopwords_extra: []           # optional list of strings (default []).
+                                      # Agreement-type-specific words merged
+                                      # into publisher's #211 proper-noun
+                                      # residue sweep on top of its generic
+                                      # default (e.g. an education corpus's
+                                      # "school", "student", "students",
+                                      # "university", "college" — issue #107).
+                                      # Case-insensitive. Neither key affects
+                                      # the OTHER hard backstops (step 4's
+                                      # known-entity scan, step 5.6's contact
+                                      # gate) — only the two shape-based scans
+                                      # named above.
 """
 
 from __future__ import annotations
@@ -257,6 +278,14 @@ class EngineConfig:
     classification: ClassificationConfig
     extraction: ExtractionConfig
     config_path: Path  # absolute path to the config file itself
+    # Issue #107: agreement-type-specific party-scan vocabulary, merged into
+    # playbook_engine.publisher's generic defaults at publish time (see
+    # publisher.publish_playbook's scan_role_words_extra/scan_stopwords_extra
+    # params). Both default to [] so a config with neither key (every
+    # existing fixture except the affiliation example) keeps the engine's
+    # now-agreement-type-neutral scan defaults unchanged.
+    scan_role_words_extra: list[str] = field(default_factory=list)
+    scan_stopwords_extra: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +331,8 @@ TOP_LEVEL_KEYS = frozenset(
         "segmentation",
         "classification",
         "extraction",
+        "scan_role_words_extra",
+        "scan_stopwords_extra",
     }
 )
 AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
@@ -376,7 +407,7 @@ def _resolve_taxonomy_path(tax_val: str, base_dir: Path) -> Path:
         if not name:
             raise ConfigError(
                 "config.taxonomy: 'builtin:' scheme requires a name, "
-                "e.g. 'builtin:affiliation-agreement.yaml'"
+                "e.g. 'builtin:general-commercial.yaml'"
             )
         candidate = _BUILTIN_TAXONOMY_DIR / name
         if not candidate.is_file():
@@ -601,6 +632,20 @@ def load_config(path: Path) -> EngineConfig:
 
     extraction = ExtractionConfig(extractor=extractor_raw, max_fallback=max_fallback_raw)
 
+    # --- scan_role_words_extra / scan_stopwords_extra (issue #107) ---
+    # Agreement-type-specific party-scan vocabulary, additive on top of
+    # playbook_engine.publisher's now agreement-type-neutral defaults —
+    # NOT a replacement for them. Each is optional and defaults to [].
+    scan_role_words_extra_raw = raw.get("scan_role_words_extra", [])
+    if not isinstance(scan_role_words_extra_raw, list):
+        raise ConfigError("config.scan_role_words_extra must be a list")
+    scan_role_words_extra = [str(w) for w in scan_role_words_extra_raw]
+
+    scan_stopwords_extra_raw = raw.get("scan_stopwords_extra", [])
+    if not isinstance(scan_stopwords_extra_raw, list):
+        raise ConfigError("config.scan_stopwords_extra must be a list")
+    scan_stopwords_extra = [str(w) for w in scan_stopwords_extra_raw]
+
     return EngineConfig(
         agreement_type=agreement_type,
         baseline=baseline,
@@ -615,4 +660,6 @@ def load_config(path: Path) -> EngineConfig:
         classification=classification,
         extraction=extraction,
         config_path=path.resolve(),
+        scan_role_words_extra=scan_role_words_extra,
+        scan_stopwords_extra=scan_stopwords_extra,
     )

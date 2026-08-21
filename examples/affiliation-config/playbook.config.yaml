@@ -25,3 +25,20 @@ provenance:
     - "FixtureCorp Holdings, LLC"
     - "FixtureCorp Works"
     - "FixtureCorp Performance"
+
+# Issue #107: this agreement type IS education-flavored, so it restores the
+# role/qualifier words and stopwords the engine's default no longer assumes
+# — publisher.py's step-5.5 institution gate and #211 proper-noun sweep stay
+# exactly as permissive for this corpus as they were before that change.
+scan_role_words_extra:
+  - educational
+  - academic
+  - affiliated
+  - affiliate
+
+scan_stopwords_extra:
+  - school
+  - student
+  - students
+  - university
+  - college
