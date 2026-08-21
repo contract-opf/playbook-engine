@@ -1,0 +1,41 @@
+# Engine config for the worked NDA example (issue #9).
+#
+# Wholly synthetic: fictional parties (AlphaCorp / Beta Industries / ...),
+# fictional clause text, no real corpus and no confidential source material.
+agreement_type:
+  id: nda
+  name: "Mutual Non-Disclosure Agreement"
+  description: >
+    Mutual NDA exchanged when evaluating a potential commercial relationship.
+    Six fictional negotiations: four on our paper, two on counterparty paper.
+
+baseline:
+  # Template mode. AlphaCorp's standard form -- path is relative to this file.
+  # `playbook mine` must print a non-zero "template standards: N clause(s)
+  # classified"; a zero there means template mode silently degraded to
+  # emergent and the run should not be trusted.
+  template: standard-form.rtf
+
+# Path relative to this config file.
+taxonomy: ../../spec/taxonomy/nda.yaml
+
+segmentation:
+  # Agent segmentation: the key-free path where the agent partitions each
+  # document's blocks into clauses and classifies them in the same pass,
+  # through the same store-backed loop the judges use. No ANTHROPIC_API_KEY,
+  # no token spend. Implies llm+cache with the "store-backed-agent" model
+  # sentinel so agent-produced cache entries never collide with a real
+  # model's (see playbook_engine/config.py).
+  agent: true
+
+provenance:
+  our_party_aliases:
+    - "AlphaCorp Holdings, Inc."
+    - "AlphaCorp"
+  # Deliberately EMPTY. Pseudonymization is opt-in and a no-op on an empty
+  # list -- and here we WANT the counterparty names to survive into the
+  # published example, because they are fictional placeholders that exist to
+  # be read. This is the one setting a real adopter should invert: on a real
+  # corpus every counterparty's full legal name AND its short form belong
+  # here, or the short form leaks into ids and filenames unpseudonymized.
+  known_entities: []
