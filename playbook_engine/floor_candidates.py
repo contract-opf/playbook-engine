@@ -244,42 +244,30 @@ def _text_snippet(text: str) -> str:
     return text[:_TEXT_SNIPPET_MAX].rsplit(" ", 1)[0] + "..."
 
 
-def derive_reversal_candidates(
+def _group_reversal_observations(
     observations: list[dict[str, Any]],
-) -> list[FloorCandidate]:
-    """Derive Floor candidates from ``outcome: proposed_then_reversed`` observations.
+    *,
+    structural_ids: frozenset[str],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Group ``outcome: proposed_then_reversed`` observations by ``taxonomy_id``.
 
-    Groups observations by ``taxonomy_id``. One candidate per group, citing
-    every reversal observation contributing to it (deduplicated,
-    order-preserving).
+    Shared grouping step for :func:`derive_reversal_candidates` and
+    :func:`count_below_min_deals_reversals` (issue #106) — extracted so both
+    call sites agree exactly on what counts as "one group" and its citing
+    document count; a second, independently-written grouping loop could
+    silently drift from what :func:`derive_reversal_candidates` actually
+    dropped.
 
-    An UNCLASSIFIED reversal (``taxonomy_id`` is ``None``) is EXCLUDED. It
-    used to get its own singleton candidate keyed by ``observation_id``, on
-    the reasoning that distinct unclassified reversals must not collapse into
-    one candidate — right about the collapsing, wrong about surfacing them:
-    with no taxonomy id the statement is built by quoting the raw clause text
-    (see ``_text_snippet`` below), so the legal owner is asked to sign hard
-    lines reading ``Do not concede on "shall".`` / ``... "3 3".`` /
-    ``... "4 1".`` — segmentation debris, not legal positions. Measured on
-    a real 43-document corpus: 67 of 530 reversals were unclassified and produced 67 of
-    the 90 candidates, so three-quarters of the review checklist was noise,
-    against OPF-SPEC.md §3.7.1's "keep the Floor minimal" admission test.
-
-    They are never silently dropped: :func:`write_floor_candidates` records
-    the omitted count in ``floor.candidates.json`` so the reviewer can see
-    that reversals were set aside and how many. The fix for a corpus with
-    many of them is better segmentation/classification, not a longer
-    checklist.
-
-    Args:
-        observations: Raw observation dicts, as returned by
-                      ``read_observations_jsonl`` (or ``Observation.to_dict()``).
-                      Only ``outcome == "proposed_then_reversed"`` entries
-                      contribute; everything else is ignored.
+    An UNCLASSIFIED reversal (``taxonomy_id`` is ``None``) is excluded here —
+    see :func:`derive_reversal_candidates`'s docstring. A STRUCTURAL reversal
+    (``taxonomy_id`` in *structural_ids*, issue #106 — administrative/
+    boilerplate framing curated per taxonomy YAML, e.g. parties-and-recitals)
+    is excluded the same way: neither is a proposable hard line.
 
     Returns:
-        Candidates in first-seen group order. Empty when there are no
-        ``proposed_then_reversed`` observations.
+        ``(groups, order)`` — ``groups`` keyed by ``f"taxonomy:{taxonomy_id}"``,
+        each holding ``taxonomy_id``/``text``/``document_ids``/``citations``/
+        ``seen_citations``; ``order`` lists group keys in first-seen order.
     """
     groups: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -289,7 +277,11 @@ def derive_reversal_candidates(
             continue
         taxonomy_id = obs.get("taxonomy_id")
         if not taxonomy_id:
-            # Unclassified — excluded by design; see this function's docstring.
+            # Unclassified — excluded by design; see derive_reversal_candidates.
+            continue
+        if taxonomy_id in structural_ids:
+            # Structural (issue #106) — excluded by design; see this
+            # function's docstring.
             continue
         group_key = f"taxonomy:{taxonomy_id}"
 
@@ -320,14 +312,84 @@ def derive_reversal_candidates(
                     )
                 )
 
+    return groups, order
+
+
+def derive_reversal_candidates(
+    observations: list[dict[str, Any]],
+    *,
+    structural_ids: frozenset[str] = frozenset(),
+    min_deals: int = 1,
+) -> list[FloorCandidate]:
+    """Derive Floor candidates from ``outcome: proposed_then_reversed`` observations.
+
+    Groups observations by ``taxonomy_id``. One candidate per group, citing
+    every reversal observation contributing to it (deduplicated,
+    order-preserving).
+
+    An UNCLASSIFIED reversal (``taxonomy_id`` is ``None``) is EXCLUDED. It
+    used to get its own singleton candidate keyed by ``observation_id``, on
+    the reasoning that distinct unclassified reversals must not collapse into
+    one candidate — right about the collapsing, wrong about surfacing them:
+    with no taxonomy id the statement is built by quoting the raw clause text
+    (see ``_text_snippet`` below), so the legal owner is asked to sign hard
+    lines reading ``Do not concede on "shall".`` / ``... "3 3".`` /
+    ``... "4 1".`` — segmentation debris, not legal positions. Measured on
+    a real 43-document corpus: 67 of 530 reversals were unclassified and produced 67 of
+    the 90 candidates, so three-quarters of the review checklist was noise,
+    against OPF-SPEC.md §3.7.1's "keep the Floor minimal" admission test.
+
+    A STRUCTURAL reversal (``taxonomy_id`` curated ``structural: true`` in
+    the taxonomy YAML, issue #106) is EXCLUDED the same way — administrative/
+    boilerplate framing (e.g. parties-and-recitals), not a legal position.
+    Measured on that same real corpus: ``parties_and_recitals`` alone
+    produced 54 reversal citations, the single most-cited proposed hard
+    line, none of it a real negotiating position.
+
+    A group cited by FEWER than *min_deals* distinct documents is also
+    EXCLUDED (issue #106) — a single-document reversal is a plausible fluke,
+    not a corroborated pattern across the corpus.
+
+    They are never silently dropped: :func:`write_floor_candidates` records
+    the omitted counts in ``floor.candidates.json`` so the reviewer can see
+    that reversals were set aside and how many. The fix for a corpus with
+    many unclassified/structural reversals is better segmentation/
+    classification/curation, not a longer checklist.
+
+    Args:
+        observations: Raw observation dicts, as returned by
+                      ``read_observations_jsonl`` (or ``Observation.to_dict()``).
+                      Only ``outcome == "proposed_then_reversed"`` entries
+                      contribute; everything else is ignored.
+        structural_ids: Taxonomy ids curated ``structural: true`` (issue
+                      #106) — see above. Config/taxonomy-owned; the caller
+                      (:func:`write_floor_candidates`) derives this set from
+                      a loaded ``Taxonomy``. Empty by default, so every
+                      pre-#106 call site is unaffected.
+        min_deals:    Minimum number of distinct documents that must cite a
+                      group before it becomes a candidate (issue #106).
+                      Defaults to 1 (no filtering), so every pre-#106 call
+                      site is unaffected; the CLI (``playbook floor
+                      propose``) raises this to 2 by default (``--min-deals``).
+                      See :func:`count_below_min_deals_reversals` for the
+                      omitted count.
+
+    Returns:
+        Candidates in first-seen group order. Empty when there are no
+        ``proposed_then_reversed`` observations (after exclusions/threshold).
+    """
+    groups, order = _group_reversal_observations(observations, structural_ids=structural_ids)
+
     candidates: list[FloorCandidate] = []
     for group_key in order:
         group = groups[group_key]
+        n_deals = len(group["document_ids"]) or 1
+        if n_deals < min_deals:
+            continue
         taxonomy_id = group["taxonomy_id"]
         # Always a humanized taxonomy id now: an unclassified reversal never
         # reaches here, so a candidate can no longer quote raw clause text.
         summary = _humanize_taxonomy_id(taxonomy_id)
-        n_deals = len(group["document_ids"]) or 1
         deal_word = "deal" if n_deals == 1 else "deals"
         candidates.append(
             FloorCandidate(
@@ -629,9 +691,53 @@ def count_unclassified_reversals(observations: list[dict[str, Any]]) -> int:
     )
 
 
+def count_structural_reversals_omitted(
+    observations: list[dict[str, Any]], structural_ids: frozenset[str]
+) -> int:
+    """How many ``proposed_then_reversed`` observations
+    :func:`derive_reversal_candidates` set aside for being classified under
+    a taxonomy entry curated ``structural: true`` (issue #106).
+
+    Honesty counterpart to :func:`count_unclassified_reversals`: the
+    exclusion is deliberate (see :func:`derive_reversal_candidates`'s
+    docstring), but a reviewer must be able to see that boilerplate churn
+    was set aside, and how much, rather than reading a short checklist as
+    "this is everything the corpus proposed".
+    """
+    return sum(
+        1
+        for obs in observations
+        if obs.get("outcome") == "proposed_then_reversed"
+        and obs.get("taxonomy_id") in structural_ids
+    )
+
+
+def count_below_min_deals_reversals(
+    observations: list[dict[str, Any]],
+    *,
+    min_deals: int,
+    structural_ids: frozenset[str] = frozenset(),
+) -> int:
+    """How many groups :func:`derive_reversal_candidates` would otherwise
+    have proposed as a candidate, but dropped, because fewer than
+    *min_deals* distinct documents cited them (issue #106).
+
+    Reuses :func:`_group_reversal_observations` — the exact same grouping
+    :func:`derive_reversal_candidates` itself uses — so this count can never
+    drift from what was actually dropped. A single aggregate count (not a
+    per-candidate breakdown), matching :func:`count_unclassified_reversals`'s
+    shape.
+    """
+    groups, order = _group_reversal_observations(observations, structural_ids=structural_ids)
+    return sum(1 for key in order if (len(groups[key]["document_ids"]) or 1) < min_deals)
+
+
 def propose_floor_candidates(
     observations: list[dict[str, Any]],
     interview_answers: dict[str, str] | None = None,
+    *,
+    structural_ids: frozenset[str] = frozenset(),
+    min_deals: int = 1,
 ) -> dict[str, Any]:
     """Assemble the locked ``floor.candidates.json`` shape (issue #166).
 
@@ -666,6 +772,10 @@ def propose_floor_candidates(
         interview_answers: See :func:`derive_interview_q4_candidates`. Also
                            supplies Q5 ("flexible_clauses") for the
                            auto-rejection above.
+        structural_ids:    Passed straight through to
+                           :func:`derive_reversal_candidates` (issue #106).
+        min_deals:         Passed straight through to
+                           :func:`derive_reversal_candidates` (issue #106).
 
     Returns:
         ``{"candidates": [...]}`` — reversal-sourced candidates first (in
@@ -677,9 +787,9 @@ def propose_floor_candidates(
         about, so the locked empty-input shape (``{"candidates": []}``)
         stays byte-identical to before this key existed.
     """
-    all_candidates = derive_reversal_candidates(observations) + derive_interview_q4_candidates(
-        interview_answers
-    )
+    all_candidates = derive_reversal_candidates(
+        observations, structural_ids=structural_ids, min_deals=min_deals
+    ) + derive_interview_q4_candidates(interview_answers)
     numbered = [
         FloorCandidate(
             id=f"cand-{i:03d}",
@@ -1620,7 +1730,12 @@ def _extract_interview_answers(doc: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
-def write_floor_candidates(out_dir: Path) -> Path:
+def write_floor_candidates(
+    out_dir: Path,
+    *,
+    structural_ids: frozenset[str] = frozenset(),
+    min_deals: int = 1,
+) -> Path:
     """Read ``observations.jsonl`` (+ Posture Q4, if present) from *out_dir*
     and write ``floor.candidates.json`` next to it.
 
@@ -1664,7 +1779,21 @@ def write_floor_candidates(out_dir: Path) -> Path:
     displaying "named as a willing concession".
 
     Args:
-        out_dir: Output directory produced by ``playbook mine``/``project``.
+        out_dir:        Output directory produced by ``playbook mine``/``project``.
+        structural_ids: Taxonomy ids curated ``structural: true`` (issue
+                       #106), passed straight through to
+                       :func:`propose_floor_candidates`. Empty by default
+                       (no structural exclusion) so every pre-#106 caller
+                       is unaffected; the CLI (``playbook floor propose
+                       --config``) is the only caller that supplies this.
+        min_deals:      Minimum distinct-document citation threshold (issue
+                       #106), passed straight through to
+                       :func:`propose_floor_candidates`. Defaults to 1 (no
+                       filtering) here so every pre-#106 direct caller of
+                       this function is unaffected; the CLI's own
+                       ``--min-deals`` default is 2 (``playbook floor
+                       propose``), applied by the caller, not by this
+                       function's default.
 
     Returns:
         Path to the written ``floor.candidates.json``.
@@ -1678,11 +1807,19 @@ def write_floor_candidates(out_dir: Path) -> Path:
         doc = load_opf_file(opf_path)
         interview_answers = _extract_interview_answers(doc)
 
-    result = propose_floor_candidates(observations, interview_answers)
-    # Additive sibling key — `read_floor_candidates` reads `raw.get("candidates")`
+    result = propose_floor_candidates(
+        observations, interview_answers, structural_ids=structural_ids, min_deals=min_deals
+    )
+    # Additive sibling keys — `read_floor_candidates` reads `raw.get("candidates")`
     # and tolerates siblings. Always present (0 when nothing was set aside), so
-    # its absence never has to be interpreted.
+    # their absence never has to be interpreted.
     result["unclassified_reversals_omitted"] = count_unclassified_reversals(observations)
+    result["structural_reversals_omitted"] = count_structural_reversals_omitted(
+        observations, structural_ids
+    )
+    result["below_min_deals_omitted"] = count_below_min_deals_reversals(
+        observations, min_deals=min_deals, structural_ids=structural_ids
+    )
 
     prior_by_statement: dict[tuple[str, str], dict[str, Any]] = {
         (c["statement"], c["source"]): c

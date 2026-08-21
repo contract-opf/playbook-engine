@@ -10,7 +10,12 @@ source: CUAD-v1
 
 entries:
   # --- Active: present/material in affiliation agreements ---
-  - { id: parties_and_recitals,      label: "Parties & Recitals",            status: active, cuad_origin: Parties,                       description: "Who is bound; the Institution/Company/Student framing." }
+  # structural: true (issue #106) — the reported case: on a real
+  # 43-document corpus this entry alone produced 54 reversal citations,
+  # none of it a real negotiating position. Reviewer gate: in an NDA,
+  # mutual-vs-one-way framing on this same clause CAN be substantive —
+  # re-litigate this marking per agreement type before trusting it blindly.
+  - { id: parties_and_recitals,      label: "Parties & Recitals",            status: active, cuad_origin: Parties,                       description: "Who is bound; the Institution/Company/Student framing.", structural: true }
   - { id: term,                      label: "Term",                          status: active, cuad_origin: "Expiration Date",              description: "Initial term and effective date." }
   - { id: renewal_term,              label: "Renewal / Auto-Renewal",        status: active, cuad_origin: "Renewal Term",                 description: "Whether and how the agreement renews." }
   - { id: termination_convenience,   label: "Termination for Convenience",   status: active, cuad_origin: "Termination For Convenience",   description: "Non-renewal / no-fault exit and notice period." }

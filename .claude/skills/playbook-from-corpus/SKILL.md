@@ -820,7 +820,13 @@ Every ask the user's own history reversed is a *candidate* hard line — a patte
 the compiler may surface but must never assert on its own.
 
 ```bash
-playbook floor propose $OUT      # writes $OUT/floor.candidates.json + a summary table
+playbook floor propose $OUT --config $CORPUS/playbook.config.yaml
+# writes $OUT/floor.candidates.json + a summary table.
+# --config supplies the taxonomy, so candidates classified under a
+# 'structural: true' entry (e.g. Parties & Recitals) are excluded — omit it
+# and structural exclusion silently turns off (issue #106).
+# --min-deals (default 2) additionally requires a reversal be corroborated
+# across at least that many distinct documents before it becomes a candidate.
 ```
 
 `floor propose` is a **review artifact only**. It never writes to the OPF `floor`

@@ -961,6 +961,7 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
                 "status": e.status,
                 "cuad_origin": e.cuad_origin,
                 "description": e.description,
+                "structural": e.structural,
             }
             for e in taxonomy.entries
         ],
@@ -2619,7 +2620,29 @@ def floor_group() -> None:
 
 @floor_group.command(name="propose")
 @click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-def floor_propose_cmd(out_dir: Path) -> None:
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help=(
+        "Engine config YAML — supplies the taxonomy, to exclude reversals "
+        "classified under a taxonomy entry curated 'structural: true' "
+        "(issue #106). Optional; omit to skip structural exclusion."
+    ),
+)
+@click.option(
+    "--min-deals",
+    "min_deals",
+    type=int,
+    default=2,
+    help=(
+        "Minimum number of distinct documents that must cite a reversal "
+        "before it becomes a candidate (issue #106); a single-document "
+        "reversal is a plausible fluke, not a corroborated pattern."
+    ),
+)
+def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -> None:
     """Derive Floor candidates from reversals + the Posture interview's Q4 answer.
 
     Reads OUT_DIR/observations.jsonl (every ``outcome: proposed_then_reversed``
@@ -2639,8 +2662,24 @@ def floor_propose_cmd(out_dir: Path) -> None:
     """
     import json  # noqa: PLC0415
 
+    structural_ids: frozenset[str] = frozenset()
+    if config_path is not None:
+        try:
+            cfg = load_config(config_path)
+        except ConfigError as exc:
+            click.secho(f"Config error: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        try:
+            taxonomy = load_taxonomy(cfg.taxonomy_path)
+        except TaxonomyError as exc:
+            click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        structural_ids = frozenset(e.id for e in taxonomy.entries if e.structural)
+
     out_dir_resolved = out_dir.resolve()
-    result_path = write_floor_candidates(out_dir_resolved)
+    result_path = write_floor_candidates(
+        out_dir_resolved, structural_ids=structural_ids, min_deals=min_deals
+    )
     written = json.loads(result_path.read_text(encoding="utf-8"))
     candidates = written["candidates"]
     # issue #105: a Q4/Q5 contradictory-interview warning (loud, non-blocking
