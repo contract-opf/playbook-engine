@@ -14,6 +14,7 @@ import yaml
 from click.testing import CliRunner
 
 from playbook_engine.cli import cli
+from playbook_engine.floor_candidates import derive_interview_q4_candidates
 from playbook_engine.viewer import _build_index, apply_feedback, render_review_html
 
 # ---------------------------------------------------------------------------
@@ -802,7 +803,11 @@ def test_render_html_floor_candidate_q4_already_signed_via_other_id_renders_iner
     _set_floor_invariants(tmp_path, invariants)
     candidate = _floor_candidate(
         id="cand-001",
-        statement=f"Never accept {item}.",
+        # Built by the REAL producer, not a hardcoded string: this statement is
+        # regex-parsed back into the Q4 item by `candidate_q4_invariant_id`, so
+        # a hardcoded copy silently decouples from the producer and this test
+        # keeps passing while the already-signed guard is dead in production.
+        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
         rationale='Named as non-negotiable in the Posture interview (Q4 "sacred_clauses").',
         source="interview_q4",
         citations=[],
@@ -1445,7 +1450,11 @@ def test_apply_feedback_floor_accept_q4_already_signed_candidate_refused(
     _set_floor_invariants(tmp_path, invariants)
     candidate = _floor_candidate(
         id="cand-001",
-        statement=f"Never accept {item}.",
+        # Built by the REAL producer, not a hardcoded string: this statement is
+        # regex-parsed back into the Q4 item by `candidate_q4_invariant_id`, so
+        # a hardcoded copy silently decouples from the producer and this test
+        # keeps passing while the already-signed guard is dead in production.
+        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
         rationale='Named as non-negotiable in the Posture interview (Q4 "sacred_clauses").',
         source="interview_q4",
         citations=[],

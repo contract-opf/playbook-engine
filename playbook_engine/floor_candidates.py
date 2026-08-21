@@ -193,11 +193,27 @@ def derive_reversal_candidates(
 ) -> list[FloorCandidate]:
     """Derive Floor candidates from ``outcome: proposed_then_reversed`` observations.
 
-    Groups observations by ``taxonomy_id`` (an unclassified observation —
-    ``taxonomy_id`` is ``None`` — gets its own singleton group, keyed by
-    ``observation_id``, so distinct unclassified reversals never collapse
-    into one candidate). One candidate per group, citing every reversal
-    observation contributing to it (deduplicated, order-preserving).
+    Groups observations by ``taxonomy_id``. One candidate per group, citing
+    every reversal observation contributing to it (deduplicated,
+    order-preserving).
+
+    An UNCLASSIFIED reversal (``taxonomy_id`` is ``None``) is EXCLUDED. It
+    used to get its own singleton candidate keyed by ``observation_id``, on
+    the reasoning that distinct unclassified reversals must not collapse into
+    one candidate — right about the collapsing, wrong about surfacing them:
+    with no taxonomy id the statement is built by quoting the raw clause text
+    (see ``_text_snippet`` below), so the legal owner is asked to sign hard
+    lines reading ``Do not concede on "shall".`` / ``... "3 3".`` /
+    ``... "4 1".`` — segmentation debris, not legal positions. Measured on
+    a real 43-document corpus: 67 of 530 reversals were unclassified and produced 67 of
+    the 90 candidates, so three-quarters of the review checklist was noise,
+    against OPF-SPEC.md §3.7.1's "keep the Floor minimal" admission test.
+
+    They are never silently dropped: :func:`write_floor_candidates` records
+    the omitted count in ``floor.candidates.json`` so the reviewer can see
+    that reversals were set aside and how many. The fix for a corpus with
+    many of them is better segmentation/classification, not a longer
+    checklist.
 
     Args:
         observations: Raw observation dicts, as returned by
@@ -216,7 +232,10 @@ def derive_reversal_candidates(
         if obs.get("outcome") != "proposed_then_reversed":
             continue
         taxonomy_id = obs.get("taxonomy_id")
-        group_key = f"taxonomy:{taxonomy_id}" if taxonomy_id else f"obs:{obs.get('observation_id')}"
+        if not taxonomy_id:
+            # Unclassified — excluded by design; see this function's docstring.
+            continue
+        group_key = f"taxonomy:{taxonomy_id}"
 
         if group_key not in groups:
             groups[group_key] = {
@@ -249,17 +268,15 @@ def derive_reversal_candidates(
     for group_key in order:
         group = groups[group_key]
         taxonomy_id = group["taxonomy_id"]
-        summary = (
-            _humanize_taxonomy_id(taxonomy_id)
-            if taxonomy_id
-            else f'"{_text_snippet(group["text"])}"'
-        )
+        # Always a humanized taxonomy id now: an unclassified reversal never
+        # reaches here, so a candidate can no longer quote raw clause text.
+        summary = _humanize_taxonomy_id(taxonomy_id)
         n_deals = len(group["document_ids"]) or 1
         deal_word = "deal" if n_deals == 1 else "deals"
         candidates.append(
             FloorCandidate(
                 id="",  # assigned by propose_floor_candidates
-                statement=f"Never accept {summary}.",
+                statement=f"Do not concede on {summary}.",
                 rationale=f"Proposed then reversed before signing in {n_deals} {deal_word}.",
                 source="reversal",
                 citations=group["citations"],
@@ -308,7 +325,7 @@ def _q4_statement(item: str) -> str:
     in a statement that ships live, unedited, with fail-closed consequence
     semantics (OPF-SPEC.md §3.7 rule 1).
     """
-    return f"Never accept {item}."
+    return f"Do not concede on {item}."
 
 
 def _q4_promoted_statement(item: str) -> str:
@@ -381,6 +398,25 @@ def derive_interview_q4_candidates(
 # ---------------------------------------------------------------------------
 # Combined proposal (pure)
 # ---------------------------------------------------------------------------
+
+
+def count_unclassified_reversals(observations: list[dict[str, Any]]) -> int:
+    """How many ``proposed_then_reversed`` observations
+    :func:`derive_reversal_candidates` set aside for having no
+    ``taxonomy_id``.
+
+    Kept as a separate pure function rather than a second return value so
+    the derivation's signature stays a plain ``list[FloorCandidate]``. Its
+    only purpose is honesty: the exclusion is deliberate (see that
+    function's docstring), but a reviewer must be able to see that reversals
+    were set aside and how many, rather than reading a short checklist as
+    "this is everything the corpus proposed".
+    """
+    return sum(
+        1
+        for obs in observations
+        if obs.get("outcome") == "proposed_then_reversed" and not obs.get("taxonomy_id")
+    )
 
 
 def propose_floor_candidates(
@@ -659,7 +695,13 @@ def candidate_invariant_id(candidate: dict[str, Any]) -> str:
     return _slugify(str(candidate.get("statement", "")), fallback=f"floor-{candidate_id}")
 
 
-_Q4_CANDIDATE_STATEMENT_RE = re.compile(r"^Never accept (?P<item>.+)\.$")
+# The exact inverse of `_q4_statement`'s wording. These two MUST change
+# together: `candidate_q4_invariant_id` reconstructs the Q4 item by matching
+# this pattern, and a mismatch makes it return None for every real candidate,
+# silently disabling `promote_floor_candidate`'s already-signed duplicate
+# guard. `test_candidate_q4_invariant_id_round_trips_the_real_producer` builds
+# its candidate from the real producer so that decoupling cannot land green.
+_Q4_CANDIDATE_STATEMENT_RE = re.compile(r"^Do not concede on (?P<item>.+)\.$")
 
 
 def candidate_q4_invariant_id(candidate: dict[str, Any]) -> str | None:
@@ -670,7 +712,8 @@ def candidate_q4_invariant_id(candidate: dict[str, Any]) -> str | None:
     signed under (issue #90 review finding 1).
 
     :func:`candidate_invariant_id` slugs THIS candidate's own draft
-    ``statement`` (:func:`_q4_statement`'s "Never accept {item}." wording);
+    ``statement`` (:func:`_q4_statement`'s "Do not concede on {item}."
+    wording);
     :func:`promote_interview_q4_invariants` instead slugs the bare *item*
     text via :func:`_slugify_statement_item` and writes
     :func:`_q4_promoted_statement`'s "Do not concede on {item}." wording.
@@ -689,7 +732,8 @@ def candidate_q4_invariant_id(candidate: dict[str, Any]) -> str | None:
     Returns ``None`` for a ``source: reversal`` candidate (no Q4 item to
     derive from — reversal candidates never take the Q4 promotion path at
     all), or when *candidate*'s ``statement`` doesn't match
-    :func:`_q4_statement`'s exact "Never accept {item}." shape (defensive;
+    :func:`_q4_statement`'s exact "Do not concede on {item}." shape
+    (defensive;
     every real ``interview_q4`` candidate does, by construction of
     :func:`derive_interview_q4_candidates`).
     """
@@ -849,8 +893,9 @@ def promote_floor_candidate(
     # underlying item may STILL already be signed — under the OTHER id
     # promote_interview_q4_invariants (issue #89) would have used for the
     # exact same item. Appending here regardless would add a SECOND,
-    # opposite-polarity invariant for an item that is already settled
-    # ("Never accept X." alongside an existing "Do not concede on X.") —
+    # invariant for an item that is already settled (the candidate draft
+    # and the promoted statement now share wording but still slugify to two
+    # different ids — statement-slug vs item-slug) —
     # refuse instead, the same never-silently-duplicate-or-conflict
     # principle as the foreign-collision guard above.
     if q4_inv_id is not None and q4_inv_id in index_by_id:
@@ -1114,6 +1159,10 @@ def write_floor_candidates(out_dir: Path) -> Path:
         interview_answers = _extract_interview_answers(doc)
 
     result = propose_floor_candidates(observations, interview_answers)
+    # Additive sibling key — `read_floor_candidates` reads `raw.get("candidates")`
+    # and tolerates siblings. Always present (0 when nothing was set aside), so
+    # its absence never has to be interpreted.
+    result["unclassified_reversals_omitted"] = count_unclassified_reversals(observations)
 
     prior_decisions: dict[str, str] = {
         c["statement"]: c["decision"]

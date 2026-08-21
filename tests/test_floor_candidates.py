@@ -137,7 +137,7 @@ def test_reversal_yields_candidate() -> None:
     cand = candidates[0]
     assert cand.source == "reversal"
     assert "uncapped liability" in cand.statement.lower()
-    assert cand.statement.startswith("Never accept")
+    assert cand.statement.startswith("Do not concede on")
     assert len(cand.citations) >= 1
     cite = cand.citations[0]
     assert cite.document_id == "doc-a"
@@ -168,7 +168,24 @@ def test_reversal_groups_by_taxonomy_id_across_documents() -> None:
     assert len(candidates[0].citations) == 2
 
 
-def test_reversal_unclassified_observations_do_not_collapse() -> None:
+def test_reversal_unclassified_observations_are_excluded() -> None:
+    """An UNCLASSIFIED reversal is not a proposable hard line.
+
+    Superseded `test_reversal_unclassified_observations_do_not_collapse`,
+    which asserted each unclassified reversal became its own candidate. That
+    was correct about not COLLAPSING them, but wrong about surfacing them at
+    all: with no `taxonomy_id` the statement is built by quoting the raw
+    clause text, so the reviewer is asked to sign hard lines reading `Never
+    accept "shall".`, `Never accept "3 3".`, `Never accept "4 1".` —
+    segmentation debris, not legal positions. Measured on a real corpus:
+    67 of 530 reversals were unclassified and produced 67 of the 90 reversal
+    candidates, so three-quarters of the checklist was noise, against
+    OPF-SPEC.md §3.7.1's "keep the Floor minimal".
+
+    They are counted and reported (see
+    `test_write_floor_candidates_reports_unclassified_omitted_count`), never
+    silently dropped.
+    """
     observations = [
         _reversal_observation(
             observation_id="doc-a/2/8.1", taxonomy_id=None, full_text="Unusual clause A."
@@ -183,7 +200,44 @@ def test_reversal_unclassified_observations_do_not_collapse() -> None:
 
     candidates = derive_reversal_candidates(observations)
 
-    assert len(candidates) == 2  # distinct unclassified reversals stay distinct
+    assert candidates == []
+
+
+def test_reversal_classified_still_yields_candidate_alongside_unclassified() -> None:
+    """Excluding the unclassified ones must not drop the real one beside them."""
+    observations = [
+        _reversal_observation(observation_id="doc-a/2/8.1"),
+        _reversal_observation(
+            observation_id="doc-a/2/9.1", taxonomy_id=None, clause_path="9.1",
+            full_text="3 3",
+        ),
+    ]
+
+    candidates = derive_reversal_candidates(observations)
+
+    assert len(candidates) == 1
+    assert '"' not in candidates[0].statement  # never a quoted raw fragment
+
+
+def test_reversal_statement_is_not_inverted_into_a_prohibition() -> None:
+    """`Never accept governing law.` tells a Floor judge to reject any clause
+    CONTAINING governing law — backwards, and the exact inversion issue #89
+    already fixed on the promoted path (`_q4_promoted_statement`). A reversal
+    candidate means "we asked for this and backed down", so the hard line is
+    "don't back down", not "reject the clause".
+    """
+    cand = derive_reversal_candidates([_reversal_observation()])[0]
+
+    assert not cand.statement.startswith("Never accept")
+    assert cand.statement.startswith("Do not concede on")
+
+
+def test_q4_candidate_statement_is_not_inverted_into_a_prohibition() -> None:
+    """Same inversion, same fix, on the Q4 candidate draft."""
+    cands = derive_interview_q4_candidates({"sacred_clauses": "uncapped liability"})
+
+    assert not cands[0].statement.startswith("Never accept")
+    assert cands[0].statement.startswith("Do not concede on")
 
 
 # ---------------------------------------------------------------------------
@@ -470,10 +524,46 @@ def test_write_floor_candidates_reads_observations_and_posture(tmp_path: Path) -
     assert sources == {"reversal", "interview_q4"}
 
 
+def test_write_floor_candidates_reports_unclassified_omitted_count(tmp_path: Path) -> None:
+    """Excluded is not the same as hidden.
+
+    `derive_reversal_candidates` drops unclassified reversals so the review
+    checklist is not three-quarters segmentation debris — but a reviewer
+    reading a short checklist must be able to tell that reversals were set
+    aside, and how many, rather than reading it as "this is everything the
+    corpus proposed".
+    """
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "observations.jsonl").write_text(
+        "\n".join(
+            json.dumps(o)
+            for o in (
+                _reversal_observation(observation_id="doc-a/2/8.1"),
+                _reversal_observation(
+                    observation_id="doc-a/2/9.1", taxonomy_id=None, clause_path="9.1",
+                    full_text="3 3",
+                ),
+                _reversal_observation(
+                    observation_id="doc-a/2/9.2", taxonomy_id=None, clause_path="9.2",
+                    full_text="shall",
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    written = json.loads(write_floor_candidates(out).read_text(encoding="utf-8"))
+
+    assert len(written["candidates"]) == 1          # only the classified one
+    assert written["unclassified_reversals_omitted"] == 2
+
+
 def test_write_floor_candidates_no_playbook_no_observations(tmp_path: Path) -> None:
     out_path = write_floor_candidates(tmp_path)
     written = json.loads(out_path.read_text(encoding="utf-8"))
-    assert written == {"candidates": []}
+    assert written == {"candidates": [], "unclassified_reversals_omitted": 0}
 
 
 def test_write_floor_candidates_preserves_decision_across_repropose(tmp_path: Path) -> None:
@@ -563,7 +653,7 @@ def test_cli_floor_propose_empty_corpus(tmp_path: Path) -> None:
     assert exit_code == 0, output
     assert "0 candidates" in output
     written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert written == {"candidates": []}
+    assert written == {"candidates": [], "unclassified_reversals_omitted": 0}
 
 
 def test_cli_floor_propose_missing_out_dir_fails() -> None:
@@ -747,9 +837,23 @@ def test_promote_floor_candidate_result_is_schema_shaped() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_candidate_q4_invariant_id_derives_slug_of_underlying_item() -> None:
+def test_candidate_q4_invariant_id_round_trips_the_real_producer() -> None:
+    """The parser must track the PRODUCER, not a hardcoded string.
+
+    `candidate_q4_invariant_id` reconstructs the Q4 item by regex-matching
+    the candidate's statement, and that regex is the exact inverse of
+    `_q4_statement`'s wording. Every test in this section used to hand-write
+    "Never accept X.", so when that wording changed, producer and parser
+    decoupled silently: every test still passed while
+    `candidate_q4_invariant_id` returned None in production, disabling the
+    already-signed duplicate guard in `promote_floor_candidate` entirely.
+    Building the candidate from the real producer makes that class of
+    regression impossible to land green.
+    """
     candidate = _floor_candidate(
-        statement="Never accept liability caps.", source="interview_q4", citations=[]
+        statement=derive_interview_q4_candidates({"sacred_clauses": "liability caps"})[0].statement,
+        source="interview_q4",
+        citations=[],
     )
     assert candidate_q4_invariant_id(candidate) == "liability-caps"
 
@@ -761,7 +865,9 @@ def test_candidate_q4_invariant_id_matches_promote_interview_q4_invariants_id() 
     statement) never would."""
     item = "Liability caps and student-data protection"
     candidate = _floor_candidate(
-        statement=f"Never accept {item}.", source="interview_q4", citations=[]
+        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
+        source="interview_q4",
+        citations=[],
     )
     promoted = promote_interview_q4_invariants(
         {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
@@ -803,7 +909,10 @@ def test_promote_floor_candidate_refuses_when_q4_item_already_signed_under_other
         {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
     )
     candidate = _floor_candidate(
-        id="cand-001", statement=f"Never accept {item}.", source="interview_q4", citations=[]
+        id="cand-001",
+        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
+        source="interview_q4",
+        citations=[],
     )
 
     with pytest.raises(FloorCandidateError, match="liability-caps"):

@@ -347,6 +347,52 @@ def test_check_posture_floor_conflict_fires_on_red_line_and_hard_line_phrasing()
         assert "no-uncapped-liability" in warnings[0], phrase
 
 
+def test_check_posture_floor_conflict_does_not_fire_on_the_word_agreement() -> None:
+    """"agreement" is domain-universal, not a shared concept.
+
+    Real-corpus reproduction: two hand-authored Floor invariants each warned
+    against the Posture sentence "Flexible to close a deal: Governing law;
+    notices and notice periods; renewal and auto-renewal; boilerplate such as
+    amendments, severability and entire agreement." — a sentence that names
+    neither liability nor indemnification. The ONLY overlapping content word
+    was "agreement", which appears in essentially every sentence on both
+    sides of this comparison. Same class as the "concede" template artifact
+    already stopworded above, and the reason "deal" was kept out of
+    `_q4_promoted_statement`'s wording.
+    """
+    invariant = {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": (
+            "If the agreement contains a limitation of liability, it must not "
+            "operate solely in the counterparty's favor."
+        ),
+    }
+    system_prompt = (
+        "Flexible to close a deal: Governing law; notices and notice periods; "
+        "renewal and auto-renewal; boilerplate such as amendments, severability "
+        "and entire agreement."
+    )
+
+    assert check_posture_floor_conflict(system_prompt, [invariant]) == []
+
+
+def test_check_posture_floor_conflict_still_fires_on_a_real_shared_concept() -> None:
+    """Stopwording "agreement" must not blunt the check: a sentence that
+    genuinely softens the protected concept still warns."""
+    invariant = {
+        "id": "limitation-of-liability-not-unilateral",
+        "statement": (
+            "If the agreement contains a limitation of liability, it must not "
+            "operate solely in the counterparty's favor."
+        ),
+    }
+    system_prompt = "A one-sided limitation of liability is flexible to close a deal."
+
+    warnings = check_posture_floor_conflict(system_prompt, [invariant])
+    assert warnings
+    assert "limitation-of-liability-not-unilateral" in warnings[0]
+
+
 def test_check_posture_floor_conflict_silent_without_softening_language() -> None:
     system_prompt = "Hold firm on the liability cap; see Floor."
     warnings = check_posture_floor_conflict(system_prompt, [_LIABILITY_INVARIANT])

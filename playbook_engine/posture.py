@@ -332,6 +332,17 @@ _STOPWORDS: frozenset[str] = frozenset(
         # matches those phrases as substrings independently of
         # ``_content_words`` — see ``check_posture_floor_conflict`` below.
         "concede",
+        # "agreement" is the single most domain-universal noun here: every
+        # Posture sentence and essentially every hand-authored Floor statement
+        # ("If the agreement contains a limitation of liability...") uses it,
+        # so left as a content word it makes ANY softening Posture sentence
+        # overlap ANY invariant on "agreement" alone — a domain artifact, not a
+        # shared concept. Same reasoning as "concede" above, and the same
+        # reasoning that kept "deal" out of `_q4_promoted_statement`'s wording.
+        # Verified against a real derived playbook: two invariants each warned
+        # against the "Flexible to close a deal: governing law; notices; ..."
+        # sentence whose ONLY overlap with them was the word "agreement".
+        "agreement",
     }
 )
 
