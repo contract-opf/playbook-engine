@@ -1175,6 +1175,34 @@ def test_apply_floor_review_never_writes_playbook_opf_json(tmp_path: Path) -> No
     assert not (tmp_path / "playbook.opf.json").exists()
 
 
+def test_apply_floor_review_preserves_sibling_keys_on_rewrite(tmp_path: Path) -> None:
+    """Issue #101: apply_floor_review's rewrite must not clobber sibling
+    keys already in floor.candidates.json (the always-present
+    `unclassified_reversals_omitted` honesty count, and — generically, not
+    as a special case — any other unknown future key)."""
+    candidates_path = tmp_path / "floor.candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "candidates": [_floor_candidate()],
+                "unclassified_reversals_omitted": 3,
+                "x_future": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = apply_floor_review(
+        tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[]
+    )
+
+    assert result.promoted == ["cand-001"]
+    on_disk = json.loads(candidates_path.read_text(encoding="utf-8"))
+    assert on_disk["candidates"][0]["decision"] == "accepted"
+    assert on_disk["unclassified_reversals_omitted"] == 3
+    assert on_disk["x_future"] == 1
+
+
 def test_apply_floor_review_missing_candidates_file_reports_unknown(tmp_path: Path) -> None:
     result = apply_floor_review(
         tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[]

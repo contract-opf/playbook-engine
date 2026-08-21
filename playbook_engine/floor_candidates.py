@@ -1185,6 +1185,26 @@ def write_floor_candidates(out_dir: Path) -> Path:
     return out_path
 
 
+def _read_floor_candidates_raw(out_dir: Path) -> dict[str, Any]:
+    """Return the raw top-level dict from ``out_dir/floor.candidates.json``.
+
+    ``{}`` when the file is absent, unparseable/unreadable, or not a JSON
+    object — the same tolerant degradation :func:`read_floor_candidates`
+    layers ``"candidates"`` extraction on top of (see its docstring for why).
+    Shared here so :func:`apply_floor_review` can preserve sibling keys
+    (e.g. ``unclassified_reversals_omitted``) without duplicating the
+    parsing/tolerance logic.
+    """
+    candidates_path = out_dir / "floor.candidates.json"
+    if not candidates_path.exists():
+        return {}
+    try:
+        raw = json.loads(candidates_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 def read_floor_candidates(out_dir: Path) -> list[dict[str, Any]]:
     """Return the ``candidates`` list from ``out_dir/floor.candidates.json``.
 
@@ -1200,14 +1220,7 @@ def read_floor_candidates(out_dir: Path) -> list[dict[str, Any]]:
     CLI's generic ``ValueError`` handler (``UnicodeDecodeError`` IS-A
     ``ValueError``) then misattributed the failure to ``playbook.opf.json``.
     """
-    candidates_path = out_dir / "floor.candidates.json"
-    if not candidates_path.exists():
-        return []
-    try:
-        raw = json.loads(candidates_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-        return []
-    candidates = raw.get("candidates") if isinstance(raw, dict) else None
+    candidates = _read_floor_candidates_raw(out_dir).get("candidates")
     return candidates if isinstance(candidates, list) else []
 
 
@@ -1250,9 +1263,17 @@ def apply_floor_review(
     result = resolve_floor_candidate_decisions(floor_feedback, candidates, existing_invariants)
 
     if result.candidates_changed:
+        # Preserve any sibling key already in the file (e.g.
+        # `unclassified_reversals_omitted`, or any future addition) —
+        # generic by construction, not a special-case for one known key.
+        # Issue #101: this rewrite previously replaced the whole document
+        # with `{"candidates": [...]}`, silently destroying siblings the
+        # first time a reviewer applied a decision.
+        raw = _read_floor_candidates_raw(out_dir)
+        raw["candidates"] = result.candidates
         tmp = candidates_path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps({"candidates": result.candidates}, indent=2, ensure_ascii=False) + "\n",
+            json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
         os.replace(tmp, candidates_path)
