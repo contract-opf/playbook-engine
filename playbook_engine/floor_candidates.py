@@ -154,14 +154,30 @@ class FloorCandidate:
     """One proposed Floor invariant, pending human review (issue #166).
 
     Attributes:
-        id:         ``"cand-NNN"``, 1-indexed, assigned in derivation order
-                    (reversal candidates before interview_q4 candidates).
-        statement:  NL invariant draft, imperative "Never ..." form.
-        rationale:  Human-readable justification for the proposal.
-        source:     ``"reversal"`` or ``"interview_q4"``.
-        citations:  >=1 for ``source == "reversal"``; ``[]`` for
-                    ``source == "interview_q4"`` (the interview names a
-                    clause TYPE, not a specific document/clause instance).
+        id:           ``"cand-NNN"``, 1-indexed, assigned in derivation order
+                      (reversal candidates before interview_q4 candidates).
+        statement:    NL invariant draft, imperative "Never ..." form.
+        rationale:    Human-readable justification for the proposal.
+        source:       ``"reversal"`` or ``"interview_q4"``.
+        citations:    >=1 for ``source == "reversal"``; ``[]`` for
+                      ``source == "interview_q4"`` (the interview names a
+                      clause TYPE, not a specific document/clause instance).
+        taxonomy_id:  Clause-taxonomy id this candidate is about (issue
+                      #102), for ``source == "reversal"`` — the group key
+                      :func:`derive_reversal_candidates` grouped its
+                      contributing observations by, BEFORE it gets flattened
+                      into this candidate's humanized-prose ``statement``.
+                      ``None`` for ``source == "interview_q4"`` (a Q4-named
+                      item carries no taxonomy) and for any candidate
+                      produced before this field existed — an ADDITIVE key,
+                      absent on old ``floor.candidates.json`` files, which
+                      must keep loading exactly as before. Lets a
+                      taxonomy-aware "already signed" check
+                      (``candidate_invariant_id``'s exact-slug match can
+                      miss a hand-authored invariant that covers the same
+                      taxonomy under different wording) recognise the
+                      candidate without needing the two statements to
+                      slugify the same.
     """
 
     id: str
@@ -169,15 +185,23 @@ class FloorCandidate:
     rationale: str
     source: str
     citations: list[FloorCandidateCitation] = field(default_factory=list)
+    taxonomy_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "id": self.id,
             "statement": self.statement,
             "rationale": self.rationale,
             "source": self.source,
             "citations": [c.to_dict() for c in self.citations],
         }
+        # Additive, omitted key rather than an explicit `null` when absent —
+        # keeps a candidate with no taxonomy_id (every interview_q4 one, and
+        # every reversal one derived before this field existed) byte-
+        # identical to the pre-#102 output.
+        if self.taxonomy_id is not None:
+            d["taxonomy_id"] = self.taxonomy_id
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +312,7 @@ def derive_reversal_candidates(
                 rationale=f"Proposed then reversed before signing in {n_deals} {deal_word}.",
                 source="reversal",
                 citations=group["citations"],
+                taxonomy_id=taxonomy_id,
             )
         )
 
@@ -458,6 +483,7 @@ def propose_floor_candidates(
             rationale=c.rationale,
             source=c.source,
             citations=c.citations,
+            taxonomy_id=c.taxonomy_id,
         )
         for i, c in enumerate(all_candidates, start=1)
     ]
@@ -690,14 +716,19 @@ def candidate_invariant_id(candidate: dict[str, Any]) -> str:
     reversal candidate has no separate "item" text distinct from its
     statement.
 
-    One of TWO ground-truth signals ``viewer.render_review_html`` uses to
+    One of the ground-truth signals ``viewer.render_review_html`` uses to
     detect whether a candidate is ALREADY present in ``floor.invariants``
     — the id an acceptance would produce is looked up directly in the
     playbook's current invariant ids, so the "already signed" state is
     always read off the playbook itself, never a possibly-stale flag. For
     a ``source: interview_q4`` candidate specifically, this id ALONE is not
     enough — see :func:`candidate_q4_invariant_id` (issue #90 review
-    finding 1).
+    finding 1). Nor is it enough for a candidate whose ``taxonomy_id``
+    matches a hand-authored (or otherwise differently-worded) invariant's
+    ``x_taxonomy_id`` with zero slug overlap — see the ``candidate.get(
+    "taxonomy_id")`` check alongside this id's use, both in
+    ``viewer._classify_floor_candidates`` and in
+    :func:`promote_floor_candidate` (issue #102).
     """
     candidate_id = candidate.get("id") or "candidate"
     return _slugify(str(candidate.get("statement", "")), fallback=f"floor-{candidate_id}")
@@ -801,6 +832,24 @@ def _promoted_candidate_rationale(candidate: dict[str, Any]) -> str:
     return f"{base}{evidence} Accepted via review feedback (floor candidate {candidate_id})."
 
 
+def _floor_invariant_entry(
+    inv_id: str, statement: str, rationale: str, taxonomy_id: Any
+) -> dict[str, Any]:
+    """One ``floor.invariants[]`` entry, with *taxonomy_id* (if it's a
+    non-blank string) stamped in as ``x_taxonomy_id`` (issue #102) —
+    ``promote_floor_candidate``'s two entry-construction sites (update in
+    place / append) share this so they can never drift on the key name or
+    the "only when present" rule. NOT a bare ``taxonomy_id`` key: see the
+    module comment above :func:`sign_floor_invariant` for why
+    ``spec/playbook.schema-0.3.json``'s frozen, ``additionalProperties:
+    false`` invariant-entry shape forces the ``x_`` prefix.
+    """
+    entry: dict[str, Any] = {"id": inv_id, "statement": statement, "rationale": rationale}
+    if isinstance(taxonomy_id, str) and taxonomy_id.strip():
+        entry["x_taxonomy_id"] = taxonomy_id
+    return entry
+
+
 def promote_floor_candidate(
     candidate: dict[str, Any],
     *,
@@ -843,6 +892,17 @@ def promote_floor_candidate(
     second, opposite-polarity invariant for an item that is already
     settled.
 
+    A candidate carrying a ``taxonomy_id`` (issue #102 — ``source: reversal``
+    candidates only; see :class:`FloorCandidate`) gets a THIRD, independent
+    guard: an existing ``floor.invariants`` entry whose ``x_taxonomy_id``
+    (see :func:`sign_floor_invariant`) equals this candidate's ``taxonomy_id``
+    is the SAME clause taxonomy already settled under a DIFFERENT statement
+    — e.g. a hand-authored invariant that covers the same ground in the
+    legal owner's own wording, which :func:`candidate_invariant_id`'s exact
+    slug match can never recognise. Refused the same way as the other two
+    guards, never silently appended as a second, possibly-conflicting
+    invariant for a taxonomy that is already covered.
+
     Args:
         candidate:            One candidate dict from ``floor.candidates.json``
                               (``id``/``statement``/``rationale``/``source``/
@@ -862,11 +922,14 @@ def promote_floor_candidate(
             promote for THIS candidate — never overwritten; or (issue #90
             review finding 1) a ``source: interview_q4`` candidate's item is
             already signed via :func:`promote_interview_q4_invariants` under
-            its own, differently-derived id.
+            its own, differently-derived id; or (issue #102) the candidate's
+            ``taxonomy_id`` matches an existing entry's ``x_taxonomy_id``
+            under yet another, differently-worded statement.
     """
     candidate_id = str(candidate.get("id", ""))
     inv_id = candidate_invariant_id(candidate)
     q4_inv_id = candidate_q4_invariant_id(candidate)
+    taxonomy_id = candidate.get("taxonomy_id")
     statement = str(candidate.get("statement", ""))
     rationale = _promoted_candidate_rationale(candidate)
 
@@ -892,8 +955,7 @@ def promote_floor_candidate(
             )
         if existing_entry.get("statement") == statement:
             return merged  # true no-op: same id, same statement, nothing changed
-        entry = {"id": inv_id, "statement": statement, "rationale": rationale}
-        merged[existing_index] = entry
+        merged[existing_index] = _floor_invariant_entry(inv_id, statement, rationale, taxonomy_id)
         return merged
 
     # issue #90 review finding 1: this candidate's own id (inv_id, above)
@@ -916,8 +978,26 @@ def promote_floor_candidate(
             "for the same item."
         )
 
-    entry = {"id": inv_id, "statement": statement, "rationale": rationale}
-    merged.append(entry)
+    # issue #102: neither id-based check above caught anything, but this
+    # candidate's taxonomy_id (source: reversal only — see FloorCandidate)
+    # may STILL already be settled, under a hand-authored (or otherwise
+    # differently-worded) invariant whose statement does not slugify to
+    # either of this candidate's ids at all. Same never-silently-duplicate
+    # principle: refuse rather than append a second, possibly-conflicting
+    # invariant for a taxonomy that is already covered.
+    if isinstance(taxonomy_id, str) and taxonomy_id.strip():
+        for inv in merged:
+            if isinstance(inv, dict) and inv.get("x_taxonomy_id") == taxonomy_id:
+                raise FloorCandidateError(
+                    f"floor.invariants already has an entry with x_taxonomy_id "
+                    f"{taxonomy_id!r} (id={inv.get('id')!r}, statement="
+                    f"{inv.get('statement')!r}) for floor candidate "
+                    f"{candidate_id!r} — already signed for this clause "
+                    "taxonomy; refusing to add a duplicate, possibly-"
+                    "conflicting invariant."
+                )
+
+    merged.append(_floor_invariant_entry(inv_id, statement, rationale, taxonomy_id))
     return merged
 
 
@@ -1160,6 +1240,9 @@ def resolve_floor_candidate_decisions(
         *existing_invariants* entry :func:`promote_floor_candidate` did not
         itself author -> ``skipped[f"floor:{candidate_id}"]`` (the
         :class:`FloorCandidateError` message).
+      - an ``accept`` whose ``taxonomy_id`` matches an existing invariant's
+        ``x_taxonomy_id`` under a different statement ->
+        ``skipped[f"floor:{candidate_id}"]`` (issue #102).
 
     A ``comment`` is captured into the result's ``comments`` (issue #90
     review finding 3) whenever the named ``candidate_id`` is known,

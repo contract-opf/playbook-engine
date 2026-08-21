@@ -860,6 +860,82 @@ def test_render_html_floor_candidate_already_signed_with_alias_map_still_inert(
     assert "Statewide College" in html_with_map
 
 
+def test_render_html_floor_candidate_taxonomy_already_signed_renders_inert(
+    tmp_path: Path,
+) -> None:
+    """Issue #102 regression -- the real failure reported in the issue: a
+    hand-authored invariant ("limitation-of-liability-not-unilateral")
+    covers the same clause taxonomy as a reversal candidate's draft
+    statement ("Do not concede on limitation of liability."), but the two
+    share ZERO slug overlap -- neither candidate_invariant_id nor
+    candidate_q4_invariant_id would ever match. Only the taxonomy_id /
+    x_taxonomy_id signal can recognise this as already signed; without it
+    the reviewer sees a live accept control for a hard line already on the
+    books, and accepting it would append a second, conflicting invariant."""
+    _make_opf(tmp_path)
+    candidate = {
+        "id": "cand-001",
+        "statement": "Do not concede on limitation of liability.",
+        "rationale": "Proposed then reversed before signing in 2 deals.",
+        "source": "reversal",
+        "citations": [{"document_id": "state-university-2023", "version": 3, "clause_path": "8.1"}],
+        "taxonomy_id": "limitation_of_liability",
+    }
+    _write_floor_candidates(tmp_path, [candidate])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "limitation-of-liability-not-unilateral",
+                "statement": "Limitation of liability, if present, must not be unilateral "
+                "in the counterparty's favor.",
+                "rationale": "Hand-authored via `playbook floor sign`.",
+                "x_taxonomy_id": "limitation_of_liability",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert "Proposed hard lines" in html
+    assert ">already signed<" in html
+    # No live control rendered for this (now inert) candidate.
+    assert 'class="floor-decision"' not in html
+
+
+def test_render_html_floor_candidate_different_taxonomy_still_live_control(
+    tmp_path: Path,
+) -> None:
+    """A candidate's taxonomy_id must be an actual MATCH, not mere presence
+    of the key on either side, to suppress the row."""
+    _make_opf(tmp_path)
+    candidate = {
+        "id": "cand-001",
+        "statement": "Do not concede on uncapped liability.",
+        "rationale": "Proposed then reversed before signing in 2 deals.",
+        "source": "reversal",
+        "citations": [{"document_id": "state-university-2023", "version": 3, "clause_path": "8.1"}],
+        "taxonomy_id": "uncapped_liability",
+    }
+    _write_floor_candidates(tmp_path, [candidate])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "some-other-hard-line",
+                "statement": "IP assignment must be mutual.",
+                "rationale": "Hand-authored via `playbook floor sign`.",
+                "x_taxonomy_id": "ip_assignment",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert ">already signed<" not in html
+    assert 'value="accept"' in html
+
+
 # ---------------------------------------------------------------------------
 # apply_feedback — hints.yaml
 # ---------------------------------------------------------------------------
