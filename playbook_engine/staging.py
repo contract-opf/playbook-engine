@@ -699,7 +699,7 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         "# perspective:\n"
         '#   party: ""              # our legal entity/party name\n'
         '#   counterparty_type: ""  # what the other side typically is,\n'
-        '#                          # e.g. "Educational Institution"\n'
+        '#                          # e.g. "Customer"\n'
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

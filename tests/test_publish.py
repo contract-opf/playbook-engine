@@ -603,6 +603,24 @@ def test_proper_noun_residue_dedups_with_counts_and_paths() -> None:
     assert len(findings[0].sample_paths) == 2
 
 
+def test_proper_noun_residue_stopwords_are_config_driven_not_baked_in() -> None:
+    """Issue #107: education-specific stopwords ('university' etc.) are no
+    longer baked into the engine's default; a caller restores the old
+    leniency only by passing them explicitly (normally sourced from a
+    config's ``scan_stopwords_extra``)."""
+    from playbook_engine.publisher import proper_noun_residue
+
+    doc = _doc_with_prose(
+        "The provider consults with University about scheduling. Acme Corp signed."
+    )
+    default_texts = [f.text for f in proper_noun_residue(doc)]
+    assert "University" in default_texts
+
+    extra_texts = [f.text for f in proper_noun_residue(doc, extra_stopwords=["university"])]
+    assert "University" not in extra_texts
+    assert "Acme Corp" in extra_texts
+
+
 def test_publish_report_carries_proper_noun_findings() -> None:
     """End to end: a surviving unknown name shows up on the PublishReport (it is
     advisory — it does NOT block, unlike a KNOWN-name backstop hit)."""
@@ -1178,6 +1196,22 @@ def test_bare_sha256_hash_still_exempt_everywhere() -> None:
     )
     assert report.doc is not None  # no PublishError; baseline sha256 untouched
     assert report.doc["baseline"]["template_ref"]["sha256"] == bare_hash
+
+
+def test_institution_gate_role_words_are_config_driven_not_baked_in() -> None:
+    """Issue #107: education-specific role/qualifier words ('educational',
+    'academic', 'affiliated', 'affiliate') are no longer baked into the
+    engine's default institution gate — only an explicit ``extra_role_words``
+    (normally sourced from a config's ``scan_role_words_extra``) restores the
+    old leniency for an education-flavored corpus."""
+    from playbook_engine.publisher import _institution_identity_hits
+
+    doc = {"a": "Academic University shall indemnify the Provider."}
+    # Default (agreement-type-neutral): "academic" is no longer a role-word
+    # stopword, so "academic university" is a real institution-shape hit.
+    assert any(kind == "institution" for _p, _m, kind in _institution_identity_hits(doc))
+    # With the config-provided extra, the old leniency is restored.
+    assert _institution_identity_hits(doc, extra_role_words=["academic"]) == []
 
 
 def test_scrub_publication_noise_does_not_exempt_sha256_label_prefix() -> None:

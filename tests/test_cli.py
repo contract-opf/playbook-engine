@@ -2140,6 +2140,80 @@ def test_publish_residue_report_no_tmp_left_after_success(tmp_path: Path) -> Non
 
 
 # ---------------------------------------------------------------------------
+# publish --config (issue #107: config-driven scan_role_words_extra /
+# scan_stopwords_extra wired through the CLI)
+# ---------------------------------------------------------------------------
+
+_AFFILIATION_EXAMPLE_CONFIG = (
+    Path(__file__).parent.parent / "examples" / "affiliation-config" / "playbook.config.yaml"
+)
+
+
+def test_publish_no_config_hard_fails_on_affiliation_vocabulary(tmp_path: Path) -> None:
+    """Without --config, the step-5.5 institution gate uses the engine's
+    agreement-type-neutral defaults only, so "the affiliated university" (an
+    education-corpus phrase, previously exempted by the baked-in role-word
+    default) now survives every earlier transform and hard-fails publish
+    (issue #107)."""
+    doc = _minimal_publishable_doc()
+    doc["posture"]["system_prompt"] += " The affiliated university shall provide space."
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+        ],
+    )
+
+    assert result.exit_code == 1, f"expected fail-closed exit 1:\n{result.output}"
+    assert "institution-identity" in result.output
+    assert not out_path.exists()
+
+
+def test_publish_config_restores_affiliation_scan_leniency(tmp_path: Path) -> None:
+    """--config examples/affiliation-config/playbook.config.yaml merges its
+    scan_role_words_extra ("affiliated") into the step-5.5 gate, so the same
+    "the affiliated university" phrase that hard-fails with no config
+    publishes cleanly (issue #107)."""
+    doc = _minimal_publishable_doc()
+    doc["posture"]["system_prompt"] += " The affiliated university shall provide space."
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(json.dumps(doc), encoding="utf-8")
+    registry_path = _write_empty_registry(tmp_path)
+    out_path = tmp_path / "playbook.public.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "publish",
+            str(doc_path),
+            "--out",
+            str(out_path),
+            "--entity-registry",
+            str(registry_path),
+            "--allow-empty-registry",
+            "--config",
+            str(_AFFILIATION_EXAMPLE_CONFIG),
+        ],
+    )
+
+    assert result.exit_code == 0, f"expected success with --config:\n{result.output}"
+    assert out_path.exists()
+
+
+# ---------------------------------------------------------------------------
 # render-prompt --out (issue #69: atomic write)
 # ---------------------------------------------------------------------------
 

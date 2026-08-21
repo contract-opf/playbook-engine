@@ -7,6 +7,29 @@ pre-1.0 minor versions may break compatibility).
 
 ## [Unreleased]
 
+- **Breaking**: `playbook_engine.publisher`'s party-scan vocabulary is now
+  agreement-type-neutral by default (issue #107) — the education-specific
+  role words (`educational`, `academic`, `affiliated`, `affiliate`) and
+  stopwords (`school`, `student`, `students`, `university`, `college`) that
+  used to be baked into `publish_playbook`'s defaults are no longer assumed.
+  This changes two independent things for an education-flavored corpus:
+  - Step-5.5's institution gate (not suppressed by `--accept-residue-risk`;
+    individual matches can be exempted only via `--config`'s
+    `scan_role_words_extra`) now HARD-BLOCKS publish, raising
+    `PublishError`, on phrases it used to treat
+    as a benign role/qualifier and let through, e.g. "the affiliated
+    university" or "each educational university representative" (a bare
+    "University" alone was never matched by this gate, before or after).
+  - The advisory #211 proper-noun sweep (`residue_report.json`, does not
+    block) surfaces more generic institution nouns like "school" or
+    "student" that it used to treat as stopwords and silently drop.
+  - `playbook publish` now has a `--config <path>` option: pass the
+    corpus's own engine config (one carrying `scan_role_words_extra` /
+    `scan_stopwords_extra` — see `config.py`'s module docstring, and the
+    shipped `examples/affiliation-config/playbook.config.yaml`) to merge
+    those words back into both the gate and the sweep and restore prior
+    scan behavior. Without `--config`, publish uses the neutral defaults
+    only, regardless of what the corpus was mined with.
 - Negotiation dynamics in Evidence (§3.5.3): `proposed_by`, `observed_at`,
   `counterparty_ref`, `summary.stance_detail`, per-clause
   `negotiation_trail`.

@@ -722,6 +722,18 @@ class TestScaffoldConfig:
         assert "taxonomy" in raw
         assert "provenance" in raw
 
+    def test_perspective_example_is_agreement_type_neutral(self, tmp_path: Path) -> None:
+        """Issue #107: the commented ``counterparty_type`` example must not
+        hardcode an education-flavored value — the engine's skeleton is
+        agreement-type-neutral by default."""
+        src = tmp_path / "src"
+        src.mkdir()
+        out = tmp_path / "out"
+        scaffold_config(src, out)
+        text = (out / "playbook.config.yaml").read_text(encoding="utf-8")
+        assert "Educational Institution" not in text
+        assert '"Customer"' in text
+
 
 # ---------------------------------------------------------------------------
 # Integration: stage output passes lint-corpus

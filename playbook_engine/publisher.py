@@ -603,6 +603,13 @@ def _entity_backstop_scan(
 # Distinctive-token guard: a token from one of these is a role/qualifier word,
 # never the identifying part of an institution name, so a match carrying only
 # these is dropped ("the University", "State University", "of the ...").
+#
+# Generic (agreement-type-neutral) role words only — issue #107. Words that
+# only make sense for an education-flavored corpus (e.g. "educational",
+# "academic", "affiliated", "affiliate") do NOT belong in the engine's
+# default; a producer whose corpus IS education-flavored supplies them via
+# config's ``scan_role_words_extra`` (see config.py), merged in by
+# :func:`_institution_identity_hits`'s ``extra_role_words`` at publish time.
 _INSTITUTION_TOKEN_STOP = frozenset(
     {
         "the",
@@ -647,10 +654,6 @@ _INSTITUTION_TOKEN_STOP = frozenset(
         "institution",
         "party",
         "parties",
-        "educational",
-        "academic",
-        "affiliated",
-        "affiliate",
     }
 )
 
@@ -675,13 +678,22 @@ _INST_REGENTS_RE = re.compile(r"\bregents\s+of\b")
 _INST_BOARD_RE = re.compile(r"\bboard\s+of\s+(?:trustees|regents)\b")
 
 
-def _institution_identity_hits(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
+def _institution_identity_hits(
+    doc: dict[str, Any], *, extra_role_words: Sequence[str] = ()
+) -> list[tuple[str, str, str]]:
     """Return every ``(path, matched_text, kind)`` institution-name or postal-
     address pattern surviving anywhere in *doc* (values AND dict keys).
 
     ``kind`` is ``"institution"`` or ``"address"``. List-independent and
     LLM-free — see the section header for why this exists.
+
+    *extra_role_words* (issue #107) adds agreement-type-specific role/
+    qualifier words — e.g. an education corpus's "educational"/"academic"/
+    "affiliated"/"affiliate" — on top of :data:`_INSTITUTION_TOKEN_STOP`'s
+    generic default, normally sourced from config's
+    ``scan_role_words_extra``. Case-insensitive.
     """
+    token_stop = _INSTITUTION_TOKEN_STOP | {w.casefold() for w in extra_role_words}
     hits: list[tuple[str, str, str]] = []
     for path, text in _walk_strings(doc):
         if not text or _SHA256_ADDR_RE.fullmatch(text):
@@ -692,7 +704,7 @@ def _institution_identity_hits(doc: dict[str, Any]) -> list[tuple[str, str, str]
         for pattern in (_INST_UNIVERSITY_OF_RE, _INST_X_UNIVERSITY_RE, _INST_X_COLLEGE_RE):
             for match in pattern.finditer(normalized):
                 token = match.group(1)
-                if token and token not in _INSTITUTION_TOKEN_STOP:
+                if token and token not in token_stop:
                     hits.append((path, match.group(0).strip(), "institution"))
         # Unambiguous org markers: a governing body is always a specific
         # (usually public) institution, whatever token follows.
@@ -776,6 +788,13 @@ _WEEKDAYS = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
 # frequent sentence-initial words. Kept deliberately small — a benign term
 # that slips through is one the reviewer confirms and moves on; a real name
 # dropped is a leak. So the sweep errs toward INCLUSION.
+#
+# Generic (agreement-type-neutral) words only — issue #107. Education-
+# specific words (e.g. "school", "student", "students", "university",
+# "college") do NOT belong in the engine's default; a producer whose corpus
+# IS education-flavored supplies them via config's ``scan_stopwords_extra``
+# (see config.py), merged in by :func:`proper_noun_residue`'s
+# ``extra_stopwords`` at publish time.
 _STRUCTURAL_STOPWORDS = {
     # legal-document structure
     "agreement",
@@ -802,11 +821,6 @@ _STRUCTURAL_STOPWORDS = {
     "hereto",
     "herein",
     "hereunder",
-    "student",
-    "students",
-    "university",
-    "college",
-    "school",
     "program",
     "programs",
     "services",
@@ -958,6 +972,7 @@ def proper_noun_residue(
     party_label: str = DEFAULT_PARTY_LABEL,
     counterparty_label: str = DEFAULT_COUNTERPARTY_LABEL,
     max_sample_paths: int = _DEFAULT_MAX_SAMPLE_PATHS,
+    extra_stopwords: Sequence[str] = (),
 ) -> tuple[ProperNounFinding, ...]:
     """Return every proper-noun-like string remaining in *doc*'s free text.
 
@@ -968,10 +983,17 @@ def proper_noun_residue(
     Deduplicated case-insensitively, ordered most-frequent first. Advisory
     output — the caller (a reviewer / the classification skill step) decides
     what is a real name vs. a benign place/generic term.
+
+    *extra_stopwords* (issue #107) adds agreement-type-specific words — e.g.
+    an education corpus's "school"/"student"/"university"/"college" — on top
+    of :data:`_BASE_STOPWORDS`'s generic default, normally sourced from
+    config's ``scan_stopwords_extra``. Case-insensitive.
     """
     stopwords = set(_BASE_STOPWORDS)
     for label in (party_label, counterparty_label):
         stopwords.update(_normalize_for_scan(label).split())
+    for word in extra_stopwords:
+        stopwords.update(_normalize_for_scan(word).split())
 
     samples, _ = _extract_text_samples(doc)
     agg: dict[str, dict[str, Any]] = {}
@@ -1016,6 +1038,8 @@ def publish_playbook(
     keep_dates: bool = False,
     accept_residue_risk: bool = False,
     redact_terms: Sequence[str] = (),
+    scan_role_words_extra: Sequence[str] = (),
+    scan_stopwords_extra: Sequence[str] = (),
 ) -> PublishReport:
     """Run the six-step party-anonymous publication transform (issue #188).
 
@@ -1047,6 +1071,14 @@ def publish_playbook(
                               step 5 is returned on the report instead of
                               raising :class:`PublishError`. Never affects
                               step 4's hard backstop.
+        scan_role_words_extra: Agreement-type-specific role/qualifier words
+                              (issue #107) merged into step 5.5's institution
+                              gate on top of its generic default — normally
+                              sourced from config's ``scan_role_words_extra``.
+        scan_stopwords_extra: Agreement-type-specific stopwords (issue #107)
+                              merged into the final proper-noun sweep's
+                              generic default — normally sourced from
+                              config's ``scan_stopwords_extra``.
 
     Returns:
         :class:`PublishReport`.
@@ -1137,7 +1169,7 @@ def publish_playbook(
     # redact_terms. Catches the class of leak that shipped in a public
     # example-playbook publish: a real counterparty name in a signature block,
     # a stats dict key, or a filename-derived document_id slug.
-    identity_hits = _institution_identity_hits(published)
+    identity_hits = _institution_identity_hits(published, extra_role_words=scan_role_words_extra)
     if identity_hits:
         listing = "; ".join(
             f"{path}: {matched!r} ({kind})" for path, matched, kind in identity_hits[:25]
@@ -1191,7 +1223,10 @@ def publish_playbook(
     # --- list-independent proper-noun residue sweep (issue #211, advisory) ---
     # Computed on the FINAL published doc so it reflects every transform above.
     proper_nouns = proper_noun_residue(
-        published, party_label=party_label, counterparty_label=counterparty_label
+        published,
+        party_label=party_label,
+        counterparty_label=counterparty_label,
+        extra_stopwords=scan_stopwords_extra,
     )
 
     return PublishReport(

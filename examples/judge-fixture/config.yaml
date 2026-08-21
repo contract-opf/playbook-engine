@@ -17,3 +17,22 @@ provenance:
   our_party_aliases:
     - "FixtureCorp"
     - "TestOrg"
+
+# Issue #107: this fixture is affiliation-typed (see agreement_type/taxonomy
+# above), so it carries the same restore-prior-behavior keys as
+# examples/affiliation-config/playbook.config.yaml, even though nothing in
+# this repo currently runs it through `playbook publish` — a future publish
+# of judge-fixture output should not silently regress to the neutral
+# defaults.
+scan_role_words_extra:
+  - educational
+  - academic
+  - affiliated
+  - affiliate
+
+scan_stopwords_extra:
+  - school
+  - student
+  - students
+  - university
+  - college
