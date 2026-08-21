@@ -145,6 +145,68 @@ def test_classifier_eligible_property(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# `structural` flag (issue #106)
+# ---------------------------------------------------------------------------
+
+
+def test_structural_absent_defaults_false(tmp_path: Path) -> None:
+    """A taxonomy YAML written before this field existed (no `structural`
+    key on any entry) must keep loading exactly as before -- the field is
+    additive."""
+    path = _minimal_taxonomy(tmp_path)
+    tax = load_taxonomy(path)
+    assert all(e.structural is False for e in tax.entries)
+
+
+def test_structural_field_round_trips(tmp_path: Path) -> None:
+    path = _write_taxonomy(
+        tmp_path,
+        {
+            "source": "test",
+            "entries": [
+                {
+                    "id": "parties_and_recitals",
+                    "label": "Parties & Recitals",
+                    "status": "active",
+                    "cuad_origin": None,
+                    "structural": True,
+                },
+                {
+                    "id": "indemnification",
+                    "label": "Indemnification",
+                    "status": "active",
+                    "cuad_origin": None,
+                    "structural": False,
+                },
+            ],
+        },
+    )
+    tax = load_taxonomy(path)
+    assert tax.get("parties_and_recitals").structural is True  # type: ignore[union-attr]
+    assert tax.get("indemnification").structural is False  # type: ignore[union-attr]
+
+
+def test_structural_non_bool_raises(tmp_path: Path) -> None:
+    path = _write_taxonomy(
+        tmp_path,
+        {
+            "source": "test",
+            "entries": [
+                {
+                    "id": "bad_entry",
+                    "label": "Bad",
+                    "status": "active",
+                    "cuad_origin": None,
+                    "structural": "yes",
+                },
+            ],
+        },
+    )
+    with pytest.raises(TaxonomyError, match="structural"):
+        load_taxonomy(path)
+
+
+# ---------------------------------------------------------------------------
 # CUAD-merge utility (OPF §5)
 # ---------------------------------------------------------------------------
 
@@ -195,6 +257,44 @@ def test_merge_preserves_existing_curation(tmp_path: Path) -> None:
     assert merged.get("exclusivity").status == "inactive"  # type: ignore[union-attr]
     # only the new one is added
     assert len(merged.entries) == len(existing.entries) + 1
+
+
+def test_merge_preserves_structural_flag(tmp_path: Path) -> None:
+    """Issue #106 reviewer gate: a known id's curated `structural: true`
+    marking must survive a merge/upgrade unchanged, same as its `status`
+    (OPF §5) — a freshly-loaded upstream release carries no opinion on
+    this curation dimension at all."""
+    path = _write_taxonomy(
+        tmp_path,
+        {
+            "source": "test-v1",
+            "entries": [
+                {
+                    "id": "parties_and_recitals",
+                    "label": "Parties & Recitals",
+                    "status": "active",
+                    "cuad_origin": None,
+                    "structural": True,
+                },
+            ],
+        },
+    )
+    existing = load_taxonomy(path)
+
+    upstream = [
+        {
+            "id": "parties_and_recitals",
+            "label": "Parties & Recitals",
+            "status": "active",
+            "cuad_origin": "Parties",
+        },
+        {"id": "brand_new", "label": "Brand New", "cuad_origin": "Brand New"},
+    ]
+    merged = merge_taxonomy(existing, upstream)
+
+    assert merged.get("parties_and_recitals").structural is True  # type: ignore[union-attr]
+    # A freshly-added (never-curated) entry defaults to non-structural.
+    assert merged.get("brand_new").structural is False  # type: ignore[union-attr]
 
 
 def test_merge_preserves_custom_entries(tmp_path: Path) -> None:
@@ -459,6 +559,55 @@ def test_cli_taxonomy_merge_writes_output(tmp_path: Path) -> None:
     merged = load_taxonomy(out_path)
     assert merged.get("new_clause") is not None
     assert merged.get("new_clause").status == "inactive"  # type: ignore[union-attr]
+
+
+def test_cli_taxonomy_merge_preserves_structural_flag_on_disk(tmp_path: Path) -> None:
+    """Issue #106 reviewer gate, on the actual user-facing path: a curated
+    `structural: true` marking must survive `playbook taxonomy merge` as
+    written to disk, not just in the in-memory `merge_taxonomy` return value.
+    """
+    from click.testing import CliRunner
+
+    from playbook_engine.cli import cli
+
+    tax_path = _write_taxonomy(
+        tmp_path,
+        {
+            "source": "test-v1",
+            "entries": [
+                {
+                    "id": "parties_and_recitals",
+                    "label": "Parties & Recitals",
+                    "status": "active",
+                    "cuad_origin": None,
+                    "structural": True,
+                },
+            ],
+        },
+    )
+    upstream_path = tmp_path / "upstream.yaml"
+    upstream_path.write_text(
+        yaml.dump(
+            {
+                "source": "CUAD-v2",
+                "entries": [
+                    {
+                        "id": "parties_and_recitals",
+                        "label": "Parties & Recitals",
+                        "cuad_origin": "Parties",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["taxonomy", "merge", str(tax_path), str(upstream_path)])
+    assert result.exit_code == 0, result.output
+
+    reloaded = load_taxonomy(tax_path)
+    assert reloaded.get("parties_and_recitals").structural is True  # type: ignore[union-attr]
 
 
 def test_cli_write_taxonomy_stages_via_tmp_then_replace(

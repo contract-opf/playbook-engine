@@ -27,4 +27,6 @@ entries:
   - { id: insurance_requirements, label: "Insurance Requirements", status: active, cuad_origin: null }
   - { id: background_checks, label: "Background Checks", status: active, cuad_origin: null }
   - { id: relationship_of_parties, label: "Relationship of Parties", status: active, cuad_origin: null }
-  - { id: counterparts, label: "Counterparts", status: active, cuad_origin: null }
+  # structural: true (issue #106) — pure execution mechanics (how many
+  # signature-page copies exist), never a negotiated legal position.
+  - { id: counterparts, label: "Counterparts", status: active, cuad_origin: null, structural: true }

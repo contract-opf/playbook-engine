@@ -45,6 +45,8 @@ from playbook_engine.floor_candidates import (
     apply_floor_review,
     candidate_invariant_id,
     candidate_q4_invariant_id,
+    count_below_min_deals_reversals,
+    count_structural_reversals_omitted,
     derive_interview_q4_candidates,
     derive_reversal_candidates,
     is_q4_item_sentence_shaped,
@@ -258,6 +260,305 @@ def test_reversal_statement_is_not_inverted_into_a_prohibition() -> None:
 
     assert not cand.statement.startswith("Never accept")
     assert cand.statement.startswith("Do not concede on")
+
+
+# ---------------------------------------------------------------------------
+# Reversal noise filters (issue #106): structural taxonomy + --min-deals
+# ---------------------------------------------------------------------------
+
+
+def test_reversal_structural_taxonomy_excluded() -> None:
+    """A reversal classified under a taxonomy entry curated `structural:
+    true` (issue #106) is excluded exactly like an unclassified one — it is
+    administrative/boilerplate framing, not a proposable hard line."""
+    observations = [_reversal_observation(taxonomy_id="parties_and_recitals")]
+
+    candidates = derive_reversal_candidates(
+        observations, structural_ids=frozenset({"parties_and_recitals"})
+    )
+
+    assert candidates == []
+
+
+def test_reversal_structural_exclusion_does_not_drop_non_structural_siblings() -> None:
+    """Excluding a structural taxonomy_id must not drop an unrelated,
+    non-structural candidate derived alongside it."""
+    observations = [
+        _reversal_observation(observation_id="doc-a/2/8.1", taxonomy_id="uncapped_liability"),
+        _reversal_observation(
+            observation_id="doc-a/2/9.1",
+            taxonomy_id="parties_and_recitals",
+            clause_path="9.1",
+        ),
+    ]
+
+    candidates = derive_reversal_candidates(
+        observations, structural_ids=frozenset({"parties_and_recitals"})
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].taxonomy_id == "uncapped_liability"
+
+
+def test_count_structural_reversals_omitted() -> None:
+    observations = [
+        _reversal_observation(observation_id="doc-a/2/8.1", taxonomy_id="parties_and_recitals"),
+        _reversal_observation(
+            observation_id="doc-a/2/9.1", taxonomy_id="parties_and_recitals", clause_path="9.1"
+        ),
+        _reversal_observation(observation_id="doc-a/2/10.1", taxonomy_id="uncapped_liability"),
+    ]
+
+    assert (
+        count_structural_reversals_omitted(observations, frozenset({"parties_and_recitals"})) == 2
+    )
+
+
+def test_reversal_below_min_deals_dropped() -> None:
+    """A reversal cited by only 1 distinct document is a plausible fluke,
+    not a corroborated pattern -- dropped when min_deals=2."""
+    observations = [_reversal_observation()]  # single document ("doc-a")
+
+    candidates = derive_reversal_candidates(observations, min_deals=2)
+
+    assert candidates == []
+
+
+def test_reversal_min_deals_default_is_unfiltered() -> None:
+    """derive_reversal_candidates' own default (min_deals=1) must not
+    filter -- every pre-#106 call site (and write_floor_candidates' own
+    default) is unaffected; only the CLI raises the threshold to 2."""
+    observations = [_reversal_observation()]
+
+    candidates = derive_reversal_candidates(observations)
+
+    assert len(candidates) == 1
+
+
+def test_reversal_min_deals_boundary_exactly_kept() -> None:
+    """Exactly `min_deals` distinct documents citing a group is KEPT, not
+    dropped -- the threshold is a floor, not a strict minimum (mutation
+    gate: an off-by-one here, `<=` instead of `<`, must fail this test)."""
+    observations = [
+        _reversal_observation(observation_id="doc-a/2/8.1", document_id="doc-a"),
+        _reversal_observation(
+            observation_id="doc-b/3/9.1", document_id="doc-b", version=3, clause_path="9.1"
+        ),
+    ]
+
+    candidates = derive_reversal_candidates(observations, min_deals=2)
+
+    assert len(candidates) == 1
+
+
+def test_count_below_min_deals_reversals() -> None:
+    observations = [
+        _reversal_observation(),  # 1 doc, below threshold of 2
+        _reversal_observation(
+            observation_id="doc-x/2/1.1",
+            taxonomy_id="cap_on_liability",
+            document_id="doc-x",
+            clause_path="1.1",
+        ),
+        _reversal_observation(
+            observation_id="doc-y/2/1.1",
+            taxonomy_id="cap_on_liability",
+            document_id="doc-y",
+            clause_path="1.1",
+        ),  # 2 docs, meets threshold
+    ]
+
+    assert count_below_min_deals_reversals(observations, min_deals=2) == 1
+
+
+def test_propose_floor_candidates_threads_structural_and_min_deals() -> None:
+    observations = [_reversal_observation(taxonomy_id="parties_and_recitals")]
+
+    result = propose_floor_candidates(
+        observations, structural_ids=frozenset({"parties_and_recitals"})
+    )
+    assert result["candidates"] == []
+
+    result2 = propose_floor_candidates([_reversal_observation()], min_deals=2)
+    assert result2["candidates"] == []
+
+
+def test_write_floor_candidates_structural_omitted_sibling(tmp_path: Path) -> None:
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(
+        json.dumps(_reversal_observation(taxonomy_id="parties_and_recitals")) + "\n",
+        encoding="utf-8",
+    )
+
+    out_path = write_floor_candidates(tmp_path, structural_ids=frozenset({"parties_and_recitals"}))
+    written = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert written["candidates"] == []
+    assert written["structural_reversals_omitted"] == 1
+    assert written["below_min_deals_omitted"] == 0
+
+
+def test_write_floor_candidates_below_min_deals_sibling(tmp_path: Path) -> None:
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
+
+    out_path = write_floor_candidates(tmp_path, min_deals=2)
+    written = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert written["candidates"] == []
+    assert written["below_min_deals_omitted"] == 1
+    assert written["structural_reversals_omitted"] == 0
+
+
+def test_apply_floor_review_preserves_106_sibling_keys(tmp_path: Path) -> None:
+    """Issue #106's two new always-present siblings survive
+    apply_floor_review's rewrite exactly like `unclassified_reversals_omitted`
+    already does (issue #101's generic, not-a-special-case preservation)."""
+    candidates_path = tmp_path / "floor.candidates.json"
+    candidates_path.write_text(
+        json.dumps(
+            {
+                "candidates": [_floor_candidate()],
+                "unclassified_reversals_omitted": 0,
+                "structural_reversals_omitted": 5,
+                "below_min_deals_omitted": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    apply_floor_review(tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[])
+
+    on_disk = json.loads(candidates_path.read_text(encoding="utf-8"))
+    assert on_disk["structural_reversals_omitted"] == 5
+    assert on_disk["below_min_deals_omitted"] == 7
+
+
+def test_cli_floor_propose_min_deals_default_drops_single_document(tmp_path: Path) -> None:
+    """The CLI's own default (--min-deals 2) drops a single-document
+    reversal, even though the underlying write_floor_candidates() function's
+    own default (1) would not."""
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
+
+    exit_code, output = _invoke("floor", "propose", str(tmp_path))
+
+    assert exit_code == 0, output
+    written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert written["candidates"] == []
+    assert written["below_min_deals_omitted"] == 1
+
+
+def test_cli_floor_propose_min_deals_flag_keeps_single_document(tmp_path: Path) -> None:
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
+
+    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--min-deals", "1")
+
+    assert exit_code == 0, output
+    written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert len(written["candidates"]) == 1
+    assert written["below_min_deals_omitted"] == 0
+
+
+def test_cli_floor_propose_min_deals_boundary_exactly_two_kept(tmp_path: Path) -> None:
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(
+        "\n".join(
+            json.dumps(o)
+            for o in (
+                _reversal_observation(observation_id="doc-a/2/8.1", document_id="doc-a"),
+                _reversal_observation(
+                    observation_id="doc-b/3/9.1",
+                    document_id="doc-b",
+                    version=3,
+                    clause_path="9.1",
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code, output = _invoke("floor", "propose", str(tmp_path))
+
+    assert exit_code == 0, output
+    written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
+    assert len(written["candidates"]) == 1
+    assert written["below_min_deals_omitted"] == 0
+
+
+def test_cli_floor_propose_config_excludes_structural_candidate(tmp_path: Path) -> None:
+    """--config supplies the taxonomy that curates `structural: true` —
+    without it, structural exclusion is skipped entirely (empty set)."""
+    obs_path = tmp_path / "observations.jsonl"
+    obs_path.write_text(
+        "\n".join(
+            json.dumps(o)
+            for o in (
+                _reversal_observation(observation_id="doc-a/2/8.1", document_id="doc-a"),
+                _reversal_observation(
+                    observation_id="doc-b/3/8.1",
+                    document_id="doc-b",
+                    version=3,
+                    taxonomy_id="parties_and_recitals",
+                ),
+                _reversal_observation(
+                    observation_id="doc-c/2/8.1",
+                    document_id="doc-c",
+                    taxonomy_id="parties_and_recitals",
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    taxonomy_path = tmp_path / "taxonomy.yaml"
+    taxonomy_path.write_text(
+        yaml.dump(
+            {
+                "source": "test",
+                "entries": [
+                    {
+                        "id": "uncapped_liability",
+                        "label": "Uncapped Liability",
+                        "status": "active",
+                        "cuad_origin": None,
+                    },
+                    {
+                        "id": "parties_and_recitals",
+                        "label": "Parties & Recitals",
+                        "status": "active",
+                        "cuad_origin": None,
+                        "structural": True,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
+                "baseline": {"template": None},
+                "taxonomy": str(taxonomy_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--config", str(config_path))
+
+    assert exit_code == 0, output
+    written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
+    # doc-a's uncapped_liability is single-document and dropped by the CLI's
+    # default --min-deals 2; doc-b/doc-c's parties_and_recitals is structural
+    # and excluded by --config. Nothing should survive.
+    assert written["candidates"] == []
+    assert all(c.get("taxonomy_id") != "parties_and_recitals" for c in written["candidates"])
+    assert written["structural_reversals_omitted"] == 2
 
 
 def test_q4_candidate_statement_is_not_inverted_into_a_prohibition() -> None:
@@ -1030,7 +1331,12 @@ def test_write_floor_candidates_reports_unclassified_omitted_count(tmp_path: Pat
 def test_write_floor_candidates_no_playbook_no_observations(tmp_path: Path) -> None:
     out_path = write_floor_candidates(tmp_path)
     written = json.loads(out_path.read_text(encoding="utf-8"))
-    assert written == {"candidates": [], "unclassified_reversals_omitted": 0}
+    assert written == {
+        "candidates": [],
+        "unclassified_reversals_omitted": 0,
+        "structural_reversals_omitted": 0,
+        "below_min_deals_omitted": 0,
+    }
 
 
 def test_write_floor_candidates_preserves_decision_across_repropose(tmp_path: Path) -> None:
@@ -1120,7 +1426,12 @@ def test_cli_floor_propose_empty_corpus(tmp_path: Path) -> None:
     assert exit_code == 0, output
     assert "0 candidates" in output
     written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert written == {"candidates": [], "unclassified_reversals_omitted": 0}
+    assert written == {
+        "candidates": [],
+        "unclassified_reversals_omitted": 0,
+        "structural_reversals_omitted": 0,
+        "below_min_deals_omitted": 0,
+    }
 
 
 def test_cli_floor_propose_missing_out_dir_fails() -> None:
@@ -1139,14 +1450,18 @@ def test_cli_floor_propose_rejected_candidate_stays_rejected_on_second_run(
     doc = _minimal_v02_doc()
     (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
 
-    exit_code, output = _invoke("floor", "propose", str(tmp_path))
+    # --min-deals 1: this fixture is a single-document reversal, unrelated
+    # to issue #106's threshold feature exercised elsewhere -- the CLI's
+    # own default (2) would drop it before it ever reaches the decision-
+    # persistence behavior this test actually covers.
+    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--min-deals", "1")
     assert exit_code == 0, output
     first = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
     cand_id = first["candidates"][0]["id"]
 
     apply_floor_review(tmp_path, {cand_id: {"decision": "reject"}})
 
-    exit_code, output = _invoke("floor", "propose", str(tmp_path))
+    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--min-deals", "1")
     assert exit_code == 0, output
     second = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
     assert len(second["candidates"]) == 1

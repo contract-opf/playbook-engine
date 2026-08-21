@@ -41,6 +41,19 @@ class TaxonomyEntry:
     status: str  # active | inactive | custom
     cuad_origin: str | None  # None for custom entries
     description: str = ""
+    # True marks this entry as administrative/boilerplate framing rather than
+    # a negotiable legal position (issue #106) — e.g. parties-and-recitals
+    # framing, an initial term/date field. Consumed by
+    # floor_candidates.derive_reversal_candidates to exclude REVERSAL
+    # observations classified under a structural entry: measured on a real
+    # 43-document corpus, boilerplate churn on a single parties_and_recitals
+    # entry alone produced 54 reversal citations — the single most-cited
+    # proposed "hard line", none of it a real negotiating position. Curated
+    # per taxonomy YAML by a human (config/taxonomy-owned), never a
+    # hardcoded id list in code. Defaults False; absent on every taxonomy
+    # YAML written before this field existed, which must keep loading
+    # unchanged.
+    structural: bool = False
 
     @property
     def is_classifier_eligible(self) -> bool:
@@ -91,12 +104,18 @@ def _parse_entry(raw: dict[str, Any], index: int) -> TaxonomyEntry:
             f"entries[{index}] ({entry_id!r}): custom entries must have cuad_origin: null"
         )
     description = str(raw.get("description") or "")
+    structural = raw.get("structural", False)
+    if not isinstance(structural, bool):
+        raise TaxonomyError(
+            f"entries[{index}] ({entry_id!r}): 'structural' must be a boolean, got {structural!r}"
+        )
     return TaxonomyEntry(
         id=entry_id,
         label=label,
         status=status,
         cuad_origin=cuad_origin if cuad_origin is not None else None,
         description=description,
+        structural=structural,
     )
 
 

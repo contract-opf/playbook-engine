@@ -16,8 +16,16 @@
 # status: inactive per agreement type (never delete).
 source: CUAD-v1
 entries:
-  - { id: document_name, label: "Document Name", status: active, cuad_origin: "Document Name" }
-  - { id: parties, label: "Parties", status: active, cuad_origin: "Parties" }
+  # structural: true (issue #106) — the document's caption/title, never a
+  # negotiated legal position; a reversal here is segmentation/title-page
+  # churn, not a hard line.
+  - { id: document_name, label: "Document Name", status: active, cuad_origin: "Document Name", structural: true }
+  # structural: true (issue #106) — who the parties are, not what they
+  # agreed to; measured on a real 43-document corpus, this framing alone
+  # produced 54 of the noisiest reversal citations. Reviewer gate: in an
+  # NDA, mutual-vs-one-way framing on this same clause CAN be substantive —
+  # re-litigate this marking per agreement type before trusting it blindly.
+  - { id: parties, label: "Parties", status: active, cuad_origin: "Parties", structural: true }
   - { id: agreement_date, label: "Agreement Date", status: active, cuad_origin: "Agreement Date" }
   - { id: effective_date, label: "Effective Date", status: active, cuad_origin: "Effective Date" }
   - { id: expiration_date, label: "Expiration Date", status: active, cuad_origin: "Expiration Date" }
