@@ -66,7 +66,6 @@ from playbook_engine.pipeline import (
     mine_corpus,
     project_playbook,
 )
-from playbook_engine.review import write_review
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.validator import validate_document
@@ -1041,10 +1040,6 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     assert _ENTITY_LEAK_NAME not in published_text
     assert _ENTITY_LEAK_NAME not in json.dumps(playbook), "double-check the in-memory dict too"
 
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert _ENTITY_LEAK_NAME not in review_text
-
     # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
     # must find zero hits — the compiled playbook must already be born-safe
     # by the time it reaches publish.
@@ -1121,10 +1116,6 @@ def test_taxonomy_gate_error_never_leaks_raw_entity_name(tmp_path: Path) -> None
     assert _TAXONOMY_LEAK_ENTITY_NAME not in json.dumps(playbook), (
         "double-check the in-memory dict too"
     )
-
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert _TAXONOMY_LEAK_ENTITY_NAME not in review_text
 
     # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
     # must find zero hits — the compiled playbook must already be born-safe
@@ -1374,21 +1365,16 @@ def test_hints_error_never_leaks_raw_entity_name_via_path(tmp_path: Path) -> Non
     # Belt-and-braces (issue #96 review correction: an earlier attempt's
     # comments overstated this as THE documented propagation path — it
     # isn't; the after-action report above is). playbook.opf.json has no
-    # quarantine section and review.write_review reads scope.json/trail/
-    # observations.jsonl/corpus_manifest.json only, never quarantine.json —
-    # so neither artifact was ever reachable by this leak. These assertions
-    # stay true either way; they just aren't proof of anything this fix
-    # changed.
+    # quarantine section, and quarantine.json is not among corpus_manifest's
+    # sources either — so neither artifact was ever reachable by this leak.
+    # These assertions stay true either way; they just aren't proof of
+    # anything this fix changed.
     playbook = project_playbook(out_dir, cfg, taxonomy)
     published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
     assert _HINTS_LEAK_ENTITY_NAME not in published_text
     assert _HINTS_LEAK_ENTITY_NAME not in json.dumps(playbook), (
         "double-check the in-memory dict too"
     )
-
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert _HINTS_LEAK_ENTITY_NAME not in review_text
 
     # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
     # must find zero hits — the compiled playbook must already be born-safe
@@ -1480,10 +1466,6 @@ def test_hints_error_never_leaks_raw_entity_name_via_yaml_content_snippet(
     published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
     assert entity_name not in published_text
     assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
-
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert entity_name not in review_text
 
     # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
     # must find zero hits — the compiled playbook must already be born-safe
@@ -1582,10 +1564,6 @@ def test_hints_error_never_leaks_raw_entity_name_via_yaml_problem_token(
     published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
     assert entity_name not in published_text
     assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
-
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert entity_name not in review_text
 
     # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
     # must find zero hits — the compiled playbook must already be born-safe
@@ -2672,9 +2650,8 @@ def test_fallback_detail_never_leaks_raw_entity_name(
     """CRITICAL PRIVACY REQUIREMENT (issue #81): ExtractorLabel.detail
     (str(exc) from a docling failure) embeds the absolute source path, which
     embeds the counterparty/entity name baked into the corpus folder
-    structure. It must never reach corpus_manifest.json or review.json —
-    defeating the born-safe pseudonymization contract those artifacts
-    otherwise uphold.
+    structure. It must never reach corpus_manifest.json — defeating the
+    born-safe pseudonymization contract that artifact otherwise upholds.
     """
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "Fictional University"
@@ -2718,10 +2695,6 @@ def test_fallback_detail_never_leaks_raw_entity_name(
     assert ingest["reason"] == "backend-error", "sanity: the fallback must actually have happened"
     assert "detail" not in ingest, "version_ingest must never carry a 'detail' key at all"
     assert "Fictional University" not in manifest_text
-
-    write_review(out_dir)
-    review_text = (out_dir / "review.json").read_text(encoding="utf-8")
-    assert "Fictional University" not in review_text
 
 
 def test_stage_cache_reason_version_bump_forces_recompute_on_upgrade(

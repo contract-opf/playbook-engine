@@ -832,8 +832,8 @@ def test_judge_plan_reuses_extraction_from_prior_judge_round(
 #
 # ``mine_cmd`` originally had no --no-cache option at all, so an operator
 # following the engine's own version_ingest_failed remediation ("Inspect the
-# source file and re-run 'playbook mine' with --no-cache" — review.py/
-# inspection_report.py) hit "Error: No such option '--no-cache'." on exactly
+# source file and re-run 'playbook mine' with --no-cache" — inspection_report.py)
+# hit "Error: No such option '--no-cache'." on exactly
 # the mine->project workflow the remediation text points at.
 #
 # The tests above (and the lower-level tests in test_pipeline_llm_seg.py /

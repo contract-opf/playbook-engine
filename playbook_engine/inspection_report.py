@@ -172,12 +172,12 @@ def build_inspection_report(
     observations_by_doc = _load_observations(out_dir)
     manifest = _load_manifest(out_dir)
     # Failed per-version ingests (issue #89) are read straight from
-    # corpus_manifest.json — unlike the rest of ``review_flags`` these don't
-    # require a separate ``playbook review`` run to have populated
-    # review.json first, so a failed version always shows up here. Dedupe
-    # against review.json's own version_ingest_failed entries (if a
-    # ``playbook review`` run already wrote them) so a failure that appears
-    # in both sources renders as one row, not two.
+    # corpus_manifest.json — unlike the rest of ``review_flags`` these
+    # surface even when no ``review.json`` sidecar exists to fold in via
+    # :func:`_load_review_flags`, so a failed version always shows up here.
+    # Dedupe against review.json's own version_ingest_failed entries (if a
+    # ``review.json`` sidecar already carries them) so a failure that
+    # appears in both sources renders as one row, not two.
     review_flags = _dedupe_flags(
         _version_ingest_review_flags(manifest) + _load_review_flags(out_dir)
     )
@@ -340,9 +340,9 @@ def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 #: Human-readable text for a fallback version_ingest[].reason (issue #81) —
-#: kept in sync with review._FALLBACK_REASON_TEXT (same reason vocabulary as
-#: pipeline._FALLBACK_REASONS). "declared" is deliberately absent: a
-#: config-declared legacy run is not a degradation and never flagged here.
+#: same reason vocabulary as pipeline._FALLBACK_REASONS. "declared" is
+#: deliberately absent: a config-declared legacy run is not a degradation
+#: and never flagged here.
 _FALLBACK_REASON_TEXT = {
     "env-missing": "docling was not available on this host — legacy ran automatically",
     "backend-error": "docling failed on this file and the engine fell back to legacy",
@@ -352,10 +352,9 @@ _FALLBACK_REASON_TEXT = {
 def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Build "Needs attention"-shaped flag dicts for per-version ingest issues.
 
-    Mirrors :func:`playbook_engine.review._check_manifest` but reads
-    ``corpus_manifest.json`` directly (via *manifest*) so the inspection
-    report surfaces these even when ``playbook review`` was never run to
-    populate ``review.json`` (issue #89).
+    Reads ``corpus_manifest.json`` directly (via *manifest*) so the
+    inspection report surfaces these even when no ``review.json`` sidecar
+    exists to fold in via :func:`_load_review_flags` (issue #89).
 
     Two kinds of flag:
       - ``version_ingest_failed`` (``severity="warn"``): the version's
@@ -399,12 +398,12 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
                         "document_id": doc_id,
                         "severity": "info",
                         "kind": "version_ingest_fallback",
-                        # Must match review._check_manifest's text VERBATIM
-                        # (issue #89 fix-round-1's dedupe convention —
-                        # _dedupe_flags keys on (document_id, kind,
-                        # suggested_action), so a fallback present in BOTH
-                        # corpus_manifest.json and review.json collapses to
-                        # one Needs-Attention row, not two).
+                        # Text must stay VERBATIM across a rewrite (issue #89
+                        # fix-round-1's dedupe convention — _dedupe_flags
+                        # keys on (document_id, kind, suggested_action), so a
+                        # fallback present in BOTH corpus_manifest.json and
+                        # an optional review.json sidecar collapses to one
+                        # Needs-Attention row, not two).
                         "suggested_action": (
                             f"Version {version!r} was mined via the legacy extractor: "
                             f"{reason_text} — no OCR, no docling-derived heading structure "

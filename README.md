@@ -175,7 +175,6 @@ extraction stack is a property of how you installed, not a flag.
 | [`docs/CORPUS-LAYOUT.md`](docs/CORPUS-LAYOUT.md) | How to organize your input directory (and what to do if you can't) |
 | [`docs/QUICK-COMPILE.md`](docs/QUICK-COMPILE.md) | The no-LLM stub smoke run (`playbook mine` → `playbook project`) |
 | [`docs/REAL-CORPUS-DERIVATION.md`](docs/REAL-CORPUS-DERIVATION.md) | Plan/execute discipline for a real (confidential) corpus run |
-| [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) | The checkpoint-review loop for supervised derivations |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
