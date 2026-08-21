@@ -224,7 +224,7 @@ correct and honestly labelled. LLM segmentation (`segmentation.llm: true` +
 a key) is the quality upgrade, not a requirement.
 
 **Born-safe sidecar — keep it in one gitignored place.** Pass
-`--entity-registry /work/out/entity_registry.json` to `mine`/`compile` so the
+`--entity-registry /work/out/entity_registry.json` to `mine` so the
 sensitive alias→real-name registry co-locates with `alias_map.json` under
 `$OUT` (both gitignored) instead of the machine-global
 `~/.cache/playbook-engine/entity_registry.json` default. Under Docker the
@@ -934,11 +934,11 @@ disk** — the bundle contains it, never replaces it. A consumer extracts the
 `opf-canonical` block, JSON-parses it, and verifies `identity.content_hash`
 against `playbook_engine.canonicalize.content_hash`.
 
-`view document` is a **deprecated alias of `view bundle`** (kept one release):
-it writes `playbook.opf.html`, no longer emits `playbook.document.html`, and
-rejects `--alias-map`. Only `view render --alias-map /work/out/alias_map.json`
-resolves real names, for an internal-eyes-only copy; without it every
-rendering stays alias-only.
+`view bundle` writes `playbook.opf.html`; `playbook.document.html` is no
+longer emitted as a separate artifact. `view bundle` takes no `--alias-map`
+— only `view render --alias-map /work/out/alias_map.json` resolves real
+names, for an internal-eyes-only copy; without it every rendering stays
+alias-only.
 
 ---
 

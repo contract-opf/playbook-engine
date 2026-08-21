@@ -1,7 +1,7 @@
 """Corpus-layout linter — pre-flight check before a compile run.
 
 Reports what is missing or misconfigured in a corpus directory so a
-non-engineer can fix it before running ``playbook compile``.
+non-engineer can fix it before running ``playbook mine``.
 
 The linter produces a ``LintReport`` with a list of ``LintItem`` entries,
 each classified as ``"ok"``, ``"warning"``, or ``"error"``.  Errors block
@@ -272,7 +272,7 @@ def _lint_duplicate_stems(doc_dir: Path, version_files: list[Path], report: Lint
     (and its ``_batch_custom_id``), one version of the negotiation record
     disappears, and ``corpus_doc["versions"]`` still reports both as mined
     (issue #95). Flag it here as a blocking error so users fix the layout
-    before running ``compile``, rather than lose a version silently.
+    before running ``mine``, rather than lose a version silently.
 
     Comparison is case-insensitive since most of the target filesystems
     (macOS, Windows) are case-insensitive-preserving in practice, and a
@@ -477,7 +477,7 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
 
     # segmentation.llm credentials (issue #131): lint-corpus is the documented
     # preflight tool, so it must catch a missing ANTHROPIC_API_KEY here rather
-    # than let a user discover it only when ``mine``/``compile``/``judge``
+    # than let a user discover it only when ``mine``/``judge``
     # itself refuses to run (or, before that fix, after docling had already
     # ground through extraction).
     #
@@ -553,7 +553,7 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
     # _VALID_EXTRACTORS copy above) -- is reported as an ERROR here,
     # mirroring the CONFIG_PROVENANCE_INVALID / CONFIG_ALIASES_INVALID
     # pattern above: this is precisely the raw-vs-resolved gap that bit #68,
-    # and lint-corpus must never say "OK" about a config ``mine``/``compile``
+    # and lint-corpus must never say "OK" about a config ``mine``
     # will refuse to load (the same invariant the provenance section above
     # states explicitly). The CONFIG_UNKNOWN_KEY check above already flags
     # an unknown key inside extraction: (e.g. a typo'd ``extractr``); this

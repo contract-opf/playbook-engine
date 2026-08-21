@@ -73,7 +73,7 @@ docling vs. legacy adapters:
   (returned in place of the old plain string — issue #81) carries a
   structured ``reason`` — ``"env-missing" | "backend-error" | "declared" |
   None`` — so ``corpus_manifest.json``'s ``version_ingest``,
-  ``config.extraction.max_fallback``'s budget, and the ``mine``/``compile``
+  ``config.extraction.max_fallback``'s budget, and the ``mine``
   CLI summary can all tell these apart instead of collapsing to one
   ambiguous ``"legacy"``.
 
@@ -322,7 +322,7 @@ def detect_extractor(path: Path) -> str:
     ``"legacy"`` otherwise (pdfplumber/python-docx/pandoc, per format) —
     the exact same check ``extract_blocks`` makes internally to choose its
     code path when no extractor is declared. Factored out so callers that
-    need to *record* the choice (corpus manifest, ``mine``/``compile`` CLI
+    need to *record* the choice (corpus manifest, ``mine`` CLI
     output) can do so up front — including for a version whose extraction
     subsequently fails — without duplicating or risking drift from
     ``extract_blocks``'s own branch (issue #129: this was previously only

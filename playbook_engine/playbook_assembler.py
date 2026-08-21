@@ -126,8 +126,9 @@ def _sanitize_corpus_documents_for_schema(
 # cover the *default zero-LLM* deviation stub (``_NullDeviationJudge``,
 # pipeline.py), which emits basis="needs_review" rather than "stub" for
 # every changed clause since a judge protocol IS wired (just not a real
-# one). Watermarking on all three is what makes a default `playbook compile`
-# (no LLM configured anywhere) actually watermark its output — see issue #101.
+# one). Watermarking on all three is what makes a default `playbook mine` +
+# `playbook project` run (no LLM configured anywhere) actually watermark its
+# output — see issue #101.
 _UNJUDGED_OBSERVATION_BASES = frozenset({"stub", "needs_review", "judge_error"})
 
 

@@ -7,6 +7,12 @@ pre-1.0 minor versions may break compatibility).
 
 ## [Unreleased]
 
+- **Breaking**: Removed the `playbook compile` and `playbook view document`
+  CLI commands (issue #109) — both were redundant spellings of existing
+  pipelines (`compile`'s options were exactly `mine`'s plus `--stop-after`,
+  and `view document` was a self-declared deprecated alias). Use
+  `playbook mine` followed by `playbook project` in place of `compile`, and
+  `playbook view bundle` in place of `view document`.
 - **Breaking**: `playbook_engine.publisher`'s party-scan vocabulary is now
   agreement-type-neutral by default (issue #107) — the education-specific
   role words (`educational`, `academic`, `affiliated`, `affiliate`) and

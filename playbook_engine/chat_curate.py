@@ -194,7 +194,7 @@ def apply_curate_commands(
 
     Args:
         out_dir:   Directory containing ``playbook.opf.json`` (from
-                   ``playbook compile``/``project``).
+                   ``playbook mine``/``project``).
         commands:  Instruction lines (see module docstring for grammar).
                    Blank lines and lines starting with ``#`` are skipped.
         pinned_by: Optional attribution stamped on any pin created

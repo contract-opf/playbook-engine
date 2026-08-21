@@ -153,7 +153,7 @@ def build_inspection_report(
 
     Args:
         out_dir:          Path to the ``out/`` directory produced by
-                          ``playbook compile``.
+                          ``playbook mine``.
         coherence_flags:  Optional list of ``CoherenceFlag`` entries emitted
                           by ``CoherenceJudge``.  When provided and non-empty,
                           a dedicated section is prepended to the report.

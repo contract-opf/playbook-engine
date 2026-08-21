@@ -81,8 +81,8 @@ def build_after_action_data(out_dir: Path) -> dict[str, Any]:
     drift.
 
     Args:
-        out_dir: Path to the ``out/`` directory produced by ``playbook compile``
-                 (or ``playbook mine`` + ``playbook project``).
+        out_dir: Path to the ``out/`` directory produced by ``playbook mine``
+                 + ``playbook project``.
 
     Returns:
         Nested dict with sections: corpus_coverage, backbone_health,

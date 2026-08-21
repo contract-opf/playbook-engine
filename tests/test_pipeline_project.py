@@ -270,8 +270,9 @@ _CORPUS_BODY_V2 = (
 def test_default_stub_judges_compile_watermarks_playbook(tmp_path: Path) -> None:
     """End-to-end regression guard for issue #101.
 
-    A real ``playbook compile`` with NO judges configured (the CLI default)
-    uses ``_AllInScopeJudge`` (scope) and ``_NullDeviationJudge`` (deviation)
+    A real ``playbook mine`` + ``playbook project`` run with NO judges
+    configured (the CLI default) uses ``_AllInScopeJudge`` (scope) and
+    ``_NullDeviationJudge`` (deviation)
     — both stubs, neither backed by an LLM. Neither stub ever emits an
     Observation with basis="stub" literally: ``_AllInScopeJudge``'s
     basis="stub" lands on the ``ScopeDecision`` (scope.json), not an
