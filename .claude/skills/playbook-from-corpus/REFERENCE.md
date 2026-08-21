@@ -307,9 +307,15 @@ and write one verdict line per document to the verdicts JSONL:
 6. **Corpus confidentiality.** Real agreement text is private. Do not log,
    echo, or store clause text outside the local `out/` directory.
 
-7. **OPF v0.2 fields.** The `historical_stance` (Posture section) and walk-away
-   floor (Floor section) require a GC interview and cannot be derived from the
-   corpus. List them as pending human input in the report — never invent them.
+7. **Posture / Floor fields.** The `historical_stance` (Posture section) and the
+   walk-away floor (Floor section) require the GC interview (OPF-SPEC.md §7) and
+   cannot be derived from the corpus — never invent them. With the human
+   present, run SKILL.md Step 7a (interview) and Step 7b (floor propose → sign);
+   without them, list both as pending human input in the report and say that an
+   evidence-only playbook is a complete document (Rung 0), not an unfinished one.
+   Q4 `sacred_clauses` is written straight into signed `floor.invariants` (the
+   human authored it); compiler-derived candidates require an explicit accept
+   round-tripped through `playbook view apply`.
 
 ---
 

@@ -1,14 +1,19 @@
 ---
 name: playbook-from-corpus
 description: >-
-  Use when deriving a negotiation playbook from a corpus of agreement files,
-  running the full unattended derivation pipeline from staging through LLM judgment to
-  a validated playbook. Use when the user has a folder of contracts and wants to
-  produce a playbook.opf.json with real semantics, acting as the LLM judge. Use
-  when the user says "derive a playbook", "run the corpus pipeline", "mine and
-  judge the corpus", or "produce the OPF playbook from agreements". Drives the
-  complete ordered workflow — stage, lint-corpus, mine, checkpoint/inspect,
-  judge (plan/subset/drain loop), judge-apply, project, validate, report, view.
+  Use for any work on an OPF negotiation playbook — deriving one from a corpus of
+  agreement files, OR authoring the Posture and Floor on a playbook that already
+  exists. Use when the user has a folder of contracts and wants a
+  playbook.opf.json with real semantics, acting as the LLM judge. Use when the
+  user says "derive a playbook", "run the corpus pipeline", "mine and judge the
+  corpus", or "produce the OPF playbook from agreements". ALSO use when the user
+  says "run the posture interview", "author the posture", "add hard lines",
+  "sign the floor", "my playbook has no posture", "update my playbook", or wants
+  to climb the control ladder on an evidence-only playbook. Asks first whether
+  this is a full derivation or an update to an existing out-dir, then walks only
+  the steps that route needs — stage, lint-corpus, mine, checkpoint/inspect,
+  judge (plan/subset/drain loop), judge-apply, project, posture interview, floor
+  propose/sign, validate, report, view.
 ---
 
 # playbook-from-corpus
@@ -40,7 +45,61 @@ derived from the export manifest.
 
 ---
 
-## Interactive setup (one prompt)
+## Step 0 — Pick the route (ask this FIRST, before anything else)
+
+Most of this pipeline is expensive and unattended; the part that needs the
+human is six questions. So establish which of these the user is actually
+doing before running a single command:
+
+> "Before I start — which of these are you doing?
+>  **A. Full derivation.** You have a folder of agreements and no playbook yet.
+>     I'll run the whole pipeline: stage → judge → project → interview → render.
+>     Long (mostly unattended), and I'll need ~10 minutes of your attention near
+>     the end.
+>  **B. Author Posture / Floor on a playbook you already have.** There's a
+>     validated `playbook.opf.json` with Evidence in it, and `posture` / `floor`
+>     are empty. This is six questions and a sign-off — about ten minutes, no
+>     re-derivation, no corpus needed.
+>  **C. Re-derive Evidence from a changed corpus, keeping what you authored.**
+>     The agreements changed; the Posture and Floor you already signed should
+>     survive."
+
+**Route B is the common case and the cheap one.** A playbook whose `posture` and
+`floor` are `{}` is not broken — evidence-only is a complete, legitimate OPF
+document (Rung 0, `docs/ADOPTING.md`). But it is also the state every freshly
+derived playbook lands in, because Posture and Floor are *forward-looking
+intent* that no corpus contains. If the user says "my playbook is missing
+posture", they want Route B, not a re-derivation.
+
+Confirm the route by measuring, never by asking twice — read the playbook and
+say what you found:
+
+```bash
+python3 -c "
+import json,sys; d=json.load(open(sys.argv[1]))
+ev=(d.get('evidence') or {}).get('clauses') or []
+print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
+      f\"posture: {len(d.get('posture') or {})} keys | floor: {len(d.get('floor') or {})} keys\")
+" out/<name>/playbook.opf.json
+```
+
+| Route | Steps to run |
+|---|---|
+| **A** — full derivation | 1 → 11 (everything below, in order) |
+| **B** — author Posture/Floor | **7a → 7b → 8 → 9 → 10** only |
+| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. |
+
+Route B needs no corpus and no config — every command in Steps 7a/7b reads and
+writes the single out-dir. If the user only has an out-dir, that is sufficient;
+do not ask them to produce a corpus they do not need.
+
+One mechanical caveat: `make docker-run` **always** mounts `CORPUS` (defaulting
+to `./corpus`, see the Makefile), so a Route B user with no corpus directory
+will hit a mount error. On Route B either use the venv form directly —
+`playbook posture interview $OUT ...` — or pass the out-dir as a harmless
+placeholder: `make docker-run CORPUS=$OUT OUT=$OUT ARGS="..."`.
+
+## Interactive setup (Route A and C only — skip for Route B)
 
 Before starting, ask the human only what you cannot derive yourself:
 
@@ -614,6 +673,179 @@ make docker-run CORPUS=./corpus OUT=./out \
 `mine` replays the verdict store to populate full semantics. `project` compiles
 L5 (playbook assembly) deterministically from the observation store.
 
+### Step 7a — Posture interview (Rung 1) — THE ONLY STEP THAT NEEDS THE HUMAN
+
+Everything before this was derived from the corpus. Posture cannot be: it is
+*forward-looking intent*, and no pile of past agreements contains it. This is
+why a freshly projected playbook always has `posture: {}` — not a failure, just
+the boundary of what derivation can know (OPF-SPEC.md §7).
+
+**Never ask an open-ended question.** Every question is presented as
+multiple choice with options computed from the corpus you just mined, and the
+free-text escape is always available (`AskUserQuestion` renders an "Other"
+choice automatically — never remove it, and never tell the user to type instead
+of choosing). A blank "what is your risk appetite?" prompt makes the user do the
+analysis you already did for them.
+
+**Compute the options before asking.** Read `$OUT/observations.jsonl` and
+`$OUT/round_moves.jsonl` and turn them into concrete choices:
+
+```bash
+# reversal candidates (seeds Q1/sacred), outcome + provenance mix (Q2/Q3),
+# and rounds-to-settle per document (Q4)
+python3 - <<'PY'
+import json, collections, statistics
+D = "OUT_DIR_HERE"
+obs = [json.loads(l) for l in open(f"{D}/observations.jsonl") if l.strip()]
+pb  = json.load(open(f"{D}/playbook.opf.json"))
+titles = {c.get("taxonomy_id") or c.get("id"): c.get("title")
+          for c in (pb["evidence"].get("clauses") or [])}
+rev = collections.Counter(o.get("taxonomy_id") for o in obs
+                          if o.get("outcome") == "proposed_then_reversed")
+print("most REVERSED:", [(titles.get(k, k), v) for k, v in rev.most_common(8)])
+
+# Rank the SECOND axis too — see the warning below. A clause that is usually
+# ABSENT barely registers as reversed, because it was never there to fight over.
+def doc_of(o):
+    c = o.get("citation"); return c.get("document_id") if isinstance(c, dict) else None
+docs = {doc_of(o) for o in obs} - {None}
+seen = collections.defaultdict(set)
+for o in obs:
+    if o.get("taxonomy_id") and doc_of(o): seen[o["taxonomy_id"]].add(doc_of(o))
+absent = sorted(titles, key=lambda t: len(seen.get(t, ())))
+print("most ABSENT:", [(titles[t], f"{len(seen.get(t,()))}/{len(docs)}") for t in absent[:8]])
+print("provenance:", dict(collections.Counter(o.get("provenance") for o in obs)))
+rm = [json.loads(l) for l in open(f"{D}/round_moves.jsonl") if l.strip()]
+per = collections.defaultdict(int)
+for m in rm:
+    if m.get("round"): per[m["document_id"]] = max(per[m["document_id"]], m["round"])
+v = sorted(per.values())
+print("rounds/doc: median", statistics.median(v), "mean", round(statistics.mean(v),1),
+      "p90", v[int(len(v)*0.9)-1], "n", len(v))
+PY
+```
+
+**Ask in order of importance, not in spec order.** OPF-SPEC.md §7 numbers the
+questions 1–6, but only one of them creates hard-binding content. Lead with it:
+
+| Order | id | Why it ranks here |
+|---|---|---|
+| 1 | `sacred_clauses` | **The only answer that becomes hard-binding.** Writes straight into signed `floor.invariants`; forces the outcome on every future review. |
+| 2 | `risk_appetite` | Governs the default disposition on every non-material change — the most-exercised sentence in the Posture. |
+| 3 | `leverage` | Frames whether the model argues from strength or accommodation. |
+| 4 | `rounds` | Sets when to escalate rather than keep trading. |
+| 5 | `flexible_clauses` | The mirror of Q1, but soft — shapes concession order, binds nothing. |
+| 6 | `audience` | Style of the rationale, not the substance of the judgment. |
+
+Batch them as **two `AskUserQuestion` rounds** (the tool takes at most 4
+questions and 2–4 options each): rounds 1–4 first, then 5–6. Do not send six
+separate prompts.
+
+**Write options at medium depth.** Each option label is a short phrase; each
+`description` states what choosing it *commits the playbook to*, and cites the
+corpus number behind it. Not `"Collaborative"` — rather
+`"Collaborative — we usually want the placement"` with a description naming that
+94% of observations are on our own paper. The user should be able to choose
+without reading anything else, and should learn something from the options
+themselves.
+
+**Order options within a question by what the corpus supports**, most-supported
+first, so the likely answer is the first thing read. Never pad to four options
+when two are honest.
+
+**Rank the sacred-clauses options on BOTH axes — reversal count AND absence
+rate.** This is the one mistake in this step that is easy to make and hard to
+notice. Ranking candidates by "most reversed" surfaces the clauses that get
+*fought over*, and is structurally blind to the clauses that are silently
+*missing* — a clause that is not in the document cannot be reversed, so it
+scores zero on the axis you are sorting by, no matter how badly it is needed.
+Measured on the EIAA corpus: Limitation of Liability appeared in **9 of 43
+documents (20%)** — the single most-absent clause — and drew only 4 mentions
+across 2,662 observations, so a reversal-ranked option set omitted it entirely
+while the user's actual top hard line was *"limitation of liability must always
+be present."*
+
+So offer both kinds and say which kind each is:
+
+- **"don't let them weaken X"** — from the reversal ranking; X is present and
+  contested.
+- **"X must be present at all"** — from the absence ranking; the Floor's job
+  here is to fix what the history got wrong, not to encode it. Say the absence
+  rate out loud in the option description ("present in 9 of 43 — your history
+  is the argument FOR this hard line, not against it").
+
+An absence-shaped invariant is often the most valuable thing in the whole
+Floor, precisely because the corpus cannot propose it: the corpus is the record
+of it not happening.
+
+**Write the answers to a file as you collect them**, then apply them. The
+interview is the expensive thing to lose — a crash mid-way should never cost
+the user their answers:
+
+```bash
+# Question ids, if you need to confirm them:
+playbook posture questions
+
+# Write $OUT/posture-answers.json as you go, then:
+playbook posture interview $OUT --answers-file $OUT/posture-answers.json
+# Docker form: make docker-run OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
+```
+
+Three rules that are easy to get wrong:
+
+- **Three answers is enough.** Each answered question becomes one sentence of
+  `posture.system_prompt`. Skipping questions is legitimate; inventing answers
+  is not.
+- **Q4 is different in kind, and signs itself.** Naming what is non-negotiable
+  is a human authoring a hard line in natural language, so that answer is
+  written **directly into signed `floor.invariants`**, attributed to the
+  interview. This is *not* the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids —
+  that rule bars promoting a **compiler-derived** candidate without an explicit
+  accept. A human-authored statement's sign-off is the act of writing it. Do not
+  ask the user to "confirm" Q4 a second time in Step 7b; it will render there as
+  an inert already-signed row.
+- **Re-running is safe.** The same statement always resolves to the same id and
+  updates in place — never a duplicate (a repeated id is a blocking validator
+  error, §3.13). Offer to re-run whenever the user's answers change.
+
+**If the human is not available**, stop here. Do not fabricate a Posture. Leave
+`posture: {}`, note it as pending human input in the Step 9 report, and say
+plainly that the playbook is a complete evidence-only document (Rung 0) that can
+ship as-is — `render-prompt` will mark it **ADVISORY ONLY — NOTHING BELOW IS
+BINDING** rather than shipping unmarked guidance.
+
+### Step 7b — Floor: propose, then let the human sign (Rung 2)
+
+Every ask the user's own history reversed is a *candidate* hard line — a pattern
+the compiler may surface but must never assert on its own.
+
+```bash
+playbook floor propose $OUT      # writes $OUT/floor.candidates.json + a summary table
+```
+
+`floor propose` is a **review artifact only**. It never writes to the OPF `floor`
+section and never promotes a candidate. Accepting is a human act, and it
+round-trips through the review HTML — do **not** hand-edit `floor.invariants`:
+
+```bash
+playbook view render $OUT        # candidates appear as a "Proposed hard lines"
+                                 # checklist above the clause sections of
+                                 # $OUT/playbook.review.html
+# Human: accept / reject / undecided on each, then click "Export feedback"
+# Save the export to $OUT/feedback.json, then:
+playbook view apply $OUT
+```
+
+`accept` signs the candidate into `floor.invariants` with attribution; `reject`
+records that a human looked and declined, so it is not re-proposed. **Undecided
+is the default and nothing expires unreviewed** — an undecided candidate simply
+reappears next time. Tell the user that: it means they can stop halfway without
+losing anything or leaving a landmine.
+
+Keep the Floor small. §3.7.1's admission test is the standard — a Floor
+invariant is something that forces the outcome on every review, fail-closed, so
+a bloated Floor turns into noise the consumer must still evaluate on every run.
+
 ### Step 8 — Validate (must exit 0)
 
 ```bash
@@ -640,8 +872,11 @@ Review both outputs. The report surfaces:
 - Backbone health (trail quality, provenance distribution)
 - Judgment economics (items judged, low-confidence count)
 - Semantic coverage (classified vs unclassified clauses)
-- Needs-attention items (unknown aliases, low-confidence provenance, OPF v0.2
-  Posture/Floor fields that require a GC interview — listed, never invented)
+- Needs-attention items (unknown aliases, low-confidence provenance, and
+  Posture/Floor fields that require the GC interview — listed, never invented).
+  If `posture`/`floor` are still empty here, say so explicitly and offer Step 7a
+  rather than filing it as a defect: evidence-only is Rung 0, a legitimate
+  endpoint, not an unfinished state.
 - Honesty section (what remains stubbed or unresolved)
 
 ### Step 10 — View (render + bundle) and digest
@@ -775,9 +1010,14 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out
 - **Token efficiency.** Deduplicate clauses by content hash before judging;
   `playbook judge` does this automatically. Judge changed hunks, not full
   documents. Use `--plan-only` to estimate before committing to a full-corpus pass.
-- **OPF v0.2 Posture/Floor** sections (historical stance, walk-away floor)
-  require a GC interview and cannot be derived from the corpus alone. List
-  them as human-input-dependent in the report.
+- **Posture and Floor are never derived, and never invented.** They are
+  forward-looking intent; no corpus contains them. When the human is available,
+  run Step 7a/7b and let them author it. When the human is not available, leave
+  `posture: {}` / `floor: {}` and list them as pending human input in the
+  report — an evidence-only playbook is a complete OPF document, not a broken
+  one. The only content that may enter `floor.invariants` without an explicit
+  per-candidate accept is the interview's own Q4 answer, because a human wrote
+  it (OPF-SPEC.md §3.7 rule 4). A compiler-derived candidate NEVER auto-promotes.
 
 ---
 

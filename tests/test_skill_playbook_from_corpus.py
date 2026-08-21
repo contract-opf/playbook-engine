@@ -63,6 +63,12 @@ REQUIRED_SUBCOMMANDS = [
     "report",
     "view",
     "inspect",
+    # Step 7a/7b of SKILL.md — both are command GROUPS, handled like `view`
+    # in `_all_subcommand_help_text` below (a group's own --help lists only
+    # subcommand names, so flags such as `posture interview --answers-file`
+    # only appear in the SUBcommand's help).
+    "posture",
+    "floor",
 ]
 
 
@@ -133,13 +139,18 @@ def _all_subcommand_help_text() -> str:
     """
     subcmds = ["compile", *REQUIRED_SUBCOMMANDS]
     texts = [_subcommand_help(subcmd) for subcmd in subcmds]
-    for view_sub in ("render", "document", "apply"):
-        result = subprocess.run(
-            ["playbook", "view", view_sub, "--help"],
-            capture_output=True,
-            text=True,
-        )
-        texts.append(result.stdout + result.stderr)
+    for group, group_subs in (
+        ("view", ("render", "document", "apply")),
+        ("posture", ("questions", "interview")),
+        ("floor", ("propose",)),
+    ):
+        for group_sub in group_subs:
+            result = subprocess.run(
+                ["playbook", group, group_sub, "--help"],
+                capture_output=True,
+                text=True,
+            )
+            texts.append(result.stdout + result.stderr)
     return "\n".join(texts)
 
 
