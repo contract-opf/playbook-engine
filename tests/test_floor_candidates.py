@@ -34,8 +34,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
+from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import (
     FloorCandidateError,
@@ -49,8 +51,11 @@ from playbook_engine.floor_candidates import (
     propose_floor_candidates,
     read_floor_candidates,
     resolve_floor_candidate_decisions,
+    sign_floor_invariant,
+    sign_invariant_id,
     write_floor_candidates,
 )
+from playbook_engine.validator import validate_document
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -208,7 +213,9 @@ def test_reversal_classified_still_yields_candidate_alongside_unclassified() -> 
     observations = [
         _reversal_observation(observation_id="doc-a/2/8.1"),
         _reversal_observation(
-            observation_id="doc-a/2/9.1", taxonomy_id=None, clause_path="9.1",
+            observation_id="doc-a/2/9.1",
+            taxonomy_id=None,
+            clause_path="9.1",
             full_text="3 3",
         ),
     ]
@@ -541,11 +548,15 @@ def test_write_floor_candidates_reports_unclassified_omitted_count(tmp_path: Pat
             for o in (
                 _reversal_observation(observation_id="doc-a/2/8.1"),
                 _reversal_observation(
-                    observation_id="doc-a/2/9.1", taxonomy_id=None, clause_path="9.1",
+                    observation_id="doc-a/2/9.1",
+                    taxonomy_id=None,
+                    clause_path="9.1",
                     full_text="3 3",
                 ),
                 _reversal_observation(
-                    observation_id="doc-a/2/9.2", taxonomy_id=None, clause_path="9.2",
+                    observation_id="doc-a/2/9.2",
+                    taxonomy_id=None,
+                    clause_path="9.2",
                     full_text="shall",
                 ),
             )
@@ -556,7 +567,7 @@ def test_write_floor_candidates_reports_unclassified_omitted_count(tmp_path: Pat
 
     written = json.loads(write_floor_candidates(out).read_text(encoding="utf-8"))
 
-    assert len(written["candidates"]) == 1          # only the classified one
+    assert len(written["candidates"]) == 1  # only the classified one
     assert written["unclassified_reversals_omitted"] == 2
 
 
@@ -1235,3 +1246,386 @@ def test_read_floor_candidates_returns_candidates_list(tmp_path: Path) -> None:
         json.dumps({"candidates": [candidate]}), encoding="utf-8"
     )
     assert read_floor_candidates(tmp_path) == [candidate]
+
+
+# ---------------------------------------------------------------------------
+# sign_floor_invariant / sign_invariant_id — issue #103
+# ---------------------------------------------------------------------------
+
+_CONDITIONAL_STATEMENT = (
+    "Limitation of liability, if present, must not be unilateral in the counterparty's favor."
+)
+
+
+def test_sign_floor_invariant_records_statement_verbatim() -> None:
+    """A conditional statement with commas — exactly the shape Q4's
+    semicolon-split templating would garble — must survive byte-for-byte."""
+    result = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
+
+    assert len(result) == 1
+    assert result[0]["statement"] == _CONDITIONAL_STATEMENT
+
+
+def test_sign_floor_invariant_default_id_is_slug_of_statement() -> None:
+    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    assert result[0]["id"] == sign_invariant_id("Never accept uncapped liability.")
+    assert result[0]["id"] == "never-accept-uncapped-liability"
+
+
+def test_sign_floor_invariant_id_override() -> None:
+    result = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, invariant_id="liability-not-unilateral", existing_invariants=[]
+    )
+    assert result[0]["id"] == "liability-not-unilateral"
+
+
+def test_sign_floor_invariant_default_rationale() -> None:
+    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    assert result[0]["rationale"] == "Hand-authored via `playbook floor sign`."
+
+
+def test_sign_floor_invariant_custom_rationale() -> None:
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.",
+        rationale="Signed off by the GC 2026-08-20.",
+        existing_invariants=[],
+    )
+    assert result[0]["rationale"] == "Signed off by the GC 2026-08-20."
+
+
+def test_sign_floor_invariant_taxonomy_id_stored_as_x_prefixed() -> None:
+    """Not a bare `taxonomy_id` — spec/playbook.schema-0.3.json's frozen
+    floor.invariants[] item is `additionalProperties: false`; only the
+    `^x_` escape hatch is schema-safe without a spec version bump."""
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.",
+        taxonomy_id="uncapped_liability",
+        existing_invariants=[],
+    )
+    assert result[0]["x_taxonomy_id"] == "uncapped_liability"
+    assert "taxonomy_id" not in result[0]
+
+
+def test_sign_floor_invariant_no_taxonomy_id_key_when_clause_omitted() -> None:
+    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    assert "x_taxonomy_id" not in result[0]
+
+
+def test_sign_floor_invariant_appends_after_existing_entries() -> None:
+    existing = [{"id": "existing-one", "statement": "Existing.", "rationale": "r"}]
+    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=existing)
+    assert result[0] == existing[0]
+    assert len(result) == 2
+
+
+def test_sign_floor_invariant_rejects_blank_statement() -> None:
+    with pytest.raises(FloorCandidateError):
+        sign_floor_invariant("   ", existing_invariants=[])
+
+
+def test_sign_floor_invariant_same_id_same_statement_is_idempotent_noop() -> None:
+    first = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
+    second = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=first)
+    assert second == first
+    assert second[0] is first[0]  # not even a fresh dict — true no-op
+
+
+def test_sign_floor_invariant_noop_ignores_a_new_rationale_or_clause() -> None:
+    """Literal reading of the ticket's collision rule: 'same id + same
+    statement = idempotent no-op', full stop — not 'no-op unless the
+    caller also asked to change something else'. There is no in-place
+    update path here (see the function's docstring); a caller wanting to
+    change rationale/taxonomy_id on an already-signed statement removes or
+    edits the invariant directly."""
+    first = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, rationale="Original rationale.", existing_invariants=[]
+    )
+    second = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT,
+        rationale="A different rationale.",
+        taxonomy_id="limitation_of_liability",
+        existing_invariants=first,
+    )
+    assert second == first
+    assert second[0]["rationale"] == "Original rationale."
+    assert "x_taxonomy_id" not in second[0]
+
+
+def test_sign_floor_invariant_same_id_different_statement_refuses() -> None:
+    first = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
+    inv_id = first[0]["id"]
+
+    with pytest.raises(FloorCandidateError, match=inv_id):
+        sign_floor_invariant(
+            "A completely different statement.", invariant_id=inv_id, existing_invariants=first
+        )
+
+    # Never mutated in place.
+    assert first[0]["statement"] == _CONDITIONAL_STATEMENT
+
+
+def test_sign_floor_invariant_never_overwrites_a_foreign_entry() -> None:
+    """Colliding with a hand-authored entry from an entirely different
+    producer (e.g. Q4 promotion) must refuse exactly the same way — this
+    function draws no distinction between 'foreign' and 'self-authored'
+    collisions (unlike promote_interview_q4_invariants/
+    promote_floor_candidate's attribution-marker guards): ANY id collision
+    with a different statement is refused."""
+    hand_authored = {
+        "id": "no-uncapped-liability",
+        "statement": "Never accept uncapped liability under any circumstances.",
+        "rationale": "Board-approved 2026-01-01.",
+    }
+    with pytest.raises(FloorCandidateError):
+        sign_floor_invariant(
+            "Never accept uncapped liability.",
+            invariant_id="no-uncapped-liability",
+            existing_invariants=[hand_authored],
+        )
+    assert hand_authored == {
+        "id": "no-uncapped-liability",
+        "statement": "Never accept uncapped liability under any circumstances.",
+        "rationale": "Board-approved 2026-01-01.",
+    }
+
+
+def test_sign_invariant_id_blank_override_falls_back_to_slug() -> None:
+    assert sign_invariant_id("Never accept uncapped liability.", "   ") == (
+        "never-accept-uncapped-liability"
+    )
+
+
+def test_sign_invariant_id_all_punctuation_statement_falls_back() -> None:
+    assert sign_invariant_id("...", None) == "floor-invariant"
+
+
+# ---------------------------------------------------------------------------
+# CLI — playbook floor sign — issue #103
+# ---------------------------------------------------------------------------
+
+
+def _write_signable_doc(tmp_path: Path, **doc_overrides: Any) -> Path:
+    doc = _minimal_v02_doc(floor={"invariants": []}, **doc_overrides)
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+    return opf_path
+
+
+def _write_taxonomy_config(tmp_path: Path, entry_ids: list[str]) -> Path:
+    """Minimal engine config + taxonomy YAML for --clause validation tests."""
+    taxonomy_path = tmp_path / "taxonomy.yaml"
+    taxonomy_path.write_text(
+        yaml.dump(
+            {
+                "source": "custom",
+                "entries": [
+                    {
+                        "id": entry_id,
+                        "label": entry_id.replace("_", " ").title(),
+                        "status": "active",
+                        "cuad_origin": None,
+                    }
+                    for entry_id in entry_ids
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
+                "baseline": {"template": None},
+                "taxonomy": str(taxonomy_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_cli_floor_sign_writes_verbatim_statement(tmp_path: Path) -> None:
+    opf_path = _write_signable_doc(tmp_path)
+
+    exit_code, output = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+
+    assert exit_code == 0, output
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["floor"]["invariants"] == [
+        {
+            "id": sign_invariant_id(_CONDITIONAL_STATEMENT),
+            "statement": _CONDITIONAL_STATEMENT,
+            "rationale": "Hand-authored via `playbook floor sign`.",
+        }
+    ]
+
+
+def test_cli_floor_sign_refreshes_content_hash(tmp_path: Path) -> None:
+    """Issue #103's Reviewer gate: 'a forgotten hash recompute must be
+    caught by a test, not luck.' Direct equality against a freshly computed
+    content_hash of the expected final document — the same proof pattern
+    test_posture.py uses for apply_posture_interview."""
+    doc_overrides: dict[str, Any] = {"floor": {"invariants": []}}
+    doc = _minimal_v02_doc(**doc_overrides)
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exit_code, output = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+    assert exit_code == 0, output
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    expected_doc = dict(written)
+    assert written["identity"]["content_hash"] == content_hash(expected_doc)
+    assert written["identity"]["content_hash"] != doc["identity"]["content_hash"]
+    assert written["identity"]["section_digests"] == compute_section_digests(written)
+    assert (
+        written["identity"]["section_digests"]["floor"]
+        != doc["identity"]["section_digests"]["floor"]
+    )
+
+
+def test_cli_floor_sign_warns_on_posture_floor_conflict(tmp_path: Path) -> None:
+    """Issue #103's Reviewer gate: 'floor sign' runs check_posture_floor_conflict
+    (see the rationale comment at cli.py) and its SHOULD-warn output must
+    actually be exercised by a test, not left dead code behind an always-empty
+    fixture posture."""
+    _write_signable_doc(
+        tmp_path,
+        posture={"system_prompt": "The liability cap is flexible to close a deal."},
+    )
+
+    exit_code, output = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+
+    assert exit_code == 0, output
+    assert "WARN" in output, output
+
+
+def test_cli_floor_sign_output_passes_playbook_validate(tmp_path: Path) -> None:
+    opf_path = _write_signable_doc(tmp_path)
+    config_path = _write_taxonomy_config(tmp_path, ["limitation_of_liability"])
+
+    exit_code, output = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--clause",
+        "limitation_of_liability",
+        "--config",
+        str(config_path),
+    )
+    assert exit_code == 0, output
+
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    result = validate_document(written)
+    blocking = [str(e) for e in result.errors if e.blocking]
+    assert result.ok, blocking
+
+
+def test_cli_floor_sign_idempotent_rerun_does_not_rewrite_the_file(tmp_path: Path) -> None:
+    opf_path = _write_signable_doc(tmp_path)
+
+    exit_code, _ = _invoke("floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT)
+    assert exit_code == 0
+    first_bytes = opf_path.read_bytes()
+
+    exit_code2, output2 = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+    assert exit_code2 == 0, output2
+    assert "no-op" in output2
+    assert opf_path.read_bytes() == first_bytes
+
+
+def test_cli_floor_sign_collision_refuses_and_exits_nonzero(tmp_path: Path) -> None:
+    opf_path = _write_signable_doc(tmp_path)
+    exit_code, _ = _invoke("floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT)
+    assert exit_code == 0
+    inv_id = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"][0]["id"]
+    original_bytes = opf_path.read_bytes()
+
+    exit_code2, output2 = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        "A totally different statement.",
+        "--id",
+        inv_id,
+    )
+
+    assert exit_code2 != 0
+    assert "ERROR" in output2
+    # Never overwritten.
+    assert opf_path.read_bytes() == original_bytes
+
+
+def test_cli_floor_sign_unknown_clause_lists_valid_ids_and_exits_nonzero(tmp_path: Path) -> None:
+    _write_signable_doc(tmp_path)
+    config_path = _write_taxonomy_config(tmp_path, ["limitation_of_liability", "indemnification"])
+
+    exit_code, output = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--clause",
+        "not_a_real_clause",
+        "--config",
+        str(config_path),
+    )
+
+    assert exit_code != 0
+    assert "not_a_real_clause" in output
+    assert "limitation_of_liability" in output
+    assert "indemnification" in output
+
+
+def test_cli_floor_sign_clause_without_config_exits_nonzero(tmp_path: Path) -> None:
+    _write_signable_doc(tmp_path)
+
+    exit_code, output = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--clause",
+        "limitation_of_liability",
+    )
+
+    assert exit_code != 0
+    assert "--config" in output
+
+
+def test_cli_floor_sign_missing_out_dir_fails() -> None:
+    exit_code, output = _invoke(
+        "floor", "sign", "/nonexistent/out/dir", "--statement", _CONDITIONAL_STATEMENT
+    )
+    assert exit_code != 0
+
+
+def test_cli_floor_sign_missing_playbook_fails(tmp_path: Path) -> None:
+    exit_code, output = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+    assert exit_code != 0
+    assert "playbook.opf.json" in output
+
+
+def test_cli_floor_propose_docstring_no_longer_claims_curation_cli() -> None:
+    """Issue #103: the docstring used to say a candidate could be accepted
+    'via the curation CLI' — false; chat_curate.py has zero occurrences of
+    'floor'."""
+    exit_code, output = _invoke("floor", "propose", "--help")
+    assert exit_code == 0
+    assert "curation CLI" not in output

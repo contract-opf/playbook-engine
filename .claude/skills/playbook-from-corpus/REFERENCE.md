@@ -315,7 +315,10 @@ and write one verdict line per document to the verdicts JSONL:
    evidence-only playbook is a complete document (Rung 0), not an unfinished one.
    Q4 `sacred_clauses` is written straight into signed `floor.invariants` (the
    human authored it); compiler-derived candidates require an explicit accept
-   round-tripped through `playbook view apply`.
+   round-tripped through `playbook view apply`. A conditional hard line either
+   of those templates would garble ("X, if present, must not be Y") goes
+   through `playbook floor sign --statement "..."` instead, verbatim — never
+   by hand-editing `floor.invariants`.
 
 ---
 

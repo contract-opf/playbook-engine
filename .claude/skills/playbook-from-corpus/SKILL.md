@@ -842,6 +842,27 @@ is the default and nothing expires unreviewed** — an undecided candidate simpl
 reappears next time. Tell the user that: it means they can stop halfway without
 losing anything or leaving a landmine.
 
+**A conditional hard line needs `floor sign`, not a candidate.** Both paths
+above only ever produce "Do not concede on {clause type}." — fine for an
+unconditional rule, but a real hard line is often conditional ("limitation of
+liability, *if present*, must not be unilateral in the counterparty's favor"),
+and neither template can express that; forcing it through either one just
+garbles the sentence. When the human dictates a hard line like that, write it
+down **verbatim**:
+
+```bash
+playbook floor sign $OUT --statement "Limitation of liability, if present, must not be unilateral in the counterparty's favor."
+# Optional: --id a-slug, --rationale "attribution", and --clause TAXONOMY_ID
+# (validated against --config's taxonomy — pass --config when you use --clause)
+```
+
+Re-running with the identical `--statement` under the same id is a no-op;
+re-running with a different `--statement` under an id that already carries one
+is refused, never silently overwritten. This is the ONLY sanctioned way to put
+a hand-authored statement into `floor.invariants` outside of Q4/the
+accept-checklist above — never hand-edit `floor.invariants` directly, even for
+a one-word fix.
+
 Keep the Floor small. §3.7.1's admission test is the standard — a Floor
 invariant is something that forces the outcome on every review, fail-closed, so
 a bloated Floor turns into noise the consumer must still evaluate on every run.
@@ -1016,8 +1037,9 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out
   `posture: {}` / `floor: {}` and list them as pending human input in the
   report — an evidence-only playbook is a complete OPF document, not a broken
   one. The only content that may enter `floor.invariants` without an explicit
-  per-candidate accept is the interview's own Q4 answer, because a human wrote
-  it (OPF-SPEC.md §3.7 rule 4). A compiler-derived candidate NEVER auto-promotes.
+  per-candidate accept is the interview's own Q4 answer and a `floor sign`
+  statement, because a human wrote them (OPF-SPEC.md §3.7 rule 4). A
+  compiler-derived candidate NEVER auto-promotes.
 
 ---
 

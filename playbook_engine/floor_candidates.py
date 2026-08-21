@@ -78,6 +78,12 @@ This module implements:
     "rejected"`` flag directly on the candidate in ``floor.candidates.json``
     so a later re-render shows it as rejected instead of re-proposing it —
     rejections have no ``floor.invariants`` counterpart to promote into.
+  - :func:`sign_floor_invariant` / :func:`sign_invariant_id` — issue #103's
+    THIRD route into ``floor.invariants``, for a verbatim, hand-authored
+    statement (``playbook floor sign``) that has no machine-derived draft to
+    accept and no Q4 item to template — the caller's exact wording is
+    written unchanged, e.g. a conditional hard line Q4's semicolon-split
+    templating would otherwise garble.
 """
 
 from __future__ import annotations
@@ -107,6 +113,8 @@ __all__ = [
     "propose_floor_candidates",
     "read_floor_candidates",
     "resolve_floor_candidate_decisions",
+    "sign_floor_invariant",
+    "sign_invariant_id",
     "write_floor_candidates",
 ]
 
@@ -909,6 +917,161 @@ def promote_floor_candidate(
         )
 
     entry = {"id": inv_id, "statement": statement, "rationale": rationale}
+    merged.append(entry)
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Hand-authored verbatim signing (issue #103) — a THIRD route into
+# floor.invariants, alongside promote_interview_q4_invariants (Q4 templating)
+# and promote_floor_candidate (accepted candidate). Unlike either of those,
+# nothing here is derived or templated: the caller supplies the exact
+# statement text, and it is written unchanged. This is the path for a
+# conditional hard line ("limitation of liability, if present, must not be
+# unilateral in the counterparty's favor") that Q4's semicolon-split
+# "Do not concede on {item}." templating would otherwise garble into
+# nonsense.
+# ---------------------------------------------------------------------------
+
+# Storing a bare "taxonomy_id" key on a floor.invariants entry would violate
+# spec/playbook.schema-0.3.json's `additionalProperties: false` (only
+# id/statement/rationale/`^x_.*` are allowed there) — and OPF-SPEC.md's
+# versioning policy (spec/CHANGELOG.md: "opf_version 0.3 ... frozen ... any
+# further spec-affecting change goes to 0.4") forbids widening that FROZEN
+# schema in place. The schema already ships an escape hatch for exactly this
+# situation (`patternProperties: {"^x_": true}`), the same one
+# clause_position_compiler.py's `x_search_snippet`, pipeline.py's
+# `x_quarantined`, and publisher.py's `x_publication` already use — so the
+# clause taxonomy id this function records goes in under that prefix,
+# `x_taxonomy_id`, never a bare `taxonomy_id`. A schema-version bump (or a
+# genuine widening of a NOT-yet-frozen version) to promote this to a first-
+# class `taxonomy_id` property is out of this ticket's scope.
+_SIGN_DEFAULT_RATIONALE = "Hand-authored via `playbook floor sign`."
+
+
+def sign_invariant_id(statement: str, invariant_id: str | None = None) -> str:
+    """The ``floor.invariants[].id`` :func:`sign_floor_invariant` will use for
+    *statement*, given an optional caller-supplied *invariant_id* override.
+
+    Exposed separately (mirrors :func:`candidate_invariant_id`'s role for the
+    review-checklist path) so a caller — the CLI — can report the id it just
+    signed without re-deriving the slug logic itself.
+
+    Args:
+        statement:     The verbatim invariant text (see :func:`sign_floor_invariant`).
+        invariant_id:  ``--id`` override, or ``None``/blank to derive one from
+                       *statement* via :func:`_slugify`.
+
+    Returns:
+        *invariant_id* verbatim if non-blank, else a kebab-case slug of
+        *statement* (``"floor-invariant"`` if that normalizes to nothing).
+    """
+    return (
+        invariant_id
+        if invariant_id and invariant_id.strip()
+        else _slugify(statement, fallback="floor-invariant")
+    )
+
+
+def sign_floor_invariant(
+    statement: str,
+    *,
+    invariant_id: str | None = None,
+    taxonomy_id: str | None = None,
+    rationale: str | None = None,
+    existing_invariants: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Record ONE verbatim, hand-authored Floor invariant (issue #103).
+
+    Pure merge function — no I/O, no LLM, no templating. *statement* is
+    written into the returned ``floor.invariants`` list byte-for-byte: unlike
+    :func:`promote_interview_q4_invariants` (which wraps each Q4-named item in
+    "Do not concede on {item}." — a template that garbles a conditional hard
+    line) or :func:`promote_floor_candidate` (whose statement started life as
+    a compiler-drafted proposal), the caller here is the legal owner
+    authoring the exact sentence themselves; there is nothing to reword.
+
+    Collision semantics (simpler than the other two producers' — this
+    function never needs an attribution-marker guard, because EVERY entry it
+    is asked to write is, by construction, already a human's own considered
+    statement, not a machine draft someone else might have authored around):
+
+      - *invariant_id* (or, if omitted, ``slugify(statement)`` via
+        :func:`sign_invariant_id`) not present in *existing_invariants* ->
+        appended.
+      - present, with the SAME ``statement`` already recorded -> idempotent
+        no-op: *existing_invariants* is returned completely unchanged (same
+        object contents), including its ``rationale``/``x_taxonomy_id`` —
+        re-running the identical ``floor sign`` command twice must never
+        perturb the document. A run that supplies a different
+        ``--rationale``/``--clause`` for an otherwise-unchanged statement is
+        ALSO a no-op by this rule; there is no in-place-update path here (by
+        design — this command is for adding a new hard line, not editing an
+        existing one).
+      - present, with a DIFFERENT ``statement`` -> refused
+        (:class:`FloorCandidateError`) — never silently overwritten. Pick a
+        different ``--id``, or edit/remove the conflicting invariant first.
+
+    Args:
+        statement:            The invariant, verbatim. Must be non-blank.
+        invariant_id:         ``--id`` override; see :func:`sign_invariant_id`.
+        taxonomy_id:          Clause-taxonomy id this invariant is about (CLI-
+                              validated against the config-resolved taxonomy
+                              before this is called — this function trusts its
+                              caller and does no taxonomy lookup itself).
+                              Stored as ``x_taxonomy_id`` (see the module-level
+                              comment above this function for why not a bare
+                              ``taxonomy_id``), omitted entirely when
+                              ``None``/blank.
+        rationale:            Attribution/justification text. Defaults to
+                              :data:`_SIGN_DEFAULT_RATIONALE` when
+                              ``None``/blank — callers can attribute a
+                              specific person via an explicit ``--rationale``.
+        existing_invariants:  The playbook's current ``floor.invariants``
+                              list, or ``None``/``[]`` for a first-ever sign.
+
+    Returns:
+        The full, merged ``floor.invariants`` list: pre-existing entries
+        untouched, in their original order, plus this statement appended (or
+        nothing appended, for the no-op case above).
+
+    Raises:
+        FloorCandidateError: *statement* is blank, or *invariant_id* (or its
+            derived slug) collides with an existing entry carrying a
+            different statement.
+    """
+    if not isinstance(statement, str) or not statement.strip():
+        raise FloorCandidateError("floor sign: --statement must be a non-empty string")
+
+    inv_id = sign_invariant_id(statement, invariant_id)
+    rationale_text = rationale if rationale and rationale.strip() else _SIGN_DEFAULT_RATIONALE
+
+    merged: list[dict[str, Any]] = list(existing_invariants or [])
+    index_by_id: dict[str, int] = {
+        inv["id"]: i
+        for i, inv in enumerate(merged)
+        if isinstance(inv, dict) and isinstance(inv.get("id"), str)
+    }
+
+    existing_index = index_by_id.get(inv_id)
+    if existing_index is not None:
+        # existing_index only ever comes from a dict entry with a string
+        # "id" (see index_by_id's construction above) — never a bare-string
+        # invariant.
+        existing_entry = merged[existing_index]
+        if existing_entry.get("statement") == statement:
+            return merged  # true no-op: same id, same statement, nothing changed
+        raise FloorCandidateError(
+            f"floor.invariants already has an entry with id {inv_id!r} "
+            f"(statement={existing_entry.get('statement')!r}) that does not "
+            f"match the statement being signed ({statement!r}) — refusing to "
+            "overwrite. Pass a different --id, or edit/remove the conflicting "
+            "invariant first if it should be replaced."
+        )
+
+    entry: dict[str, Any] = {"id": inv_id, "statement": statement, "rationale": rationale_text}
+    if taxonomy_id and taxonomy_id.strip():
+        entry["x_taxonomy_id"] = taxonomy_id
     merged.append(entry)
     return merged
 

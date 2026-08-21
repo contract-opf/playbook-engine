@@ -13,13 +13,24 @@ import yaml
 
 from playbook_engine import __version__
 from playbook_engine.aar import build_after_action_report, write_after_action_report
+from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import ConfigError, load_config
 from playbook_engine.corpus_linter import lint_corpus
-from playbook_engine.floor_candidates import write_floor_candidates
+from playbook_engine.floor_candidates import (
+    FloorCandidateError,
+    sign_floor_invariant,
+    sign_invariant_id,
+    write_floor_candidates,
+)
 from playbook_engine.inspection_report import build_inspection_report, write_inspection_report
 from playbook_engine.pipeline import PipelineError, compile_corpus, mine_corpus, project_playbook
-from playbook_engine.playbook_assembler import AssemblyError
-from playbook_engine.posture import INTERVIEW_QUESTIONS, PostureError, apply_posture_interview
+from playbook_engine.playbook_assembler import AssemblyError, write_playbook
+from playbook_engine.posture import (
+    INTERVIEW_QUESTIONS,
+    PostureError,
+    apply_posture_interview,
+    check_posture_floor_conflict,
+)
 from playbook_engine.segmentation_qa import SegmentationQAError
 from playbook_engine.taxonomy import Taxonomy, TaxonomyError, load_taxonomy, merge_taxonomy
 from playbook_engine.validator import SUPPORTED_OPF_VERSIONS, load_opf_file, validate_document
@@ -2806,8 +2817,12 @@ def floor_propose_cmd(out_dir: Path) -> None:
 
     This is a REVIEW ARTIFACT for the legal owner — it never writes to the
     OPF ``floor`` section, and never auto-promotes a candidate into
-    ``floor.invariants``. Accepting a candidate is a human act: edit
-    ``floor.invariants`` directly, or via the curation CLI.
+    ``floor.invariants``. Accepting a candidate is a human act: review
+    OUT_DIR/playbook.review.html, export feedback, then run
+    ``playbook view apply`` (issue #90). For a hard line the legal owner is
+    authoring themselves, verbatim — not one of these derived candidates —
+    use ``playbook floor sign`` instead (issue #103); do not hand-edit
+    ``floor.invariants``.
     """
     import json  # noqa: PLC0415
 
@@ -2825,6 +2840,151 @@ def floor_propose_cmd(out_dir: Path) -> None:
     click.echo("-" * 70)
     for c in candidates:
         click.echo(f"{c['id']:<10} {c['source']:<14} {len(c['citations']):<10} {c['statement']}")
+
+
+@floor_group.command(name="sign")
+@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--statement",
+    required=True,
+    help="The invariant, verbatim — recorded exactly as given, never templated.",
+)
+@click.option(
+    "--id",
+    "invariant_id",
+    default=None,
+    help="floor.invariants[].id to use (default: a kebab-case slug of --statement).",
+)
+@click.option(
+    "--clause",
+    "taxonomy_id",
+    default=None,
+    help=(
+        "Clause-taxonomy id this invariant is about — validated against "
+        "--config's taxonomy; on a mismatch, prints the valid ids."
+    ),
+)
+@click.option(
+    "--rationale",
+    default=None,
+    help="Attribution/justification (default: 'Hand-authored via `playbook floor sign`.').",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Engine config YAML — required only when --clause is given, to resolve the taxonomy.",
+)
+def floor_sign_cmd(
+    out_dir: Path,
+    statement: str,
+    invariant_id: str | None,
+    taxonomy_id: str | None,
+    rationale: str | None,
+    config_path: Path | None,
+) -> None:
+    """Record a verbatim, hand-authored Floor invariant (issue #103).
+
+    Unlike the Posture interview's Q4 templating ("Do not concede on
+    {item}.") or an accepted 'floor propose' candidate's compiler-drafted
+    wording, STATEMENT is written into OUT_DIR/playbook.opf.json's
+    ``floor.invariants`` exactly as given — the path for a conditional hard
+    line ("limitation of liability, if present, must not be unilateral in
+    the counterparty's favor") that either of those templates would
+    otherwise garble.
+
+    Idempotent: signing the same statement under the same id twice is a
+    no-op. Signing an id that already carries a DIFFERENT statement is
+    refused — this command never overwrites an existing invariant; edit or
+    remove the conflicting one first, or choose a different --id.
+
+    OUT_DIR must already contain a playbook.opf.json (from 'playbook
+    compile'/'project').
+    """
+    out_dir_resolved = out_dir.resolve()
+    opf_path = out_dir_resolved / "playbook.opf.json"
+    if not opf_path.exists():
+        click.secho(
+            f"ERROR: {opf_path} not found — run 'playbook compile'/'project' first.",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if taxonomy_id is not None:
+        if config_path is None:
+            click.secho(
+                "ERROR: --clause requires --config, to resolve the taxonomy it is "
+                "validated against.",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1)
+        try:
+            cfg = load_config(config_path)
+        except ConfigError as exc:
+            click.secho(f"Config error: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        try:
+            taxonomy = load_taxonomy(cfg.taxonomy_path)
+        except TaxonomyError as exc:
+            click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        valid_ids = sorted(e.id for e in taxonomy.classifier_entries())
+        if taxonomy_id not in valid_ids:
+            click.secho(
+                f"ERROR: unknown --clause {taxonomy_id!r}. Valid taxonomy ids:",
+                fg="red",
+                err=True,
+            )
+            for vid in valid_ids:
+                click.echo(f"  {vid}", err=True)
+            raise SystemExit(1)
+
+    doc = load_opf_file(opf_path)
+    existing_invariants = (doc.get("floor") or {}).get("invariants") or []
+    try:
+        invariants = sign_floor_invariant(
+            statement,
+            invariant_id=invariant_id,
+            taxonomy_id=taxonomy_id,
+            rationale=rationale,
+            existing_invariants=existing_invariants,
+        )
+    except FloorCandidateError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+
+    inv_id = sign_invariant_id(statement, invariant_id)
+    changed = invariants != existing_invariants
+    if changed:
+        floor_section = dict(doc.get("floor") or {})
+        floor_section["invariants"] = invariants
+        doc["floor"] = floor_section
+        # MUST recompute — floor is part of identity.content_hash (see
+        # posture.apply_posture_interview, the reference pattern this
+        # mirrors); a stale hash silently misdescribes the document to any
+        # consumer that trusts it.
+        if "identity" in doc:
+            doc["identity"]["content_hash"] = content_hash(doc)
+            doc["identity"]["section_digests"] = compute_section_digests(doc)
+        write_playbook(doc, opf_path)
+        click.secho(f"OK  floor invariant {inv_id!r} signed to {opf_path}", fg="green")
+    else:
+        click.secho(
+            f"OK  floor invariant {inv_id!r} already signed (no-op) — {opf_path}", fg="green"
+        )
+
+    # Decision (issue #103 Reviewer gate): YES, duplicate validator.py:526's
+    # non-blocking SHOULD-warn here too, even though `playbook validate` will
+    # catch it later. A hand-signed invariant is exactly the moment a GC is
+    # staring at both the new statement and the existing Posture — surfacing
+    # a conflict immediately, in the same command, is cheaper to act on than
+    # waiting for a separate validate pass to report it after the fact.
+    posture_prompt = ((doc.get("posture") or {}).get("system_prompt")) or ""
+    for warning in check_posture_floor_conflict(posture_prompt, invariants):
+        click.secho(f"WARN  {warning}", fg="yellow")
 
 
 @cli.command(name="curate")
