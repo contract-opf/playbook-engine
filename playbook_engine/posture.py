@@ -49,7 +49,11 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
-from playbook_engine.floor_candidates import FloorCandidateError, promote_interview_q4_invariants
+from playbook_engine.floor_candidates import (
+    FloorCandidateError,
+    promote_interview_q4_invariants,
+    q4_sentence_shaped_items,
+)
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.validator import load_opf_file
 
@@ -467,17 +471,34 @@ def apply_posture_interview(
     path (``playbook floor propose`` / ``floor.candidates.json``), which
     this function never touches.
 
+    A SENTENCE-SHAPED Q4 item (``floor_candidates.is_q4_item_sentence_shaped``,
+    issue #104) — a conditional hard line typed as prose, not a bare
+    clause-type name, e.g. "limitation of liability, if present, must not
+    be unilateral in the counterparty's favor" — is never templated or
+    promoted (``promote_interview_q4_invariants`` itself skips it); this
+    function additionally surfaces one actionable warning per such item,
+    through the same warnings channel as ``check_posture_floor_conflict()``,
+    naming the exact command to record it verbatim instead: ``playbook
+    floor sign {out_dir} --statement "<the item>"``. The item itself stays
+    exactly as typed in the recorded interview
+    (``posture.generation.interview`` — see ``generate_posture()``); only
+    the Floor-promotion and templating steps skip it.
+
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` (produced
-                       by ``playbook compile``/``project``).
+                       by ``playbook compile``/``project``). Also the
+                       directory named in a sentence-shaped item's
+                       ``playbook floor sign`` warning, above.
         answers:       Interview answers — see ``generate_posture()``.
         generated_at:  ISO-8601 datetime (supplied by caller).
         generated_by:  Recorded in ``posture.generation.generated_by``.
 
     Returns:
         ``PostureApplyResult`` — the new version number, any SHOULD-warn
-        messages from ``check_posture_floor_conflict()`` (checked against
-        the Floor's post-promotion state), and the path written.
+        messages (one ``playbook floor sign`` warning per sentence-shaped
+        Q4 item, issue #104, followed by any messages from
+        ``check_posture_floor_conflict()`` checked against the Floor's
+        post-promotion state), and the path written.
 
     Raises:
         FileNotFoundError: no ``playbook.opf.json`` in *out_dir*.
@@ -517,7 +538,22 @@ def apply_posture_interview(
         )
     except FloorCandidateError as exc:
         raise PostureError(str(exc)) from exc
-    warnings = check_posture_floor_conflict(posture["system_prompt"], floor_invariants)
+    # issue #104: a sentence-shaped Q4 item was skipped, silently, by
+    # promote_interview_q4_invariants above (it neither templates nor
+    # promotes one) — surface it here as an actionable warning naming the
+    # exact `playbook floor sign` command instead of letting it vanish.
+    sentence_shaped_warnings = [
+        (
+            f'Posture interview Q4 ("sacred_clauses") item {item!r} reads as a full '
+            "sentence, not a clause-type name — not templated or promoted into "
+            f"floor.invariants. To record it verbatim, run: playbook floor sign {out_dir} "
+            f'--statement "{item}"'
+        )
+        for item in q4_sentence_shaped_items(answers)
+    ]
+    warnings = sentence_shaped_warnings + check_posture_floor_conflict(
+        posture["system_prompt"], floor_invariants
+    )
 
     doc["posture"] = posture
     # Only rewrite `floor` when promotion actually changed it — e.g. no
