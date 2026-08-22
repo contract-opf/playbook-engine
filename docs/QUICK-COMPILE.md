@@ -44,6 +44,12 @@ Rules:
 
 You also need a **config file** (`playbook.config.yaml`) in the same directory as your corpus. Use the example at `examples/affiliation-config/playbook.config.yaml` as a starting point.
 
+For a second, fully committed worked example of exactly this stub-judge flow
+— a different agreement type (NDA) run end-to-end with no LLM calls — see
+[`examples/nda/`](../examples/nda/) and run it with
+`--config examples/nda/config.smoke.yaml`. `make smoke-nda` runs precisely
+this guide's flow against that corpus.
+
 ---
 
 ## Step 1 — Check your layout

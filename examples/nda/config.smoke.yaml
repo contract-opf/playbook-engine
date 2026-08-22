@@ -1,0 +1,40 @@
+# Deterministic-segmentation override of config.yaml, for the hermetic
+# no-LLM NDA smoke test (tests/test_nda_smoke.py, `make smoke-nda`; issue
+# #111). See examples/nda/README.md for the full picture.
+#
+# WHY THIS FILE EXISTS: config.yaml sets `segmentation.agent: true` -- a
+# store-backed agent loop (the same one `playbook segment`/`segment-apply`
+# drive) that queues unsegmented documents and cannot complete headlessly
+# inside pytest/CI. This override simply omits `segmentation:` entirely, so
+# segmentation falls back to its default: deterministic, rule-based,
+# no LLM, no ANTHROPIC_API_KEY read (see SegmentationConfig in
+# playbook_engine/config.py -- `_llm_segmentation_kwargs` returns {} and
+# never touches the environment when `segmentation.llm` is off).
+#
+# Everything else below is identical to config.yaml.
+agreement_type:
+  id: nda
+  name: "Mutual Non-Disclosure Agreement"
+  description: >
+    Mutual NDA exchanged when evaluating a potential commercial relationship.
+    Six fictional negotiations: four on our paper, two on counterparty paper.
+
+baseline:
+  # Template mode -- path is relative to this file. `playbook mine` must
+  # print a non-zero "template standards: N clause(s) classified"; a zero
+  # there means template mode silently degraded to emergent and the run
+  # should not be trusted (this is exactly what the smoke test asserts).
+  template: standard-form.rtf
+
+# Path relative to this config file.
+taxonomy: ../../spec/taxonomy/nda.yaml
+
+provenance:
+  our_party_aliases:
+    - "AlphaCorp Holdings, Inc."
+    - "AlphaCorp"
+  # Deliberately EMPTY -- see config.yaml's own comment on this field. The
+  # smoke test never publishes anything; the setting is copied here purely
+  # to keep this file's shape identical to the real config aside from the
+  # segmentation override.
+  known_entities: []

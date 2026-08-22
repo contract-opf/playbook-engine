@@ -1,4 +1,4 @@
-.PHONY: install lint fmt typecheck test all docker-build docker-run
+.PHONY: install lint fmt typecheck test smoke-nda all docker-build docker-run
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -25,6 +25,13 @@ typecheck:
 
 test:
 	$(RUN)/pytest
+
+# Hermetic, no-LLM second-agreement-type smoke run (issue #111): lint-corpus
+# -> mine -> project -> validate over the synthetic examples/nda/ corpus.
+# No network, no ANTHROPIC_API_KEY read. See examples/nda/README.md and
+# tests/test_nda_smoke.py.
+smoke-nda:
+	$(RUN)/pytest tests/test_nda_smoke.py -q -m smoke
 
 all: lint fmt-check typecheck test
 
