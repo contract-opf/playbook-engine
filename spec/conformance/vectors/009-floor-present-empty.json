@@ -1,0 +1,52 @@
+{
+  "name": "floor-present-empty",
+  "description": "Document with a top-level floor key explicitly present and empty ({}). Pairs with 010 (floor key entirely absent) to prove content_hash distinguishes 'empty' from 'absent' even though section_digests.floor is identical between the two (both resolve to section_digest({})).",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:7ff0e3eccd1d229b815c8032837384e708106666da380cd5c53fae58621ff40d",
+    "section_digests": {
+      "evidence": "sha256:7b5b958e7b1a8262a989d0c3fd410d6e3f1c725e3cca313575e4c20b78859809",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 0,
+      "clauses": []
+    }
+  }
+}

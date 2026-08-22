@@ -1,0 +1,52 @@
+{
+  "name": "minimal-ascii-reordered-keys",
+  "description": "Same content as 001-minimal-ascii with every object's keys inserted in reverse order (top level, and the nested compiler/taxonomy/agreement_type objects). expected.canonical and expected.content_hash MUST equal 001's byte-for-byte — proves recursive key-sort independence.",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "compiler": {
+      "generated_at": "2026-01-01T00:00:00Z",
+      "run_id": "conformance-fixture-run",
+      "version": "1.0.0",
+      "name": "playbook-engine"
+    },
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "floor": {},
+    "posture": {},
+    "evidence": {
+      "clauses": [],
+      "clause_library": []
+    },
+    "taxonomy": {
+      "entries": [],
+      "source": "custom"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "agreement_type": {
+      "name": "Conformance Fixture Agreement",
+      "id": "conformance-fixture"
+    },
+    "opf_version": "0.3"
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:7ff0e3eccd1d229b815c8032837384e708106666da380cd5c53fae58621ff40d",
+    "section_digests": {
+      "evidence": "sha256:7b5b958e7b1a8262a989d0c3fd410d6e3f1c725e3cca313575e4c20b78859809",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 0,
+      "clauses": []
+    }
+  }
+}

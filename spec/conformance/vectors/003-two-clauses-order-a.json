@@ -1,0 +1,198 @@
+{
+  "name": "two-clauses-order-a",
+  "description": "Two clauses [alpha, beta], each carrying a nested char_span array several levels deep (evidence.clauses[].observed_positions[].example_ref.char_span). Pairs with 004 (reversed order) to prove array element order is preserved, not sorted.",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.alpha",
+          "taxonomy_id": "alpha",
+          "title": "Alpha Clause",
+          "observed_positions": [
+            {
+              "text_summary": "Alpha Clause — standard form.",
+              "full_text": "Alpha Clause — standard form, full text.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  21
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3
+            }
+          ],
+          "summary": {
+            "historical_stance": "usually_held",
+            "acceptable_if": [],
+            "fallbacks": [],
+            "rejected": [],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 3,
+              "n_counterparty_paper": 0
+            }
+          }
+        },
+        {
+          "id": "clause.beta",
+          "taxonomy_id": "beta",
+          "title": "Beta Clause",
+          "observed_positions": [
+            {
+              "text_summary": "Beta Clause — standard form.",
+              "full_text": "Beta Clause — standard form, full text.",
+              "example_ref": {
+                "document_id": "doc-2",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  5,
+                  40
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3
+            }
+          ],
+          "summary": {
+            "historical_stance": "usually_held",
+            "acceptable_if": [],
+            "fallbacks": [],
+            "rejected": [],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 3,
+              "n_counterparty_paper": 0
+            }
+          }
+        }
+      ],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[{\"id\":\"clause.alpha\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,21],\"clause_path\":\"1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Alpha Clause — standard form, full text.\",\"outcome\":\"signed\",\"precedent_count\":3,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Alpha Clause — standard form.\"}],\"summary\":{\"acceptable_if\":[],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":3,\"score\":0.5},\"fallbacks\":[],\"historical_stance\":\"usually_held\",\"rejected\":[]},\"taxonomy_id\":\"alpha\",\"title\":\"Alpha Clause\"},{\"id\":\"clause.beta\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[5,40],\"clause_path\":\"1\",\"document_id\":\"doc-2\",\"version\":1},\"full_text\":\"Beta Clause — standard form, full text.\",\"outcome\":\"signed\",\"precedent_count\":3,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Beta Clause — standard form.\"}],\"summary\":{\"acceptable_if\":[],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":3,\"score\":0.5},\"fallbacks\":[],\"historical_stance\":\"usually_held\",\"rejected\":[]},\"taxonomy_id\":\"beta\",\"title\":\"Beta Clause\"}]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:222f514d45b9a5bb65f5467cad4ba35e813c9e8b6d3608676bcdebf9143f31b0",
+    "section_digests": {
+      "evidence": "sha256:6b203a2241e64ba9b103a457850469e36c5bb0c9a83c914fd3ffa22eda52bd38",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 2,
+      "clauses": [
+        {
+          "id": "clause.alpha",
+          "taxonomy_id": "alpha",
+          "title": "Alpha Clause",
+          "historical_stance": "usually_held",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [],
+          "concessions": [],
+          "unacceptable": [],
+          "exemplar_forms": [
+            {
+              "text_summary": "Alpha Clause — standard form.",
+              "n": 3,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  21
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "clause.beta",
+          "taxonomy_id": "beta",
+          "title": "Beta Clause",
+          "historical_stance": "usually_held",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [],
+          "concessions": [],
+          "unacceptable": [],
+          "exemplar_forms": [
+            {
+              "text_summary": "Beta Clause — standard form.",
+              "n": 3,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-2",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  5,
+                  40
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

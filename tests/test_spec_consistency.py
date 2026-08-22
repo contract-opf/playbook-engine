@@ -212,6 +212,48 @@ def test_spec_changelog_pins_every_schema() -> None:
         )
 
 
+def _conformance_fixture_digest() -> str:
+    """A single sha256 over spec/conformance/manifest.json plus every
+    vectors/*.json (sorted by filename, concatenated in that order), so an
+    edit to the frozen conformance fixtures is covered by the same
+    pin-and-changelog discipline as test_spec_changelog_pins_every_schema
+    above, rather than being outside it (schema*.json globs never match
+    anything under spec/conformance/)."""
+    import hashlib
+
+    conformance_dir = ROOT / "spec" / "conformance"
+    hasher = hashlib.sha256()
+    hasher.update((conformance_dir / "manifest.json").read_bytes())
+    for vector_file in sorted((conformance_dir / "vectors").glob("*.json")):
+        hasher.update(vector_file.read_bytes())
+    return hasher.hexdigest()
+
+
+def test_spec_changelog_pins_conformance_vectors() -> None:
+    """spec/conformance/README.md states the conformance vectors "are never
+    edited in place for the same format-version stamp" (issue #115), and
+    they are declared normative (docs/OPF-SPEC.md §10.2) — but nothing
+    mechanically enforced that: test_spec_changelog_pins_every_schema only
+    globs playbook.schema*.json, so no file under spec/conformance/ was
+    hashed anywhere, and no other test pinned a literal canonical hash
+    either. Without this guard, `python scripts/generate_conformance_vectors.py
+    && make all` goes fully green after a canonicalize.py/digest.py change
+    with no spec/CHANGELOG.md entry required — the silent-semantic-drift
+    path issue #115 exists to close, left to the generator docstring's
+    honor system (fix round 1, finding 2). This test fails on any change to
+    spec/conformance/manifest.json or spec/conformance/vectors/*.json until
+    spec/CHANGELOG.md's Current-pins table records the new digest."""
+    changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
+    digest = _conformance_fixture_digest()
+    assert digest in changelog, (
+        f"spec/conformance/ changed (sha256 {digest}) but spec/CHANGELOG.md "
+        "was not updated — spec/conformance/README.md declares these "
+        "vectors never edited in place for the same format-version stamp; "
+        "record the new digest in the Current-pins table alongside a "
+        "changelog entry describing what changed and why."
+    )
+
+
 def test_spec_changelog_states_current_digest_version() -> None:
     """The changelog's stated DIGEST_VERSION must match the code, so a digest
     shape/semantics change cannot ship without the changelog noticing."""

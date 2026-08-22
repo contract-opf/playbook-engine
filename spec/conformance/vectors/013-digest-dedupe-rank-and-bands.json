@@ -1,0 +1,1135 @@
+{
+  "name": "digest-dedupe-rank-and-bands",
+  "description": "One clause whose observed_positions (11 entries), acceptable_if (8), fallbacks (8), and rejected (8) each exceed EXEMPLAR_TOP_N (5), pinning digest.py's dedupe/rank/top-N-plus-material cap (_dedupe_rank / _preferred_variations) and the often/sometimes/rare band boundaries — a gap vectors 001-012 left unconstrained despite the normative digest-construction conformance claim. Each of the four lists includes one pair that collides only after _normalize_text (case/punctuation/whitespace) and one risk_delta-material entry ranked outside the top-5 by frequency that MUST survive the cap anyway; observed_positions additionally pins n=10 -> 'often', and n=9 / n=2 -> 'sometimes' (the boundary just below 'often' and the minimum for 'sometimes').",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.dedupe_rank_cap",
+          "taxonomy_id": "dedupe_rank_cap",
+          "title": "Digest Dedupe/Rank/Cap Machinery Probe",
+          "observed_positions": [
+            {
+              "text_summary": "Standard delivery clause, often-signed form.",
+              "full_text": "Standard delivery clause, often-signed form.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-often",
+                "char_span": [
+                  0,
+                  44
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 10
+            },
+            {
+              "text_summary": "Standard fallback clause, just-below-often form.",
+              "full_text": "Standard fallback clause, just-below-often form.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-sometimes-hi",
+                "char_span": [
+                  0,
+                  48
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 9
+            },
+            {
+              "text_summary": "Minimum sometimes-band clause form.",
+              "full_text": "Minimum sometimes-band clause form.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-sometimes-lo",
+                "char_span": [
+                  0,
+                  35
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 2
+            },
+            {
+              "text_summary": "Rare filler clause form 5.",
+              "full_text": "Rare filler clause form 5.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-5",
+                "char_span": [
+                  0,
+                  26
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Rare filler clause form 6.",
+              "full_text": "Rare filler clause form 6.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-6",
+                "char_span": [
+                  0,
+                  26
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Rare filler clause form 7.",
+              "full_text": "Rare filler clause form 7.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-7",
+                "char_span": [
+                  0,
+                  26
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Rare filler clause form 8.",
+              "full_text": "Rare filler clause form 8.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-8",
+                "char_span": [
+                  0,
+                  26
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Rare filler clause form 9.",
+              "full_text": "Rare filler clause form 9.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-9",
+                "char_span": [
+                  0,
+                  26
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Rare but material risk clause form.",
+              "full_text": "Rare but material risk clause form.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-material",
+                "char_span": [
+                  0,
+                  35
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "Collision clause FORM — duplicate spelling.",
+              "full_text": "Collision clause FORM — duplicate spelling.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-collision-a",
+                "char_span": [
+                  0,
+                  43
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            },
+            {
+              "text_summary": "collision   clause form,, duplicate spelling",
+              "full_text": "collision   clause form,, duplicate spelling",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-collision-b",
+                "char_span": [
+                  0,
+                  44
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            }
+          ],
+          "summary": {
+            "historical_stance": "mixed",
+            "acceptable_if": [
+              {
+                "if": "If the counterparty proposes filler variant 0.",
+                "to": "Accepted alternative for filler variant 0.",
+                "rationale": "Conformance probe entry — filler variant 0.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-filler variant 0"
+                }
+              },
+              {
+                "if": "If the counterparty proposes filler variant 1.",
+                "to": "Accepted alternative for filler variant 1.",
+                "rationale": "Conformance probe entry — filler variant 1.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-filler variant 1"
+                }
+              },
+              {
+                "if": "If the counterparty proposes filler variant 2.",
+                "to": "Accepted alternative for filler variant 2.",
+                "rationale": "Conformance probe entry — filler variant 2.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-filler variant 2"
+                }
+              },
+              {
+                "if": "If the counterparty proposes filler variant 3.",
+                "to": "Accepted alternative for filler variant 3.",
+                "rationale": "Conformance probe entry — filler variant 3.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-filler variant 3"
+                }
+              },
+              {
+                "if": "If the counterparty proposes filler variant 4.",
+                "to": "Accepted alternative for filler variant 4.",
+                "rationale": "Conformance probe entry — filler variant 4.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-filler variant 4"
+                }
+              },
+              {
+                "if": "If the Counterparty Deletes Data upon termination.",
+                "to": "Deletion occurs within 30 days of termination.",
+                "rationale": "Conformance probe entry — collision variant a.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-collision"
+                }
+              },
+              {
+                "if": "if   the counterparty deletes data upon-termination",
+                "to": "deletion occurs within 30 days of termination",
+                "rationale": "Conformance probe entry — collision variant b (differs from variant a only in case/punctuation/whitespace).",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-collision"
+                }
+              },
+              {
+                "if": "If the counterparty proposes the material risk form.",
+                "to": "Accepted alternative for the material risk form.",
+                "rationale": "Conformance probe entry — the material risk form.",
+                "observation_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "pos-material"
+                }
+              }
+            ],
+            "fallbacks": [
+              {
+                "text_summary": "Fallback filler variant 0.",
+                "full_text": "Fallback filler variant 0.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-0",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback filler variant 1.",
+                "full_text": "Fallback filler variant 1.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-1",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback filler variant 2.",
+                "full_text": "Fallback filler variant 2.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-2",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback filler variant 3.",
+                "full_text": "Fallback filler variant 3.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-3",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback filler variant 4.",
+                "full_text": "Fallback filler variant 4.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-4",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback rare but material variant.",
+                "full_text": "Fallback rare but material variant.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-material",
+                  "char_span": [
+                    0,
+                    35
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "worse",
+                  "magnitude": "material"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback Collision Variant — Duplicate Spelling.",
+                "full_text": "Fallback Collision Variant — Duplicate Spelling.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-collision-a",
+                  "char_span": [
+                    0,
+                    48
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Fallback   collision variant,, duplicate spelling",
+                "full_text": "Fallback   collision variant,, duplicate spelling",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Fallback-collision-b",
+                  "char_span": [
+                    0,
+                    49
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              }
+            ],
+            "rejected": [
+              {
+                "text_summary": "Rejected filler variant 0.",
+                "full_text": "Rejected filler variant 0.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-0",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected filler variant 1.",
+                "full_text": "Rejected filler variant 1.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-1",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected filler variant 2.",
+                "full_text": "Rejected filler variant 2.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-2",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected filler variant 3.",
+                "full_text": "Rejected filler variant 3.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-3",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected filler variant 4.",
+                "full_text": "Rejected filler variant 4.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-4",
+                  "char_span": [
+                    0,
+                    26
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected rare but material variant.",
+                "full_text": "Rejected rare but material variant.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-material",
+                  "char_span": [
+                    0,
+                    35
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "worse",
+                  "magnitude": "material"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected Collision Variant — Duplicate Spelling.",
+                "full_text": "Rejected Collision Variant — Duplicate Spelling.",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-collision-a",
+                  "char_span": [
+                    0,
+                    48
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              },
+              {
+                "text_summary": "Rejected   collision variant,, duplicate spelling",
+                "full_text": "Rejected   collision variant,, duplicate spelling",
+                "example_ref": {
+                  "document_id": "doc-1",
+                  "version": 1,
+                  "clause_path": "unresolvable-Rejected-collision-b",
+                  "char_span": [
+                    0,
+                    49
+                  ]
+                },
+                "deviation": "none",
+                "risk_delta": {
+                  "direction": "neutral",
+                  "magnitude": "none"
+                },
+                "provenance": "our_paper",
+                "outcome": "signed",
+                "precedent_count": 1
+              }
+            ],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 11,
+              "n_counterparty_paper": 0
+            }
+          }
+        }
+      ],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[{\"id\":\"clause.dedupe_rank_cap\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,44],\"clause_path\":\"pos-often\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Standard delivery clause, often-signed form.\",\"outcome\":\"signed\",\"precedent_count\":10,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Standard delivery clause, often-signed form.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,48],\"clause_path\":\"pos-sometimes-hi\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Standard fallback clause, just-below-often form.\",\"outcome\":\"signed\",\"precedent_count\":9,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Standard fallback clause, just-below-often form.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,35],\"clause_path\":\"pos-sometimes-lo\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Minimum sometimes-band clause form.\",\"outcome\":\"signed\",\"precedent_count\":2,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Minimum sometimes-band clause form.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"pos-filler-5\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare filler clause form 5.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rare filler clause form 5.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"pos-filler-6\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare filler clause form 6.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rare filler clause form 6.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"pos-filler-7\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare filler clause form 7.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rare filler clause form 7.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"pos-filler-8\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare filler clause form 8.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rare filler clause form 8.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"pos-filler-9\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare filler clause form 9.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rare filler clause form 9.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,35],\"clause_path\":\"pos-material\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rare but material risk clause form.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"worse\",\"magnitude\":\"material\"},\"text_summary\":\"Rare but material risk clause form.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,43],\"clause_path\":\"pos-collision-a\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Collision clause FORM — duplicate spelling.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Collision clause FORM — duplicate spelling.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,44],\"clause_path\":\"pos-collision-b\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"collision   clause form,, duplicate spelling\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"collision   clause form,, duplicate spelling\"}],\"summary\":{\"acceptable_if\":[{\"if\":\"If the counterparty proposes filler variant 0.\",\"observation_ref\":{\"clause_path\":\"unresolvable-filler variant 0\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — filler variant 0.\",\"to\":\"Accepted alternative for filler variant 0.\"},{\"if\":\"If the counterparty proposes filler variant 1.\",\"observation_ref\":{\"clause_path\":\"unresolvable-filler variant 1\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — filler variant 1.\",\"to\":\"Accepted alternative for filler variant 1.\"},{\"if\":\"If the counterparty proposes filler variant 2.\",\"observation_ref\":{\"clause_path\":\"unresolvable-filler variant 2\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — filler variant 2.\",\"to\":\"Accepted alternative for filler variant 2.\"},{\"if\":\"If the counterparty proposes filler variant 3.\",\"observation_ref\":{\"clause_path\":\"unresolvable-filler variant 3\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — filler variant 3.\",\"to\":\"Accepted alternative for filler variant 3.\"},{\"if\":\"If the counterparty proposes filler variant 4.\",\"observation_ref\":{\"clause_path\":\"unresolvable-filler variant 4\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — filler variant 4.\",\"to\":\"Accepted alternative for filler variant 4.\"},{\"if\":\"If the Counterparty Deletes Data upon termination.\",\"observation_ref\":{\"clause_path\":\"unresolvable-collision\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — collision variant a.\",\"to\":\"Deletion occurs within 30 days of termination.\"},{\"if\":\"if   the counterparty deletes data upon-termination\",\"observation_ref\":{\"clause_path\":\"unresolvable-collision\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — collision variant b (differs from variant a only in case/punctuation/whitespace).\",\"to\":\"deletion occurs within 30 days of termination\"},{\"if\":\"If the counterparty proposes the material risk form.\",\"observation_ref\":{\"clause_path\":\"pos-material\",\"document_id\":\"doc-1\",\"version\":1},\"rationale\":\"Conformance probe entry — the material risk form.\",\"to\":\"Accepted alternative for the material risk form.\"}],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":11,\"score\":0.5},\"fallbacks\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Fallback-0\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback filler variant 0.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback filler variant 0.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Fallback-1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback filler variant 1.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback filler variant 1.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Fallback-2\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback filler variant 2.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback filler variant 2.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Fallback-3\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback filler variant 3.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback filler variant 3.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Fallback-4\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback filler variant 4.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback filler variant 4.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,35],\"clause_path\":\"unresolvable-Fallback-material\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback rare but material variant.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"worse\",\"magnitude\":\"material\"},\"text_summary\":\"Fallback rare but material variant.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,48],\"clause_path\":\"unresolvable-Fallback-collision-a\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback Collision Variant — Duplicate Spelling.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback Collision Variant — Duplicate Spelling.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,49],\"clause_path\":\"unresolvable-Fallback-collision-b\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Fallback   collision variant,, duplicate spelling\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Fallback   collision variant,, duplicate spelling\"}],\"historical_stance\":\"mixed\",\"rejected\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Rejected-0\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected filler variant 0.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected filler variant 0.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Rejected-1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected filler variant 1.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected filler variant 1.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Rejected-2\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected filler variant 2.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected filler variant 2.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Rejected-3\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected filler variant 3.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected filler variant 3.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,26],\"clause_path\":\"unresolvable-Rejected-4\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected filler variant 4.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected filler variant 4.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,35],\"clause_path\":\"unresolvable-Rejected-material\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected rare but material variant.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"worse\",\"magnitude\":\"material\"},\"text_summary\":\"Rejected rare but material variant.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,48],\"clause_path\":\"unresolvable-Rejected-collision-a\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected Collision Variant — Duplicate Spelling.\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected Collision Variant — Duplicate Spelling.\"},{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,49],\"clause_path\":\"unresolvable-Rejected-collision-b\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Rejected   collision variant,, duplicate spelling\",\"outcome\":\"signed\",\"precedent_count\":1,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Rejected   collision variant,, duplicate spelling\"}]},\"taxonomy_id\":\"dedupe_rank_cap\",\"title\":\"Digest Dedupe/Rank/Cap Machinery Probe\"}]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:9fc83ebcab46db6ff1af8ff63ffb1f46db4cab44e3b97f8bb2f25a108b10bc6f",
+    "section_digests": {
+      "evidence": "sha256:7fff1488104370ffdbf26e987fbc28b38a219dbeb2d7bcd3f4874ac513874774",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 1,
+      "clauses": [
+        {
+          "id": "clause.dedupe_rank_cap",
+          "taxonomy_id": "dedupe_rank_cap",
+          "title": "Digest Dedupe/Rank/Cap Machinery Probe",
+          "historical_stance": "mixed",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [
+            {
+              "if": "If the Counterparty Deletes Data upon termination.",
+              "to": "Deletion occurs within 30 days of termination.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-collision"
+              },
+              "n": 2,
+              "band": "sometimes"
+            },
+            {
+              "if": "If the counterparty proposes filler variant 0.",
+              "to": "Accepted alternative for filler variant 0.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-filler variant 0"
+              },
+              "n": 1,
+              "band": "rare"
+            },
+            {
+              "if": "If the counterparty proposes filler variant 1.",
+              "to": "Accepted alternative for filler variant 1.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-filler variant 1"
+              },
+              "n": 1,
+              "band": "rare"
+            },
+            {
+              "if": "If the counterparty proposes filler variant 2.",
+              "to": "Accepted alternative for filler variant 2.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-filler variant 2"
+              },
+              "n": 1,
+              "band": "rare"
+            },
+            {
+              "if": "If the counterparty proposes filler variant 3.",
+              "to": "Accepted alternative for filler variant 3.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-filler variant 3"
+              },
+              "n": 1,
+              "band": "rare"
+            },
+            {
+              "if": "If the counterparty proposes the material risk form.",
+              "to": "Accepted alternative for the material risk form.",
+              "observation_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-material"
+              },
+              "n": 1,
+              "band": "rare"
+            }
+          ],
+          "concessions": [
+            {
+              "text_summary": "Fallback Collision Variant — Duplicate Spelling.",
+              "n": 2,
+              "band": "sometimes",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-collision-a",
+                "char_span": [
+                  0,
+                  48
+                ]
+              }
+            },
+            {
+              "text_summary": "Fallback filler variant 0.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-0",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Fallback filler variant 1.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-1",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Fallback filler variant 2.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-2",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Fallback filler variant 3.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-3",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Fallback rare but material variant.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Fallback-material",
+                "char_span": [
+                  0,
+                  35
+                ]
+              }
+            }
+          ],
+          "unacceptable": [
+            {
+              "text_summary": "Rejected Collision Variant — Duplicate Spelling.",
+              "n": 2,
+              "band": "sometimes",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-collision-a",
+                "char_span": [
+                  0,
+                  48
+                ]
+              }
+            },
+            {
+              "text_summary": "Rejected filler variant 0.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-0",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Rejected filler variant 1.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-1",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Rejected filler variant 2.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-2",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Rejected filler variant 3.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-3",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Rejected rare but material variant.",
+              "n": 1,
+              "band": "rare",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "unresolvable-Rejected-material",
+                "char_span": [
+                  0,
+                  35
+                ]
+              }
+            }
+          ],
+          "exemplar_forms": [
+            {
+              "text_summary": "Standard delivery clause, often-signed form.",
+              "n": 10,
+              "band": "often",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-often",
+                "char_span": [
+                  0,
+                  44
+                ]
+              }
+            },
+            {
+              "text_summary": "Standard fallback clause, just-below-often form.",
+              "n": 9,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-sometimes-hi",
+                "char_span": [
+                  0,
+                  48
+                ]
+              }
+            },
+            {
+              "text_summary": "Minimum sometimes-band clause form.",
+              "n": 2,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-sometimes-lo",
+                "char_span": [
+                  0,
+                  35
+                ]
+              }
+            },
+            {
+              "text_summary": "Collision clause FORM — duplicate spelling.",
+              "n": 2,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-collision-a",
+                "char_span": [
+                  0,
+                  43
+                ]
+              }
+            },
+            {
+              "text_summary": "Rare filler clause form 5.",
+              "n": 1,
+              "band": "rare",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-filler-5",
+                "char_span": [
+                  0,
+                  26
+                ]
+              }
+            },
+            {
+              "text_summary": "Rare but material risk clause form.",
+              "n": 1,
+              "band": "rare",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "pos-material",
+                "char_span": [
+                  0,
+                  35
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
