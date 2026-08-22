@@ -50,10 +50,14 @@ ready to paste into any chat LLM next to a contract you're reviewing.
 [examples/README.md](examples/README.md) walks through every step's
 expected output, plus the Docker variant.
 
-A second, no-LLM agreement-type run — proving the engine isn't hardcoded to
-one contract type — lives at [`examples/nda/`](examples/nda/) and is fully
-hermetic via `make smoke-nda` (or `playbook mine`/`project` directly against
-`examples/nda/config.smoke.yaml`).
+A second worked agreement type — proving the engine isn't hardcoded to one
+contract type — lives at [`examples/nda/`](examples/nda/): a synthetic
+six-deal Mutual NDA corpus compiled into a full playbook with populated
+Posture and Floor at [`examples/nda/playbook.opf.json`](examples/nda/playbook.opf.json),
+reproducible with no `ANTHROPIC_API_KEY` from the committed corpus + canned
+judge verdicts (see [examples/nda/README.md](examples/nda/README.md#the-worked-playbook)
+for the exact commands). A faster, bare-bones structural check of the same
+corpus is available via `make smoke-nda`.
 
 Ready for your own agreements? See **[docs/ADOPTING.md](docs/ADOPTING.md)**
 — the path from a messy folder of deals to a curated, publishable playbook.
