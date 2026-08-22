@@ -48,7 +48,7 @@ frozen vectors; see `spec/conformance/README.md` for what edge case each
 vector isolates. This is the mechanism issue #113's normative-rule-change
 policy anticipated ("an independent [implementation] checked against the
 conformance vectors") — the drift class it defends against is
-contract-toaster's hand-maintained source-level ports of these two files,
+Contract Toaster's hand-maintained source-level ports of these two files,
 pinned to an engine commit by docstring rather than to anything
 mechanically checkable until now.
 
