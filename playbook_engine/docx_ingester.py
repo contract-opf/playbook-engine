@@ -35,6 +35,16 @@ Tracked changes (side-channel — consumed by the tracked-changes overlay stage)
   - ``w:del``: deleted text recorded with author, date; char_span=None.
   - Tracked changes nested inside ``w:hyperlink`` and ``w:smartTag`` are
     captured correctly via recursive descent.
+
+``DocxIngestResult.units`` (issue #118) is the ordered stream of exactly those
+kept units — one ``TextUnit`` per unit ``doc_char_offset`` advances past,
+same order, same spans. It exists so a caller whose ``ClauseTree`` came from
+a DIFFERENT extractor's parse of this same file (e.g. docling's Markdown,
+under the default ``extraction.extractor="auto"``) can align this module's
+own unit stream against that extractor's unit stream and translate
+``TrackedChange.char_span`` into the other coordinate space — see
+:func:`~playbook_engine.extraction.bridge_tracked_change_spans`. This
+module itself never reads ``units``.
 """
 
 from __future__ import annotations
@@ -92,10 +102,30 @@ class TrackedChanges:
         }
 
 
+@dataclass(frozen=True)
+class TextUnit:
+    """One kept (stripped, non-blank) paragraph/table unit from the document
+    body, in reading order — the same units ``doc_char_offset`` walks to
+    build both ``ClauseNode.char_span`` and ``TrackedChange.char_span`` (see
+    the module docstring's char_span contract).
+
+    Exposed so a caller (issue #118's coordinate-space bridge — see
+    :func:`~playbook_engine.extraction.bridge_tracked_change_spans`) can
+    align this document's OWN unit stream against a different extractor's
+    (e.g. docling's) unit stream for the same file, to translate
+    ``TrackedChange.char_span`` into that extractor's coordinate system.
+    Not consumed anywhere in this module itself.
+    """
+
+    text: str
+    char_span: tuple[int, int]
+
+
 @dataclass
 class DocxIngestResult:
     tree: ClauseTree
     tracked: TrackedChanges
+    units: list[TextUnit] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +185,7 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
 
     builder = _ClauseBuilder()
     raw_tracked: list[_RawChange] = []
+    units: list[TextUnit] = []
     doc_char_offset = 0
 
     for block in _iter_body_blocks(doc):
@@ -165,6 +196,12 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
             stripped_block = block.strip()
             if not stripped_block:
                 continue
+            units.append(
+                TextUnit(
+                    text=stripped_block,
+                    char_span=(doc_char_offset, doc_char_offset + len(stripped_block)),
+                )
+            )
             builder.add_body(stripped_block, doc_char_offset)
             doc_char_offset += len(stripped_block) + 1
             continue
@@ -190,6 +227,13 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
             # PDF/RTF ingesters' convention: the virtual text is exactly the
             # kept (non-blank) units joined by "\n".
             continue
+
+        units.append(
+            TextUnit(
+                text=stripped_text,
+                char_span=(doc_char_offset, doc_char_offset + len(stripped_text)),
+            )
+        )
 
         # _extract_para_text's tracked-change spans are paragraph-local
         # against the RAW para_text (including any leading whitespace, e.g. a
@@ -256,7 +300,7 @@ def ingest_docx(path: Path, document_id: str, version: str) -> DocxIngestResult:
             for rc in raw_tracked
         ],
     )
-    return DocxIngestResult(tree=tree, tracked=tracked)
+    return DocxIngestResult(tree=tree, tracked=tracked, units=units)
 
 
 # ---------------------------------------------------------------------------

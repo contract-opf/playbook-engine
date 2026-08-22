@@ -129,6 +129,35 @@ Engine 1.0.0 / OPF 1.0 — first non-beta release. The format is no longer
   `our_party_aliases` configured today, previously-`"counterparty"`
   `proposed_by`/`moved_by` values for authors not in `our_authors` become
   `"unknown"` on the next mine.
+- **Correctness**: round-move/clause tracked-changes attribution
+  (`moved_by`/`proposed_by`) now works on the default DOCX extraction path
+  (issue #118). `TrackedChange.char_span` is always an offset into
+  `docx_ingester`'s own paragraph-join text, but under
+  `extraction.extractor: auto` (the default), the diffed `ClauseTree` for a
+  DOCX usually comes from docling instead — a different coordinate space —
+  so span-overlap candidate selection (`tracked_changes_overlay.
+  enrich_clause_diff`, issue #112) was comparing numerically coincidental
+  offsets on that path, reliable only on the legacy-adapter path. A new
+  coordinate-space bridge (`extraction.bridge_tracked_change_spans`)
+  aligns `docx_ingester`'s own text-unit stream against docling's block
+  stream (order-preserving, so a repeated boilerplate clause aligns to its
+  own position rather than the first occurrence) and translates each
+  tracked change's span into the tree's actual coordinate space before
+  matching runs; a version whose bridge can't be confirmed has its spans
+  cleared rather than left as an untrustworthy raw value. A round-level
+  fallback tier (`tracked_changes_overlay.round_level_fallback_attribution`)
+  attributes an otherwise-unmatched clause change to a version's tracked-
+  changes author when that version's side channel carries exactly one
+  distinct author string — refusing outright whenever two or more distinct
+  authors are present, never guessing between them. Also fixes
+  `tracked_changes_overlay._jaccard` returning a false "perfect" `1.0` for
+  two empty (all-stopword) token sets instead of `0.0`. **Behavior
+  change**: a mine over a DOCX corpus using the default docling extractor
+  now recovers real `moved_by`/`proposed_by` attribution where it
+  previously read `"unknown"` corpus-wide; ships together with issue #119
+  above so the recovered attribution resolves to `"us"`/`"counterparty"`/
+  `"unknown"` correctly rather than converting honest unknowns into
+  confidently wrong `"counterparty"` guesses.
 
 ## [0.2.0]
 

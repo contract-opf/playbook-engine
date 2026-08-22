@@ -48,10 +48,12 @@ from playbook_engine.aar import (
     write_after_action_report,
 )
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
+from playbook_engine.clause_differ import ClauseDiff, TextHunk
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
+from playbook_engine.docx_ingester import TextUnit, TrackedChange, TrackedChanges
 from playbook_engine.entity_registry import EntityRegistry
-from playbook_engine.extraction import ExtractionCache, extract_blocks
+from playbook_engine.extraction import ExtractionCache, ExtractorLabel, extract_blocks
 from playbook_engine.llm_segmenter_batch import (
     NormalizeTrailError,
     NormalizeTrailResult,
@@ -61,7 +63,10 @@ from playbook_engine.llm_segmenter_batch import (
 from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import (
     PipelineError,
+    _attribution_for_diff,
+    _bridge_tracked_changes_if_needed,
     _classified_from_taxonomy_by_path,
+    _extract_blocks_for_bridge,
     _llm_tracked_changes,
     mine_corpus,
     project_playbook,
@@ -2893,34 +2898,37 @@ def _docx_fake_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegN
 
 def test_llm_tracked_changes_returns_side_channel_for_tracked_docx(tmp_path: Path) -> None:
     """Direct unit coverage for pipeline._llm_tracked_changes: a
-    tracked-changes DOCX yields a non-None TrackedChanges, with no warning
-    logged on a clean parse.
+    tracked-changes DOCX yields a non-None TrackedChanges (plus its
+    docx_ingester unit stream — issue #118), with no warning logged on a
+    clean parse.
     """
     from tests.test_docx_ingester import _tracked_docx
 
     path = _tracked_docx(tmp_path)
     messages: list[str] = []
 
-    result = _llm_tracked_changes(path, messages.append)
+    tracked, units = _llm_tracked_changes(path, messages.append)
 
-    assert result is not None
-    assert any(c.author == "Alice" for c in result.changes)
+    assert tracked is not None
+    assert any(c.author == "Alice" for c in tracked.changes)
+    assert units, "docx_ingester's unit stream must be non-empty for a real DOCX"
     assert messages == []
 
 
 def test_llm_tracked_changes_degrades_to_none_on_unreadable_docx(tmp_path: Path) -> None:
-    """A DOCX python-docx cannot open must degrade to None + a progress
-    warning, never raise — an LLM-segmented version's tree has already been
-    produced successfully by the time this best-effort call runs, so a
-    failure here must not retroactively fail the whole version.
+    """A DOCX python-docx cannot open must degrade to (None, []) + a
+    progress warning, never raise — an LLM-segmented version's tree has
+    already been produced successfully by the time this best-effort call
+    runs, so a failure here must not retroactively fail the whole version.
     """
     path = tmp_path / "corrupt.docx"
     path.write_bytes(b"not a real docx")
     messages: list[str] = []
 
-    result = _llm_tracked_changes(path, messages.append)
+    tracked, units = _llm_tracked_changes(path, messages.append)
 
-    assert result is None
+    assert tracked is None
+    assert units == []
     assert len(messages) == 1
     assert "tracked-changes side-channel unavailable" in messages[0]
 
@@ -2985,3 +2993,545 @@ def test_llm_segmented_docx_carries_tracked_changes_attribution(tmp_path: Path) 
         "date": "2024-03-15T10:00:00Z",
         "tracked_type": "insertion",
     }
+
+
+# ---------------------------------------------------------------------------
+# _bridge_tracked_changes_if_needed / _extract_blocks_for_bridge (issue #118)
+# ---------------------------------------------------------------------------
+
+
+def _tc(
+    text: str,
+    char_span: tuple[int, int] | None,
+    author: str = "Alice",
+    change_type: str = "insertion",
+    clause_path: str = "1",
+) -> TrackedChange:
+    return TrackedChange(
+        change_type=change_type,  # type: ignore[arg-type]
+        author=author,
+        date="2024-01-01",
+        text=text,
+        clause_path=clause_path,
+        char_span=char_span,
+    )
+
+
+def _units(texts: list[str]) -> list[TextUnit]:
+    units: list[TextUnit] = []
+    offset = 0
+    for t in texts:
+        units.append(TextUnit(text=t, char_span=(offset, offset + len(t))))
+        offset += len(t) + 1
+    return units
+
+
+def _blocks(texts: list[str]) -> list[Block]:
+    blocks: list[Block] = []
+    offset = 0
+    for i, t in enumerate(texts):
+        blocks.append(Block(block_id=f"b{i}", page=0, char_span=(offset, offset + len(t)), text=t))
+        offset += len(t) + 1
+    return blocks
+
+
+def test_bridge_not_needed_on_legacy_extractor_leaves_spans_untouched() -> None:
+    """Legacy adapter reuses docx_ingester's own paragraph-join text
+    verbatim (#112's originally-landed case) — no bridge, spans pass
+    through exactly as given."""
+    units = _units(["1. Clause", "Body text."])
+    blocks = _blocks(["Clause", "Body text."])
+    tc = _tc("Body text.", units[1].char_span)
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+
+    result = _bridge_tracked_changes_if_needed(tracked, units, blocks, ExtractorLabel("legacy"))
+
+    assert result is not None
+    assert result.changes[0].char_span == units[1].char_span
+
+
+def test_bridge_not_needed_when_extractor_label_none_leaves_spans_untouched() -> None:
+    """Deterministic path never calls this at all, but a None label
+    (unknown extractor) must degrade the same safe way as "legacy" — never
+    strip a span it has no reason to distrust."""
+    units = _units(["1. Clause"])
+    blocks = _blocks(["Clause"])
+    tc = _tc("Clause", units[0].char_span)
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+
+    result = _bridge_tracked_changes_if_needed(tracked, units, blocks, None)
+
+    assert result is not None
+    assert result.changes[0].char_span == units[0].char_span
+
+
+def test_bridge_docling_extractor_with_blocks_translates_span() -> None:
+    units = _units(["1. Clause", "Payment due in thirty days."])
+    blocks = _blocks(["Clause", "Payment due in thirty days."])
+    tc = _tc("Payment due in thirty days.", units[1].char_span)
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+
+    result = _bridge_tracked_changes_if_needed(tracked, units, blocks, ExtractorLabel("docling"))
+
+    assert result is not None
+    span = result.changes[0].char_span
+    assert span is not None
+    assert span == blocks[1].char_span
+
+
+def test_bridge_docling_extractor_without_blocks_strips_spans_to_none() -> None:
+    """Safety gate (issue #118): a non-legacy extractor with no confirmed
+    bridge target must never leave a raw, potentially wrong-coordinate-space
+    span in place — clears it instead of trusting numeric coincidence."""
+    units = _units(["1. Clause", "Payment due in thirty days."])
+    tc = _tc("Payment due in thirty days.", units[1].char_span)
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+
+    result = _bridge_tracked_changes_if_needed(tracked, units, None, ExtractorLabel("docling"))
+
+    assert result is not None
+    assert result.changes[0].char_span is None
+    # Everything else about the change must survive untouched.
+    assert result.changes[0].author == "Alice"
+    assert result.changes[0].clause_path == "1"
+
+
+def test_bridge_no_tracked_changes_returns_input_unchanged() -> None:
+    assert _bridge_tracked_changes_if_needed(None, [], None, ExtractorLabel("docling")) is None
+
+    empty = TrackedChanges(document_id="doc", version="v2", changes=[])
+    result = _bridge_tracked_changes_if_needed(empty, [], None, ExtractorLabel("docling"))
+    assert result is empty
+
+
+def test_extract_blocks_for_bridge_returns_none_on_unreadable_file(tmp_path: Path) -> None:
+    """Best-effort, never raises — tracked-changes attribution is a bonus
+    signal and must not retroactively fail an already-successful version."""
+    path = tmp_path / "corrupt.docx"
+    path.write_bytes(b"not a real docx")
+
+    result = _extract_blocks_for_bridge(path, None, False, "auto")
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# issue #118 fix round 1, finding 1: _extract_blocks_for_bridge must be a
+# cache hit — never a second real extraction — once the segmentation call
+# has already populated extraction_cache, regardless of the run's own
+# refresh_extraction (--no-cache) setting.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_blocks_for_bridge_hits_cache_populated_by_segmentation_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard for issue #118 fix round 1, finding 1.
+
+    ``_llm_segment_file`` (via ``segment_to_tree``) calls ``extract_blocks``
+    first, which populates ``extraction_cache`` for this exact ``(path,
+    cache, extractor)`` key. ``_extract_blocks_for_bridge``'s later re-fetch
+    must land on that SAME cache entry: pipeline.py's only production call
+    site (``_compute_doc_result``, ~pipeline.py:1818) now always passes
+    ``refresh=False`` here, regardless of the run's own
+    ``refresh_extraction``/``--no-cache`` setting — because the bridge must
+    translate spans into the coordinate space the tree was just built from,
+    and a second real extraction is not guaranteed to reproduce it even if
+    byte-identical.
+
+    Proven directly against the real per-format extractor entry point
+    (``extraction._extract_legacy_lines``), not a mock of ``extract_blocks``
+    itself, which would hide a regression at the call site. Mirrors the
+    issue's own empirical proof: with a warm cache,
+    ``_extract_blocks_for_bridge(p, cache, False, ...)`` performs zero real
+    extractions; ``(p, cache, True, ...)`` performs one — the contrast that
+    shows ``refresh`` genuinely matters here, not just a no-op parameter.
+    """
+    from tests.test_docx_ingester import _tracked_docx
+
+    path = _tracked_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+
+    real_extract_legacy_lines = extraction._extract_legacy_lines
+    calls: list[Path] = []
+
+    def counting_extract_legacy_lines(p: Path, suffix: str) -> list[tuple[str, int]]:
+        calls.append(p)
+        return real_extract_legacy_lines(p, suffix)
+
+    monkeypatch.setattr(extraction, "_extract_legacy_lines", counting_extract_legacy_lines)
+
+    # Warm the cache exactly as the segmentation call's own extract_blocks
+    # invocation does (segment_to_tree -> extract_blocks(path, cache=...,
+    # refresh=refresh_extraction, extractor=...)). extractor="legacy" pins
+    # this test to the real per-format extractor regardless of whether
+    # docling happens to be on the host running it.
+    extract_blocks(path, cache=cache, refresh=False, extractor="legacy")
+    assert len(calls) == 1, "sanity: the warming call itself must be a real extraction"
+
+    hit = _extract_blocks_for_bridge(path, cache, False, "legacy")
+    assert hit is not None
+    assert len(calls) == 1, (
+        "the bridge re-fetch with refresh=False must be a cache hit — no second "
+        "real extraction — once the segmentation call has already populated the "
+        "cache for this file"
+    )
+
+    refreshed = _extract_blocks_for_bridge(path, cache, True, "legacy")
+    assert refreshed is not None
+    assert len(calls) == 2, (
+        "contrast case: refresh_extraction=True passed directly to "
+        "_extract_blocks_for_bridge DOES force a second real extraction — "
+        "proving the production fix is the CALL SITE now always passing False, "
+        "not some cache behavior that would have masked the bug either way"
+    )
+
+
+# ---------------------------------------------------------------------------
+# issue #118 fix round 1, finding 2: end-to-end coverage for the two
+# production bridge call sites in _compute_doc_result (pipeline.py:1787 and
+# :1820), unreachable by every other test in this file — either the legacy
+# extractor is used (no bridge needed) or the bridge functions are called
+# directly rather than through mine_corpus.
+#
+# Headings carry an EXPLICIT number ("1.1.", "1.2.") so docx_ingester's own
+# clause_path ("1.1"/"1.2", via _parse_clause_number's explicit-number
+# branch) diverges from the LLM/agent segmenter's flat root-level clause_path
+# ("1"/"2", via segmentation_grounding's own sequential numbering) — the same
+# hierarchical-vs-flat mismatch #112 first measured on the real corpus. With
+# that mismatch, enrich_clause_diff's clause-path filter can never admit the
+# tracked change on its own — only a bridge that leaves a real, overlapping
+# char_span in place can. That makes this fixture an honest test of the two
+# call sites specifically: bypassing them (as if deleted) hits the safety
+# gate's None-stripping (_bridge_tracked_changes_if_needed, "blocks is
+# None") and the clause-path mismatch then leaves nothing to attribute to.
+# ---------------------------------------------------------------------------
+
+_NUMBERED_DOCX_HEADING_TAXONOMY = {
+    "1.1. Confidentiality": "relationship_of_parties",
+    "1.2. Term": "governing_law",
+}
+
+
+def _numbered_docx_fake_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+    """Same (heading, body) block-pairing shape as ``_docx_fake_segment_fn``,
+    but assigns FLAT root-level clause paths ("1", "2") that do not mirror
+    the DOCX's own "1.1."/"1.2." numbering — exactly how a real LLM/agent
+    segmenter's own numbering is independent of source-document numbering."""
+    del canonical_text
+    nodes: list[SegNode] = []
+    for order, i in enumerate(range(0, len(blocks), 2), start=1):
+        heading_block, body_block = blocks[i], blocks[i + 1]
+        nodes.append(
+            SegNode(
+                node_id=f"n{order}",
+                parent_id=None,
+                order=order,
+                heading=heading_block.text,
+                taxonomy_id=_NUMBERED_DOCX_HEADING_TAXONOMY.get(heading_block.text),
+                start_block_id=heading_block.block_id,
+                end_block_id=body_block.block_id,
+                start_quote=heading_block.text[:10],
+                end_quote=body_block.text[-10:],
+            )
+        )
+    return nodes
+
+
+def _numbered_docx_no_tracked_changes(tmp_path: Path, filename: str) -> Path:
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("1.1. Confidentiality", level=1)
+    doc.add_paragraph("Party A shall provide services to client.")
+    doc.add_heading("1.2. Term", level=1)
+    doc.add_paragraph("This agreement is governed by the laws of the State of California.")
+    path = tmp_path / filename
+    doc.save(str(path))
+    return path
+
+
+def _numbered_docx_with_tracked_insertion(tmp_path: Path, filename: str) -> Path:
+    """Redlined version: 'promptly' inserted by Alice via w:ins in the
+    Confidentiality clause, same convention as
+    test_docx_ingester._tracked_docx / test_pipeline_project's
+    _docx_with_tracked_insertion, but under numbered headings (see module
+    section comment above). ALSO carries a second insertion by Bob, in the
+    Term clause — two distinct authors in this version's side channel, so
+    tracked_changes_overlay.round_level_fallback_attribution (single-author
+    only) cannot fire and silently supply the Confidentiality clause's
+    attribution regardless of whether the bridge ran; only enrich_clause_diff
+    (clause-path OR bridged char_span) can attribute Alice's change."""
+    from docx import Document
+    from lxml import etree
+
+    from tests.test_pipeline_project import _w
+
+    doc = Document()
+    doc.add_heading("1.1. Confidentiality", level=1)
+    p = doc.add_paragraph()
+    p.add_run("Party A shall ")
+
+    ins_elem = etree.SubElement(p._p, _w("ins"))
+    ins_elem.set(_w("id"), "1")
+    ins_elem.set(_w("author"), "Alice")
+    ins_elem.set(_w("date"), "2024-03-15T10:00:00Z")
+    r_ins = etree.SubElement(ins_elem, _w("r"))
+    t_ins = etree.SubElement(r_ins, _w("t"))
+    t_ins.text = "promptly "
+
+    p.add_run("provide services to client.")
+    doc.add_heading("1.2. Term", level=1)
+    p2 = doc.add_paragraph()
+    p2.add_run("This agreement is governed ")
+
+    ins_elem2 = etree.SubElement(p2._p, _w("ins"))
+    ins_elem2.set(_w("id"), "2")
+    ins_elem2.set(_w("author"), "Bob")
+    ins_elem2.set(_w("date"), "2024-03-16T09:00:00Z")
+    r_ins2 = etree.SubElement(ins_elem2, _w("r"))
+    t_ins2 = etree.SubElement(r_ins2, _w("t"))
+    t_ins2.text = "without delay "
+
+    p2.add_run("by the laws of the State of California.")
+
+    path = tmp_path / filename
+    doc.save(str(path))
+    return path
+
+
+# Markdown docling would produce for the fixtures above. Neither heading
+# matches docling's single-level _LIST_ITEM_RE ("1.1." is a multi-level
+# dotted number — see test_span_bridge.py's own
+# test_normalize_strips_multi_level_dotted_numbering), so the numbering is
+# NOT stripped here; only the EXTRACTOR differs from docx_ingester's own
+# parse, not the text.
+_NUMBERED_V1_DOCLING_MARKDOWN = (
+    "1.1. Confidentiality\n"
+    "\n"
+    "Party A shall provide services to client.\n"
+    "\n"
+    "1.2. Term\n"
+    "\n"
+    "This agreement is governed by the laws of the State of California.\n"
+)
+
+_NUMBERED_V2_DOCLING_MARKDOWN = (
+    "1.1. Confidentiality\n"
+    "\n"
+    "Party A shall promptly provide services to client.\n"
+    "\n"
+    "1.2. Term\n"
+    "\n"
+    "This agreement is governed without delay by the laws of the State of California.\n"
+)
+
+
+def _mock_docling_present_multi_stem(
+    monkeypatch: pytest.MonkeyPatch, markdown_by_stem: dict[str, str]
+) -> None:
+    """Like ``_mock_docling_present_and_succeeding``, but serves DIFFERENT
+    markdown per input-file stem — both corpus versions below must actually
+    go through docling for ``extractor_label`` to resolve to "docling" and
+    reach the non-legacy bridge branch."""
+
+    def fake_which(cmd: str) -> str | None:
+        return "/usr/bin/docling" if cmd == "docling" else _real_which(cmd)
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] != "docling":
+            return _real_subprocess_run(cmd, **kwargs)  # type: ignore[arg-type]
+        stem = Path(cmd[2]).stem  # cmd == ["docling", "convert", str(path), ...]
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        (outdir / f"{stem}.md").write_text(markdown_by_stem[stem], encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+
+def test_llm_segmented_docx_via_docling_bridges_tracked_changes_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end regression guard for issue #118 fix round 1, finding 2.
+
+    Mines a tracked-changes DOCX through the SYNCHRONOUS LLM-segmentation
+    branch of ``_compute_doc_result`` (pipeline.py:~1790-1822) with docling
+    mocked present-and-succeeding, so ``extractor_label == "docling"`` and
+    the non-legacy bridge branch (pipeline.py:1817-1822 —
+    ``_extract_blocks_for_bridge`` + ``_bridge_tracked_changes_if_needed``)
+    is actually exercised through ``mine_corpus`` — proven by asserting the
+    resulting observation's ``attribution`` resolves to the redline author.
+
+    Then re-mines the SAME corpus with the bridge call site bypassed
+    (``_extract_blocks_for_bridge`` monkeypatched to always return ``None``,
+    as if the call site were deleted) and asserts attribution is honestly
+    ABSENT rather than the same correct result — proving this test would
+    actually catch that regression, unlike every other test in this file
+    (issue #118 fix round 1 measured: neutering the production bridge call
+    leaves ``make all`` green except two direct unit tests of the bridge
+    functions themselves, never through ``mine_corpus``).
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-118"
+    deal_dir.mkdir(parents=True)
+    _numbered_docx_no_tracked_changes(deal_dir, "v1.docx")
+    _numbered_docx_with_tracked_insertion(deal_dir, "v2.docx")
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": None},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    _mock_docling_present_multi_stem(
+        monkeypatch,
+        {"v1": _NUMBERED_V1_DOCLING_MARKDOWN, "v2": _NUMBERED_V2_DOCLING_MARKDOWN},
+    )
+
+    out_dir = tmp_path / "out-bridged"
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_numbered_docx_fake_segment_fn,
+        extraction_cache=ExtractionCache(out_dir / "extraction_cache.jsonl"),
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ingest_by_version = {vi["version"]: vi for vi in manifest[0]["version_ingest"]}
+    assert ingest_by_version["v2"]["extractor"] == "docling", (
+        "this test only proves what it claims to if the tracked-changes version "
+        "actually went through docling, not a legacy fallback"
+    )
+
+    raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
+    deal_obs = [o for o in raw_obs if o["citation"]["document_id"] == "deal-118"]
+    assert deal_obs, "deal-118 must have observations"
+
+    attributed = [o for o in deal_obs if o.get("attribution") is not None]
+    assert attributed, (
+        "a correctly bridged tracked-changes span must resolve to Alice's "
+        f"insertion — got attributions={[o.get('attribution') for o in deal_obs]}"
+    )
+    assert attributed[0]["attribution"]["author"] == "Alice"
+    assert attributed[0]["attribution"]["tracked_type"] == "insertion"
+
+    # Bypass the bridge (as if pipeline.py:1817-1822 were deleted) and
+    # re-mine the SAME corpus into a fresh out_dir.
+    monkeypatch.setattr(pipeline_module, "_extract_blocks_for_bridge", lambda *a, **kw: None)
+
+    out_dir_bypassed = tmp_path / "out-bypassed"
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir_bypassed,
+        use_llm_segmentation=True,
+        llm_segment_fn=_numbered_docx_fake_segment_fn,
+        extraction_cache=ExtractionCache(out_dir_bypassed / "extraction_cache.jsonl"),
+    )
+
+    raw_obs_bypassed = read_observations_jsonl(out_dir_bypassed / "observations.jsonl")
+    deal_obs_bypassed = [o for o in raw_obs_bypassed if o["citation"]["document_id"] == "deal-118"]
+    assert deal_obs_bypassed, "deal-118 must still have observations"
+    assert all(o.get("attribution") is None for o in deal_obs_bypassed), (
+        "with the bridge call site bypassed, the '1.1' vs '1' clause-path "
+        "mismatch must leave every observation's attribution honestly absent "
+        "(never a wrong guess) — proving the wiring this ticket exists to "
+        "deliver is actually exercised end-to-end, not dead code"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _attribution_for_diff round-level fallback (issue #118)
+# ---------------------------------------------------------------------------
+
+
+def _clause_diff(hunks: tuple[TextHunk, ...]) -> ClauseDiff:
+    return ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="1",
+        clause_path_after="1",
+        kind="modified",
+        hunks=hunks,
+        text_before="original text",
+        text_after="revised text",
+    )
+
+
+def test_attribution_for_diff_falls_back_to_round_level_when_no_hunk_matches() -> None:
+    """No per-hunk match (dissimilar text) but exactly one distinct author
+    in the version's side channel, AND single_round=True (the net diff IS
+    that one round) — the fallback tier fires where enrich_clause_diff
+    alone would leave this unattributed."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="wholly unrelated new language")
+    tc = _tc("completely different redline text", None, author="Alice")
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+    cd = _clause_diff((hunk,))
+
+    result = _attribution_for_diff(cd, tracked, single_round=True)
+
+    assert result is not None
+    assert result.author == "Alice"
+    assert result.date is None
+
+
+def test_attribution_for_diff_round_level_fallback_refuses_with_two_authors() -> None:
+    hunk = TextHunk(kind="insert", old_text="", new_text="wholly unrelated new language")
+    tc1 = _tc("completely different redline text", None, author="Alice")
+    tc2 = _tc("yet more different text", None, author="Bob", clause_path="9")
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc1, tc2])
+    cd = _clause_diff((hunk,))
+
+    result = _attribution_for_diff(cd, tracked, single_round=True)
+
+    assert result is None
+
+
+def test_attribution_for_diff_round_level_fallback_refuses_when_not_single_round() -> None:
+    """issue #118 fix round 2, finding 1 regression guard: exactly one
+    distinct author in the side channel — the fallback's OWN firing
+    condition is satisfied — but single_round=False (a net diff spanning
+    more than one negotiation round) must suppress it outright. Consulting
+    only the signed version's side channel for a net diff that can bundle
+    an earlier, differently-authored round's change is not "that round";
+    firing here would convert an honest unknown into a confidently wrong
+    attribution to the signed round's sole author."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="wholly unrelated new language")
+    tc = _tc("completely different redline text", None, author="Alice")
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+    cd = _clause_diff((hunk,))
+
+    result = _attribution_for_diff(cd, tracked, single_round=False)
+
+    assert result is None
+
+
+def test_attribution_for_diff_prefers_direct_match_over_round_level_fallback() -> None:
+    """When enrich_clause_diff DOES find a real per-hunk match, that match
+    is returned — the fallback tier only ever fills a gap, never overrides
+    a real signal. Also proves the direct match is unaffected by
+    single_round=False: a real per-hunk match must survive multi-round net
+    diffs exactly as it does for single-round ones."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="consequential damages excluded")
+    tc = _tc("consequential damages excluded", None, author="Alice")
+    tracked = TrackedChanges(document_id="doc", version="v2", changes=[tc])
+    cd = _clause_diff((hunk,))
+
+    result = _attribution_for_diff(cd, tracked, single_round=False)
+
+    assert result is not None
+    assert result.author == "Alice"
+    assert result.date == "2024-01-01"  # real match carries the real date, not None

@@ -28,7 +28,7 @@ from lxml import etree
 from playbook_engine.clause_differ import ClauseDiff, DocumentDiff, TextHunk, VersionDiff
 from playbook_engine.clause_position_compiler import compile_clause_positions
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
-from playbook_engine.docx_ingester import ingest_docx
+from playbook_engine.docx_ingester import TrackedChange, TrackedChanges, ingest_docx
 from playbook_engine.observation_builder import (
     Observation,
     ObservationCitation,
@@ -341,6 +341,77 @@ def test_negotiation_trail_from_rounds() -> None:
     doc["corpus"]["documents"][0]["versions"] = 4
     result = validate_document(doc)
     assert result.ok, [str(e) for e in result.errors]
+
+
+def test_build_round_moves_round_level_fallback_fires_with_single_author() -> None:
+    """issue #118 fix round 2, finding 2 regression guard: build_round_moves
+    must consult tracked_changes_overlay.round_level_fallback_attribution as
+    a last resort once enrich_clause_diff finds no per-hunk match — a
+    round's own side channel with exactly one distinct author must still
+    recover moved_by, mapped through our_authors exactly like the direct
+    per-hunk-match path already is."""
+    diff = _clause_diff_for_round("v1", "v2", changed=True)
+    doc_diff = DocumentDiff(
+        consecutive=(VersionDiff("v1", "v2", (diff,)),),
+        net=VersionDiff("v1", "v2", (diff,)),
+        version_order=("v1", "v2"),
+    )
+    # clause_path "99" / no char_span never overlaps diff's clause_path "1"
+    # or char_span (0, 20) — enrich_clause_diff finds no candidate at all,
+    # so only the round-level fallback tier can recover an attribution here.
+    tc = TrackedChange(
+        change_type="insertion",
+        author="Alice",
+        date="2024-01-01",
+        text="unrelated redline text elsewhere in the document",
+        clause_path="99",
+        char_span=None,
+    )
+    tracked_by_vid = {"v2": TrackedChanges(document_id="deal-1", version="v2", changes=[tc])}
+
+    moves = build_round_moves(
+        "deal-1", doc_diff, tracked_by_vid=tracked_by_vid, our_authors=["Alice"]
+    )
+
+    assert len(moves) == 1
+    assert moves[0].moved_by == "us"
+
+
+def test_build_round_moves_round_level_fallback_refuses_with_two_authors() -> None:
+    """Two distinct authors in the round's own side channel — both parties'
+    marks in one round — must refuse to guess between them: moved_by stays
+    'unknown', mirroring round_level_fallback_attribution's own refusal
+    rule."""
+    diff = _clause_diff_for_round("v1", "v2", changed=True)
+    doc_diff = DocumentDiff(
+        consecutive=(VersionDiff("v1", "v2", (diff,)),),
+        net=VersionDiff("v1", "v2", (diff,)),
+        version_order=("v1", "v2"),
+    )
+    tc1 = TrackedChange(
+        change_type="insertion",
+        author="Alice",
+        date="2024-01-01",
+        text="unrelated redline text elsewhere",
+        clause_path="99",
+        char_span=None,
+    )
+    tc2 = TrackedChange(
+        change_type="insertion",
+        author="Bob",
+        date="2024-01-02",
+        text="yet more unrelated text",
+        clause_path="98",
+        char_span=None,
+    )
+    tracked_by_vid = {"v2": TrackedChanges(document_id="deal-1", version="v2", changes=[tc1, tc2])}
+
+    moves = build_round_moves(
+        "deal-1", doc_diff, tracked_by_vid=tracked_by_vid, our_authors=["Alice", "Bob"]
+    )
+
+    assert len(moves) == 1
+    assert moves[0].moved_by == "unknown"
 
 
 def test_trail_ref_dangling_fails() -> None:

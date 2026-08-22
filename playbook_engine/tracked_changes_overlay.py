@@ -18,6 +18,31 @@ Matching strategy:
   - Minimum similarity threshold ``_MATCH_THRESHOLD = 0.50`` to accept a match.
   - Greedy (first-fit within each hunk); each ``TrackedChange`` matched at
     most once to avoid double-attribution.
+
+``enrich_clause_diff`` above depends on ``TrackedChange.char_span`` already
+being in the SAME coordinate space as the diffed ``ClauseTree``'s own
+``char_span``s — true unconditionally on the deterministic ingest path, and
+true on the LLM-segmentation path only once the caller has bridged it (see
+``extraction.bridge_tracked_change_spans`` and
+``pipeline._bridge_tracked_changes_if_needed`` — issue #118). This module
+does not perform that bridge itself and has no way to detect whether its
+caller already has: it trusts whatever ``char_span`` it is given.
+
+Round-level fallback tier (issue #118): ``round_level_fallback_attribution``
+below is a SEPARATE, coarser last resort — not part of ``enrich_clause_diff``
+— for when a version's entire tracked-changes side channel has exactly one
+distinct author. It has two callers, both only after ``enrich_clause_diff``
+finds no per-hunk match at all, never as a substitute for it:
+``observation_builder.build_round_moves`` (per-round ``moved_by``, issue
+#118 fix round 2) applies it unconditionally per round, since its side
+channel is always genuinely that round's own; ``pipeline._attribution_for_diff``
+(net-diff ``proposed_by``) gates it to single-round documents only, since a
+net diff spanning more than one round would otherwise let the signed
+round's sole author absorb an earlier round's differently-authored change
+— see that function's docstring. Every test in this file that asserts a
+"no match" outcome against a single-author fixture is exercising
+``enrich_clause_diff`` alone, not either full attribution path, and must
+keep passing unchanged.
 """
 
 from __future__ import annotations
@@ -143,16 +168,24 @@ def enrich_clause_diff(
     #     join. For redline DOCX specifically — the files that actually
     #     carry ``w:ins``/``w:del`` — docling 2.x crashes and
     #     ``_retry_docling_on_normalized_docx`` re-extracts from a THIRD,
-    #     differently-normalized copy. On this (default) path, two spans
-    #     comparing equal is numeric coincidence, not co-location; where
-    #     it fires, the Jaccard confirmation in ``_match_hunk`` can still
-    #     accept the wrong clause for repeated boilerplate text.
-    # ``clause_diff`` carries no extractor label, so this function cannot
-    # gate on the precondition above — span overlap is applied
-    # unconditionally, reliable at recovering attribution on the
-    # legacy-adapter path and best-effort (may spuriously match or
-    # spuriously miss) on the default docling path. See issue #112 review
-    # notes.
+    #     differently-normalized copy.
+    # ``clause_diff`` carries no extractor label, and this function still
+    # cannot check the precondition directly — it applies span overlap
+    # unconditionally, exactly as before. What changed (issue #118): on the
+    # LLM-segmentation path, the PIPELINE CALLER now bridges
+    # ``TrackedChange.char_span`` into the tree's own coordinate space
+    # BEFORE calling this function whenever the two would otherwise
+    # disagree (see ``extraction.bridge_tracked_change_spans`` and
+    # ``pipeline._bridge_tracked_changes_if_needed``) — clearing a span to
+    # ``None`` rather than passing through an unbridged, coincidentally-
+    # comparable one when bridging isn't possible. So by the time a
+    # ``TrackedChanges`` reaches this function on the LLM path, its
+    # char_spans are either already correct or already absent; on the
+    # deterministic path they were always correct (see above). This
+    # function's own overlap check is unconditional either way — it is the
+    # caller's job to ensure that precondition holds, not this function's to
+    # verify it. See issue #112's original review notes for the
+    # coordinate-mismatch problem this bridge solves.
     #
     # Span overlap must also stay additive rather than replace the
     # clause-path filter even where the coordinate systems do match:
@@ -192,6 +225,61 @@ def enrich_clause_diff(
     return [
         EnrichedHunk(hunk=h, enrichment=_match_hunk(h, candidates, used)) for h in clause_diff.hunks
     ]
+
+
+def round_level_fallback_attribution(
+    hunk: TextHunk,
+    tracked_changes: TrackedChanges,
+) -> HunkEnrichment | None:
+    """Last-resort, round-level attribution when a version's ENTIRE tracked-
+    changes side channel has exactly one distinct author (issue #118).
+
+    Not called by ``enrich_clause_diff`` and not a replacement for it — a
+    SEPARATE tier called only once per-hunk matching has already been tried
+    and failed for the clause in question, by two callers (issue #118 fix
+    round 2): ``observation_builder.build_round_moves`` (per negotiation
+    round — ``moved_by``) and ``pipeline._attribution_for_diff``, gated
+    there to single-round documents (``proposed_by``). Safe precisely
+    because it is immune to every failure mode that defeats per-hunk
+    matching (coordinate-space mismatch, short/stopword-only tracked-change
+    text, repeated boilerplate ambiguity — see ``_jaccard``): if there is
+    only ONE author in the whole file's redline session, every real content
+    change in that round came from them, independent of which clause or
+    which specific ``TrackedChange`` record it corresponds to.
+
+    CALLER INVARIANT this function cannot check itself: *tracked_changes*
+    must genuinely be the side channel of the SAME round the given *hunk*
+    belongs to — not, e.g., a signed/last version's side channel consulted
+    for a hunk that may have originated in an earlier, differently-authored
+    round (net diffs spanning more than one round). Violating this
+    invariant is exactly what turned an honest "unknown" into a confidently
+    wrong attribution before the ``single_round`` gate was added to
+    ``pipeline._attribution_for_diff``.
+
+    Gated strictly on RAW author strings actually present in
+    ``tracked_changes.changes`` — never on which party (``"us"``/
+    ``"counterparty"``/``"unknown"``) they resolve to via
+    ``observation_builder.party_side_for_author`` (issue #119). A version
+    with two distinct authors — both parties' marks in one file, common on
+    this corpus — must refuse to fire rather than guess between them; that
+    refusal is the whole point, not an edge case to special-case away.
+
+    ``date`` is deliberately always ``None`` on the returned
+    ``HunkEnrichment``: which specific ``TrackedChange`` record *this* hunk
+    corresponds to is still genuinely unknown at this tier — only WHO made
+    some change in this round is known, not WHEN this particular one was
+    made. Guessing a date here would be exactly the kind of unearned
+    precision this fallback exists to avoid everywhere else.
+
+    Returns ``None`` when ``tracked_changes.changes`` is empty or carries
+    more than one distinct author.
+    """
+    authors = {c.author for c in tracked_changes.changes}
+    if len(authors) != 1:
+        return None
+    (author,) = authors
+    tracked_type = "insertion" if hunk.kind in ("insert", "replace") else "deletion"
+    return HunkEnrichment(author=author, date=None, tracked_type=tracked_type)
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +346,18 @@ def _tokens(text: str) -> frozenset[str]:
 
 
 def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
-    if not a and not b:
-        return 1.0
+    """Word-level Jaccard similarity, ``0.0`` when either side has no
+    content tokens post-stopword-stripping (issue #118).
+
+    Two EMPTY token sets are not evidence of similarity — they are the
+    absence of any signal at all (e.g. a one-word tracked change like "the"
+    or "and", all stopwords, real on this corpus's short redlines: median
+    tracked-change length is 3 words). The previous ``1.0`` for
+    ``not a and not b`` was a false "perfect match", live the moment the
+    candidate filter selects more than one all-stopword change/hunk pair —
+    an empty-vs-empty tie that ``_match_hunk``'s ``sim > best_sim`` strict
+    inequality would accept as confidently as a real full-text match.
+    """
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)

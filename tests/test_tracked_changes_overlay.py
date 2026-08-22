@@ -14,7 +14,9 @@ from playbook_engine.docx_ingester import TrackedChange, TrackedChanges
 from playbook_engine.tracked_changes_overlay import (
     EnrichedHunk,
     HunkEnrichment,
+    _jaccard,
     enrich_clause_diff,
+    round_level_fallback_attribution,
 )
 
 # ---------------------------------------------------------------------------
@@ -141,6 +143,31 @@ def test_enrich_low_similarity_text_no_match() -> None:
     """TrackedChange with dissimilar text does not enrich."""
     hunk = TextHunk(kind="insert", old_text="", new_text="indemnification liability clause")
     tc = _tracked_change("insertion", "Alice", "governing Delaware choice law")
+    cd = _clause_diff((hunk,))
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc]))
+    assert result[0].enrichment is None
+
+
+def test_jaccard_empty_vs_empty_is_zero() -> None:
+    """Issue #118: two empty token sets are absence of signal, not a match.
+
+    Regression coverage for the ``_jaccard`` empty-set case — previously
+    returned ``1.0`` (a false "perfect match"), now ``0.0``.
+    """
+    assert _jaccard(frozenset(), frozenset()) == 0.0
+
+
+def test_enrich_all_stopword_hunk_no_false_match() -> None:
+    """Issue #118: an all-stopword hunk must not be falsely attributed to an
+    all-stopword tracked change on the same clause path.
+
+    Before the ``_jaccard`` empty-set fix, both sides tokenize to the empty
+    set, ``_jaccard`` returned a false "perfect" ``1.0``, and ``_match_hunk``
+    accepted it as a confident match. After the fix, empty-vs-empty yields
+    ``0.0``, which is below ``_MATCH_THRESHOLD`` (0.50), so no enrichment.
+    """
+    hunk = TextHunk(kind="insert", old_text="", new_text="and the")
+    tc = _tracked_change("insertion", "Alice", "of a")
     cd = _clause_diff((hunk,))
     result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc]))
     assert result[0].enrichment is None
@@ -398,3 +425,72 @@ def test_enriched_hunk_date_none() -> None:
     result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc]))
     if result[0].enrichment:
         assert result[0].enrichment.date is None
+
+
+# ---------------------------------------------------------------------------
+# round_level_fallback_attribution (issue #118): a SEPARATE, coarser tier —
+# not called by enrich_clause_diff, not exercised by any test above. See
+# pipeline._attribution_for_diff for the only real caller.
+# ---------------------------------------------------------------------------
+
+
+def test_round_level_fallback_fires_with_single_distinct_author() -> None:
+    hunk = TextHunk(kind="insert", old_text="", new_text="anything at all")
+    tc1 = _tracked_change("insertion", "Alice", "unrelated text one")
+    tc2 = _tracked_change("deletion", "Alice", "unrelated text two")
+    tracked = _tracked_changes("doc", "v2", [tc1, tc2])
+
+    result = round_level_fallback_attribution(hunk, tracked)
+
+    assert result is not None
+    assert result.author == "Alice"
+    assert result.date is None
+
+
+def test_round_level_fallback_refuses_with_two_distinct_authors() -> None:
+    """The 'prove it doesn't guess' test (issue #118's own required
+    verification): 14/30 real corpus versions have two distinct authors in
+    one file (both parties' marks) and must not be treated as
+    single-author."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="anything at all")
+    tc1 = _tracked_change("insertion", "Alice", "unrelated text one")
+    tc2 = _tracked_change("insertion", "Bob", "unrelated text two")
+    tracked = _tracked_changes("doc", "v2", [tc1, tc2])
+
+    result = round_level_fallback_attribution(hunk, tracked)
+
+    assert result is None
+
+
+def test_round_level_fallback_refuses_on_empty_changes() -> None:
+    hunk = TextHunk(kind="insert", old_text="", new_text="anything at all")
+    tracked = _tracked_changes("doc", "v2", [])
+
+    assert round_level_fallback_attribution(hunk, tracked) is None
+
+
+def test_round_level_fallback_gates_on_raw_author_string_not_party_side() -> None:
+    """Explicitly NOT gated on which party ("us"/"counterparty") the author
+    resolves to (issue #119 is a separate, later stage) — two distinct raw
+    author strings refuse to fire even though this function has no way to
+    know or care which side either one is on."""
+    hunk = TextHunk(kind="delete", old_text="x", new_text="")
+    tc1 = _tracked_change("deletion", "J. Smith", "x")
+    tc2 = _tracked_change("deletion", "M. Chen", "y", clause_path="2")
+    tracked = _tracked_changes("doc", "v2", [tc1, tc2])
+
+    assert round_level_fallback_attribution(hunk, tracked) is None
+
+
+def test_round_level_fallback_infers_tracked_type_from_hunk_kind() -> None:
+    tc = _tracked_change("insertion", "Alice", "text")
+    tracked = _tracked_changes("doc", "v2", [tc])
+
+    insert_hunk = TextHunk(kind="insert", old_text="", new_text="x")
+    delete_hunk = TextHunk(kind="delete", old_text="x", new_text="")
+    replace_hunk = TextHunk(kind="replace", old_text="x", new_text="y")
+
+    assert round_level_fallback_attribution(insert_hunk, tracked).tracked_type == "insertion"  # type: ignore[union-attr]
+    assert round_level_fallback_attribution(delete_hunk, tracked).tracked_type == "deletion"  # type: ignore[union-attr]
+    # replace prefers the insertion-side convention, same as _match_hunk.
+    assert round_level_fallback_attribution(replace_hunk, tracked).tracked_type == "insertion"  # type: ignore[union-attr]
