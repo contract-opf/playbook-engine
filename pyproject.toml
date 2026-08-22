@@ -73,6 +73,25 @@ dev = [
 [tool.hatch.build.targets.wheel.force-include]
 "spec" = "spec"
 
+# Hatchling's default sdist content is "the whole working directory minus
+# .gitignore" — and .gitignore is the ONLY ignore file it honors (not
+# .git/info/exclude, not the user's global gitignore). That leaves sdist
+# contents dependent on whatever local/scratch dirs a maintainer's checkout
+# happens to have lying around under `.claude/` — e.g. a stale agent
+# worktree copy of the whole repo, or `settings.local.json` with local
+# absolute paths — even though `git status` reports clean (issue #114).
+# Exclude just those untracked scratch paths, NOT all of `.claude/`: the
+# directory also holds git-tracked content (`.claude/skills/` — the
+# playbook-from-corpus skill linked from README.md and docs/PLAN-FIRST.md)
+# that must still ship in the sdist.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".claude/worktrees",
+    ".claude/settings.local.json",
+    ".claude/checkpoints",
+    ".claude/mailbox",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

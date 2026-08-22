@@ -83,6 +83,51 @@ Vendor-specific needs belong in the reserved `x_*` extension namespace
 4. Keep `docs/` in sync — undocumented behavior is a bug.
 5. A maintainer reviews; spec changes may need a second maintainer.
 
+## Cutting a release
+
+Maintainer-only. `docker-publish.yml` and `pypi-publish.yml` do the actual
+publishing; this is the sequence that fires them (issue #114).
+
+1. **Bump the version.** `pyproject.toml` `[project].version`, following
+   the §11 stability policy above (1.x is additive-only; see issue #113
+   for the 1.0.0 precedent).
+2. **Update `CHANGELOG.md`.** A new `## [X.Y.Z] - YYYY-MM-DD` entry. Any
+   new or changed normative MUST — schema-touching or not — gets its own
+   `### Normative rule changes` entry, per the changelog's own header
+   policy.
+3. **Tag and push.** `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag
+   push alone fires `.github/workflows/docker-publish.yml`, which builds
+   and pushes `ghcr.io/contract-opf/playbook-engine:vX.Y.Z` and `:latest`.
+4. **Publish a GitHub Release from that tag** (UI: Releases → Draft a new
+   release → pick the tag; or
+   `gh release create vX.Y.Z --generate-notes`). Publishing the release —
+   not the tag push — is what fires `.github/workflows/pypi-publish.yml`:
+   it builds the sdist + wheel, verifies both actually contain `spec/`
+   (the wheel-only `force-include` setting doesn't cover the sdist —
+   `tests/test_packaging.py::test_sdist_contains_spec_dir` is the
+   in-repo regression test for that gap), and publishes to PyPI over
+   Trusted Publishing (OIDC — no `PYPI_API_TOKEN` secret is configured
+   or needed).
+
+### One-time PyPI setup (before the first release)
+
+`pypi-publish.yml` has no long-lived PyPI credential to configure; it
+authenticates via OIDC Trusted Publishing instead. Before the *first* run,
+a PyPI project owner must register the publisher — this is a PyPI-account
+action, not something CI can do, and is the one release step that can't be
+automated (flagged at landing, issue #114):
+
+1. On PyPI, register (or claim) the `playbook-engine` project name —
+   registering a Trusted Publisher can create the pending project even
+   before any release is uploaded, so this may happen as part of step 2.
+2. Add a Trusted Publisher: project → Publishing → Add a new publisher →
+   GitHub → owner `contract-opf`, repository `playbook-engine`, workflow
+   `pypi-publish.yml`, environment `pypi`.
+
+Until this is done, steps 1–4 above still succeed (version bump, changelog,
+tag, Docker image, GitHub Release) — only the `publish` job in
+`pypi-publish.yml` fails, since PyPI has no publisher to trust yet.
+
 ## Maintainers
 
 The conventions below apply to the maintainers' automated workflow, not to

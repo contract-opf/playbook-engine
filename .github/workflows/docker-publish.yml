@@ -3,8 +3,9 @@ name: Docker Publish
 # Builds the canonical docling/OCR runtime (Dockerfile) and pushes it to
 # GHCR on every version tag. This is the release path for the Docker image;
 # see docker-smoke.yml for the recurring health check of the same image
-# that runs independently of a release. PyPI publishing is deliberately
-# out of scope here — see issue #176 and #181 (org move / package name).
+# that runs independently of a release. PyPI publishing is its sibling
+# workflow, `pypi-publish.yml`, fired by the GitHub Release rather than by
+# this tag push — see CONTRIBUTING.md "Cutting a release".
 #
 # Plain `docker build`/`docker push` (no buildx) — the local runner pool
 # provides a container daemon via DOCKER_HOST but doesn't support
@@ -37,19 +38,33 @@ jobs:
         run: |
           ref="${GITHUB_REF#refs/tags/}"
           image="ghcr.io/${{ github.repository }}"
+          # Semver pre-release tags (e.g. v1.1.0-rc1) carry a `-` after the
+          # version core — never move `:latest` onto one of those (issue
+          # #114: this only ever worked in theory before the first real
+          # tag, and CONTRIBUTING.md's release procedure only names plain
+          # `vX.Y.Z` tags).
+          if [[ "$ref" == *-* ]]; then
+            is_prerelease=true
+          else
+            is_prerelease=false
+          fi
           {
             echo "image=$image"
             echo "ref=$ref"
+            echo "is_prerelease=$is_prerelease"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build image
         run: |
-          docker build \
-            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.ref }}" \
-            -t "${{ steps.meta.outputs.image }}:latest" \
-            .
+          tags=(-t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.ref }}")
+          if [ "${{ steps.meta.outputs.is_prerelease }}" = "false" ]; then
+            tags+=(-t "${{ steps.meta.outputs.image }}:latest")
+          fi
+          docker build "${tags[@]}" .
 
-      - name: Push image (:<tag> and :latest)
+      - name: Push image (:<tag>, plus :latest for non-pre-release tags)
         run: |
           docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.ref }}"
-          docker push "${{ steps.meta.outputs.image }}:latest"
+          if [ "${{ steps.meta.outputs.is_prerelease }}" = "false" ]; then
+            docker push "${{ steps.meta.outputs.image }}:latest"
+          fi
