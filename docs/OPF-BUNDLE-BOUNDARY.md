@@ -5,7 +5,8 @@
 
 ## The canonical-format decision
 
-**OPF v0.2 is the canonical playbook format.** There is no second, parallel
+**OPF 1.0 (document shape `opf_version` 0.3) is the canonical playbook format.**
+There is no second, parallel
 "review-engine playbook format" that OPF must be converted into. What a review
 engine installs and runs is **an OPF document plus a
 thin bundle wrapper** — not a distinct schema requiring a field-by-field

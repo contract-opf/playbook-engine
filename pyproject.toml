@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "playbook-engine"
-version = "0.2.0"
+version = "1.0.0"
 description = "Corpus-to-playbook compiler emitting the Open Playbook Format (OPF)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Athletes' Performance, Inc." }]
 keywords = ["contracts", "negotiation", "playbook", "legal", "opf", "clause-analysis"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Legal Industry",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",

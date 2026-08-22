@@ -39,4 +39,5 @@ treated as a high-severity engineering bug in addition to the takedown.
 
 ## Supported versions
 
-Pre-1.0: only the latest release/main receives fixes.
+Only the latest release/main receives fixes. No older major/minor line is
+back-patched.

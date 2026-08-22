@@ -3,11 +3,11 @@
 Verifies:
   - `docs/OPF-BUNDLE-BOUNDARY.md` exists.
   - It carries the OPF-owns and bundle-owns headings.
-  - It states the canonical-format decision (OPF v0.2 IS the format; a
+  - It states the canonical-format decision (OPF IS the format; a
     consuming app's playbook = OPF document + bundle wrapper), superseding #115's
     converter framing.
-  - `docs/OPF-SPEC.md` (the v0.2 spec, promoted to this filename by #172)
-    cross-links to it.
+  - `docs/OPF-SPEC.md` (the OPF 1.0 spec, promoted to this filename by
+    #172) cross-links to it.
 """
 
 from __future__ import annotations
@@ -35,7 +35,8 @@ def test_boundary_doc_has_ownership_headings() -> None:
 
 def test_boundary_doc_states_canonical_format() -> None:
     text = _boundary_text()
-    assert "OPF v0.2 is the canonical playbook format" in text
+    assert "OPF 1.0" in text
+    assert "is the canonical playbook format" in text
     assert "supersedes" in text.lower()
     assert "#115" in text
 

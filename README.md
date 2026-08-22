@@ -63,9 +63,9 @@ rungs from zero-effort to full audit, each with an honest cost.
 
 ## What a playbook knows
 
-OPF v0.2 is **one document with three sections**, each with a different
-runtime binding — this is the design that makes it safe to point a
-stochastic model at high-stakes legal work:
+OPF 1.0 (document shape `opf_version` "0.3") is **one document with three
+sections**, each with a different runtime binding — this is the design
+that makes it safe to point a stochastic model at high-stakes legal work:
 
 | Section | What it carries | Binding at review time |
 |---|---|---|
@@ -173,7 +173,7 @@ extraction stack is a property of how you installed, not a flag.
 
 | Path | What's there |
 |---|---|
-| [`docs/OPF-SPEC.md`](docs/OPF-SPEC.md) | The Open Playbook Format standard, v0.2 (the keystone) |
+| [`docs/OPF-SPEC.md`](docs/OPF-SPEC.md) | The Open Playbook Format standard, v1.0 (the keystone) |
 | [`docs/ADOPTING.md`](docs/ADOPTING.md) | The adopter's path: quickstart → your corpus → curation → publishing |
 | [`docs/prompts/create-playbook.md`](docs/prompts/create-playbook.md) | The launch prompt for the Claude Code skill path (`claude "$(cat …)"`) |
 | [`docs/PLAN-FIRST.md`](docs/PLAN-FIRST.md) | Running on a Claude plan vs an API key, stage by stage |
@@ -183,16 +183,22 @@ extraction stack is a property of how you installed, not a flag.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
-| [`spec/`](spec/) | JSON Schemas (v0.2 + superseded v0.1) and shipped taxonomies |
+| [`spec/`](spec/) | JSON Schemas — current: `playbook.schema-0.3.json` (frozen); superseded: v0.2, v0.1 — and shipped taxonomies |
 | [`examples/`](examples/) | The flagship v0.2 example playbook, fixtures, the quickstart corpus, and a second agreement type (NDA) at [`examples/nda/`](examples/nda/) |
 
 ## Status
 
-**OPF v0.3 (additive over v0.2 — the `digest` section); pre-1.0.** The format may still change (breaking changes are
-called out in [CHANGELOG.md](CHANGELOG.md) and the spec's Appendix B). The
-engine's full pipeline is exercised end-to-end in CI — currently ~1,900
+**Engine 1.0.0; OPF 1.0 (stable).** The current document shape —
+`opf_version` 0.3, additive over 0.2 (the `digest` section) — is frozen: it
+is never edited in place. 1.0 is a stability commitment for the 1.x series
+as a whole: a 1.x release may add a new OPTIONAL field or `x_*` extension,
+but ships it under a new `opf_version` rather than an in-place edit of 0.3
+(a breaking shape or normative-rule change requires 2.0; see the spec's
+§11).
+The engine's full pipeline is exercised end-to-end in CI — currently ~2,600
 tests, all offline. Real-world derivation runs on a private educational-
-affiliation corpus; a synthetic public showcase corpus is planned.
+affiliation corpus; a synthetic public showcase corpus ships at
+[`examples/nda/`](examples/nda/).
 
 ## Contributing
 

@@ -222,6 +222,129 @@ def test_spec_changelog_states_current_digest_version() -> None:
 
 
 # ---------------------------------------------------------------------------
+# #113 — CHANGELOG.md normative-rule-change policy (OPF-SPEC §11)
+# ---------------------------------------------------------------------------
+
+
+def _numbered_release_sections(changelog: str) -> list[tuple[str, str]]:
+    """Return (version, body) pairs for each numbered `## [x.y.z]` release
+    section in a CHANGELOG.md text, in document order. `## [Unreleased]`
+    (and any other non-numbered heading) is deliberately excluded — the
+    normative-rule-change policy applies to shipped releases only, and the
+    Keep a Changelog workflow this repo follows keeps an `[Unreleased]`
+    section at the top between releases."""
+    headings = list(re.finditer(r"^## \[(\d+\.\d+\.\d+)\]", changelog, flags=re.MULTILINE))
+    sections = []
+    for i, heading in enumerate(headings):
+        start = heading.start()
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(changelog)
+        sections.append((heading.group(1), changelog[start:end]))
+    return sections
+
+
+def _normative_rule_change_violations(changelog: str) -> list[str]:
+    """Return the version of every numbered release section whose body
+    contains the substring "MUST" without a `### Normative rule changes`
+    heading recording an actual entry, per OPF-SPEC §11's
+    normative-rule-change policy (docs/OPF-SPEC.md §11: "any new or changed
+    MUST ... MUST get an entry"). A release with no "MUST" anywhere in its
+    body is not a violation (test_changelog_guard_allows_release_with_no_
+    must_change). This check is deliberately over-strict beyond that: it
+    does not attempt to distinguish a genuinely new/changed MUST from one
+    that merely restates an existing rule — any occurrence of the word
+    forces the release to either carry the heading or be reworded. A
+    `### Normative rule changes` heading with no content under it (before
+    the next `###` heading or the end of the section) does not satisfy the
+    guard — an empty heading would let a release vacuously claim
+    compliance without recording what changed."""
+    violations = []
+    for version, section in _numbered_release_sections(changelog):
+        if "MUST" not in section:
+            continue
+        heading_match = re.search(r"^### Normative rule changes\s*$", section, flags=re.MULTILINE)
+        if heading_match is None:
+            violations.append(version)
+            continue
+        after_heading = section[heading_match.end() :]
+        next_heading = re.search(r"^### ", after_heading, flags=re.MULTILINE)
+        body = after_heading[: next_heading.start()] if next_heading else after_heading
+        if not body.strip():
+            violations.append(version)
+    return violations
+
+
+def test_changelog_normative_release_sections_have_heading() -> None:
+    """OPF-SPEC §11's normative-rule-change policy (normative, effective at
+    1.0) requires a dedicated `### Normative rule changes` heading in any
+    numbered release section that ships a new or changed MUST. This is a
+    lasting guard, not a one-time grep: it fails on any future numbered
+    release that documents a MUST without recording it under the heading.
+    It does not fire on `## [Unreleased]` (see
+    test_changelog_guard_ignores_unreleased_section) and does not require
+    the heading on a release that ships no MUST change (see
+    test_changelog_guard_allows_release_with_no_must_change) — the policy
+    at docs/OPF-SPEC.md §11 is conditional, not unconditional."""
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    violations = _normative_rule_change_violations(changelog)
+    assert not violations, (
+        "release(s) "
+        + ", ".join(violations)
+        + " in CHANGELOG.md document a MUST without a `### Normative rule "
+        "changes` heading — required by OPF-SPEC §11 whenever a release "
+        "ships a new or changed MUST (see spec §11, normative)"
+    )
+
+
+def test_changelog_guard_ignores_unreleased_section() -> None:
+    """`## [Unreleased]` must never be scanned as a release section — the
+    Keep a Changelog workflow CHANGELOG.md itself declares (and that a
+    routine PR reintroduces between releases) must not trip the
+    normative-rule-change guard just because the section body happens to
+    contain the word "MUST"."""
+    changelog = (
+        "## [Unreleased]\n\n"
+        "- Some new MUST that hasn't shipped under a release yet.\n\n"
+        "## [1.0.0]\n\n"
+        "### Normative rule changes\n\n"
+        "- A MUST changed.\n"
+    )
+    assert _normative_rule_change_violations(changelog) == []
+
+
+def test_changelog_guard_allows_release_with_no_must_change() -> None:
+    """A release that ships no normative rule change is not required to
+    carry a `### Normative rule changes` heading — the policy in
+    docs/OPF-SPEC.md §11 is conditional ("any new or changed MUST"), so a
+    release with no MUST change must not be forced to add an empty or
+    false heading just to satisfy this guard."""
+    changelog = "## [1.1.0]\n\n### Added\n\n- A new optional field.\n"
+    assert _normative_rule_change_violations(changelog) == []
+
+
+def test_changelog_guard_flags_must_without_heading() -> None:
+    """Positive case: a numbered release section that documents a MUST and
+    carries no `### Normative rule changes` heading at all must be flagged
+    — this locks in that the guard actually fires (rather than vacuously
+    returning `[]`) if the heading regex or string ever drifts."""
+    changelog = "## [1.2.0]\n\n### Added\n\n- Consumers MUST now reject unknown fields.\n"
+    assert _normative_rule_change_violations(changelog) == ["1.2.0"]
+
+
+def test_changelog_guard_rejects_empty_heading() -> None:
+    """A `### Normative rule changes` heading with no content under it
+    (before the next `###` heading or end of section) must not satisfy the
+    guard — an empty heading would let a release vacuously claim
+    compliance without recording what changed."""
+    changelog = (
+        "## [1.3.0]\n\n"
+        "### Normative rule changes\n\n"
+        "### Added\n\n"
+        "- Consumers MUST now reject unknown fields.\n"
+    )
+    assert _normative_rule_change_violations(changelog) == ["1.3.0"]
+
+
+# ---------------------------------------------------------------------------
 # #23 — docs drift: ARCHITECTURE.md must name the schema actually shipped
 # ---------------------------------------------------------------------------
 

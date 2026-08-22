@@ -10,6 +10,12 @@
 | `our-paper-baseline.v0.2.playbook.json` | A worked example playbook, current OPF v0.2 format |
 | `our-paper-baseline.playbook.json`, `emergent-no-template.playbook.json` | Worked examples in the superseded OPF v0.1 format |
 
+`our-paper-baseline.v0.2.playbook.json`'s embedded `compiler.version` and
+`posture.generation.generated_by` strings (`"0.2.0"`) are historical
+provenance — the actual engine version that generated this fixture and its
+recorded `identity.content_hash` — and are intentionally not rolled
+forward on later engine version bumps; doing so would change the hash.
+
 ## Quickstart: judge-fixture → playbook
 
 This walks you from a fresh clone to a validating `playbook.opf.json` with
