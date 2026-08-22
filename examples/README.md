@@ -6,6 +6,7 @@
 | [`staging-fixtures/`](staging-fixtures/) | Corpus-layout variants (flat, CLM-nested, manifest) used by `playbook stage` tests |
 | [`fixtures/`](fixtures/) | OPF documents used by the schema validator's test suite (valid + deliberately invalid) |
 | [`affiliation-config/`](affiliation-config/) | A worked `playbook.config.yaml` for the Educational Affiliation Agreement taxonomy |
+| [`nda/`](nda/) | A synthetic second agreement type (Mutual NDA), exercised by `tests/test_nda_smoke.py` / `make smoke-nda` — see [`nda/README.md`](nda/README.md) |
 | `our-paper-baseline.v0.2.playbook.json` | A worked example playbook, current OPF v0.2 format |
 | `our-paper-baseline.playbook.json`, `emergent-no-template.playbook.json` | Worked examples in the superseded OPF v0.1 format |
 

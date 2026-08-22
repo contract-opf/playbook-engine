@@ -91,3 +91,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "smoke: hermetic, no-LLM smoke tests over a committed example corpus (see tests/test_nda_smoke.py, `make smoke-nda`)",
+]

@@ -50,6 +50,11 @@ ready to paste into any chat LLM next to a contract you're reviewing.
 [examples/README.md](examples/README.md) walks through every step's
 expected output, plus the Docker variant.
 
+A second, no-LLM agreement-type run — proving the engine isn't hardcoded to
+one contract type — lives at [`examples/nda/`](examples/nda/) and is fully
+hermetic via `make smoke-nda` (or `playbook mine`/`project` directly against
+`examples/nda/config.smoke.yaml`).
+
 Ready for your own agreements? See **[docs/ADOPTING.md](docs/ADOPTING.md)**
 — the path from a messy folder of deals to a curated, publishable playbook.
 Not sure how much of that curation to do? ADOPTING.md's [control
@@ -179,7 +184,7 @@ extraction stack is a property of how you installed, not a flag.
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
 | [`spec/`](spec/) | JSON Schemas (v0.2 + superseded v0.1) and shipped taxonomies |
-| [`examples/`](examples/) | The flagship v0.2 example playbook, fixtures, and the quickstart corpus |
+| [`examples/`](examples/) | The flagship v0.2 example playbook, fixtures, the quickstart corpus, and a second agreement type (NDA) at [`examples/nda/`](examples/nda/) |
 
 ## Status
 
