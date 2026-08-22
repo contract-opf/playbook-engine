@@ -55,8 +55,11 @@ changes carry a higher bar** — the format is an interface others build on:
 - an updated example (`examples/our-paper-baseline.v0.2.playbook.json`
   must keep validating — CI enforces this),
 - a spec-text update (`docs/OPF-SPEC.md`) including Appendix B changelog,
-- a note on versioning impact (pre-1.0, breaking changes are allowed but
-  must be called out; see §11 Versioning & migration).
+- a note on versioning impact: as of OPF 1.0, 1.x changes are additive-only
+  (new OPTIONAL fields, new `x_*` extensions); removing/retyping a field or
+  changing a normative MUST requires 2.0 (see §11 Versioning & migration).
+  A new or changed MUST — even one that touches no schema field — needs its
+  own `CHANGELOG.md` entry under a `### Normative rule changes` heading.
 
 Vendor-specific needs belong in the reserved `x_*` extension namespace
 (§10.1), not in new core fields.

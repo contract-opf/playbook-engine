@@ -1,7 +1,7 @@
 # Open Playbook Format (OPF) — Specification
 
-**Version:** 0.3 (additive over 0.2 — §3.12 `digest`; the 0.2 shape is unchanged)
-**Status:** Current specification (0.3; 0.2 documents remain valid). Breaking changes possible until 1.0.
+**Version:** 1.0
+**Status:** Stable — the first non-beta release. The document shape (`opf_version` "0.3"; 0.1/0.2 documents remain valid) is unchanged by this release; 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11.
 **Serialization:** JSON (canonical). YAML permitted for authoring; tools MUST accept both and treat them as equivalent.
 **Issue references:** #NNN citations throughout are design provenance from the project's original development tracker.
 **License:** This file is specification text and is additionally licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0), per the repository `LICENSE` — alongside the Apache-2.0 license covering this repository.
@@ -663,7 +663,30 @@ closed shape (`identity`, citations, `agreement_type`, `taxonomy` entries,
 
 ## 11. Versioning & migration
 
-OPF uses semantic versioning. `opf_version` is required. Pre-1.0 minor versions may break compatibility.
+OPF uses semantic versioning. `opf_version` is required.
+
+**Stability policy (normative, effective at 1.0):** 1.0 is the first
+non-beta release — the format is no longer "breaking changes possible until
+1.0." Within the 1.x series:
+- A 1.x release MAY add a new OPTIONAL field, or a new `x_*` vendor
+  extension (§10.1).
+- A 1.x release MUST NOT add a new REQUIRED field, remove or retype an
+  existing field, or change what an existing field means or how its
+  contents are selected.
+- Removing or retyping a field, or changing a normative MUST, requires a
+  2.0 release — never an in-place edit or a same-major-version reinterpretation
+  of an existing rule.
+
+**Normative rule changes (normative, effective at 1.0):** the drift class
+that actually bites a consumer is a normative rule changing *without* a
+schema change or a version bump — JSON Schema validation alone cannot catch
+it. §3.13's id-uniqueness rule shipped in exactly this shape (a blocking
+validator rule, no schema change, no version bump). Going forward, any new
+or changed MUST — whether or not it touches the schema — MUST get an entry
+in `CHANGELOG.md` under a dedicated `### Normative rule changes` heading in
+the release it ships under, so a downstream implementation (including an
+independent one checked against the conformance vectors) has a durable,
+greppable record of what changed.
 
 **Immutability rule (normative, effective 2026-07-16):** a published
 `opf_version` is immutable once a consumer exists. Shape or *semantic*
@@ -674,6 +697,19 @@ section's `digest_version` follows the same rule independently. Every
 spec-affecting change gets an entry in `spec/CHANGELOG.md`, whose schema-hash
 pins are CI-enforced (`tests/test_spec_consistency.py`). OPF 0.3 is frozen as
 of `digest_version` 2.
+
+**How the 1.x series relates to `opf_version` (normative):** the engine's
+1.x series and the document shape's `opf_version` are versioned
+independently, and the stability policy and the immutability rule above
+compose as follows — an additive 1.x change (a new OPTIONAL field or `x_*`
+extension, permitted by the stability policy) ships as a NEW `opf_version`
+(e.g. 0.3 → 0.4), per the immutability rule; it is never an in-place edit
+of a frozen shape. A consumer pinned to `opf_version` 0.3 is unaffected by
+such a change and keeps validating against the frozen 0.3 schema; a
+consumer that wants the new field upgrades its pin to the new
+`opf_version`. "OPF 0.3 is frozen" and "1.x is additive-only" are therefore
+both true without conflict: 0.3 itself never changes in place, and the
+additive changes the 1.x series permits ship as later `opf_version`s.
 
 **0.1 → 0.2 migration:**
 - `clauses` and `clause_library` move under a new `evidence` object.
@@ -695,6 +731,7 @@ of `digest_version` 2.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved:** `summary.stance_detail` carries the held-rate alongside the enum — see §3.5.3.
 
 ## Appendix B — Changelog
+- **1.0** — Stability commitment, not a shape change: the document shape (`opf_version` "0.3") is unchanged. New §11 stability policy (1.x changes are additive-only — new OPTIONAL fields and new `x_*` extensions permitted; no new REQUIRED field, no removing/retyping a field, no changing a normative MUST without a 2.0 release) and new §11 normative-rule-change policy (any new or changed MUST, whether or not it touches the schema, gets a `CHANGELOG.md` entry under a `### Normative rule changes` heading in the release it ships under).
 - **0.3** — `digest` section (§3.12): compact model-facing projection of `evidence` (stances, preferred variations verbatim, text_summary-only concession/unacceptable summaries, frequency-banded deduplicated exemplar forms with `example_ref` drill-down); single-file bundle artifact `playbook.opf.html` embedding the canonical JSON + digest; additive over 0.2.
 - **0.2** — Three-section model (Evidence / Posture / Floor); `historical_stance` (descriptive) replaces `rollup.position` (prescriptive); `composes` (pinned external modules); determinism boundary (§5); producer/author/consumer responsibilities (§6); Posture interview (§7); lineage boundary with the consumer (§8); `identity` — canonical serialization, `content_hash`, per-section digests, producer-assigned `id`/`version`/`supersedes` (§3.10, issue #143); `curation` — embedded attorney-pinned positions surviving recompile with deterministic conflict-flagging (§3.11, issue #147).
 - **0.1** — Initial draft. Risk-delta model, provenance rule, dual structure (clause positions + clause library), citation requirement, taxonomy curation model.

@@ -15,4 +15,7 @@ Closes #
 
 - [ ] Rationale stated; `docs/OPF-SPEC.md` updated incl. Appendix B changelog
 - [ ] `examples/our-paper-baseline.v0.2.playbook.json` still validates
-- [ ] Versioning impact called out (pre-1.0 breaking changes allowed but explicit)
+- [ ] Versioning impact called out (1.x is additive-only; removing/retyping a
+      field or changing a normative MUST requires 2.0 — see spec §11); a new
+      or changed MUST gets its own `CHANGELOG.md` entry under
+      `### Normative rule changes`

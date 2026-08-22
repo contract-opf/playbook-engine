@@ -2,10 +2,38 @@
 
 All notable changes to the OPF standard and the playbook-engine are
 documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project uses semantic versioning (`opf_version` for the format;
-pre-1.0 minor versions may break compatibility).
+and the project uses semantic versioning (`opf_version` for the format).
+As of 1.0, the format's stability policy (spec §11) applies: 1.x changes
+are additive-only, and any new or changed normative MUST — even one that
+touches no schema field — gets its own entry under a `### Normative rule
+changes` heading in the release it ships under.
 
-## [Unreleased]
+## [1.0.0] - 2026-08-22
+
+Engine 1.0.0 / OPF 1.0 — first non-beta release. The format is no longer
+"breaking changes possible until 1.0"; see the spec's §11 stability policy.
+
+### Normative rule changes
+
+- **§11 Stability policy** (docs/OPF-SPEC.md §11, normative, effective at
+  1.0): within the 1.x series a release MAY add a new OPTIONAL field or a
+  new `x_*` vendor extension; it MUST NOT add a new REQUIRED field, remove
+  or retype an existing field, or change what an existing field means or
+  how its contents are selected — any of those requires a 2.0 release.
+- **§11 Normative-rule-change policy** (docs/OPF-SPEC.md §11, normative,
+  effective at 1.0): any new or changed MUST — whether or not it touches
+  the schema — MUST get an entry under this heading, in the release it
+  ships under. This entry is the first one recorded under the policy it
+  announces.
+- **§3.13 Identifier uniqueness** (docs/OPF-SPEC.md §3.13, normative,
+  effective 2026-07-29, pre-existing): `evidence.clauses[].id`,
+  `evidence.clause_library[].concept_id`, `floor.invariants[].id`, and
+  `corpus.documents[].document_id` MUST be unique among siblings, in every
+  OPF version. This rule shipped (issue #70) as a blocking validator rule
+  with no schema change and no version bump — the motivating case for the
+  policy above — and had no `CHANGELOG.md` record until this entry.
+
+### Removed
 
 - Removed `playbook_engine/eval_harness.py`, `playbook_engine/review.py`,
   `playbook_engine/review_orchestration.py`, and `docs/ORCHESTRATION.md`
@@ -25,7 +53,13 @@ pre-1.0 minor versions may break compatibility).
   back-compat `review.json` sidecar reader) are untouched. The removed code
   is recoverable at commit `7737a1e` (the last commit where these files were
   present) for anyone reviving the eval-harness or checkpoint-orchestration
-  work tracked by issues #151/#152.
+  work tracked by issues #151/#152 (pre-migration tracker numbers; not
+  issues in this repo).
+- `posture.rubric` removed — prose Posture + Floor + Evidence are the
+  interface.
+
+### Breaking
+
 - **Breaking**: Removed the `playbook compile` and `playbook view document`
   CLI commands (issue #109) — both were redundant spellings of existing
   pipelines (`compile`'s options were exactly `mine`'s plus `--stop-after`,
@@ -45,9 +79,10 @@ pre-1.0 minor versions may break compatibility).
     as a benign role/qualifier and let through, e.g. "the affiliated
     university" or "each educational university representative" (a bare
     "University" alone was never matched by this gate, before or after).
-  - The advisory #211 proper-noun sweep (`residue_report.json`, does not
-    block) surfaces more generic institution nouns like "school" or
-    "student" that it used to treat as stopwords and silently drop.
+  - The advisory proper-noun sweep (pre-migration tracker #211; not an
+    issue in this repo) (`residue_report.json`, does not block) surfaces
+    more generic institution nouns like "school" or "student" that it used
+    to treat as stopwords and silently drop.
   - `playbook publish` now has a `--config <path>` option: pass the
     corpus's own engine config (one carrying `scan_role_words_extra` /
     `scan_stopwords_extra` — see `config.py`'s module docstring, and the
@@ -55,14 +90,15 @@ pre-1.0 minor versions may break compatibility).
     those words back into both the gate and the sweep and restore prior
     scan behavior. Without `--config`, publish uses the neutral defaults
     only, regardless of what the corpus was mined with.
+
+### Added
+
 - Negotiation dynamics in Evidence (§3.5.3): `proposed_by`, `observed_at`,
   `counterparty_ref`, `summary.stance_detail`, per-clause
   `negotiation_trail`.
 - Resolvable citations (§4.1): `corpus.documents[].version_files` content
   addresses, `corpus.snapshot.manifest_hash`, `playbook resolve-citation`.
 - Reserved `x_*` vendor-extension namespace (§10.1).
-- `posture.rubric` removed — prose Posture + Floor + Evidence are the
-  interface.
 - Reference consumer: `playbook render-prompt` composes
   Evidence+Posture+Floor into a review-ready system prompt.
 

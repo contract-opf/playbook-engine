@@ -32,6 +32,24 @@ Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
 
+### 2026-08-22 — OPF 1.0: stability policy and normative-rule-change policy (issue #113)
+
+OPF-SPEC §11 gained two new normative statements, effective at 1.0: the
+**stability policy** (1.x changes are additive-only — new OPTIONAL fields
+and new `x_*` extensions permitted; no new REQUIRED field, no removing or
+retyping an existing field, no changing a normative MUST without a 2.0
+release) and the **normative-rule-change policy** (any new or changed
+MUST — whether or not it touches the schema — gets its own entry under a
+`### Normative rule changes` heading in `CHANGELOG.md`, in the release it
+ships under). §3.13's id-uniqueness rule, recorded in `CHANGELOG.md` for
+the first time by this same release, is the motivating case: it shipped as
+a blocking validator rule with no schema change and no version bump, the
+exact drift class both new policies exist to make greppable. No schema,
+`opf_version`, or `digest_version` change — the document shape
+(`opf_version` "0.3") is unchanged; this entry exists because both new
+rules are normative validator rules, within this changelog's stated scope,
+even though their durable record lives in `CHANGELOG.md`.
+
 ### 2026-08-03 — clause-tree `ClauseNode` gains optional `page` (issue #86)
 
 `spec/clause-tree.schema.json`'s `$defs.ClauseNode` gained an optional
