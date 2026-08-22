@@ -101,6 +101,11 @@ Engine 1.0.0 / OPF 1.0 — first non-beta release. The format is no longer
 - Reserved `x_*` vendor-extension namespace (§10.1).
 - Reference consumer: `playbook render-prompt` composes
   Evidence+Posture+Floor into a review-ready system prompt.
+- Conformance vectors for canonicalization + digest (§10.2): `spec/conformance/`
+  (`manifest.json` + plain-JSON `vectors/*.json`), the standalone,
+  non-Python-dependency normative reference a downstream port of
+  `canonicalize.py`/`digest.py` must reproduce to be conformant, checked
+  against by `tests/test_conformance_vectors.py` (issue #115).
 
 ## [0.2.0]
 

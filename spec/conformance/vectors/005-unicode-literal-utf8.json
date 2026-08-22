@@ -1,0 +1,126 @@
+{
+  "name": "unicode-literal-utf8",
+  "description": "A clause title containing accented Latin, curly quotes, an em dash, an emoji, and CJK characters. expected.canonical MUST contain these code points literally (UTF-8) — a \\uXXXX-escaping implementation produces a DIFFERENT byte sequence and therefore a different content_hash than this vector's.",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.unicode_literal",
+          "taxonomy_id": "unicode_literal",
+          "title": "Café Non-Disclosure — “Confidentiality” 🔒 合同",
+          "observed_positions": [
+            {
+              "text_summary": "Café Non-Disclosure — “Confidentiality” 🔒 合同 — standard form.",
+              "full_text": "Café Non-Disclosure — “Confidentiality” 🔒 合同 — standard form, full text.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  20
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3
+            }
+          ],
+          "summary": {
+            "historical_stance": "usually_held",
+            "acceptable_if": [],
+            "fallbacks": [],
+            "rejected": [],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 3,
+              "n_counterparty_paper": 0
+            }
+          }
+        }
+      ],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[{\"id\":\"clause.unicode_literal\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,20],\"clause_path\":\"1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Café Non-Disclosure — “Confidentiality” 🔒 合同 — standard form, full text.\",\"outcome\":\"signed\",\"precedent_count\":3,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Café Non-Disclosure — “Confidentiality” 🔒 合同 — standard form.\"}],\"summary\":{\"acceptable_if\":[],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":3,\"score\":0.5},\"fallbacks\":[],\"historical_stance\":\"usually_held\",\"rejected\":[]},\"taxonomy_id\":\"unicode_literal\",\"title\":\"Café Non-Disclosure — “Confidentiality” 🔒 合同\"}]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:2ec51cdaf3d694a886943f2bd247d1de0f85f1eaf5468f0110bbfd190aeea30a",
+    "section_digests": {
+      "evidence": "sha256:2e108037419af114575d147ec42c1526fc759c6838ddd6c2b6bdcd93613fda8d",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 1,
+      "clauses": [
+        {
+          "id": "clause.unicode_literal",
+          "taxonomy_id": "unicode_literal",
+          "title": "Café Non-Disclosure — “Confidentiality” 🔒 合同",
+          "historical_stance": "usually_held",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [],
+          "concessions": [],
+          "unacceptable": [],
+          "exemplar_forms": [
+            {
+              "text_summary": "Café Non-Disclosure — “Confidentiality” 🔒 合同 — standard form.",
+              "n": 3,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  20
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

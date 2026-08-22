@@ -1,0 +1,134 @@
+{
+  "name": "float-int-formatting",
+  "description": "A synthetic x_numeric_probe object (schema-legal vendor extension at the document root, §10.1) isolating float/int formatting gotchas: a whole-number float that MUST keep its '.0', a floating-point-precision value (0.1 + 0.2), a negative float, 0.0, a large integer, and a small-magnitude float that Python renders in exponential notation. expected.canonical is the byte-for-byte pin for each.",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.numeric",
+          "taxonomy_id": "numeric",
+          "title": "Numeric Edge Cases",
+          "observed_positions": [
+            {
+              "text_summary": "Numeric Edge Cases — standard form.",
+              "full_text": "Numeric Edge Cases — standard form, full text.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  20
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3
+            }
+          ],
+          "summary": {
+            "historical_stance": "usually_held",
+            "acceptable_if": [],
+            "fallbacks": [],
+            "rejected": [],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 3,
+              "n_counterparty_paper": 0
+            }
+          }
+        }
+      ],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    },
+    "x_numeric_probe": {
+      "whole_number_float": 1.0,
+      "float_precision": 0.30000000000000004,
+      "negative_float": -0.5,
+      "zero_float": 0.0,
+      "large_int": 1000000000,
+      "small_exponent_float": 1e-10
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[{\"id\":\"clause.numeric\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,20],\"clause_path\":\"1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Numeric Edge Cases — standard form, full text.\",\"outcome\":\"signed\",\"precedent_count\":3,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Numeric Edge Cases — standard form.\"}],\"summary\":{\"acceptable_if\":[],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":3,\"score\":0.5},\"fallbacks\":[],\"historical_stance\":\"usually_held\",\"rejected\":[]},\"taxonomy_id\":\"numeric\",\"title\":\"Numeric Edge Cases\"}]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"},\"x_numeric_probe\":{\"float_precision\":0.30000000000000004,\"large_int\":1000000000,\"negative_float\":-0.5,\"small_exponent_float\":1e-10,\"whole_number_float\":1.0,\"zero_float\":0.0}}",
+    "content_hash": "sha256:6b18ece6e59b26a59f7d9cff41791ba6004251dc0afdf54477142f658a006225",
+    "section_digests": {
+      "evidence": "sha256:3084d7e2a5b97a9745f2a10ee0297f691159fa84ec192673b98fcf0aa961afed",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 1,
+      "clauses": [
+        {
+          "id": "clause.numeric",
+          "taxonomy_id": "numeric",
+          "title": "Numeric Edge Cases",
+          "historical_stance": "usually_held",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [],
+          "concessions": [],
+          "unacceptable": [],
+          "exemplar_forms": [
+            {
+              "text_summary": "Numeric Edge Cases — standard form.",
+              "n": 3,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  20
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "name": "excluded-metadata-variant-a",
+  "description": "A document carrying identity, a curation pin, and compiler.generated_at/run_id. Pairs with 012 (same evidence/posture/floor, unrecognizably different identity/curation/run metadata) to prove content_hash and canonical bytes are identical across the pair, while section_digests.curation differs.",
+  "opf_version": "0.3",
+  "engine_version": "1.0.0",
+  "digest_version": "2",
+  "input": {
+    "opf_version": "0.3",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.alpha",
+          "taxonomy_id": "alpha",
+          "title": "Alpha Clause",
+          "observed_positions": [
+            {
+              "text_summary": "Alpha Clause — standard form.",
+              "full_text": "Alpha Clause — standard form, full text.",
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  21
+                ]
+              },
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "provenance": "our_paper",
+              "outcome": "signed",
+              "precedent_count": 3
+            }
+          ],
+          "summary": {
+            "historical_stance": "usually_held",
+            "acceptable_if": [],
+            "fallbacks": [],
+            "rejected": [],
+            "confidence": {
+              "score": 0.5,
+              "basis": "precedent_count+provenance_mix",
+              "n_our_paper": 3,
+              "n_counterparty_paper": 0
+            }
+          }
+        }
+      ],
+      "clause_library": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "run-a",
+      "generated_at": "2026-01-01T00:00:00Z"
+    },
+    "identity": {
+      "id": "playbook-v1",
+      "version": "1.0.0",
+      "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "section_digests": {
+        "evidence": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "posture": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "floor": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "curation": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    "curation": {
+      "pins": [
+        {
+          "clause_id": "clause.alpha",
+          "item_id": "C1",
+          "position": "consistently_held",
+          "baseline_stance": "usually_held",
+          "pinned_at": "2026-01-01T00:00:00Z"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":false},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clause_library\":[],\"clauses\":[{\"id\":\"clause.alpha\",\"observed_positions\":[{\"deviation\":\"none\",\"example_ref\":{\"char_span\":[0,21],\"clause_path\":\"1\",\"document_id\":\"doc-1\",\"version\":1},\"full_text\":\"Alpha Clause — standard form, full text.\",\"outcome\":\"signed\",\"precedent_count\":3,\"provenance\":\"our_paper\",\"risk_delta\":{\"direction\":\"neutral\",\"magnitude\":\"none\"},\"text_summary\":\"Alpha Clause — standard form.\"}],\"summary\":{\"acceptable_if\":[],\"confidence\":{\"basis\":\"precedent_count+provenance_mix\",\"n_counterparty_paper\":0,\"n_our_paper\":3,\"score\":0.5},\"fallbacks\":[],\"historical_stance\":\"usually_held\",\"rejected\":[]},\"taxonomy_id\":\"alpha\",\"title\":\"Alpha Clause\"}]},\"floor\":{},\"opf_version\":\"0.3\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:7f14aea0087446a4d9e88bf7b8ea7c857995822499beb169e9fc1bff7c88265d",
+    "section_digests": {
+      "evidence": "sha256:6307f673070393915fab9fb373765cd5d2674d0c29d517810d4ff93e3147fa9d",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:896599cb88a3b6e65799f8039ddace256721cde9d36fe4009dd3800fb46243d9"
+    },
+    "digest": {
+      "digest_version": "2",
+      "clause_count": 1,
+      "clauses": [
+        {
+          "id": "clause.alpha",
+          "taxonomy_id": "alpha",
+          "title": "Alpha Clause",
+          "historical_stance": "usually_held",
+          "stance_detail": null,
+          "our_standard": null,
+          "preferred_variations": [],
+          "concessions": [],
+          "unacceptable": [],
+          "exemplar_forms": [
+            {
+              "text_summary": "Alpha Clause — standard form.",
+              "n": 3,
+              "band": "sometimes",
+              "deviation": "none",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "example_ref": {
+                "document_id": "doc-1",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  21
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

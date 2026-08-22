@@ -661,6 +661,38 @@ closed shape (`identity`, citations, `agreement_type`, `taxonomy` entries,
   and the section digests, so two documents differing only in an `x_*`
   value are different playbooks.
 
+### 10.2 Conformance vectors — canonicalization and digest (normative)
+
+`spec/conformance/` is the **normative definition** of the two mechanical
+algorithms everything in §3.10 (`identity`) and §3.12 (`digest`) rests on:
+canonical serialization + content hashing (reference implementation
+`playbook_engine/canonicalize.py`) and `digest` section construction
+(reference implementation `playbook_engine/digest.py`).
+`spec/conformance/manifest.json` stamps the exact `opf_version` /
+`digest_version` / reference `engine_version` the vectors bind to, per the
+§11 immutability rule below — a format-version bump gets a new,
+separately-stamped vector set, never an in-place edit of an existing one.
+
+Each vector under `spec/conformance/vectors/` is a self-contained,
+plain-JSON `{input, expected}` pair (`canonical`, `content_hash`,
+`section_digests`, `digest`) — **an independent, non-Python implementation
+that reproduces every vector's `expected.*` from its `input` is conformant**
+with canonicalization and digest construction for that format version, with
+no dependency on this repo. `tests/test_conformance_vectors.py` is this
+engine's own check against the same frozen vectors; see
+`spec/conformance/README.md` for what edge case each vector isolates (key
+ordering, nested array order, Unicode literal emission and normalization,
+float/int formatting, empty-vs-absent fields, excluded run/curation
+metadata, and digest list dedupe/rank/top-N-plus-material capping with its
+"often"/"sometimes"/"rare" frequency-band boundaries).
+
+This exists because a hand-maintained downstream port of `canonicalize.py`
+or `digest.py` (contract-toaster carries one, pinned to an engine commit by
+docstring) fails silently on drift: a changed algorithm doesn't raise an
+import error, it just produces a different `content_hash` — surfacing later
+as an ingest-hash-verification failure, or worse, a hash that agrees when it
+shouldn't.
+
 ## 11. Versioning & migration
 
 OPF uses semantic versioning. `opf_version` is required.
@@ -685,8 +717,8 @@ validator rule, no schema change, no version bump). Going forward, any new
 or changed MUST — whether or not it touches the schema — MUST get an entry
 in `CHANGELOG.md` under a dedicated `### Normative rule changes` heading in
 the release it ships under, so a downstream implementation (including an
-independent one checked against the conformance vectors) has a durable,
-greppable record of what changed.
+independent one checked against the conformance vectors, §10.2) has a
+durable, greppable record of what changed.
 
 **Immutability rule (normative, effective 2026-07-16):** a published
 `opf_version` is immutable once a consumer exists. Shape or *semantic*

@@ -27,10 +27,39 @@ reverse-engineering `git log`.
 | `playbook.schema.json` | `c1a25b477eeb71c9a6daa2d2d390793301df5e4e6539503e622b72d2f8276962` |
 | `playbook.schema-0.2.json` | `eae5f882f9289f2144cc784109d3dd04de7673d6e563d195fd693fd38ae1138d` |
 | `playbook.schema-0.3.json` | `d2d81ca1c4f7547b508b2a22310906ce9a3bf43a2436e8730f0b1e4c9b0a0e15` |
+| `spec/conformance/` (manifest.json + vectors/*.json, concatenated) | `551a503c5749ee680e044546acea5bb50a0fd15b66138f4e9e0f7ae747385cf6` |
 
 Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
+
+### 2026-08-22 — Conformance vectors for canonicalization + digest (issue #115)
+
+Added `spec/conformance/` (`manifest.json` + `vectors/*.json`): the
+normative, plain-JSON, standalone-consumable conformance vector set for
+canonicalization/content-hashing (`canonicalize.py`) and `digest` section
+construction (`digest.py`), stamped `opf_version` 0.3 / `digest_version` 2 /
+reference `engine_version` 1.0.0. `docs/OPF-SPEC.md` gained §10.2
+documenting them as the normative definition. No schema, `opf_version`, or
+`digest_version` change — this entry exists because canonicalization is
+explicitly within this changelog's stated scope.
+`tests/test_conformance_vectors.py` checks this engine against the same
+frozen vectors; see `spec/conformance/README.md` for what edge case each
+vector isolates. This is the mechanism issue #113's normative-rule-change
+policy anticipated ("an independent [implementation] checked against the
+conformance vectors") — the drift class it defends against is
+contract-toaster's hand-maintained source-level ports of these two files,
+pinned to an engine commit by docstring rather than to anything
+mechanically checkable until now.
+
+**Fix round 1 amendment (same day):** added vector 013 (digest dedupe/rank/
+top-N-plus-material capping and the "often"/"sometimes"/"rare" frequency-
+band boundaries — `_dedupe_rank`/`_preferred_variations` in `digest.py`),
+which vectors 001-012 left completely unexercised despite the normative
+digest-construction conformance claim. Also added this table's
+`spec/conformance/` pin, mechanically enforcing the "never edited in place"
+rule `spec/conformance/README.md` already stated but nothing previously
+checked (`tests/test_spec_consistency.py::test_spec_changelog_pins_conformance_vectors`).
 
 ### 2026-08-22 — OPF 1.0: stability policy and normative-rule-change policy (issue #113)
 

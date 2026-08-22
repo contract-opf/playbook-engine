@@ -1,0 +1,75 @@
+{
+  "format_version": {
+    "opf_version": "0.3",
+    "engine_version": "1.0.0",
+    "digest_version": "2"
+  },
+  "algorithm": "canonical: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False) restricted to the whole-document form used for content_hash — i.e. after removing the top-level 'identity' and 'curation' keys and the 'compiler.generated_at'/'compiler.run_id' sub-keys from a copy of the input (see canonicalize.py). content_hash: 'sha256:' + hex(sha256(canonical.encode('utf-8'))). section_digests[name]: 'sha256:' + hex(sha256(canonical(input.get(name, {})).encode('utf-8'))) for name in evidence/posture/floor/curation — NOT excluding anything (a section has no self-referential fields). digest: playbook_engine.digest.build_digest(input) with the default token_budget.",
+  "vectors": [
+    {
+      "name": "minimal-ascii",
+      "file": "vectors/001-minimal-ascii.json",
+      "description": "Smallest well-formed document, ASCII only, no evidence clauses. Baseline for the key-ordering pair (002) and the empty/absent pair (009/010)."
+    },
+    {
+      "name": "minimal-ascii-reordered-keys",
+      "file": "vectors/002-minimal-ascii-reordered-keys.json",
+      "description": "Same content as 001-minimal-ascii with every object's keys inserted in reverse order (top level, and the nested compiler/taxonomy/agreement_type objects). expected.canonical and expected.content_hash MUST equal 001's byte-for-byte — proves recursive key-sort independence."
+    },
+    {
+      "name": "two-clauses-order-a",
+      "file": "vectors/003-two-clauses-order-a.json",
+      "description": "Two clauses [alpha, beta], each carrying a nested char_span array several levels deep (evidence.clauses[].observed_positions[].example_ref.char_span). Pairs with 004 (reversed order) to prove array element order is preserved, not sorted."
+    },
+    {
+      "name": "two-clauses-order-b",
+      "file": "vectors/004-two-clauses-order-b.json",
+      "description": "Same two clause objects as 003-two-clauses-order-a with the evidence.clauses array reversed to [beta, alpha]. expected.canonical and expected.content_hash MUST differ from 003's."
+    },
+    {
+      "name": "unicode-literal-utf8",
+      "file": "vectors/005-unicode-literal-utf8.json",
+      "description": "A clause title containing accented Latin, curly quotes, an em dash, an emoji, and CJK characters. expected.canonical MUST contain these code points literally (UTF-8) — a \\uXXXX-escaping implementation produces a DIFFERENT byte sequence and therefore a different content_hash than this vector's."
+    },
+    {
+      "name": "unicode-nfc-form",
+      "file": "vectors/006-unicode-nfc-form.json",
+      "description": "Clause title using the NFC (precomposed) spelling of an accented character. Pairs with 007 (NFD/decomposed spelling, visually identical) to prove the engine does NOT apply Unicode normalization before hashing."
+    },
+    {
+      "name": "unicode-nfd-form",
+      "file": "vectors/007-unicode-nfd-form.json",
+      "description": "Same clause id/structure as 006-unicode-nfc-form with the title's accented character spelled in NFD (decomposed) form instead — same rendered glyphs, different code points. expected.content_hash MUST differ from 006's."
+    },
+    {
+      "name": "float-int-formatting",
+      "file": "vectors/008-float-int-formatting.json",
+      "description": "A synthetic x_numeric_probe object (schema-legal vendor extension at the document root, §10.1) isolating float/int formatting gotchas: a whole-number float that MUST keep its '.0', a floating-point-precision value (0.1 + 0.2), a negative float, 0.0, a large integer, and a small-magnitude float that Python renders in exponential notation. expected.canonical is the byte-for-byte pin for each."
+    },
+    {
+      "name": "floor-present-empty",
+      "file": "vectors/009-floor-present-empty.json",
+      "description": "Document with a top-level floor key explicitly present and empty ({}). Pairs with 010 (floor key entirely absent) to prove content_hash distinguishes 'empty' from 'absent' even though section_digests.floor is identical between the two (both resolve to section_digest({}))."
+    },
+    {
+      "name": "floor-absent",
+      "file": "vectors/010-floor-absent.json",
+      "description": "Same document as 009-floor-present-empty with the top-level floor key removed entirely (not merely emptied). expected.content_hash MUST differ from 009's; expected.section_digests.floor MUST equal 009's."
+    },
+    {
+      "name": "excluded-metadata-variant-a",
+      "file": "vectors/011-excluded-metadata-variant-a.json",
+      "description": "A document carrying identity, a curation pin, and compiler.generated_at/run_id. Pairs with 012 (same evidence/posture/floor, unrecognizably different identity/curation/run metadata) to prove content_hash and canonical bytes are identical across the pair, while section_digests.curation differs."
+    },
+    {
+      "name": "excluded-metadata-variant-b",
+      "file": "vectors/012-excluded-metadata-variant-b.json",
+      "description": "Same evidence/posture/floor as 011-excluded-metadata-variant-a with unrecognizably different identity, curation pin, and compiler.generated_at/run_id. expected.canonical and expected.content_hash MUST equal 011's byte-for-byte; expected.section_digests.curation MUST differ from 011's (curation is excluded from content_hash but still gets its own lineage digest, §3.11)."
+    },
+    {
+      "name": "digest-dedupe-rank-and-bands",
+      "file": "vectors/013-digest-dedupe-rank-and-bands.json",
+      "description": "One clause whose observed_positions (11 entries), acceptable_if (8), fallbacks (8), and rejected (8) each exceed EXEMPLAR_TOP_N (5), pinning digest.py's dedupe/rank/top-N-plus-material cap (_dedupe_rank / _preferred_variations) and the often/sometimes/rare band boundaries — a gap vectors 001-012 left unconstrained despite the normative digest-construction conformance claim. Each of the four lists includes one pair that collides only after _normalize_text (case/punctuation/whitespace) and one risk_delta-material entry ranked outside the top-5 by frequency that MUST survive the cap anyway; observed_positions additionally pins n=10 -> 'often', and n=9 / n=2 -> 'sometimes' (the boundary just below 'often' and the minimum for 'sometimes')."
+    }
+  ]
+}
