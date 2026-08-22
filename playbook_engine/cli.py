@@ -481,11 +481,11 @@ def validate(file: Path) -> None:
     help="Write the rendered prompt to this file (default: stdout).",
 )
 def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
-    """Compose Evidence+Posture+Floor into a review-ready system prompt (issue #179).
+    """Compose Evidence+Posture+Floor into a review-ready system prompt.
 
-    The reference prompt-pack consumer: pure Markdown a user pastes into any chat
-    LLM alongside a contract to review. No API calls, no redline generation — the
-    determinism boundary (§5) rendered as instructions.
+    Pure Markdown a user pastes into any chat LLM alongside a contract to
+    review. No API calls, no redline generation — the determinism boundary
+    (§5) rendered as instructions.
     """
     from playbook_engine.prompt_renderer import is_advisory_only, render_prompt
 
@@ -550,7 +550,7 @@ def resolve_citation_cmd(
     Looks up the cited (document_id, version) in corpus.documents[].version_files,
     finds the file under CORPUS-DIR whose sha256 matches, and prints the path plus
     clause_path/char_span. Exits 1 on hash mismatch or a missing content address —
-    the reference implementation consumers copy (issue #185).
+    the reference implementation consumers copy.
     """
     from playbook_engine.citation_resolver import CitationResolutionError, resolve_citation
 
@@ -652,9 +652,9 @@ def resolve_citation_cmd(
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help=(
-        "Path to this corpus's engine config YAML (issue #107). Its "
+        "Path to this corpus's engine config YAML. Its "
         "scan_role_words_extra / scan_stopwords_extra lists are merged into "
-        "the step-5.5 institution gate and the #211 proper-noun sweep on top "
+        "the step-5.5 institution gate and the proper-noun sweep on top "
         "of the engine's agreement-type-neutral defaults — pass the config "
         "an affiliation (or other domain-flavored) corpus was mined with to "
         "restore its prior scan leniency. Without this flag, publish uses "
@@ -673,7 +673,7 @@ def publish_cmd(
     allow_empty_registry: bool,
     config_path: Path | None,
 ) -> None:
-    """Produce a party-anonymous public playbook (issue #188).
+    """Produce a party-anonymous public playbook.
 
     Runs the six-step publication transform: party/counterparty role-label
     normalization, DMS-path stripping, date coarsening, a deterministic
@@ -687,10 +687,10 @@ def publish_cmd(
     same as every other zero-configuration path in this engine. Wiring a
     real judge is a separate concern (see playbook_engine/export_profile.py).
 
-    Pass --config for a domain-flavored corpus (issue #107): the engine's
-    step-5.5 institution gate and #211 proper-noun sweep default to a
-    neutral vocabulary, and --config's scan_role_words_extra /
-    scan_stopwords_extra restore whatever leniency that corpus's config
+    Pass --config for a domain-flavored corpus: the engine's step-5.5
+    institution gate and proper-noun sweep default to a neutral vocabulary,
+    and --config's scan_role_words_extra / scan_stopwords_extra restore
+    whatever leniency that corpus's config
     (e.g. examples/affiliation-config/playbook.config.yaml) declares.
     """
     import datetime  # noqa: PLC0415
@@ -991,7 +991,7 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
     help=(
         "Disable the stage cache and force a full recompute — including "
         "re-extraction (docling/pdfplumber/python-docx/pandoc), even if "
-        "extraction_cache.jsonl is warm (issue #78)."
+        "extraction_cache.jsonl is warm."
     ),
 )
 @click.option(
@@ -1031,7 +1031,7 @@ def mine_cmd(
     re-extraction (docling/pdfplumber/python-docx/pandoc) even if
     extraction_cache.jsonl already has a warm entry for a version's current
     content, so a suspect extraction can be recomputed rather than silently
-    replayed (issue #78). Reads are bypassed; extraction_cache.jsonl is still
+    replayed. Reads are bypassed; extraction_cache.jsonl is still
     refreshed with the new result, so a subsequent run without --no-cache
     stays warm.
 
@@ -1260,8 +1260,8 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     help=(
         "Don't stage — write a staging_plan.json proposal (deals/order/signed, "
         "assembled from file contents and metadata) to the output directory for "
-        "review. Required first step for a corpus whose layout is 'unknown' "
-        "(issue #186); works for any layout."
+        "review. Required first step for a corpus whose layout is 'unknown'; "
+        "works for any layout."
     ),
 )
 @click.option(
@@ -1274,9 +1274,9 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
         "Execute a staging_plan.json previously written by --plan-only "
         "(optionally hand/skill-edited) instead of detecting the layout. "
         "Preferred spelling is --from-plan; --plan is accepted as a "
-        "deprecated alias for one release (issue #76 — on `judge`, --plan "
-        "means dry-run/preview instead, so the same flag name carried "
-        "opposite risk profiles on sibling subcommands)."
+        "deprecated alias for one release (on `judge`, --plan means "
+        "dry-run/preview instead, so the same flag name carried opposite "
+        "risk profiles on sibling subcommands)."
     ),
 )
 def stage_cmd(
@@ -1297,13 +1297,13 @@ def stage_cmd(
     When the layout can't be determined (``unknown`` — loose files, ad-hoc
     trees, no per-agreement subfolders) staging refuses to guess; run with
     ``--plan-only`` first to assemble a ``staging_plan.json`` proposal from
-    file contents/metadata (issue #186), review/edit it, then re-run with
+    file contents/metadata, review/edit it, then re-run with
     ``--from-plan staging_plan.json`` (``--plan`` also accepted, deprecated)
     to execute it.
 
     Writes only to the output directory (default:
     ~/.cache/playbook-engine/staging/<name>, a user-owned cache dir rather
-    than world-readable /tmp — see issue #135). Never modifies SRC_DIR.
+    than world-readable /tmp). Never modifies SRC_DIR.
     """
     import json  # noqa: PLC0415
 
@@ -1419,7 +1419,7 @@ def stage_cmd(
         "Print deduped pending counts by kind and a rough token estimate, then exit "
         "without writing observations.jsonl. Preferred spelling is --plan-only "
         "(matches `stage --plan-only`'s preview meaning); --plan is accepted as "
-        "an alias (issue #76)."
+        "an alias."
     ),
 )
 @click.option(
@@ -1436,16 +1436,16 @@ def judge_cmd(
     plan_only: bool,
     subset: int | None,
 ) -> None:
-    """Run mine_corpus with store-backed judges and emit the pending review queue.
+    """Mine the corpus with store-backed judges and emit the pending review queue.
 
     Reads the verdict store at <out>/judge/verdicts.jsonl and replays any
     previously supplied verdicts.  For every new clause payload not in the store,
     appends a full record to <out>/judge/pending.jsonl.
 
-    The verdict-cache layer (out/.cache/verdicts.jsonl) is intentionally bypassed
-    when using store-backed judges (no_cache=True).  This prevents stale
-    needs_review sentinels from being replayed across rounds — the store-backed
-    judges own the verdict life-cycle, not the JudgmentCache.
+    The general-purpose stage cache is intentionally bypassed when using
+    store-backed judges.  This prevents stale needs_review sentinels from
+    being replayed across rounds — the store-backed judges own the verdict
+    life-cycle, not that cache.
 
     Use ``playbook judge-apply`` to load verdicts into the store, then re-run
     ``playbook judge`` to confirm no new items are pending.  Finally run
@@ -1853,13 +1853,13 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     help="Output directory (default: <corpus_dir>/../out).",
 )
 def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> None:
-    """Emit the agent segmentation queue for CORPUS_DIR (issue #191).
+    """Emit the agent segmentation queue for CORPUS_DIR.
 
     Key-free store-backed segmentation. Extracts each version and, for every
     document whose segmentation is not yet cached, appends its ``Block`` stream
     to ``<out>/segment/pending.jsonl``. Read that queue, partition each
-    document's blocks into contiguous clause ranges (``SegNode`` list) — one
-    per clause — write them to a verdicts JSONL, then run
+    document's blocks into contiguous clause ranges — one node per clause —
+    write them to a verdicts JSONL, then run
     ``playbook segment-apply`` and ``playbook mine``. No API key is used.
 
     The queue is rewritten from scratch each run, so re-running after
@@ -1983,13 +1983,16 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
     "verdicts_path",
     type=click.Path(exists=True, path_type=Path),
     required=True,
-    help='JSONL of segmentations (each line: {"canonical_text": "...", "nodes": [SegNode, ...]}).',
+    help=(
+        'JSONL of segmentations (each line: {"canonical_text": "...", '
+        '"nodes": [<segmentation node>, ...]}).'
+    ),
 )
 def segment_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
-    """Load agent-produced ``SegNode`` lists into the segmentation cache (issue #191).
+    """Load agent-produced segmentation nodes into the segmentation cache.
 
     Each line of VERDICTS_PATH is a JSON object with ``canonical_text`` (echoed
-    from the pending item) and ``nodes`` (a list of ``SegNode`` dicts —
+    from the pending item) and ``nodes`` (a list of segmentation node dicts —
     ``node_id``, ``parent_id``, ``order``, ``heading``, ``taxonomy_id``,
     ``start_block_id``, ``end_block_id``, and optional ``start_quote`` /
     ``end_quote``). Nodes should partition the document's blocks into contiguous
@@ -2381,8 +2384,8 @@ def view_group() -> None:
     default=None,
     help=(
         "Path to the held-out alias->entity map (e.g. <out_dir>/alias_map.json, "
-        "written by 'playbook mine' — issue #153). When given, resolves aliases "
-        "to real names in the rendered HTML for authorized reviewers (issue #146). "
+        "written by 'playbook mine'). When given, resolves aliases "
+        "to real names in the rendered HTML for authorized reviewers. "
         "Possessing read access to this restricted file IS the authorization gate; "
         "omit this flag to render a still-safe, alias-only view."
     ),
@@ -2463,17 +2466,16 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
     """Apply FEEDBACK_FILE corrections to OUT_DIR.
 
     Translates provenance/signed/order corrections into per-document
-    hints.yaml entries, classification corrections into VerdictStore entries,
-    free-text notes/comments into viewer_notes.md, ``override``
+    hints.yaml entries, classification corrections into verdict-store
+    entries, free-text notes/comments into viewer_notes.md, ``override``
     (attorney-pinned position) corrections into a ``curation`` pin embedded
-    directly in ``playbook.opf.json`` (issue #147) — it survives a later
-    recompile and is flagged if fresh evidence contradicts it — and the
-    top-level ``"floor"`` key's accept/reject decisions (issue #90):
-    ``accept`` promotes a Floor candidate into ``floor.invariants`` with
-    attribution; ``reject`` records the rejection in
-    ``floor.candidates.json`` so it is not re-proposed. Any key it cannot
-    honor is reported as not applied rather than counted toward a false
-    "OK" (issue #138).
+    directly in ``playbook.opf.json`` — it survives a later recompile and is
+    flagged if fresh evidence contradicts it — and the top-level ``"floor"``
+    key's accept/reject decisions: ``accept`` promotes a Floor candidate
+    into ``floor.invariants`` with attribution; ``reject`` records the
+    rejection in ``floor.candidates.json`` so it is not re-proposed. Any key
+    it cannot honor is reported as not applied rather than counted toward a
+    false "OK".
 
     OUT_DIR is the output directory produced by ``playbook mine`` followed
     by ``playbook project``.
@@ -2536,7 +2538,7 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
 
 @cli.group(name="posture")
 def posture_group() -> None:
-    """Author the OPF Posture via a short GC interview (issue #156)."""
+    """Author the OPF Posture via a short GC interview."""
 
 
 @posture_group.command(name="questions")
@@ -2615,7 +2617,7 @@ def posture_interview_cmd(out_dir: Path, answers_file: Path | None) -> None:
 
 @cli.group(name="floor")
 def floor_group() -> None:
-    """Propose Floor candidates for legal review (issue #166)."""
+    """Propose Floor candidates for legal review."""
 
 
 @floor_group.command(name="propose")
@@ -2627,8 +2629,8 @@ def floor_group() -> None:
     default=None,
     help=(
         "Engine config YAML — supplies the taxonomy, to exclude reversals "
-        "classified under a taxonomy entry curated 'structural: true' "
-        "(issue #106). Optional; omit to skip structural exclusion."
+        "classified under a taxonomy entry curated 'structural: true'. "
+        "Optional; omit to skip structural exclusion."
     ),
 )
 @click.option(
@@ -2638,7 +2640,7 @@ def floor_group() -> None:
     default=2,
     help=(
         "Minimum number of distinct documents that must cite a reversal "
-        "before it becomes a candidate (issue #106); a single-document "
+        "before it becomes a candidate; a single-document "
         "reversal is a plausible fluke, not a corroborated pattern."
     ),
 )
@@ -2655,9 +2657,9 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
     OPF ``floor`` section, and never auto-promotes a candidate into
     ``floor.invariants``. Accepting a candidate is a human act: review
     OUT_DIR/playbook.review.html, export feedback, then run
-    ``playbook view apply`` (issue #90). For a hard line the legal owner is
+    ``playbook view apply``. For a hard line the legal owner is
     authoring themselves, verbatim — not one of these derived candidates —
-    use ``playbook floor sign`` instead (issue #103); do not hand-edit
+    use ``playbook floor sign`` instead; do not hand-edit
     ``floor.invariants``.
     """
     import json  # noqa: PLC0415
@@ -2742,7 +2744,7 @@ def floor_sign_cmd(
     rationale: str | None,
     config_path: Path | None,
 ) -> None:
-    """Record a verbatim, hand-authored Floor invariant (issue #103).
+    """Record a verbatim, hand-authored Floor invariant.
 
     Unlike the Posture interview's Q4 templating ("Do not concede on
     {item}.") or an accepted 'floor propose' candidate's compiler-drafted
@@ -2875,16 +2877,16 @@ def curate_cmd(
     commands_file: Path | None,
     pinned_by: str | None,
 ) -> None:
-    """Apply chat-style curate instructions to OUT_DIR/playbook.opf.json (issue #159).
+    """Apply chat-style curate instructions to OUT_DIR/playbook.opf.json.
 
     A minimal deterministic command grammar (not LLM-driven parsing) for the
-    #104 "chat to fine-tune" interaction goal:
+    "chat to fine-tune" interaction goal:
 
     \b
         pin governing_law to usually_conceded[: optional comment]
         note governing_law: free-text note
 
-    Pins are embedded directly in ``curation.pins`` (issue #147 — survive a
+    Pins are embedded directly in ``curation.pins`` (survive a
     later recompile, and are flagged if fresh evidence contradicts the
     pinned position); notes are appended to ``viewer_notes.md``. Every run
     also refreshes conflict status on every already-embedded pin, so
