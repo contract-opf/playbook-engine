@@ -465,7 +465,7 @@ def _render_document(
 
     # Structural inferences table
     ordered = trail.get("ordered_versions", [])
-    signed = trail.get("signed_version") or "*(not detected)*"
+    signed_version = trail.get("signed_version")
     provenance = trail.get("provenance", "unknown")
     basis = trail.get("basis", "")
     in_scope = doc_scope.get("in_scope")
@@ -491,8 +491,7 @@ def _render_document(
         lines.append(f"| Version order | {' → '.join(str(v) for v in ordered)} |")
     if shape:
         lines.append(f"| Chain shape | `{shape}` |")
-    if trail.get("signed_version"):
-        lines.append(f"| Signed copy | `{signed}` |")
+    lines.append(f"| Signed copy | {f'`{signed_version}`' if signed_version else '(none)'} |")
     if signed_conf is not None:
         lines.append(f"| Signed copy confidence | {signed_conf:.2f} |")
     if basis:

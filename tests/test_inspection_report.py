@@ -851,6 +851,29 @@ def test_report_shows_signed_copy_confidence(tmp_path: Path) -> None:
     assert "Signed copy confidence" in report
 
 
+def test_report_shows_signed_copy_none_when_undetected(tmp_path: Path) -> None:
+    """No signed copy detected → the row is still rendered, as '(none)'.
+
+    Previously the 'Signed copy' row was omitted entirely whenever
+    signed_version was falsy, silently leaving reviewers unable to
+    distinguish "no signed copy" from "field not rendered".
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(
+        out_dir,
+        "deal-alice",
+        ordered_versions=["v1"],
+        signed_version=None,
+        provenance="our_paper",
+    )
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    report = build_inspection_report(out_dir)
+    assert "Signed copy" in report
+    assert "(none)" in report
+    assert "| Signed copy | (none) |" in report
+
+
 def test_report_shows_chain_shape(tmp_path: Path) -> None:
     """shape is surfaced in the inspection report."""
     out_dir = tmp_path / "out"
