@@ -8,6 +8,39 @@ are additive-only, and any new or changed normative MUST — even one that
 touches no schema field — gets its own entry under a `### Normative rule
 changes` heading in the release it ships under.
 
+## [Unreleased]
+
+- **Round-move attribution now recovers real author attribution on the
+  default extraction path** (issue #118, building on #112): tracked-change
+  positions are bridged between docling's and the legacy DOCX adapter's
+  text-coordinate spaces via order-preserving text-unit alignment, instead
+  of relying on character offsets that only matched when both sides
+  happened to already share a coordinate system. Measured against the
+  production corpus: attribution precision improved from 61.6% to 91.3%
+  and wrong-clause attributions dropped ~80%, where previously `moved_by`
+  read `"unknown"` corpus-wide for any docling-extracted redlined document
+  — i.e. nearly all of them, since docling is the default extractor.
+- **`party_side_for_author` no longer defaults an unmatched author to
+  `"counterparty"`** (issue #119): previously, once any
+  `provenance.our_party_aliases` were configured, an author matching none
+  of them was silently assumed to be the counterparty rather than reported
+  as `"unknown"` — guessing a side the engine had no positive evidence for.
+  A new `provenance.our_authors` config field (personal names, initials,
+  and/or emails — distinct from the entity-name `our_party_aliases`) lets
+  a corpus positively identify its own people; an author matching neither
+  list now correctly reads `"unknown"`. **This changes output for any
+  corpus with `our_party_aliases` already configured** — re-derive to pick
+  up corrected attribution.
+- **Signed-copy detection**: a trailer-matched signature section with no
+  filled `By:`/`/s/` evidence and no heading corroboration now resolves to
+  a confident, deterministic `unsigned_trailer_reference` basis instead of
+  the ambiguous `empty_signature_section` bucket (issue #117), removing an
+  LLM-arbitration escalation that `d9ffde7`'s absorbed-trailer fix had
+  introduced for roughly a third of one measured corpus. Heading-matched
+  empty sections are unchanged and still escalate to arbitration.
+- `README.md` now links the real, corpus-derived, party-anonymous
+  published playbook example (issue #99).
+
 ## [1.0.0] - 2026-08-22
 
 Engine 1.0.0 / OPF 1.0 — first non-beta release. The format is no longer
