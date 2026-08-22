@@ -10,7 +10,10 @@ Detection heuristics (applied in priority order):
 3. One filled signature block.
 4. Electronic-signature (``/s/ …``) markers.
 5. Signature section found but all blocks blank → *not* signed.
-6. No signature section found → *not* signed.
+6. Signature section found with zero evidence (no filled/blank ``By:`` line,
+   no ``/s/``) → *not* signed; confidence depends on how the section was
+   found — see "Signature sections that never became their own node" below.
+7. No signature section found → *not* signed.
 
 A "filled" signature block is one where a ``By:`` line is followed by a value
 that contains at least one letter (i.e. not blank, not underscores/dashes
@@ -42,13 +45,25 @@ Signature sections that never became their own node:
   defences: ``_SIG_TRAILER`` matches a signature section from *body* text, and
   ``detect_signed`` falls back to document-wide ``/s/`` markers when no
   signature section is found at all.
+
+  ``_SIG_TRAILER`` matches execution-page boilerplate ("in witness whereof",
+  "executed as a deed") in ordinary body prose too — a clause that merely
+  *mentions* execution in passing, not a real signature block.  When that is
+  the ONLY reason a node matched (no heading anywhere) and nothing filled in
+  turns up, treating it the same as a genuine empty heading would send it to
+  LLM arbitration for content that's almost always incidental boilerplate.
+  ``_signature_nodes`` therefore tags each match's provenance (``"heading"``
+  vs. ``"trailer"``), and ``detect_signed``'s final branch uses it: any
+  heading match keeps ``basis="empty_signature_section"`` at the ambiguous
+  0.60 (escalates); trailer-only matches get the confident
+  ``basis="unsigned_trailer_reference"`` at 0.80 (no escalation).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 
@@ -140,6 +155,7 @@ _BASIS_VALUES = frozenset(
         "electronic_signature",
         "blank_signature_blocks",
         "empty_signature_section",
+        "unsigned_trailer_reference",
         "no_signature_section",
         "llm",
         "hint",
@@ -231,10 +247,11 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
     if _DOCUSIGN_CERT.search(full_text):
         return SignedStatus(signed=True, basis="docusign_cert", confidence=0.95)
 
-    # Locate nodes that belong to a signature section.
-    sig_nodes = _signature_nodes(tree)
+    # Locate nodes that belong to a signature section, tagged with how each
+    # one qualified (a real heading, or a body-text trailer match).
+    sig_matches = _signature_nodes(tree)
 
-    if not sig_nodes:
+    if not sig_matches:
         # No signature section to carve — fall back to document-wide markers.
         #
         # Confidences here are degraded relative to the localized path below
@@ -262,6 +279,7 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
 
     # Collect the full text of each signature node, including all descendants,
     # because the segmenter may have promoted inline sub-clauses to children.
+    sig_nodes = [node for node, _provenance in sig_matches]
     sig_text = "\n".join(_node_subtree_text(n) for n in sig_nodes)
 
     # Count filled and blank "By:" lines.
@@ -283,11 +301,25 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
     if blank_count > 0:
         return SignedStatus(signed=False, basis="blank_signature_blocks", confidence=0.80)
 
-    # Signature heading exists but section is completely empty.
-    result = SignedStatus(signed=False, basis="empty_signature_section", confidence=0.60)
-    if signed_judge is not None and result.confidence < AMBIGUITY_THRESHOLD:
-        return signed_judge.judge(sig_text)
-    return result
+    # No filled/blank By: lines and no /s/ marker anywhere in the matched
+    # nodes.  Provenance decides how confident "not signed" is:
+    #
+    # - Any node matched via a real *heading* → a signature section genuinely
+    #   exists (found on purpose, not incidentally); it could be an unsigned
+    #   template or a signature page whose blocks failed to extract either
+    #   way, so stay ambiguous and keep escalating to the judge.
+    # - All matches are _SIG_TRAILER hits in body text (no heading at all) →
+    #   this is boilerplate like "IN WITNESS WHEREOF" mentioned in passing
+    #   with zero corroborating evidence.  Confident "not signed" — no
+    #   escalation, so this doesn't pay for LLM arbitration on content that's
+    #   almost always incidental.
+    if any(provenance == "heading" for _node, provenance in sig_matches):
+        result = SignedStatus(signed=False, basis="empty_signature_section", confidence=0.60)
+        if signed_judge is not None and result.confidence < AMBIGUITY_THRESHOLD:
+            return signed_judge.judge(sig_text)
+        return result
+
+    return SignedStatus(signed=False, basis="unsigned_trailer_reference", confidence=0.80)
 
 
 # ---------------------------------------------------------------------------
@@ -324,17 +356,23 @@ def _node_subtree_text(node: ClauseNode) -> str:
     return "\n".join(parts)
 
 
-def _signature_nodes(tree: ClauseTree) -> list[ClauseNode]:
-    """Return nodes that belong to a signature section.
+def _signature_nodes(tree: ClauseTree) -> list[tuple[ClauseNode, Literal["heading", "trailer"]]]:
+    """Return nodes that belong to a signature section, tagged by provenance.
 
-    A node qualifies on either of two signals:
+    A node qualifies on either of two signals, recorded alongside it so
+    callers can weigh the two differently when no filled/blank evidence turns
+    up in the matched text (see ``detect_signed``'s final branch):
 
     - its *heading* matches ``_SIG_HEADING`` — the normal case, where the
-      ingester gave the execution page its own node; or
+      ingester gave the execution page its own node — tagged ``"heading"``; or
     - its *body* matches ``_SIG_TRAILER`` — the absorbed-trailer case, where
       an unnumbered "IN WITNESS WHEREOF …" block was appended to the preceding
       numbered clause instead of starting one of its own, leaving no heading to
-      match.
+      match — tagged ``"trailer"``.
+
+    A node whose heading matches is tagged ``"heading"`` even if its body also
+    happens to match ``_SIG_TRAILER``: a real heading is the stronger signal a
+    signature section actually exists.
 
     Matching the body only against the strict ``_SIG_TRAILER`` subset keeps the
     "Execution of Services" guard intact: the loose ``signatures?`` /
@@ -344,10 +382,12 @@ def _signature_nodes(tree: ClauseTree) -> list[ClauseNode]:
     the ``By:`` and ``/s/`` counts are monotone in that text, so a document
     already judged signed cannot be flipped to unsigned by a trailer match.
     """
-    result: list[ClauseNode] = []
+    result: list[tuple[ClauseNode, Literal["heading", "trailer"]]] = []
     for node in tree.all_nodes():
-        if _SIG_HEADING.search(node.heading or "") or _SIG_TRAILER.search(node.text or ""):
-            result.append(node)
+        if _SIG_HEADING.search(node.heading or ""):
+            result.append((node, "heading"))
+        elif _SIG_TRAILER.search(node.text or ""):
+            result.append((node, "trailer"))
     return result
 
 
