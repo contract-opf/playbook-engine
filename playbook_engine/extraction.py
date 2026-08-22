@@ -169,11 +169,13 @@ Callers thread their own distinct signal sourced from the operator's actual
 
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +186,8 @@ from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.artifact_store import _sha256_file
 from playbook_engine.docx_ingester import (
     DocxIngesterError,
+    TextUnit,
+    TrackedChange,
     TrackedChanges,
     _extract_para_text,
     _iter_body_blocks,
@@ -1158,12 +1162,226 @@ def extract_tracked_changes(path: Path) -> TrackedChanges | None:
     Raises:
         ExtractionError: *path* is not a valid/openable DOCX.
     """
+    result = extract_docx_units_and_tracked_changes(path)
+    return result[1] if result is not None else None
+
+
+def extract_docx_units_and_tracked_changes(
+    path: Path,
+) -> tuple[list[TextUnit], TrackedChanges] | None:
+    """Like :func:`extract_tracked_changes`, but also returns the ordered
+    text-unit stream ``TrackedChange.char_span`` is offset into (issue #118).
+
+    Same re-parse, same ``None``-for-non-DOCX / empty-``TrackedChanges``-for-
+    clean-DOCX conventions, same "call on *path* itself, never a normalized
+    copy" requirement — see :func:`extract_tracked_changes`'s docstring,
+    which this function's implementation now backs.
+
+    The returned ``list[TextUnit]`` (``playbook_engine.docx_ingester.TextUnit``)
+    is ``docx_ingester``'s OWN unit stream for *path* — the same coordinate
+    system ``TrackedChange.char_span`` is always offset into, regardless of
+    which extractor (``extract_blocks``'s docling or legacy adapter)
+    produced the ``ClauseTree`` being diffed. A caller whose tree's
+    ``char_span``s are offset into a DIFFERENT extractor's output (the
+    default docling path) needs both this unit stream and that extractor's
+    own ``Block`` list to translate — see :func:`bridge_tracked_change_spans`.
+
+    Raises:
+        ExtractionError: *path* is not a valid/openable DOCX.
+    """
     if path.suffix.lower() != ".docx":
         return None
     try:
-        return ingest_docx(path, document_id="", version="").tracked
+        result = ingest_docx(path, document_id="", version="")
+        return result.units, result.tracked
     except DocxIngesterError as exc:
         raise ExtractionError(f"cannot open DOCX: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Tracked-change coordinate-space bridge (issue #118)
+#
+# ``extract_tracked_changes``/``extract_docx_units_and_tracked_changes``
+# above always re-parse *path* via ``docx_ingester.ingest_docx`` directly, so
+# ``TrackedChange.char_span`` is always an offset into docx_ingester's OWN
+# paragraph-join text. The ``ClauseTree`` a caller is diffing against may
+# instead have been built by ``extract_blocks``'s docling adapter (the
+# DEFAULT under ``extraction.extractor="auto"``) — a different string, with
+# a different offset space entirely (see ``tracked_changes_overlay.py``'s
+# module comment for the full history). The legacy adapter is the one
+# exception: it reuses ``docx_ingester._iter_body_blocks``/
+# ``_extract_para_text`` verbatim (see this module's own docstring, "DOCX
+# (fallback)" above), so its ``Block.char_span`` values are ALREADY in the
+# same coordinate space as ``TrackedChange.char_span`` — no bridge needed,
+# and none is applied (see callers' extractor-label gate, e.g.
+# ``pipeline._bridge_tracked_changes_if_needed``).
+#
+# The bridge itself: align docx_ingester's unit-text stream against the
+# other extractor's Block-text stream (normalizing away the leading list/
+# heading numbering docling's Markdown parser strips but docx_ingester
+# keeps — measured to lift alignment from ~48% to a median 91% across the
+# real production corpus, see issue #118), then translate each
+# TrackedChange's char_span using its own unit's offset into the matched
+# Block. difflib.SequenceMatcher's matching blocks are ORDER-PRESERVING
+# (monotonic in both sequences), which is what defeats repeated boilerplate:
+# the Nth copy of a repeated clause aligns to the Nth occurrence on each
+# side, never coincidentally to the 1st (unlike plain text-containment
+# search — see issue #118's measured comparison).
+# ---------------------------------------------------------------------------
+
+_LEADING_LIST_MARKER_RE = re.compile(r"^(?:[-*+]|\d+(?:\.\d+)*[.):]?)\s+")
+_ALIGN_PUNCT_RE = re.compile(r"[^\w\s]")
+_ALIGN_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_unit_for_alignment(text: str) -> str:
+    """Normalize one text unit for cross-extractor alignment ONLY.
+
+    Strips a leading list/numbering marker ("1.2 ", "3) ", "- ") — broader
+    than what docling's Markdown list-item parsing itself consumes
+    (``_LIST_ITEM_RE`` above only strips single-level "1."/"1)" with a
+    REQUIRED trailing separator; never a dotted multi-level clause number
+    like "1.2", and never one with no trailing separator at all — the
+    trailing ``[.):]`` here is deliberately OPTIONAL, unlike
+    ``docx_ingester._NUM_PREFIX``'s own clause-number regex, precisely
+    because a real heading commonly reads "1.2 Termination" with nothing
+    between the number and the space). docx_ingester keeps that marker in
+    its own unit text verbatim regardless of which of these forms it takes,
+    so stripping it HERE — on both sides, with this more permissive pattern
+    — converges them to the same normalized text whether or not docling's
+    own (narrower) parser happened to strip it upstream: leaving it in place
+    would defeat alignment on every numbered heading/list unit, which is
+    most of a legal agreement's structure. Also folds case/punctuation/
+    whitespace, mirroring
+    ``tracked_changes_overlay._normalize``'s tolerance for the SAME class of
+    immaterial rendering differences. Alignment-only: never affects any
+    stored/citable text.
+    """
+    s = _LEADING_LIST_MARKER_RE.sub("", text.strip())
+    s = s.lower()
+    s = _ALIGN_PUNCT_RE.sub(" ", s)
+    return _ALIGN_WS_RE.sub(" ", s).strip()
+
+
+def _align_units_to_blocks(units: list[TextUnit], blocks: list[Block]) -> dict[int, int]:
+    """Order-preserving ``{source_unit_index: target_block_index}`` mapping.
+
+    ``autojunk=False``: SequenceMatcher's default junk heuristic discounts
+    elements that recur "too often" in a long sequence — exactly the
+    repeated short boilerplate lines (a lone "Confidential", a table
+    separator row) this alignment most needs to place correctly, so the
+    default would silently drop them from consideration.
+    """
+    src_norm = [_normalize_unit_for_alignment(u.text) for u in units]
+    tgt_norm = [_normalize_unit_for_alignment(b.text) for b in blocks]
+    matcher = difflib.SequenceMatcher(None, src_norm, tgt_norm, autojunk=False)
+    mapping: dict[int, int] = {}
+    for a, b, size in matcher.get_matching_blocks():
+        for k in range(size):
+            mapping[a + k] = b + k
+    return mapping
+
+
+def _unit_index_for_span(units: list[TextUnit], span: tuple[int, int]) -> int | None:
+    """Index of the unit whose char_span contains *span*'s start offset."""
+    for i, u in enumerate(units):
+        if u.char_span[0] <= span[0] < u.char_span[1]:
+            return i
+    return None
+
+
+def bridge_tracked_change_spans(
+    tracked: TrackedChanges,
+    units: list[TextUnit],
+    blocks: list[Block],
+) -> TrackedChanges:
+    """Translate *tracked*'s char_spans from docx_ingester's coordinate space
+    (what *units* is offset into) into *blocks*'s coordinate space (issue
+    #118) — the extractor (typically docling) that actually produced the
+    ``ClauseTree`` being diffed — so
+    ``tracked_changes_overlay.enrich_clause_diff``'s char_span-overlap
+    candidate selection compares like-for-like coordinates instead of
+    numeric coincidence.
+
+    Each returned ``TrackedChange.char_span``:
+      - Best-effort translation when the change's own unit aligns to a
+        target block (see ``_align_units_to_blocks``): the change's raw
+        numeric offset from its SOURCE unit's start is reapplied from the
+        TARGET block's start, then clamped to the target block's own text
+        length. This is NOT a corrected offset — when the target's leading
+        numbering/bullet marker was stripped (the source unit's was not;
+        see ``_normalize_unit_for_alignment``), the two units differ in
+        length by the stripped prefix, so the same numeric offset can land
+        a few characters into the wrong word at the target end. Measured as
+        functionally inert at clause granularity (the corpus rescored
+        identically with and without prefix-length compensation, since the
+        clamp keeps every translated span inside the mapped block either
+        way — issue #118 round-2 review) — the translated span only needs
+        to land somewhere inside the right block for
+        ``enrich_clause_diff``'s overlap check to select the right clause,
+        not at an exact character.
+      - ``None`` when the change's own unit did not align to a target block
+        (issue #118: an earlier version of this function interpolated a
+        bounding span here for a unit bracketed by aligned neighbors on
+        both sides; that tier measured net-negative on correct-clause
+        attribution against the real corpus — see the implementation
+        comment below — and was removed), or the change already had no
+        char_span (every deletion — see ``docx_ingester``'s char_span
+        contract). ``enrich_clause_diff`` falls back to clause-path
+        matching (or the round-level single-author fallback tier —
+        ``tracked_changes_overlay.round_level_fallback_attribution``) for
+        these; a stale, untranslated span must never be trusted here
+        (spurious match risk on repeated boilerplate — see this module's
+        section docstring above).
+    """
+    if not tracked.changes:
+        return tracked
+
+    mapping = _align_units_to_blocks(units, blocks)
+    target_span_by_unit: list[tuple[int, int] | None] = [
+        blocks[mapping[i]].char_span if i in mapping else None for i in range(len(units))
+    ]
+
+    new_changes: list[TrackedChange] = []
+    for change in tracked.changes:
+        if change.char_span is None:
+            new_changes.append(change)
+            continue
+        idx = _unit_index_for_span(units, change.char_span)
+        if idx is None:
+            new_changes.append(replace(change, char_span=None))
+            continue
+
+        target_span = target_span_by_unit[idx]
+        if target_span is not None:
+            unit_start = units[idx].char_span[0]
+            offset_start = change.char_span[0] - unit_start
+            offset_end = change.char_span[1] - unit_start
+            t_start = min(target_span[0] + offset_start, target_span[1])
+            t_end = min(max(target_span[0] + offset_end, t_start), target_span[1])
+            new_changes.append(replace(change, char_span=(t_start, t_end)))
+            continue
+
+        # Unaligned unit: no reliable span. An earlier version of this
+        # function interpolated a bounding span here (between the nearest
+        # aligned neighbors either side) when bracketed on both sides; issue
+        # #118 measured that tier against the real corpus and found it net-
+        # negative on correct-clause attribution (13 correct vs. 25 newly
+        # WRONG-clause attributions, precision 92.2% -> 85.0%) — a bounding
+        # span built from two DIFFERENT aligned units carries no evidence
+        # that the unaligned unit's content actually falls at that
+        # interpolated position rather than anywhere else between them, and
+        # it is inert for its own motivating case (a 1-char "\n" join gap
+        # never satisfies ``_spans_overlap``'s strict inequality). Falling
+        # through to ``None`` here lets the round-level single-author
+        # fallback tier handle it instead — per this ticket's own design
+        # note that the round-level tier is safer for whatever the bridge
+        # doesn't resolve.
+        new_changes.append(replace(change, char_span=None))
+
+    return TrackedChanges(
+        document_id=tracked.document_id, version=tracked.version, changes=new_changes
+    )
 
 
 # ---------------------------------------------------------------------------

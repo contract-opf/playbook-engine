@@ -36,7 +36,11 @@ from playbook_engine.clause_differ import ClauseDiff, DocumentDiff
 from playbook_engine.deviation_classifier import DeviationResult
 from playbook_engine.docx_ingester import TrackedChanges
 from playbook_engine.reversal_detector import ReversalRecord
-from playbook_engine.tracked_changes_overlay import HunkEnrichment, enrich_clause_diff
+from playbook_engine.tracked_changes_overlay import (
+    HunkEnrichment,
+    enrich_clause_diff,
+    round_level_fallback_attribution,
+)
 
 _TEXT_SUMMARY_MAX = 200
 
@@ -462,10 +466,26 @@ def build_round_moves(
 
     One record per changed clause per negotiation round. ``moved_by`` is
     attributed from the destination version's own tracked-changes
-    side-channel when one matches (each author's edits are tracked against
-    the file they received, so the post-move version carries the mover's
-    w:ins/w:del), mapped through *our_party_aliases* and *our_authors*
-    (issue #119); ``"unknown"`` otherwise — never guessed.
+    side-channel when a per-hunk match exists (each author's edits are
+    tracked against the file they received, so the post-move version
+    carries the mover's w:ins/w:del) via ``enrich_clause_diff``; when that
+    finds no match, ``tracked_changes_overlay.round_level_fallback_
+    attribution`` (issue #118 fix round 2, finding 2) gets one last try —
+    it fires only when the side-channel carries exactly one distinct
+    author, attributing every real content change in the round to them
+    without per-hunk matching, and refuses outright when two or more
+    distinct authors are present. Either way the resolved author is mapped
+    through *our_party_aliases* and *our_authors* (issue #119) via
+    ``party_side_for_author``; ``"unknown"`` when neither tier matches — never
+    guessed.
+
+    Unlike ``pipeline._attribution_for_diff`` (which enriches the NET diff
+    and must gate its round-level fallback to single-round documents so it
+    never attributes an earlier round's change to a later round's sole
+    author — see that function's docstring), this loop iterates
+    ``doc_diff.consecutive`` directly: ``side_channel`` here is always
+    genuinely THIS round's own destination-version side channel, so the
+    fallback is safe to apply unconditionally per round.
     """
     aliases = our_party_aliases or []
     authors = our_authors or []
@@ -495,6 +515,8 @@ def build_round_moves(
                     enrichment = next(
                         (eh.enrichment for eh in enriched if eh.enrichment is not None), None
                     )
+                    if enrichment is None:
+                        enrichment = round_level_fallback_attribution(diff.hunks[0], side_channel)
                     if enrichment is not None:
                         moved_by = party_side_for_author(enrichment.author, aliases, authors)
 

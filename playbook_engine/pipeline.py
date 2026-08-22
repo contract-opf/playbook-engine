@@ -50,7 +50,7 @@ from playbook_engine.deviation_classifier import (
     RiskDelta,
     assess_deviations,
 )
-from playbook_engine.docx_ingester import TrackedChanges, ingest_docx
+from playbook_engine.docx_ingester import TextUnit, TrackedChanges, ingest_docx
 from playbook_engine.entity_registry import (
     DEFAULT_REGISTRY_PATH,
     EntityRegistry,
@@ -62,9 +62,10 @@ from playbook_engine.entity_registry import (
 from playbook_engine.extraction import (
     ExtractionCache,
     ExtractorLabel,
+    bridge_tracked_change_spans,
     detect_extractor,
     extract_blocks,
-    extract_tracked_changes,
+    extract_docx_units_and_tracked_changes,
 )
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
@@ -117,7 +118,11 @@ from playbook_engine.segmentation_qa import SegmentationQAError, run_gates
 from playbook_engine.segmenter import segment
 from playbook_engine.signed_detector import SignedJudge, SignedStatus, detect_signed
 from playbook_engine.taxonomy import Taxonomy
-from playbook_engine.tracked_changes_overlay import HunkEnrichment, enrich_clause_diff
+from playbook_engine.tracked_changes_overlay import (
+    HunkEnrichment,
+    enrich_clause_diff,
+    round_level_fallback_attribution,
+)
 from playbook_engine.version_orderer import (
     Hints,
     HintsError,
@@ -196,7 +201,17 @@ _DEVIATION_VS_TEMPLATE_VERSION = 6
 # neither the corrected label nor any "reason" key at all, so
 # config.extraction.max_fallback would silently find zero fallbacks against
 # a replayed pre-#81 result even on a corpus that DID fall back.
-_VERSION_INGEST_REASON_VERSION = 1
+#
+# v2 (issue #118): tracked_by_vid's char_spans on the LLM-segmentation path
+# are now bridged into the tree's own coordinate space (or cleared to None
+# when the bridge can't be confirmed) instead of passed through raw — see
+# _bridge_tracked_changes_if_needed. Round-move/clause attribution
+# (observations' "attribution" field, threaded through version_ingest's
+# sibling cached output — the whole per-doc L1-L4 result, not just
+# version_ingest itself) changes for identical source content and config: a
+# warm out/.cache entry from before this fix would keep replaying
+# corpus-wide all-"unknown" attribution as if it were still current.
+_VERSION_INGEST_REASON_VERSION = 2
 
 # version_ingest[].reason values that represent a real DEGRADATION — the
 # legacy adapter ran because docling was unavailable or crashed on this
@@ -367,7 +382,9 @@ def _ingest_file_tracked(
     raise ValueError(f"Unsupported file extension {ext!r}; expected .docx, .pdf, or .rtf")
 
 
-def _llm_tracked_changes(vf: Path, progress: Callable[[str], None]) -> TrackedChanges | None:
+def _llm_tracked_changes(
+    vf: Path, progress: Callable[[str], None]
+) -> tuple[TrackedChanges | None, list[TextUnit]]:
     """Best-effort DOCX tracked-changes side-channel for an LLM-segmented version (issue #85).
 
     The deterministic branch of ``_compute_doc_result`` gets its
@@ -376,8 +393,8 @@ def _llm_tracked_changes(vf: Path, progress: Callable[[str], None]) -> TrackedCh
     LLM-segmentation branches build their tree via
     :mod:`playbook_engine.llm_segmentation_stage`/``_ground_batch_result``
     instead, which never touches ``docx_ingester`` at all — so this calls
-    :func:`~playbook_engine.extraction.extract_tracked_changes` directly on
-    *vf* to fill that gap, independent of whichever adapter
+    :func:`~playbook_engine.extraction.extract_docx_units_and_tracked_changes`
+    directly on *vf* to fill that gap, independent of whichever adapter
     (``extract_blocks``'s docling or legacy path) produced this version's
     canonical text/blocks.
 
@@ -390,13 +407,115 @@ def _llm_tracked_changes(vf: Path, progress: Callable[[str], None]) -> TrackedCh
     tracked-changes data was captured"), so a DOCX that ``python-docx``
     cannot open here (but docling could, upstream) must not retroactively
     fail an otherwise-successful version — any exception is caught, logged
-    via *progress*, and degrades to ``None``, exactly like a PDF/RTF version.
+    via *progress*, and degrades to ``(None, [])``, exactly like a PDF/RTF
+    version.
+
+    Returns ``(tracked, units)`` (issue #118) — *units* is docx_ingester's
+    own ordered text-unit stream for *vf*, the coordinate space *tracked*'s
+    char_spans are offset into. Callers whose ``ClauseTree`` came from a
+    DIFFERENT extractor (the docling path) need both to bridge — see
+    :func:`_bridge_tracked_changes_if_needed`. Always ``[]`` alongside a
+    ``None`` *tracked* (non-DOCX, or the exception path above).
     """
     try:
-        return extract_tracked_changes(vf)
+        result = extract_docx_units_and_tracked_changes(vf)
+        if result is None:
+            return None, []
+        units, tracked = result
+        return tracked, units
     except Exception as exc:  # noqa: BLE001 — bonus signal, must never fail the version
         progress(f"    WARNING: {vf.name}: tracked-changes side-channel unavailable ({exc})")
+        return None, []
+
+
+def _extract_blocks_for_bridge(
+    vf: Path,
+    extraction_cache: ExtractionCache | None,
+    refresh_extraction: bool,
+    extractor: str,
+) -> list[Block] | None:
+    """Best-effort re-fetch of *vf*'s extracted blocks, for tracked-changes
+    span bridging on the SYNCHRONOUS LLM-segmentation path (issue #118).
+
+    ``_llm_segment_file`` (via ``segment_to_tree``) already called
+    ``extract_blocks`` for this exact ``(path, extraction_cache, extractor)``
+    combination moments ago and, as a side effect, wrote its blocks into
+    *extraction_cache* under that key. Correctness — not just speed —
+    requires this call to land on that SAME cache entry: the bridge must
+    translate spans into the coordinate space the tree was just built from,
+    and a second real extraction (even a byte-identical one) is not
+    guaranteed to reproduce that space. The production call site
+    (``_compute_doc_result``, pipeline.py:~1818) therefore always passes
+    ``refresh_extraction=False`` here regardless of the run's own
+    ``--no-cache``/``refresh_extraction`` setting, making this a cache hit
+    in the common case — not a second real extraction (docling/pdfplumber/
+    python-docx/pandoc never actually re-runs). That guarantee holds only
+    for that call site's argument, though: a caller that passes
+    ``refresh_extraction=True`` here, or a ``None`` *extraction_cache*
+    (nothing to hit), does force a real second extraction — this function
+    does not enforce ``refresh=False`` itself. Only called at all when a
+    bridge is actually needed (see ``_bridge_tracked_changes_if_needed``'s
+    callers): most DOCX versions carry no tracked changes, so the common
+    case never reaches this function.
+
+    Returns ``None`` (never raises) on failure — tracked-changes attribution
+    is a bonus signal and must not retroactively fail an already-successful
+    version, same tolerance as ``_llm_tracked_changes``. ``None`` here
+    degrades ``_bridge_tracked_changes_if_needed`` to stripping the
+    now-untrustworthy raw spans rather than translating them.
+    """
+    try:
+        _canonical_text, blocks, _label = extract_blocks(
+            vf, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
+        )
+        return blocks
+    except Exception:  # noqa: BLE001 — bonus signal, must never fail the version
         return None
+
+
+def _bridge_tracked_changes_if_needed(
+    tracked: TrackedChanges | None,
+    units: list[TextUnit],
+    blocks: list[Block] | None,
+    extractor_label: ExtractorLabel | None,
+) -> TrackedChanges | None:
+    """Translate *tracked*'s char_spans into *blocks*'s coordinate space
+    when *extractor_label* means they are NOT already in it (issue #118).
+
+    - ``extractor_label`` is ``None`` or ``"legacy"``: no bridge needed —
+      the legacy DOCX adapter reuses ``docx_ingester``'s own paragraph-join
+      text verbatim (see ``extraction.py``'s module docstring, "DOCX
+      (fallback)"), so *tracked*'s char_spans are ALREADY in the tree's
+      coordinate space. Returned unchanged (``None`` covers both "no
+      side-channel" and the deterministic path, which never calls this at
+      all — see its callers).
+    - Otherwise (docling, or any future non-legacy DOCX extractor): a bridge
+      IS needed. When *blocks* is available, translate via
+      :func:`~playbook_engine.extraction.bridge_tracked_change_spans`. When
+      *blocks* is ``None`` (the best-effort re-extraction in
+      ``_extract_blocks_for_bridge`` failed) or *units* is empty, there is
+      no way to confirm the coordinate space — per issue #118's safety
+      gate, an untranslated raw span must never be trusted here (numeric
+      coincidence risk on repeated boilerplate), so every change's
+      char_span is cleared to ``None`` rather than left as-is. This is a
+      deliberate behavior change from pre-#118: previously the raw
+      (possibly wrong-coordinate-space) span reached
+      ``tracked_changes_overlay.enrich_clause_diff`` unconditionally.
+      Clause-path matching and the round-level fallback tier
+      (``tracked_changes_overlay.round_level_fallback_attribution``) still
+      work with a cleared span; a spurious span-overlap match does not.
+    """
+    if tracked is None or not tracked.changes:
+        return tracked
+    if extractor_label is None or extractor_label == "legacy":
+        return tracked
+    if blocks is None or not units:
+        return TrackedChanges(
+            document_id=tracked.document_id,
+            version=tracked.version,
+            changes=[dataclasses.replace(c, char_span=None) for c in tracked.changes],
+        )
+    return bridge_tracked_change_spans(tracked, units, blocks)
 
 
 def _discover_versions(doc_dir: Path) -> list[Path]:
@@ -976,6 +1095,8 @@ def _assess_deviations_with_standards(
 def _attribution_for_diff(
     clause_diff: ClauseDiff,
     tracked_changes: TrackedChanges | None,
+    *,
+    single_round: bool,
 ) -> HunkEnrichment | None:
     """Best-effort tracked-changes attribution for one net ``ClauseDiff`` (issue #88).
 
@@ -989,18 +1110,59 @@ def _attribution_for_diff(
     history — that would require enriching each *consecutive* diff instead
     of the net diff, which observation_builder does not model today.
 
+    ``single_round`` — ``True`` only when the document has exactly two
+    versions (``len(doc_diff.consecutive) == 1``), i.e. the net diff (first
+    → signed) IS the one and only negotiation round, so ``tracked_changes``
+    (the signed version's side channel) genuinely IS "that round"'s side
+    channel. It gates the round-level fallback below (issue #118 fix round
+    2, finding 1): for a document with more than two versions, the net diff
+    can bundle hunks that actually originated in an EARLIER round, authored
+    by someone who never appears in the signed version's own tracked-changes
+    session at all (their edits were already accepted into plain text by
+    the time the signed version was drafted). Firing the fallback there
+    would attribute that earlier round's change to the signed round's sole
+    author — confidently wrong, not an honest "unknown". Direct per-hunk
+    matching via ``enrich_clause_diff`` is unaffected by this gate: it only
+    ever matches a hunk to a specific ``TrackedChange`` record actually
+    co-located with that clause, so a real match still returns regardless
+    of how many rounds the net diff spans.
+
     Returns ``None`` when there is no side-channel at all (PDF/RTF, a clean
     DOCX with no ``w:ins``/``w:del`` elements, or a DOCX ``python-docx``
     could not open — see ``_compute_doc_result``'s ``tracked_by_vid``
     comment; this applies equally regardless of segmentation mode since
     issue #85), when the diff has no hunks (added/removed/unchanged
     clauses), or when no hunk matched a tracked change closely enough (see
-    ``tracked_changes_overlay._MATCH_THRESHOLD``).
+    ``tracked_changes_overlay._MATCH_THRESHOLD``) AND the round-level
+    fallback tier below also declines to fire (either because it isn't
+    ``single_round`` or because ``tracked_changes`` carries more than one
+    distinct author).
+
+    Round-level fallback (issue #118): when ``enrich_clause_diff`` finds no
+    per-hunk match at all for this diff AND ``single_round`` is ``True``,
+    ``tracked_changes_overlay.round_level_fallback_attribution`` gets one
+    last try — it fires only when ``tracked_changes`` (this version's
+    ENTIRE side channel, not just candidates near this clause) carries
+    exactly one distinct author, in which case every real content change in
+    the round is attributable to them without per-hunk matching. This is
+    deliberately layered ON TOP of ``enrich_clause_diff`` rather than folded
+    into it: ``enrich_clause_diff`` has its own direct unit-test suite built
+    on single-tracked-change fixtures asserting "no match" for dissimilar/
+    wrong-clause text, and those fixtures are single-author by construction
+    — folding the fallback in there would flip every one of those
+    assertions. Keeping it here means ``enrich_clause_diff`` stays a pure
+    per-hunk matcher and this (real observation/attribution) call site is
+    the only place the coarser round-level guess can surface.
     """
     if tracked_changes is None or not clause_diff.hunks:
         return None
     enriched = enrich_clause_diff(clause_diff, tracked_changes)
-    return next((eh.enrichment for eh in enriched if eh.enrichment is not None), None)
+    matched = next((eh.enrichment for eh in enriched if eh.enrichment is not None), None)
+    if matched is not None:
+        return matched
+    if not single_round:
+        return None
+    return round_level_fallback_attribution(clause_diff.hunks[0], tracked_changes)
 
 
 def _classification_confidence_for_diff(
@@ -1629,7 +1791,14 @@ def _compute_doc_result(
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
                 extractor_label = extraction.extractor_label
-                tracked_by_vid[vid] = _llm_tracked_changes(vf, progress)
+                tracked, units = _llm_tracked_changes(vf, progress)
+                # extraction.blocks (issue #118) is the SAME batch-pre-pass
+                # extraction that produced this version's tree — no second
+                # extract_blocks call needed on this branch, unlike the
+                # synchronous one below.
+                tracked_by_vid[vid] = _bridge_tracked_changes_if_needed(
+                    tracked, units, extraction.blocks, extractor_label
+                )
             elif use_llm_segmentation:
                 tree, tax_by_path, extractor_label = _llm_segment_file(
                     vf,
@@ -1644,7 +1813,25 @@ def _compute_doc_result(
                     extractor=config.extraction.extractor,
                 )
                 llm_taxonomy_by_path[vid] = tax_by_path
-                tracked_by_vid[vid] = _llm_tracked_changes(vf, progress)
+                tracked, units = _llm_tracked_changes(vf, progress)
+                # Bridge (issue #118) only when actually needed: a non-legacy
+                # extractor AND at least one change carries a char_span worth
+                # translating. Most DOCX versions carry no tracked changes at
+                # all, so this re-extraction is the exception, not the rule
+                # (see _extract_blocks_for_bridge's cache-hit note).
+                bridge_blocks: list[Block] | None = None
+                if (
+                    tracked is not None
+                    and any(c.char_span is not None for c in tracked.changes)
+                    and extractor_label is not None
+                    and extractor_label != "legacy"
+                ):
+                    bridge_blocks = _extract_blocks_for_bridge(
+                        vf, extraction_cache, False, config.extraction.extractor
+                    )
+                tracked_by_vid[vid] = _bridge_tracked_changes_if_needed(
+                    tracked, units, bridge_blocks, extractor_label
+                )
             else:
                 raw_tree, tracked = _ingest_file_tracked(vf, doc_id, vid)
                 tree = segment(raw_tree)
@@ -2044,9 +2231,16 @@ def _compute_doc_result(
         # Tracked-changes attribution (issue #88): best-effort, from the
         # signed/last version's own DOCX side-channel — see
         # _attribution_for_diff for why that version is the right source
-        # even though net_diffs can span more than one negotiation round.
+        # even though net_diffs can span more than one negotiation round,
+        # and why single_round (True only for a 2-version document, where
+        # the net diff IS the one round) gates its round-level fallback
+        # tier (issue #118 fix round 2, finding 1).
         signed_tracked = tracked_by_vid.get(signed_vid)
-        attributions = [_attribution_for_diff(cd, signed_tracked) for cd, _ in deviation_results]
+        single_round = len(doc_diff.consecutive) == 1
+        attributions = [
+            _attribution_for_diff(cd, signed_tracked, single_round=single_round)
+            for cd, _ in deviation_results
+        ]
 
         doc_obs = build_observations(
             doc_id,

@@ -932,6 +932,187 @@ def test_docx_redline_observation_carries_tracked_changes_attribution(tmp_path: 
     }
 
 
+_ROUND2_OBLIGATIONS_BASE = (
+    "Party shall provide comprehensive consulting support services under this agreement."
+)
+_ROUND2_GOVERNING_LAW_PREFIX = "Agreement governed by "
+_ROUND2_GOVERNING_LAW_SUFFIX = "laws of State California with dispute resolved exclusively."
+
+
+def _docx_round2_template(tmp_path: Path, filename: str) -> Path:
+    """Template baseline for the 3-version multi-round fixture below.
+
+    Longer clause text than ``_docx_no_tracked_changes`` (>= 8 non-stopword
+    tokens per clause) so ``clause_aligner``'s global move-matching phase's
+    Jaccard tier (``MOVE_JACCARD_MIN_TOKENS``/``MOVE_JACCARD_THRESHOLD``) can
+    chain each clause across all three versions into ONE aligned row instead
+    of splitting a lightly-edited clause into a separate added/removed pair
+    — required for the net (v1->v3) diff to come out ``kind="modified"``
+    with hunks at all.
+
+    SECURITY NOTE: synthetic text only, no real agreement content.
+    """
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph(_ROUND2_OBLIGATIONS_BASE)
+    doc.add_heading("Governing Law", level=1)
+    doc.add_paragraph(_ROUND2_GOVERNING_LAW_PREFIX + _ROUND2_GOVERNING_LAW_SUFFIX)
+    path = tmp_path / filename
+    doc.save(str(path))
+    return path
+
+
+def _docx_round1_tracked_insertion(tmp_path: Path, filename: str) -> Path:
+    """Round-1 redline: 'promptly' inserted by Bob via w:ins, tracked
+    against THIS version. By the time the final version below is authored,
+    this insertion has already been accepted (plain text, no tracked-change
+    record survives) — mirrors a real multi-round negotiation where an
+    earlier round's redline is folded into the base text before the next
+    round starts. Governing Law is untouched (byte-identical to the
+    template) — round 1 only redlines Obligations.
+
+    SECURITY NOTE: synthetic text and fictional author names only.
+    """
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    p = doc.add_paragraph()
+    p.add_run("Party shall ")
+
+    ins_elem = etree.SubElement(p._p, _w("ins"))
+    ins_elem.set(_w("id"), "1")
+    ins_elem.set(_w("author"), "Bob")
+    ins_elem.set(_w("date"), "2024-02-01T09:00:00Z")
+    r_ins = etree.SubElement(ins_elem, _w("r"))
+    t_ins = etree.SubElement(r_ins, _w("t"))
+    t_ins.text = "promptly "
+
+    p.add_run(_ROUND2_OBLIGATIONS_BASE.removeprefix("Party shall "))
+    doc.add_heading("Governing Law", level=1)
+    doc.add_paragraph(_ROUND2_GOVERNING_LAW_PREFIX + _ROUND2_GOVERNING_LAW_SUFFIX)
+
+    path = tmp_path / filename
+    doc.save(str(path))
+    return path
+
+
+def _docx_round2_signed_with_tracked_insertion(tmp_path: Path, filename: str) -> Path:
+    """Final/signed version: round 1's 'promptly' insertion is now plain
+    text (accepted, untracked, byte-identical to round 1's Obligations); a
+    NEW tracked insertion by Alice lands in a DIFFERENT clause (Governing
+    Law). This version's own tracked-changes side channel therefore carries
+    exactly ONE distinct author (Alice), even though the document's full
+    history has two.
+
+    SECURITY NOTE: synthetic text and fictional author names only.
+    """
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph(
+        "Party shall promptly " + _ROUND2_OBLIGATIONS_BASE.removeprefix("Party shall ")
+    )
+
+    doc.add_heading("Governing Law", level=1)
+    p = doc.add_paragraph()
+    p.add_run(_ROUND2_GOVERNING_LAW_PREFIX)
+
+    ins_elem = etree.SubElement(p._p, _w("ins"))
+    ins_elem.set(_w("id"), "2")
+    ins_elem.set(_w("author"), "Alice")
+    ins_elem.set(_w("date"), "2024-03-15T10:00:00Z")
+    r_ins = etree.SubElement(ins_elem, _w("r"))
+    t_ins = etree.SubElement(r_ins, _w("t"))
+    t_ins.text = "substantive "
+
+    p.add_run(_ROUND2_GOVERNING_LAW_SUFFIX)
+
+    path = tmp_path / filename
+    doc.save(str(path))
+    return path
+
+
+def test_net_diff_attribution_does_not_leak_earlier_round_author_into_signed_round_fallback(
+    tmp_path: Path,
+) -> None:
+    """Regression guard (issue #118 fix round 2, finding 1): the net diff's
+    round-level fallback tier must not fire when net_diffs span more than
+    one negotiation round — it consults only the SIGNED version's own
+    tracked-changes side channel, which is not "that round" for a clause
+    whose change actually originated in an earlier round.
+
+    Three versions: v1 (template) -> v2 (round 1, Bob inserts "promptly" in
+    Obligations, tracked) -> v3 (signed; Bob's insertion is now plain text,
+    Alice makes a NEW tracked insertion in the unrelated Governing Law
+    clause). v3's side channel has exactly one distinct author (Alice) —
+    exactly the fallback tier's firing condition — but the Obligations
+    clause's net change (the "promptly" insertion) has nothing to do with
+    Alice's round. Before the fix, the fallback fired unconditionally for
+    any unmatched hunk and wrongly attributed the Obligations change to
+    Alice; after the fix it must stay unattributed ("unknown"), while the
+    Governing Law clause (Alice's own real, per-hunk-matched change) must
+    still resolve correctly to Alice — proving the fix only suppresses the
+    coarse fallback, not the direct per-hunk match.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-003"
+    deal_dir.mkdir(parents=True)
+    _docx_round2_template(deal_dir, "v1.docx")
+    _docx_round1_tracked_insertion(deal_dir, "v2.docx")
+    _docx_round2_signed_with_tracked_insertion(deal_dir, "v3.docx")
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+    )
+
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    deal_obs = [o for o in observations if o["citation"]["document_id"] == "deal-003"]
+    assert deal_obs, "deal-003 must have observations"
+
+    obligations_obs = [o for o in deal_obs if "promptly" in o.get("full_text", "")]
+    assert obligations_obs, (
+        f"expected an observation carrying the 'promptly' insertion; got {deal_obs}"
+    )
+    for o in obligations_obs:
+        assert o.get("attribution") is None, (
+            "Obligations clause's change originated in round 1 (Bob), not "
+            "the signed version's own side channel (Alice) — the "
+            "round-level fallback must not leak the signed round's sole "
+            f"author onto it; got attribution={o.get('attribution')!r}"
+        )
+        assert o.get("proposed_by") == "unknown", (
+            f"expected proposed_by='unknown', got {o.get('proposed_by')!r}"
+        )
+
+    governing_law_obs = [o for o in deal_obs if "substantive laws" in o.get("full_text", "")]
+    assert governing_law_obs, (
+        f"expected an observation carrying Alice's Governing Law insertion; got {deal_obs}"
+    )
+    assert governing_law_obs[0]["attribution"] == {
+        "author": "Alice",
+        "date": "2024-03-15T10:00:00Z",
+        "tracked_type": "insertion",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Issue #103: a single-version document's clauses must be diffed against the
 # canonical template, not hardcoded deviation="none".
