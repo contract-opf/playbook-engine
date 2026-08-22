@@ -21,6 +21,7 @@ brew install pandoc   # macOS — Debian/Ubuntu: apt-get install -y pandoc
 python3 -m venv .venv
 source .venv/bin/activate
 make install          # pip install -e ".[dev]"
+make hooks            # install the tracked lint/format pre-push gate (issue #116)
 ```
 
 `.venv/` is disposable and machine-local (it hard-codes absolute paths, so it
@@ -93,6 +94,49 @@ external contributions.
   in one tree.
 - Validate any produced playbook against the schema for its declared
   `opf_version`.
+- **CI gate on `main`** (issue #116 — `main` went red for 12 consecutive
+  commits, one with zero CI coverage at all, before anyone noticed): a
+  tracked, generic lint/format gate (`scripts/pre-push-lint.sh` — just
+  `ruff check` / `ruff format --check`, nothing confidential) is
+  installable on **any** clone — including linked worktrees and clones with
+  `core.hooksPath` set — with `make hooks`, which resolves the real hooks
+  directory via `git rev-parse --git-path hooks` and copies the gate there.
+  This is local-only and bypassable (`--no-verify`,
+  a clone where `make hooks` was never run, `git push --force` from CI
+  credentials). The maintainer's own machine additionally layers a
+  confidential/secrets scan on top via `ignore/git-hooks/install.sh`; that
+  deny-list stays gitignored by design, so this extra layer is
+  maintainer-local only and not reproducible from a fresh clone. By
+  convention that hook is expected to delegate its own lint/format tier to
+  `scripts/pre-push-lint.sh` so the two compose safely in either install
+  order — but that convention lives outside this repository's tracked
+  history, `make hooks` cannot verify it in advance, and it must not be
+  assumed to hold on a machine you haven't checked; `make hooks` refuses
+  loudly rather than reporting false success if it ever finds a
+  secrets-scanning hook that lacks a genuine delegation line — a comment
+  that merely mentions `pre-push-lint.sh` (e.g. a stray "TODO: delegate to
+  ...") does not count as delegating (see the composition-rule comment
+  above the `hooks` target in the Makefile). The durable
+  server-side gate is still outstanding and requires repo-admin action:
+  **enable branch protection on `main`** at
+  Settings → Branches → Branch protection rules, requiring status checks to
+  pass before merging, with contexts `lint-and-test (3.11)` and
+  `lint-and-test (3.12)` (the two matrix jobs `.github/workflows/ci.yml`
+  reports as of this writing — re-check the exact context names in a recent
+  run before configuring, `gh api repos/contract-opf/playbook-engine/commits/<sha>/check-runs
+  --jq '.check_runs[].name'`). Equivalent via API:
+  `gh api -X PUT repos/contract-opf/playbook-engine/branches/main/protection
+  -F 'required_status_checks[strict]=true'
+  -f 'required_status_checks[contexts][]=lint-and-test (3.11)'
+  -f 'required_status_checks[contexts][]=lint-and-test (3.12)'
+  -F enforce_admins=true -F required_pull_request_reviews=null
+  -F restrictions=null`. Note this repo has landed 90 commits on `main`
+  against only 3 PRs in its entire history (issue #116: "~12 of the last 13
+  commits landed direct-to-main") — requiring status checks on `main` itself
+  (not just on PRs) still lets a passing check on an old commit block nothing
+  useful if commits bypass review entirely; consider pairing with
+  `required_pull_request_reviews` (forcing every change through a PR) as a
+  separate, bigger process decision, not bundled into this one.
 
 ## Issue-number provenance
 
