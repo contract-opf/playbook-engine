@@ -348,7 +348,7 @@ def test_check_posture_floor_conflict_fires_on_red_line_and_hard_line_phrasing()
 
 
 def test_check_posture_floor_conflict_does_not_fire_on_the_word_agreement() -> None:
-    """"agreement" is domain-universal, not a shared concept.
+    """ "agreement" is domain-universal, not a shared concept.
 
     Real-corpus reproduction: two hand-authored Floor invariants each warned
     against the Posture sentence "Flexible to close a deal: Governing law;
