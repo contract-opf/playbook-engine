@@ -56,31 +56,50 @@ _SEARCH_SNIPPET_MAX = 100
 _MIN_AUTHOR_CONTAINMENT_LEN = 4
 
 
-def party_side_for_author(author: str | None, our_party_aliases: list[str]) -> str:
+def party_side_for_author(
+    author: str | None,
+    our_party_aliases: list[str],
+    our_authors: list[str] | None = None,
+) -> str:
     """Map a tracked-changes author name to a negotiation side (issue #177).
 
-    Case-insensitive containment against ``config.provenance.
-    our_party_aliases`` ("FixtureCorp Legal" matches alias "FixtureCorp"). The reverse
-    direction (author contained in an alias) only applies to authors of
-    ``_MIN_AUTHOR_CONTAINMENT_LEN``+ chars — Word author strings are often
-    initials, and "IT" ⊂ "Summit Health" must not read as "us". With NO
-    aliases configured there is nothing to discriminate against, so every
-    author maps to "unknown" — a side is never guessed (§3.5.3), and in
-    particular an unconfigured corpus must not publish our own attorneys'
-    edits as counterparty asks.
+    Checked against two distinct config lists — ``config.provenance.
+    our_party_aliases`` (entity/org names, e.g. "FixtureCorp") and
+    ``config.provenance.our_authors`` (people: personal names, initials,
+    and/or email addresses actually found in DOCX ``w:author`` metadata,
+    issue #119) — because a tracked-change author is a *person*, a
+    fundamentally different namespace from an org alias that was never
+    going to match it by containment. Case-insensitive containment applies
+    to both lists identically ("FixtureCorp Legal" matches alias
+    "FixtureCorp"; "J. Smith" matches author "J. Smith (Legal)"). The
+    reverse direction (candidate contained in the author string) only
+    applies to authors of ``_MIN_AUTHOR_CONTAINMENT_LEN``+ chars — Word
+    author strings are often initials, and "IT" ⊂ "Summit Health" must not
+    read as "us".
+
+    Returns "us" on a match against either list, else "unknown" — never
+    "counterparty". Not matching our side is not evidence of matching
+    theirs: a corpus can easily have real counterparty-side authors it has
+    never seen before, or "us"-side authors missing from either list. This
+    holds symmetrically whether both lists are empty (nothing configured to
+    discriminate against) or non-empty with no match (issue #119 — an
+    unconfigured or under-configured corpus must not publish our own
+    attorneys' edits, or unrecognized authors of either side, as
+    counterparty asks) — a side is never guessed (§3.5.3).
     """
-    if not author or not any(a for a in our_party_aliases):
+    if not author:
         return "unknown"
     author_lower = author.lower()
-    for alias in our_party_aliases:
-        alias_lower = alias.lower()
-        if not alias_lower:
-            continue
-        if alias_lower in author_lower:
-            return "us"
-        if len(author_lower) >= _MIN_AUTHOR_CONTAINMENT_LEN and author_lower in alias_lower:
-            return "us"
-    return "counterparty"
+    for candidates in (our_party_aliases, our_authors or []):
+        for candidate in candidates:
+            candidate_lower = candidate.lower()
+            if not candidate_lower:
+                continue
+            if candidate_lower in author_lower:
+                return "us"
+            if len(author_lower) >= _MIN_AUTHOR_CONTAINMENT_LEN and author_lower in candidate_lower:
+                return "us"
+    return "unknown"
 
 
 def _date_from_tracked(date_str: str | None) -> str | None:
@@ -437,6 +456,7 @@ def build_round_moves(
     doc_diff: DocumentDiff,
     tracked_by_vid: dict[str, TrackedChanges | None] | None = None,
     our_party_aliases: list[str] | None = None,
+    our_authors: list[str] | None = None,
 ) -> list[RoundMove]:
     """Surface ``doc_diff.consecutive`` as ``RoundMove`` records (issue #177).
 
@@ -444,10 +464,11 @@ def build_round_moves(
     attributed from the destination version's own tracked-changes
     side-channel when one matches (each author's edits are tracked against
     the file they received, so the post-move version carries the mover's
-    w:ins/w:del), mapped through *our_party_aliases*; ``"unknown"``
-    otherwise — never guessed.
+    w:ins/w:del), mapped through *our_party_aliases* and *our_authors*
+    (issue #119); ``"unknown"`` otherwise — never guessed.
     """
     aliases = our_party_aliases or []
+    authors = our_authors or []
     tracked = tracked_by_vid or {}
     moves: list[RoundMove] = []
     # doc_diff.version_order is ordered oldest-first; consecutive[i] diffs
@@ -475,7 +496,7 @@ def build_round_moves(
                         (eh.enrichment for eh in enriched if eh.enrichment is not None), None
                     )
                     if enrichment is not None:
-                        moved_by = party_side_for_author(enrichment.author, aliases)
+                        moved_by = party_side_for_author(enrichment.author, aliases, authors)
 
             moves.append(
                 RoundMove(
@@ -556,6 +577,7 @@ def build_observations(
     has_signed_copy: bool = True,
     attributions: list[HunkEnrichment | None] | None = None,
     our_party_aliases: list[str] | None = None,
+    our_authors: list[str] | None = None,
     ordinal_by_vid: dict[str, int] | None = None,
 ) -> list[Observation]:
     """Assemble ``Observation`` objects for one document version.
@@ -611,6 +633,14 @@ def build_observations(
                                   ``proposed_by`` — nothing was proposed. When
                                   ``None`` (legacy callers/tests), no dynamics
                                   fields are derived at all.
+        our_authors:                ``config.provenance.our_authors`` (issue #119)
+                                  — the people-namespace counterpart to
+                                  ``our_party_aliases`` (personal names/initials/
+                                  emails, as opposed to entity/org names), checked
+                                  alongside it by ``party_side_for_author``. An
+                                  author matching NEITHER list is "unknown", never
+                                  "counterparty" — absence of a match is not
+                                  evidence, in either direction.
         ordinal_by_vid:             Version-id → negotiation-ordinal map (the
                                   1-based position of each version id in
                                   ``version_order``, exactly as
@@ -723,7 +753,9 @@ def build_observations(
         observed_at: str | None = None
         if our_party_aliases is not None and dr.deviation != "none":
             if attribution is not None:
-                proposed_by = party_side_for_author(attribution.author, our_party_aliases)
+                proposed_by = party_side_for_author(
+                    attribution.author, our_party_aliases, our_authors
+                )
                 observed_at = _date_from_tracked(attribution.date)
             else:
                 proposed_by = "unknown"

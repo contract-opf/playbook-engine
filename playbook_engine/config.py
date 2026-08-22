@@ -40,6 +40,15 @@ Config schema (YAML):
     counterparty_type: "Educational Institution"
   provenance:
     our_party_aliases: ["FixtureCorp", "FixtureCorp Holdings, LLC"]
+    our_authors: ["Jane Smith", "J. Smith", "jsmith@fixturecorp.example"]
+      # Optional; people-namespace counterpart to our_party_aliases (issue #119)
+      # — personal names, initials, and/or email addresses, matched against
+      # DOCX tracked-change (w:ins/w:del) author metadata by
+      # observation_builder.party_side_for_author. our_party_aliases holds
+      # entity/org names, which are a different namespace from a Word
+      # author string and were never going to match it by containment; an
+      # author matching NEITHER list maps to "unknown", never guessed as
+      # "counterparty". Defaults to an empty list when omitted.
     known_entities: ["State University"]
       # Known counterparty entity names to pseudonymize at ingest (issue #153)
       # — human-curated from the corpus manifest/folder names, same workflow
@@ -192,6 +201,11 @@ class PerspectiveConfig:
 @dataclass
 class ProvenanceConfig:
     our_party_aliases: list[str] = field(default_factory=list)
+    # Issue #119: people-namespace counterpart to our_party_aliases —
+    # personal names/initials/emails, matched against DOCX tracked-change
+    # author metadata separately from the entity/org names above (see
+    # observation_builder.party_side_for_author).
+    our_authors: list[str] = field(default_factory=list)
     known_entities: list[str] = field(default_factory=list)
     # Issue #144: producer-configurable evidence-depth floor. Defaults to
     # clause_position_compiler.MIN_EVIDENCE_N so an existing config with no
@@ -337,7 +351,9 @@ TOP_LEVEL_KEYS = frozenset(
 )
 AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
 BASELINE_KEYS = frozenset({"template"})
-PROVENANCE_KEYS = frozenset({"our_party_aliases", "known_entities", "min_evidence_n"})
+PROVENANCE_KEYS = frozenset(
+    {"our_party_aliases", "our_authors", "known_entities", "min_evidence_n"}
+)
 PERSPECTIVE_KEYS = frozenset({"party", "counterparty_type"})
 SEGMENTATION_KEYS = frozenset({"llm", "batch", "cache", "normalize_trail", "model", "agent"})
 CLASSIFICATION_KEYS = frozenset({"ambiguity_threshold", "auto_classify_threshold"})
@@ -516,6 +532,11 @@ def load_config(path: Path) -> EngineConfig:
         raise ConfigError("provenance.our_party_aliases must be a list")
     aliases = [str(a) for a in aliases_raw]
 
+    our_authors_raw = prov_raw.get("our_authors", [])
+    if not isinstance(our_authors_raw, list):
+        raise ConfigError("provenance.our_authors must be a list")
+    our_authors = [str(a) for a in our_authors_raw]
+
     known_entities_raw = prov_raw.get("known_entities", [])
     if not isinstance(known_entities_raw, list):
         raise ConfigError("provenance.known_entities must be a list")
@@ -652,6 +673,7 @@ def load_config(path: Path) -> EngineConfig:
         taxonomy_path=tax_path,
         provenance=ProvenanceConfig(
             our_party_aliases=aliases,
+            our_authors=our_authors,
             known_entities=known_entities,
             min_evidence_n=min_evidence_n_raw,
         ),

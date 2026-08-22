@@ -275,9 +275,12 @@ Per **observation**:
 }
 ```
 
-- `proposed_by` derives from tracked-changes authorship mapped through the
-  party aliases, else from which side's draft first carries the span —
-  never guessed from filenames.
+- `proposed_by` derives from tracked-changes authorship mapped through both
+  the party aliases and the configured our-side author list, else from
+  which side's draft first carries the span — never guessed from
+  filenames. An author matching neither list is `"unknown"` — never
+  guessed as `"counterparty"`, since absence of a match is not evidence
+  in either direction.
 - `observed_at` precedence: e-sign certificate date on the signed copy >
   embedded document metadata > trustworthy filename date.
 - `counterparty_ref` lets a consumer weight "we conceded this to a

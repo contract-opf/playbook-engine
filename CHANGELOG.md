@@ -106,6 +106,29 @@ Engine 1.0.0 / OPF 1.0 — first non-beta release. The format is no longer
   non-Python-dependency normative reference a downstream port of
   `canonicalize.py`/`digest.py` must reproduce to be conformant, checked
   against by `tests/test_conformance_vectors.py` (issue #115).
+- `provenance.our_authors` config list (issue #119): the people-namespace
+  counterpart to `provenance.our_party_aliases` — personal names,
+  initials, and/or email addresses, matched against DOCX tracked-change
+  (`w:ins`/`w:del`) author metadata separately from the entity/org names
+  `our_party_aliases` holds. Optional; defaults to `[]`.
+
+### Fixed
+
+- **Correctness**: `observation_builder.party_side_for_author` no longer
+  guesses `"counterparty"` for a tracked-change author that fails to match
+  any configured `our_party_aliases` (issue #119). Previously, once ANY
+  `our_party_aliases` were configured, an author matching none of them
+  fell through to `"counterparty"` — the exact guess the function's own
+  "never guess" docstring said never happens, and (verified against a real
+  production corpus) a systematic one-directional bias, since a DOCX
+  tracked-change `author` is a person's name/initials, a namespace
+  `our_party_aliases` (entity/org names) was never going to match by
+  containment. An author matching neither `our_party_aliases` nor the new
+  `our_authors` is now `"unknown"`, symmetric with the already-correct
+  no-aliases-configured case. **Behavior change**: for any corpus with
+  `our_party_aliases` configured today, previously-`"counterparty"`
+  `proposed_by`/`moved_by` values for authors not in `our_authors` become
+  `"unknown"` on the next mine.
 
 ## [0.2.0]
 

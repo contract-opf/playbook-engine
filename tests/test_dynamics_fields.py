@@ -1,8 +1,10 @@
 """Tests for the negotiation-dynamics fields (issue #177, OPF §3.5.3).
 
 Covers the five behaviors the issue names:
-  1. proposed_by derived from a DOCX tracked insertion authored by a
-     counterparty name (mapped through our_party_aliases).
+  1. proposed_by derived from a DOCX tracked insertion's author, mapped
+     through our_party_aliases/our_authors — "us" on a match, "unknown"
+     otherwise (never "counterparty": absence of a match against our own
+     side is not evidence of the other side, issue #119).
   2. proposed_by "unknown" / observed_at omitted on a PDF-only trail —
      dynamics are never fabricated.
   3. stance_detail consistent with the counts feeding historical_stance;
@@ -75,6 +77,13 @@ def _counterparty_tracked_docx(tmp_path: Path) -> Path:
 
 
 def test_proposed_by_from_tracked_changes(tmp_path: Path) -> None:
+    """Tracked-change attribution (author + date) flows into proposed_by/
+    observed_at. The fixture's author ("University Counsel") matches
+    neither the configured our_party_aliases nor any our_authors, so —
+    per issue #119 — proposed_by is "unknown", not a guessed
+    "counterparty": the mechanism under test is that real tracked-change
+    metadata reaches these fields at all, not that an unrecognized name is
+    assumed to be the other side."""
     result = ingest_docx(_counterparty_tracked_docx(tmp_path), "deal-1", "v2")
     tracked = result.tracked
     assert tracked.changes, "fixture must carry tracked changes"
@@ -110,11 +119,13 @@ def test_proposed_by_from_tracked_changes(tmp_path: Path) -> None:
     )
     assert len(observations) == 1
     obs = observations[0]
-    assert obs.proposed_by == "counterparty"
-    # The tracked-change date is the observation's embedded-metadata date.
+    assert obs.proposed_by == "unknown"
+    # The tracked-change date is still the observation's embedded-metadata
+    # date, even though the side is unattributed — date and side are
+    # derived independently.
     assert obs.observed_at == "2024-03-15"
     d = obs.to_dict()
-    assert d["proposed_by"] == "counterparty"
+    assert d["proposed_by"] == "unknown"
     assert d["observed_at"] == "2024-03-15"
 
 
@@ -404,14 +415,15 @@ def test_dynamics_fields_participate_in_content_hash() -> None:
 
 
 def test_no_aliases_never_fabricates_a_side() -> None:
-    """With NO our_party_aliases configured (the config default is []),
-    an attributed author must map to 'unknown' — publishing our own
-    attorneys' edits as counterparty asks is exactly the guessed
-    attribution §3.5.3 forbids."""
+    """With NO our_party_aliases/our_authors configured (the config default
+    is [] for both), an attributed author must map to 'unknown' —
+    publishing our own attorneys' edits as counterparty asks is exactly the
+    guessed attribution §3.5.3 forbids."""
     from playbook_engine.observation_builder import party_side_for_author
 
     assert party_side_for_author("Jane Attorney", []) == "unknown"
     assert party_side_for_author("Jane Attorney", [""]) == "unknown"
+    assert party_side_for_author("Jane Attorney", [], []) == "unknown"
 
 
 def test_short_author_initials_do_not_match_alias_substring() -> None:
@@ -419,11 +431,45 @@ def test_short_author_initials_do_not_match_alias_substring() -> None:
     not read as 'us' via reverse containment."""
     from playbook_engine.observation_builder import party_side_for_author
 
-    assert party_side_for_author("IT", ["Summit Health"]) == "counterparty"
-    assert party_side_for_author("Al", ["Alpha Corporation"]) == "counterparty"
+    # Neither matches, so — per issue #119 — these are "unknown", not a
+    # confidently wrong "counterparty": absence of a match against our own
+    # aliases is not evidence the author is on the other side.
+    assert party_side_for_author("IT", ["Summit Health"]) == "unknown"
+    assert party_side_for_author("Al", ["Alpha Corporation"]) == "unknown"
     # The forward direction and reasonable-length reverse still work.
     assert party_side_for_author("Alpha Corporation Legal", ["Alpha Corporation"]) == "us"
     assert party_side_for_author("alpha corp", ["Alpha Corporation Holdings"]) == "us"
+
+
+def test_author_matching_neither_list_is_unknown_not_counterparty() -> None:
+    """Issue #119 regression: with our_party_aliases NON-EMPTY, an author
+    matching neither our_party_aliases nor our_authors must be 'unknown'.
+    Before the fix this fell through to 'counterparty' — the exact guess
+    the function's own docstring says never happens, and (per the real
+    production corpus measurement in #119) a systematic one-directional
+    bias for every unrecognized author, since w:ins/w:del authors are
+    personal names/initials, a namespace our_party_aliases (entity/org
+    names) was never going to match."""
+    from playbook_engine.observation_builder import party_side_for_author
+
+    assert (
+        party_side_for_author("Pat Counterparty", ["FixtureCorp"], ["Jane Attorney", "J. Attorney"])
+        == "unknown"
+    )
+
+
+def test_author_matching_our_authors_is_us() -> None:
+    """Issue #119: our_authors is the people-namespace counterpart to
+    our_party_aliases — an author matching it (personal name/initials/
+    email, not an org alias) must map to 'us', the same as an
+    our_party_aliases match does."""
+    from playbook_engine.observation_builder import party_side_for_author
+
+    assert party_side_for_author("Jane Attorney", ["FixtureCorp"], ["Jane Attorney"]) == "us"
+    # our_party_aliases match still works unaffected by our_authors being set.
+    assert party_side_for_author("FixtureCorp Legal", ["FixtureCorp"], ["Jane Attorney"]) == "us"
+    # Short-initials guard applies identically to our_authors' reverse direction.
+    assert party_side_for_author("Al", [], ["Alpha Attorney"]) == "unknown"
 
 
 def test_move_summaries_truncate_after_pseudonymization_boundary() -> None:
