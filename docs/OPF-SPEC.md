@@ -687,7 +687,7 @@ metadata, and digest list dedupe/rank/top-N-plus-material capping with its
 "often"/"sometimes"/"rare" frequency-band boundaries).
 
 This exists because a hand-maintained downstream port of `canonicalize.py`
-or `digest.py` (contract-toaster carries one, pinned to an engine commit by
+or `digest.py` (Contract Toaster carries one, pinned to an engine commit by
 docstring) fails silently on drift: a changed algorithm doesn't raise an
 import error, it just produces a different `content_hash` — surfacing later
 as an ingest-hash-verification failure, or worse, a hash that agrees when it
