@@ -87,6 +87,36 @@ def test_affiliation_config_party_aliases() -> None:
     assert len(aliases) >= 1
 
 
+def test_affiliation_config_our_authors_defaults_to_empty() -> None:
+    """Issue #119: the shipped affiliation config has no our_authors — must
+    default to [], not fabricate anything."""
+    cfg = load_config(AFFILIATION_CONFIG)
+    assert cfg.provenance.our_authors == []
+
+
+def test_config_parses_our_authors(tmp_path: Path) -> None:
+    """Issue #119: provenance.our_authors is the people-namespace
+    counterpart to our_party_aliases — parsed into its own config list."""
+    tax = tmp_path / "taxonomy.yaml"
+    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
+    path = _write_config(
+        tmp_path,
+        """
+agreement_type:
+  id: test-type
+  name: "Test Agreement"
+baseline:
+  template: null
+taxonomy: taxonomy.yaml
+provenance:
+  our_party_aliases: ["FixtureCorp"]
+  our_authors: ["Jane Attorney", "J. Attorney"]
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.provenance.our_authors == ["Jane Attorney", "J. Attorney"]
+
+
 def test_affiliation_config_agreement_type_aliases() -> None:
     """Issue #142: the shipped config declares 'eiaa' as an alias of the
     canonical 'educational-affiliation' id — this is the shared cross-tool

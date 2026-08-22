@@ -658,6 +658,7 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         "taxonomy": "FILL_IN_TAXONOMY_PATH",
         "provenance": {
             "our_party_aliases": [],
+            "our_authors": [],
             # Known counterparty entity names to pseudonymize at ingest
             # (issue #153) — fill in from the corpus manifest/folder names,
             # same workflow as our_party_aliases above.
@@ -678,6 +679,13 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         "  our_party_aliases: []  # REQUIRED for provenance: every form of OUR\n"
         "  #   name in the recitals — legal entities + defined terms\n"
         "  #   (e.g. 'Acme Corp, LLC', 'Acme', 'Facility'). `mine` warns if none match.",
+    )
+    yaml_text = yaml_text.replace(
+        "  our_authors: []",
+        "  our_authors: []  # the PEOPLE on our side — names, initials, or\n"
+        "  #   emails exactly as they appear in DOCX tracked-change metadata\n"
+        "  #   (a different namespace from our_party_aliases above). Empty means\n"
+        "  #   tracked-change attribution (proposed_by/moved_by) stays 'unknown'.",
     )
     yaml_text = yaml_text.replace(
         "  known_entities: []",

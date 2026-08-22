@@ -831,6 +831,7 @@ def _observations_from_single_version(
     template_std_by_tid: dict[str, str],
     deviation_judge: DeviationJudge,
     our_party_aliases: list[str] | None = None,
+    our_authors: list[str] | None = None,
 ) -> list[Observation]:
     """Create observations from a single-version document, diffed against the template.
 
@@ -884,6 +885,7 @@ def _observations_from_single_version(
         classification_confidences=classification_confidences,
         has_signed_copy=has_signed_copy,
         our_party_aliases=our_party_aliases,
+        our_authors=our_authors,
     )
 
 
@@ -1998,6 +2000,7 @@ def _compute_doc_result(
             template_std_by_tid=template_std_by_tid,
             deviation_judge=_dev_judge,
             our_party_aliases=config.provenance.our_party_aliases,
+            our_authors=config.provenance.our_authors,
         )
     else:
         classified_versions = [(vid, classified_by_version[vid]) for vid in ordered_ids]
@@ -2012,6 +2015,7 @@ def _compute_doc_result(
             doc_diff,
             tracked_by_vid=tracked_by_vid,
             our_party_aliases=config.provenance.our_party_aliases,
+            our_authors=config.provenance.our_authors,
         )
         # Issue #106: record detected reversals on the trail itself — this is
         # what aar.py's backbone health section counts (previously read
@@ -2054,6 +2058,7 @@ def _compute_doc_result(
             has_signed_copy=has_signed_copy,
             attributions=attributions,
             our_party_aliases=config.provenance.our_party_aliases,
+            our_authors=config.provenance.our_authors,
             # Same vid → negotiation-ordinal map build_round_moves derives
             # from version_order: a reversal/removed-clause citation must
             # carry ITS draft's ordinal, not signed_ordinal, or it resolves
@@ -2454,6 +2459,12 @@ def mine_corpus(
         {
             "agreement_type_id": config.agreement_type.id,
             "provenance_aliases": sorted(config.provenance.our_party_aliases),
+            # Issue #119: our_authors feeds party_side_for_author exactly like
+            # our_party_aliases does (proposed_by/moved_by) — a config change
+            # here must bust the per-doc cache the same way an alias change
+            # does, or a stale "unknown" persists after the corpus's true
+            # author list is filled in.
+            "provenance_authors": sorted(config.provenance.our_authors),
             "template_content_hash": template_content_hash,
             "template_tree_present": template_tree is not None,
             "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),

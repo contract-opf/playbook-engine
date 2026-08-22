@@ -34,14 +34,20 @@ baseline: { template: template/our-msa-template.docx }   # or null
 taxonomy: builtin:cuad-base.yaml       # or your own; see below
 provenance:
   our_party_aliases: ["YourCo", "YourCo Holdings, LLC"]  # every name variant you sign under
+  our_authors: ["Jane Attorney", "J. Attorney", "jattorney@yourco.example"]  # the PEOPLE who redline on your side
   known_entities: ["Counterparty A Inc.", ...]           # enables born-safe pseudonymization
 perspective: { party: "YourCo", counterparty_type: "Vendor" }
 ```
 
 Two of these matter more than they look:
 
-- `our_party_aliases` is how the engine tells your edits from theirs —
-  it drives provenance detection and who-proposed-what attribution.
+- `our_party_aliases` and `our_authors` are two different namespaces, and
+  both drive attribution. `our_party_aliases` (entity/org names) drives
+  provenance detection — whose paper a document is on. `our_authors`
+  (personal names, initials, or emails exactly as they appear in Word
+  tracked-change metadata) drives who-proposed-what attribution — which
+  side proposed or moved a given change. An author matching neither list
+  is recorded as `"unknown"`; it is never guessed as the counterparty.
 - `known_entities` activates the **born-safe rule**: counterparty names
   are replaced with stable aliases *at ingest*, so no stored artifact ever
   carries a raw name. The reverse map is written to a restricted sidecar
