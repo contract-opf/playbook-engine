@@ -147,6 +147,190 @@ def test_enrich_low_similarity_text_no_match() -> None:
 
 
 # ---------------------------------------------------------------------------
+# enrich_clause_diff: span-overlap candidate selection across mismatched
+# clause-path namespaces (issue #112 regression coverage)
+#
+# With segmentation.agent=True, clause trees come from the LLM/agent
+# segmenter (flat integer paths: '1', '2') while the tracked-changes
+# side-channel comes from docx_ingester with its own hierarchical numbering
+# ('0.4.1'). The old candidate filter matched on exact clause_path string
+# equality, so these fixtures reproduce zero candidates under that filter —
+# these tests fail against that filter and pass only once candidate
+# selection uses char_span interval overlap instead.
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_mismatched_namespace_matches_via_span_containment() -> None:
+    """Agent-style flat path ('2') vs docx-style hierarchical path ('0.4.1')
+    on the tracked change: exact clause_path equality finds zero candidates,
+    but the TrackedChange.char_span is fully contained within the diff's
+    char_span_after, so span-overlap candidate selection still finds it."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="consequential damages excluded")
+    tc = TrackedChange(
+        change_type="insertion",
+        author="Alice",
+        date="2024-01-01",
+        text="consequential damages excluded",
+        clause_path="0.4.1",  # docx-ingester namespace — disjoint from clause_diff's paths
+        char_span=(120, 151),  # fully contained within char_span_after below
+    )
+    cd = ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="1",  # agent/LLM segmenter namespace
+        clause_path_after="2",
+        kind="modified",
+        hunks=(hunk,),
+        text_before="original text",
+        text_after="revised text",
+        char_span_before=(90, 160),
+        char_span_after=(100, 170),
+    )
+    # Sanity: the old exact-path filter would have zero candidates here.
+    assert tc.clause_path not in {cd.clause_path_before, cd.clause_path_after}
+
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc]))
+
+    assert result[0].enrichment is not None
+    assert result[0].enrichment.author == "Alice"
+
+
+def test_enrich_mismatched_namespace_matches_via_partial_span_overlap() -> None:
+    """Same namespace mismatch, but the tracked change's span only partially
+    intersects the diff's char_span_after (not full containment) — overlap
+    alone must still be sufficient to select it as a candidate."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="material adverse effect carveout")
+    tc = TrackedChange(
+        change_type="insertion",
+        author="Priya",
+        date="2024-02-02",
+        text="material adverse effect carveout",
+        clause_path="0.9.2",
+        char_span=(165, 210),  # starts inside char_span_after, ends past it
+    )
+    cd = ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="4",
+        clause_path_after="5",
+        kind="modified",
+        hunks=(hunk,),
+        text_before="original text",
+        text_after="revised text",
+        char_span_before=(130, 170),
+        char_span_after=(140, 170),
+    )
+    assert tc.clause_path not in {cd.clause_path_before, cd.clause_path_after}
+
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v3", [tc]))
+
+    assert result[0].enrichment is not None
+    assert result[0].enrichment.author == "Priya"
+
+
+def test_enrich_mismatched_namespace_no_span_overlap_still_no_match() -> None:
+    """Negative control: mismatched clause paths AND non-overlapping spans
+    means span-overlap selection correctly excludes the candidate too — the
+    fix adds a new way to match, it does not make matching unconditional."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="consequential damages excluded")
+    tc = TrackedChange(
+        change_type="insertion",
+        author="Alice",
+        date="2024-01-01",
+        text="consequential damages excluded",
+        clause_path="0.4.1",
+        char_span=(500, 531),  # nowhere near the diff's spans
+    )
+    cd = ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="1",
+        clause_path_after="2",
+        kind="modified",
+        hunks=(hunk,),
+        text_before="original text",
+        text_after="revised text",
+        char_span_before=(90, 160),
+        char_span_after=(100, 170),
+    )
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc]))
+    assert result[0].enrichment is None
+
+
+def test_enrich_deletion_no_span_falls_back_to_clause_path_within_mismatched_diff() -> None:
+    """A deletion (char_span=None) can't be span-matched even when the diff
+    itself carries span data; it still falls back to clause-path matching,
+    so it enriches when the path happens to match and stays unmatched when
+    it doesn't (same-namespace deletion coverage is not regressed by #112)."""
+    hunk = TextHunk(kind="delete", old_text="limitation liability cap", new_text="")
+    tc_matching_path = TrackedChange(
+        change_type="deletion",
+        author="Bob",
+        date="2024-01-01",
+        text="limitation liability cap",
+        clause_path="2",  # matches clause_diff.clause_path_after
+        char_span=None,
+    )
+    cd = ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="1",
+        clause_path_after="2",
+        kind="modified",
+        hunks=(hunk,),
+        text_before="original text",
+        text_after="revised text",
+        char_span_before=(90, 160),
+        char_span_after=(100, 170),
+    )
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v2", [tc_matching_path]))
+    assert result[0].enrichment is not None
+    assert result[0].enrichment.author == "Bob"
+
+
+def test_enrich_narrow_heading_span_still_matches_via_clause_path() -> None:
+    """Same-namespace docx-to-docx diff where the clause's char_span covers
+    only its heading line (docx_ingester._ClauseBuilder.add_body), not the
+    body — a real tracked change with a non-None char_span in the clause
+    body does NOT overlap that narrow span, but clause_path still matches
+    exactly, so the additive OR must still fire via the path branch.
+
+    Pins the reason the clause-path branch was kept alongside span overlap
+    (see enrich_clause_diff's module comment): every other clause-path-
+    branch test uses char_span=None (via the _tracked_change() helper),
+    so none of them distinguish "path branch needed because span is
+    absent" from "path branch needed because span is present but narrow"."""
+    hunk = TextHunk(kind="insert", old_text="", new_text="consequential damages excluded")
+    tc = TrackedChange(
+        change_type="insertion",
+        author="Chen",
+        date="2024-03-03",
+        text="consequential damages excluded",
+        clause_path="2",  # matches clause_diff.clause_path_after exactly
+        char_span=(400, 431),  # body text, well past the heading-only spans below
+    )
+    cd = ClauseDiff(
+        taxonomy_id="ind",
+        clause_path_before="1",
+        clause_path_after="2",
+        kind="modified",
+        hunks=(hunk,),
+        text_before="original text",
+        text_after="revised text",
+        char_span_before=(90, 100),  # heading-only span, does not reach the body
+        char_span_after=(100, 110),  # heading-only span, does not reach the body
+    )
+    # Sanity: tc's span starts after both diff spans end, so span-overlap
+    # selection alone would find zero candidates here.
+    assert tc.char_span is not None
+    assert cd.char_span_before is not None
+    assert cd.char_span_after is not None
+    assert tc.char_span[0] >= cd.char_span_before[1]
+    assert tc.char_span[0] >= cd.char_span_after[1]
+
+    result = enrich_clause_diff(cd, _tracked_changes("doc", "v4", [tc]))
+
+    assert result[0].enrichment is not None
+    assert result[0].enrichment.author == "Chen"
+
+
+# ---------------------------------------------------------------------------
 # enrich_clause_diff: partial enrichment (some hunks match, some don't)
 # ---------------------------------------------------------------------------
 
