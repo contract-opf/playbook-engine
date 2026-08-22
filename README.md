@@ -65,6 +65,16 @@ Not sure how much of that curation to do? ADOPTING.md's [control
 ladder](docs/ADOPTING.md#how-much-control-do-you-want) lays out four
 rungs from zero-effort to full audit, each with an honest cost.
 
+Want to see this run at real scale, not a six-deal fixture? A genuine,
+corpus-derived playbook — 44 real negotiated agreements, 24 clauses, 555
+substantive deviations judged and cited to precedent — is published
+party-anonymous (the publishing party named deliberately; every
+counterparty pseudonymized as `Counterparty-N`; dates coarsened to
+quarters) at [contract-opf/playbooks](https://github.com/contract-opf/playbooks),
+rendered at <https://contract-opf.github.io/playbooks/>. It's evidence-only
+today (no Posture or Floor yet) — a demonstration of derivation quality,
+not the full control ladder above.
+
 ## What a playbook knows
 
 OPF 1.0 (document shape `opf_version` "0.3") is **one document with three
