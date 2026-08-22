@@ -1,4 +1,4 @@
-.PHONY: install lint fmt typecheck test smoke-nda all docker-build docker-run
+.PHONY: install lint fmt typecheck test smoke-nda all hooks docker-build docker-run
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -34,6 +34,67 @@ smoke-nda:
 	$(RUN)/pytest tests/test_nda_smoke.py -q -m smoke
 
 all: lint fmt-check typecheck test
+
+# Install the tracked lint/format pre-push gate (issue #116) into the
+# REAL hooks directory — resolved via `git rev-parse --git-path hooks`, so
+# this works from a fresh clone, a linked worktree (where .git is a file,
+# not a directory), and a clone with core.hooksPath set (where .git/hooks
+# is never consulted by git at all). No `ignore/` required.
+# Composition rule (order-independent only when the maintainer-local hook
+# genuinely delegates — see below): this target REFUSES to touch an
+# already-installed pre-push hook that already delegates to
+# scripts/pre-push-lint.sh — detected by finding a non-comment line that
+# mentions that filename OUTSIDE of an echo/printf call, i.e. an actual
+# invocation, not merely a string that gets printed. A comment mentioning
+# the filename (e.g. a stray "TODO: delegate to...") or an echo/printf line
+# that only prints a message containing the filename (e.g. a "not found —
+# skipping" message) does NOT count: both are text *about* the script, not
+# a call to it, so they fall through to the back-up-and-install path below
+# — leaving it in place as a successful no-op, since it already
+# has full lint/format coverage. A hook that merely scans for
+# secrets/confidential terms (SECRET_PATTERNS / CONFIDENTIAL_PATTERNS) but
+# does NOT delegate is a category error, not equivalence — a secrets
+# scanner has zero lint/format coverage of its own — so this target FAILS
+# LOUDLY (non-zero exit) instead of reporting success, with instructions to
+# add the missing delegation line, rather than silently leaving the repo
+# without a lint/format gate while claiming one is active. It only backs
+# up and replaces a plain or unrelated existing hook.
+# ignore/git-hooks/install.sh, in the other direction, always installs its
+# own (richer) hook regardless of what's currently in place, and resolves
+# the same real hooks directory. BY CONVENTION that hook is expected to
+# delegate its lint/format tier to this same script — but that convention
+# lives in a gitignored, maintainer-local file this target cannot inspect
+# ahead of time, so it is not guaranteed and must not be assumed here; if
+# it's ever missing, a subsequent `make hooks` refuses loudly (per above)
+# instead of silently accepting the gap.
+hooks:
+	@hooks_dir="$$(git rev-parse --git-path hooks)"; \
+	src="$$(git rev-parse --show-toplevel)/scripts/pre-push-lint.sh"; \
+	dest="$$hooks_dir/pre-push"; \
+	mkdir -p "$$hooks_dir"; \
+	if [ -f "$$dest" ] && mentions="$$(grep -E '^[[:space:]]*[^#]*pre-push-lint\.sh' "$$dest" 2>/dev/null)" && [ -n "$$mentions" ] && printf '%s\n' "$$mentions" | grep -qvE '^[[:space:]]*(echo|printf)([[:space:]]|$$)'; then \
+		echo "$$dest already delegates to scripts/pre-push-lint.sh." >&2; \
+		echo "that hook is already at least as strong as this target installs, so it is being left in place (not an error)." >&2; \
+		echo "to (re)install/refresh it instead, run: ignore/git-hooks/install.sh" >&2; \
+		exit 0; \
+	fi; \
+	if [ -f "$$dest" ] && grep -qE 'CONFIDENTIAL_PATTERNS|SECRET_PATTERNS' "$$dest" 2>/dev/null; then \
+		echo "$$dest scans for secrets/confidential terms but does NOT delegate to scripts/pre-push-lint.sh." >&2; \
+		echo "a secrets scan has zero lint/format coverage of its own — treating it as equivalent would silently leave this clone WITHOUT the lint/format gate while reporting success, so refusing instead." >&2; \
+		echo "fix: add a line invoking scripts/pre-push-lint.sh in $$dest (see the header comment in that script), then re-run: make hooks" >&2; \
+		exit 1; \
+	fi; \
+	if [ -f "$$dest" ] && ! cmp -s "$$src" "$$dest"; then \
+		cp "$$dest" "$$dest.bak.$$(date +%s 2>/dev/null || echo prev)"; \
+		echo "existing pre-push backed up alongside $$dest"; \
+	fi; \
+	cp "$$src" "$$dest"; \
+	chmod +x "$$dest"; \
+	echo "installed lint/format pre-push gate -> $$dest"; \
+	if [ ! -x "$(RUN)/ruff" ] && ! command -v ruff >/dev/null 2>&1; then \
+		echo "WARNING: ruff not found ($(RUN)/ruff or PATH) — this looks like a developer checkout (pyproject.toml is tracked here), so scripts/pre-push-lint.sh fails CLOSED: the gate just installed will BLOCK EVERY PUSH until you run: make install" >&2; \
+	fi; \
+	echo "(maintainers: if the fuller confidential/secrets hook isn't installed yet, run ignore/git-hooks/install.sh — by convention it should delegate its lint/format tier to this same script; if it doesn't yet, add that delegation so installing in either order leaves the same protection active.)"
 
 # Build the reproducible Python 3.13 runtime (docling + OCR + pandoc).
 docker-build:
