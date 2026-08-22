@@ -149,6 +149,49 @@ def _empty_sig_section_tree() -> ClauseTree:
     )
 
 
+def _trailer_only_zero_evidence_tree() -> ClauseTree:
+    """Body text mentions execution boilerplate but carries zero signature
+    evidence, and no node heading matches _SIG_HEADING.
+
+    This is the issue #117 case: the ONLY reason any node qualifies as a
+    signature node is a body-text _SIG_TRAILER hit ("in witness whereof")
+    inside an ordinary "Miscellaneous" clause — no filled/blank By: line, no
+    /s/ marker, no real heading.  Must land on the confident
+    unsigned_trailer_reference basis, not the ambiguous
+    empty_signature_section one.
+    """
+    return _tree(
+        _node("1", "Definitions", "Body text."),
+        _node(
+            "12",
+            "Miscellaneous",
+            "This Agreement may be executed in counterparts, each of which "
+            "IN WITNESS WHEREOF shall constitute an original.",
+        ),
+    )
+
+
+def _mixed_heading_and_trailer_zero_evidence_tree() -> ClauseTree:
+    """One node matches via a real heading, another only via body-text
+    _SIG_TRAILER — both with zero By:/`/s/` evidence.
+
+    Heading provenance must dominate: the document stays in the ambiguous
+    empty_signature_section bucket at 0.60 rather than the confident
+    unsigned_trailer_reference bucket, because a real heading elsewhere is
+    stronger evidence a genuine signature section exists.
+    """
+    return _tree(
+        _node("1", "Definitions", "Body text."),
+        _node("9", "Signatures", ""),
+        _node(
+            "12",
+            "Miscellaneous",
+            "This Agreement may be executed in counterparts, each of which "
+            "IN WITNESS WHEREOF shall constitute an original.",
+        ),
+    )
+
+
 def _mixed_filled_blank_tree() -> ClauseTree:
     """One party signed, one blank — should count as single_signature."""
     return _tree(
@@ -290,7 +333,7 @@ def test_count_by_lines_table_layout_blank_mid_line() -> None:
 def test_signature_nodes_finds_signatures_heading() -> None:
     tree = _dual_filled_tree()
     nodes = _signature_nodes(tree)
-    assert any(n.clause_path == "9" for n in nodes)
+    assert any(node.clause_path == "9" for node, _provenance in nodes)
 
 
 def test_signature_nodes_finds_execution_heading() -> None:
@@ -309,6 +352,21 @@ def test_signature_nodes_empty_on_no_sig_tree() -> None:
     tree = _no_sig_tree()
     nodes = _signature_nodes(tree)
     assert nodes == []
+
+
+def test_signature_nodes_tags_heading_provenance() -> None:
+    """A node whose heading matches _SIG_HEADING is tagged 'heading' (issue #117)."""
+    tree = _dual_filled_tree()
+    nodes = _signature_nodes(tree)
+    assert any(node.clause_path == "9" and provenance == "heading" for node, provenance in nodes)
+
+
+def test_signature_nodes_tags_trailer_provenance() -> None:
+    """A node with no matching heading, matched only via body-text _SIG_TRAILER,
+    is tagged 'trailer' (issue #117)."""
+    tree = _trailer_only_zero_evidence_tree()
+    nodes = _signature_nodes(tree)
+    assert nodes == [(tree.nodes[1], "trailer")]
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +442,58 @@ def test_detect_not_signed_no_section() -> None:
 
 
 def test_detect_not_signed_empty_sig_section() -> None:
+    """Heading-matched empty section: unchanged 0.60, still escalates (issue #117)."""
     result = detect_signed(_empty_sig_section_tree())
     assert result.signed is False
     assert result.basis == "empty_signature_section"
+    assert result.confidence == 0.60
+    assert result.confidence < AMBIGUITY_THRESHOLD, "must still land below threshold to escalate"
+
+
+# ---------------------------------------------------------------------------
+# detect_signed: provenance-split confidence (issue #117)
+#
+# `d9ffde7` widened _signature_nodes to also match _SIG_TRAILER in body text
+# (the absorbed-trailer fix).  That widening pulled 70/207 real-corpus
+# documents — trailer boilerplate mentioned in passing, with zero filled or
+# blank By: evidence — down to the ambiguous 0.60 empty_signature_section
+# confidence, sending them to LLM arbitration where they previously did not
+# go at all.  These tests cover the provenance split that fixes it: a
+# trailer-only match with zero evidence gets a confident, deterministic
+# "not signed" instead.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_not_signed_trailer_only_zero_evidence_is_confident() -> None:
+    """Trailer-only match, zero By:/`/s/` evidence → confident not-signed,
+    NOT the ambiguous empty_signature_section basis."""
+    result = detect_signed(_trailer_only_zero_evidence_tree())
+    assert result.signed is False
+    assert result.basis == "unsigned_trailer_reference"
+    assert result.confidence >= AMBIGUITY_THRESHOLD, "must not need escalation"
+
+
+def test_signed_judge_not_called_for_trailer_only_zero_evidence() -> None:
+    """The judge must NOT be invoked for the confident trailer-only case."""
+    tree = _trailer_only_zero_evidence_tree()
+    verdict = SignedStatus(signed=True, basis="llm", confidence=0.5)
+    judge = _RecordingJudge(verdict)
+
+    result = detect_signed(tree, signed_judge=judge)
+
+    assert judge.calls == [], "judge must not be called once confidence clears AMBIGUITY_THRESHOLD"
+    assert result.basis == "unsigned_trailer_reference"
+
+
+def test_detect_not_signed_mixed_heading_and_trailer_stays_heading_provenance() -> None:
+    """A document with both a heading match and a trailer-only match keeps
+    heading provenance — a real heading elsewhere dominates, so the document
+    stays ambiguous at 0.60 rather than jumping to the confident trailer-only
+    basis."""
+    result = detect_signed(_mixed_heading_and_trailer_zero_evidence_tree())
+    assert result.signed is False
+    assert result.basis == "empty_signature_section"
+    assert result.confidence == 0.60
 
 
 # ---------------------------------------------------------------------------
