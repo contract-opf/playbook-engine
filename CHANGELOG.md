@@ -8,7 +8,7 @@ are additive-only, and any new or changed normative MUST — even one that
 touches no schema field — gets its own entry under a `### Normative rule
 changes` heading in the release it ships under.
 
-## [Unreleased]
+## [1.0.1] - 2026-08-22
 
 - **Round-move attribution now recovers real author attribution on the
   default extraction path** (issue #118, building on #112): tracked-change

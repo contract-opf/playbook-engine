@@ -202,7 +202,7 @@ extraction stack is a property of how you installed, not a flag.
 
 ## Status
 
-**Engine 1.0.0; OPF 1.0 (stable).** The current document shape —
+**Engine 1.0.1; OPF 1.0 (stable).** The current document shape —
 `opf_version` 0.3, additive over 0.2 (the `digest` section) — is frozen: it
 is never edited in place. 1.0 is a stability commitment for the 1.x series
 as a whole: a 1.x release may add a new OPTIONAL field or `x_*` extension,
