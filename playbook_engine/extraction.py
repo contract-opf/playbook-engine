@@ -1128,11 +1128,26 @@ def extract_tracked_changes(path: Path) -> TrackedChanges | None:
     boundaries the LLM segmenter groups the same way (the common case for a
     cleanly-numbered agreement), this lines up with the LLM tree's own
     ``clause_path`` and lets ``enrich_clause_diff`` find candidates; for a
-    document where the two disagree, matching degrades exactly the way
-    cross-version text-similarity matching already does elsewhere in
-    ``tracked_changes_overlay.py`` (best-effort, not guaranteed) — mapping
-    tracked-change positions onto the LLM's own segmentation is out of scope
-    here (see issue #85's Notes: no char_span/coordinate translation either).
+    document where the two disagree, ``enrich_clause_diff`` (issue #112)
+    also selects candidates by ``char_span`` interval overlap between this
+    function's ``TrackedChange.char_span`` values and the diffed clause
+    tree's ``ClauseNode.char_span`` — but that join is only trustworthy
+    when both sides are offsets into the SAME normalized text. The
+    ``char_span`` this function returns always comes from re-parsing
+    *path* via ``ingest_docx`` (the docx-ingester's own paragraph-join
+    text). That matches the LLM tree's ``char_span`` only when
+    ``extract_blocks`` also produced that tree via the legacy DOCX adapter
+    (``_extract_docx_lines`` reuses the same paragraph-join). Under the
+    default ``extraction.extractor="auto"``, ``extract_blocks`` prefers
+    docling for DOCX, so the LLM tree's ``char_span`` is instead an offset
+    into docling's Markdown-derived text — or, for redline DOCX that crash
+    docling's DOCX backend, a THIRD normalized-copy text via
+    ``_retry_docling_on_normalized_docx`` — a different coordinate system
+    from this function's ``char_span``. On that (default) path, span
+    overlap degrades to numeric coincidence rather than real co-location,
+    same as the clause-path matching it supplements: best-effort, not
+    guaranteed (see ``tracked_changes_overlay.enrich_clause_diff``'s module
+    comment for the full precondition).
 
     Returns ``None`` for non-DOCX paths (no tracked-changes concept) —
     mirrors ``pipeline._ingest_file_tracked``'s convention for RTF/PDF. A

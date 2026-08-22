@@ -113,11 +113,77 @@ def enrich_clause_diff(
     if not tracked_changes or not tracked_changes.changes:
         return [EnrichedHunk(hunk=h, enrichment=None) for h in clause_diff.hunks]
 
-    # Restrict candidates to the clause paths relevant to this diff.
+    # Restrict candidates to this diff's clause via clause-path equality OR
+    # char-offset span overlap (issue #112) — additive, not a replacement.
+    # ``clause_path`` alone is unreliable across mismatched numbering
+    # schemes: an agent/LLM segmenter's flat integer paths ('1', '2') share
+    # no namespace with the docx-ingester's hierarchical paths ('0.4.1')
+    # even when they denote the same clause, so exact clause-path equality
+    # silently drops every candidate whenever the two sides of a diff came
+    # from different segmenters.
+    #
+    # PRECONDITION span overlap depends on but this function cannot check:
+    # both ``char_span`` values must be offsets into the SAME normalized
+    # text. That is set by which *extractor* produced ``clause_diff``'s
+    # tree, not by which segmenter grouped it:
+    #   - Legacy DOCX adapter (``extraction._extract_docx_lines`` /
+    #     ``_build_stream``) reuses ``docx_ingester._iter_body_blocks`` /
+    #     ``_extract_para_text`` and joins with ``"\n"`` — byte-identical
+    #     to ``docx_ingester``'s own normalized text. Here
+    #     ``ClauseNode.char_span`` and ``TrackedChange.char_span`` (always
+    #     produced by a fresh ``ingest_docx`` re-parse — see
+    #     ``extraction.extract_tracked_changes``) share one coordinate
+    #     system, so overlap means real co-location.
+    #   - docling adapter — the DEFAULT under ``extraction.extractor=
+    #     "auto"`` (``config.py``), which prefers docling for DOCX: the
+    #     tree's ``char_span`` values are offsets into docling's
+    #     Markdown-derived text instead (``_parse_markdown_lines`` strips
+    #     heading/emphasis/list decoration and emits one block per table
+    #     row) — a different string from ``docx_ingester``'s paragraph
+    #     join. For redline DOCX specifically — the files that actually
+    #     carry ``w:ins``/``w:del`` — docling 2.x crashes and
+    #     ``_retry_docling_on_normalized_docx`` re-extracts from a THIRD,
+    #     differently-normalized copy. On this (default) path, two spans
+    #     comparing equal is numeric coincidence, not co-location; where
+    #     it fires, the Jaccard confirmation in ``_match_hunk`` can still
+    #     accept the wrong clause for repeated boilerplate text.
+    # ``clause_diff`` carries no extractor label, so this function cannot
+    # gate on the precondition above — span overlap is applied
+    # unconditionally, reliable at recovering attribution on the
+    # legacy-adapter path and best-effort (may spuriously match or
+    # spuriously miss) on the default docling path. See issue #112 review
+    # notes.
+    #
+    # Span overlap must also stay additive rather than replace the
+    # clause-path filter even where the coordinate systems do match:
+    # ``ClauseNode.char_span`` for a docx-ingested heading node covers
+    # only its heading *line*, not the clause body (see
+    # ``docx_ingester._ClauseBuilder.add_body``'s docstring) — a real
+    # tracked change in the body of a same-namespace docx-to-docx diff
+    # will not overlap that narrow span even though the clause path
+    # matches exactly. Keeping clause-path matching alongside span overlap
+    # preserves that same-namespace case; span overlap independently
+    # recovers the mismatched-namespace case the old filter dropped
+    # entirely (an agent-segmented clause's char_span spans its whole
+    # block range — see ``segmentation_grounding.py`` — so it does overlap
+    # a tracked change anywhere in that clause's body, when the coordinate
+    # systems agree).
+    #
+    # A ``TrackedChange`` with ``char_span=None`` (always true for
+    # deletions — deleted text is absent from the normalized text) can
+    # only be selected via the clause-path branch.
     relevant_paths = {
         p for p in (clause_diff.clause_path_before, clause_diff.clause_path_after) if p is not None
     }
-    candidates = [c for c in tracked_changes.changes if c.clause_path in relevant_paths]
+    diff_spans = [
+        s for s in (clause_diff.char_span_before, clause_diff.char_span_after) if s is not None
+    ]
+    candidates = [
+        c
+        for c in tracked_changes.changes
+        if c.clause_path in relevant_paths
+        or (c.char_span is not None and any(_spans_overlap(c.char_span, s) for s in diff_spans))
+    ]
 
     if not candidates:
         return [EnrichedHunk(hunk=h, enrichment=None) for h in clause_diff.hunks]
@@ -168,6 +234,17 @@ def _match_hunk(
         return HunkEnrichment(author=c.author, date=c.date, tracked_type=c.change_type)
 
     return None
+
+
+def _spans_overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """True if half-open char-offset spans *a* and *b* intersect.
+
+    Both ``TrackedChange.char_span`` and ``ClauseDiff.char_span_before`` /
+    ``char_span_after`` use ``[start, end)`` (Python-slice) convention, so
+    plain interval intersection applies.  Handles partial overlap and full
+    containment identically — either side may be the larger interval.
+    """
+    return a[0] < b[1] and b[0] < a[1]
 
 
 def _normalize(text: str) -> str:
