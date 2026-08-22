@@ -1,0 +1,122 @@
+name: PyPI Publish
+
+# Builds sdist + wheel with `python -m build` (hatchling backend) and
+# publishes to PyPI via Trusted Publishing (OIDC) — no PYPI_API_TOKEN
+# secret involved. Companion to docker-publish.yml, which pushes the
+# Docker image on the same `v*` tag; this workflow instead fires on the
+# GitHub Release (issue #114), so the release procedure is: tag -> GitHub
+# Release -> this workflow publishes. See CONTRIBUTING.md "Cutting a
+# release".
+#
+# The `publish` job needs `spec/` (JSON schemas + builtin taxonomies) to
+# actually land in both artifacts — hatchling's default wheel build
+# silently drops it (issue #182, guarded by tests/test_packaging.py) and
+# nothing before this workflow had ever checked the sdist for the same
+# gap — so `build` verifies both archives directly before anything is
+# uploaded to PyPI.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Verify built version matches the release tag
+        run: |
+          set -euo pipefail
+          # pyproject.toml [project].version and the tag that triggered this
+          # release are coupled only by maintainer discipline (CONTRIBUTING's
+          # "Cutting a release" step 1) — nothing upstream of this step
+          # actually compares them. A skipped bump would otherwise publish a
+          # GHCR image tagged from the git tag alongside a PyPI dist named
+          # from the stale pyproject.toml version, and PyPI would reject the
+          # duplicate filename only after the GitHub Release already exists
+          # (issue #114).
+          expected="${{ github.event.release.tag_name }}"
+          expected="${expected#v}"
+          sdist="dist/playbook_engine-${expected}.tar.gz"
+          wheel="dist/playbook_engine-${expected}-py3-none-any.whl"
+          if [[ ! -f "$sdist" ]]; then
+            echo "::error::built sdist does not match release tag ${{ github.event.release.tag_name }} — expected $sdist, got: $(ls dist/*.tar.gz 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
+            exit 1
+          fi
+          if [[ ! -f "$wheel" ]]; then
+            echo "::error::built wheel does not match release tag ${{ github.event.release.tag_name }} — expected $wheel, got: $(ls dist/*.whl 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
+            exit 1
+          fi
+
+      - name: Verify spec/ is included in sdist and wheel
+        run: |
+          set -euo pipefail
+          sdist="$(ls dist/*.tar.gz)"
+          wheel="$(ls dist/*.whl)"
+
+          # Capture each listing into a variable BEFORE grepping it. Piping
+          # a still-writing producer (tar/unzip) straight into `grep -q`
+          # under `pipefail` is broken: `grep -q` exits on the first match,
+          # SIGPIPEs the producer, and pipefail then reports the pipeline's
+          # status as the producer's 141 rather than grep's 0 — failing the
+          # gate even when the file IS present. Capturing first means tar/
+          # unzip run to a normal, un-piped exit before grep ever sees the
+          # output.
+          echo "Checking sdist: $sdist"
+          sdist_list="$(tar -tzf "$sdist")"
+          if ! printf '%s\n' "$sdist_list" | grep -qE '^[^/]+/spec/playbook\.schema-0\.3\.json$'; then
+            echo "::error::sdist is missing spec/ (issue #182 regression) — got:"
+            printf '%s\n' "$sdist_list"
+            exit 1
+          fi
+
+          echo "Checking wheel: $wheel"
+          wheel_list="$(unzip -l "$wheel")"
+          if ! printf '%s\n' "$wheel_list" | grep -qE ' spec/playbook\.schema-0\.3\.json$'; then
+            echo "::error::wheel is missing spec/ (issue #182 regression) — got:"
+            printf '%s\n' "$wheel_list"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    # Belt-and-suspenders on top of the `release: published` trigger
+    # (which forks can't fire against this repo, and PRs can't fire at
+    # all): refuse to run anywhere but the canonical repo.
+    if: github.repository == 'contract-opf/playbook-engine' && github.event_name == 'release'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/playbook-engine
+    permissions:
+      # Required by PyPI Trusted Publishing (OIDC) — no API token secret.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

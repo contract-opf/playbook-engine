@@ -20,6 +20,12 @@ from the target dir), and separately, the editable install registers an
 import finder that shadows ``sys.path`` ordering — ``PYTHONPATH`` alone does
 not win against it. Prepending the target dir via ``sys.path.insert(0, ...)``
 as the very first statement of a fresh interpreter does.
+
+``test_sdist_contains_spec_dir`` (issue #114) closes the other half of the
+same gap: the PyPI publish workflow ships both an sdist and a wheel, and
+``force-include`` is a wheel-only hatchling setting — nothing upstream of
+this test ever asserted the sdist tarball itself carries ``spec/`` too, only
+the wheel.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -99,6 +106,113 @@ def test_wheel_contains_spec_dir(packaged_install: Path) -> None:
     assert (packaged_install / "spec" / "playbook.schema.json").is_file()
     taxonomy_names = sorted(p.name for p in (packaged_install / "spec" / "taxonomy").glob("*.yaml"))
     assert "affiliation-agreement.yaml" in taxonomy_names
+
+
+def test_sdist_contains_spec_dir(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The sdist tarball — the other artifact the PyPI publish workflow
+    ships (issue #114) — must also carry ``spec/``.
+
+    ``force-include`` (pyproject.toml) only governs the wheel target;
+    hatchling's sdist build includes the source tree by its own VCS/include
+    rules, but nothing before this test ever actually opened the built
+    tarball to confirm ``spec/`` survives into it too.
+    """
+    workdir = tmp_path_factory.mktemp("sdist")
+
+    build_script = f"import hatchling.build as hb; print(hb.build_sdist({str(workdir)!r}))"
+    build = subprocess.run(
+        [sys.executable, "-c", build_script],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert build.returncode == 0, build.stderr
+    sdist_name = build.stdout.strip().splitlines()[-1]
+    sdist_path = workdir / sdist_name
+
+    with tarfile.open(sdist_path, "r:gz") as tf:
+        members = tf.getnames()
+
+    # Members are prefixed with the sdist's top-level dir (e.g.
+    # "playbook_engine-1.0.0/spec/..."). Anchor to that exact root so a
+    # stray nested "spec/" elsewhere in the tree (e.g. a worktree copy)
+    # cannot satisfy the assertion in place of the real top-level spec/.
+    assert sdist_name.endswith(".tar.gz")
+    root = sdist_name[: -len(".tar.gz")]
+    assert f"{root}/spec/playbook.schema-0.2.json" in members, members
+    assert f"{root}/spec/playbook.schema-0.3.json" in members, members
+    assert f"{root}/spec/playbook.schema.json" in members, members
+    assert f"{root}/spec/taxonomy/affiliation-agreement.yaml" in members, members
+
+
+def test_sdist_excludes_claude_scratch_but_keeps_skills(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The ``[tool.hatch.build.targets.sdist] exclude`` table (pyproject.toml,
+    issue #114) must actually keep untracked ``.claude/`` scratch content —
+    local worktree copies, ``settings.local.json`` — out of the sdist, while
+    still shipping the git-tracked ``.claude/skills/`` content.
+
+    On a clean CI checkout, neither ``.claude/worktrees/`` nor
+    ``.claude/settings.local.json`` exists, so a bare "no worktrees member"
+    assertion would pass vacuously even if the exclude table were deleted
+    outright. This test creates real probe paths first — removing exactly
+    what it created afterward, whether or not they already existed — so the
+    assertion is non-vacuous on every checkout, local or CI.
+    """
+    claude_dir = _REPO_ROOT / ".claude"
+    worktrees_dir = claude_dir / "worktrees"
+    probe_worktree_file = worktrees_dir / "_sdist_exclude_probe.txt"
+    settings_file = claude_dir / "settings.local.json"
+
+    created_worktrees_dir = not worktrees_dir.exists()
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    probe_worktree_file.write_text("probe", encoding="utf-8")
+
+    created_settings_file = not settings_file.exists()
+    if created_settings_file:
+        settings_file.write_text("{}", encoding="utf-8")
+
+    try:
+        workdir = tmp_path_factory.mktemp("sdist-exclude")
+        build_script = f"import hatchling.build as hb; print(hb.build_sdist({str(workdir)!r}))"
+        build = subprocess.run(
+            [sys.executable, "-c", build_script],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert build.returncode == 0, build.stderr
+        sdist_name = build.stdout.strip().splitlines()[-1]
+        sdist_path = workdir / sdist_name
+
+        with tarfile.open(sdist_path, "r:gz") as tf:
+            members = tf.getnames()
+
+        assert sdist_name.endswith(".tar.gz")
+        root = sdist_name[: -len(".tar.gz")]
+        claude_prefix = f"{root}/.claude/"
+        skills_prefix = f"{root}/.claude/skills/"
+
+        leaked = [
+            m for m in members if m.startswith(claude_prefix) and not m.startswith(skills_prefix)
+        ]
+        assert leaked == [], (
+            "sdist exclude table (pyproject.toml) failed to keep untracked "
+            f".claude/ scratch content out of the sdist: {leaked}"
+        )
+
+        # The fix must not regress into excluding ALL of .claude/ — the
+        # git-tracked skill content still has to ship.
+        assert f"{root}/.claude/skills/playbook-from-corpus/SKILL.md" in members, members
+        assert f"{root}/.claude/skills/playbook-from-corpus/REFERENCE.md" in members, members
+        assert f"{root}/.claude/skills/playbook-from-corpus/estimate_runtime.py" in members, members
+    finally:
+        probe_worktree_file.unlink(missing_ok=True)
+        if created_worktrees_dir:
+            worktrees_dir.rmdir()
+        if created_settings_file:
+            settings_file.unlink(missing_ok=True)
 
 
 def test_builtin_taxonomy_resolves_from_packaged_install(
