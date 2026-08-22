@@ -117,9 +117,8 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     state the no-LLM smoke run (`make smoke-nda`) deliberately produces.
 
     An installed playbook with `posture {}` / `floor {}` is exactly the
-    stale-example failure mode this ticket exists to avoid (see the eiaa
-    playbook installed on the toaster, called out in the issue) — so this
-    guard is load-bearing, not decorative.
+    stale-example failure mode this ticket exists to avoid — so this guard
+    is load-bearing, not decorative.
     """
     doc = _load(NDA_PLAYBOOK)
     assert doc["agreement_type"]["id"] == "nda"
