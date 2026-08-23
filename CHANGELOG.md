@@ -8,6 +8,30 @@ are additive-only, and any new or changed normative MUST — even one that
 touches no schema field — gets its own entry under a `### Normative rule
 changes` heading in the release it ships under.
 
+## [Unreleased]
+
+- **Canary corpus + CI gate** (`examples/canary/`,
+  `tests/test_canary_corpus.py`, `make smoke-canary`): a four-document
+  synthetic DOCX corpus — two negotiations, both with a version pair, two of
+  them tracked-changes redlines — plus a hermetic, keyless CI job that
+  asserts (a) the extractor environment a run resolves to matches a committed
+  expectation, (b) a warm-cache replay performs **zero** re-extraction and
+  quarantines **zero** documents with the L1–L4 stage cache deleted, so the
+  extraction and segmentation caches alone must carry it, and (c)
+  observation, round-move, and playbook-clause counts match
+  `examples/canary/expected.json`. Written after the 2026-08-22 production
+  re-derivation in which `docling` silently vanished from the host venv:
+  extraction fell back to `legacy`, the extraction cache key changed
+  (`extractor_env`, issue #77), the canonical text changed with it, the
+  segmentation cache missed, and 43 of 44 documents quarantined as
+  `AgentSegmentationPending` with observations falling from ~2,400 to 66 —
+  reported by the engine as a segmentation problem two layers above the
+  actual fault, and caught by nothing in CI.
+  `tests/test_canary_corpus.py::test_canary_reproduces_the_incident` replays
+  that exact cascade and asserts the new extractor check names the real
+  layer first. Runs in ~4s and installs no system packages (DOCX only, no
+  `pandoc`, no `docling`, no `ANTHROPIC_API_KEY`). No engine behavior change.
+
 ## [1.0.1] - 2026-08-22
 
 - **Round-move attribution now recovers real author attribution on the

@@ -6,6 +6,7 @@
 | [`staging-fixtures/`](staging-fixtures/) | Corpus-layout variants (flat, CLM-nested, manifest) used by `playbook stage` tests |
 | [`fixtures/`](fixtures/) | OPF documents used by the schema validator's test suite (valid + deliberately invalid) |
 | [`affiliation-config/`](affiliation-config/) | A worked `playbook.config.yaml` for the Educational Affiliation Agreement taxonomy |
+| [`canary/`](canary/) | A tiny synthetic 4-document DOCX corpus (two negotiations, two tracked-changes redlines) that exists to fail loudly when the extraction layer moves: extractor identity, warm-cache replay with zero re-extraction and zero quarantine, and committed derivation counts (`tests/test_canary_corpus.py` / `make smoke-canary`) — see [`canary/README.md`](canary/README.md) |
 | [`nda/`](nda/) | A synthetic second agreement type (Mutual NDA): a genuinely-judged worked playbook at `nda/playbook.opf.json` (populated Posture/Floor, reproducible from committed inputs — `tests/test_nda_derive_reproducible.py`), plus a bare structural smoke path (`tests/test_nda_smoke.py` / `make smoke-nda`) — see [`nda/README.md`](nda/README.md) |
 | `our-paper-baseline.v0.2.playbook.json` | A worked example playbook, current OPF v0.2 format |
 | `our-paper-baseline.playbook.json`, `emergent-no-template.playbook.json` | Worked examples in the superseded OPF v0.1 format |
