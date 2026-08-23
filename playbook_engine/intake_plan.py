@@ -647,7 +647,7 @@ def _check_plan_files_exist(plan: dict[str, Any], src_dir: Path) -> None:
     Checked before ``_recreate_out_dir`` wipes anything — same ordering
     rationale as :func:`_validate_plan`. Without this, a hand-edited plan
     with a typo'd path (or one run against the wrong ``src_dir``) reaches
-    ``_place``, which in symlink mode (the default) happily creates a
+    ``_place``, which in symlink mode (``--symlink``) happily creates a
     dangling symlink via ``os.symlink``; ``_discover_versions`` then drops
     that version silently (``p.is_file()`` is ``False`` for a dangling
     link), and ``stage --plan`` reports "staged : N version(s) ... OK" as if
@@ -682,7 +682,7 @@ def execute_staging_plan(
     src_dir: Path,
     out_dir: Path,
     *,
-    copy_files: bool = False,
+    copy_files: bool = True,
 ) -> Any:
     """Execute a ``staging_plan.json``-shaped *plan* into *out_dir*.
 
@@ -700,8 +700,9 @@ def execute_staging_plan(
                      contract as ``staging.stage``) — refused if it overlaps
                      *src_dir*, or if it exists, is non-empty, and isn't
                      itself a previous staging output (issue #248).
-        copy_files:  Write real file copies instead of absolute symlinks
-                     (see ``staging._place``).
+        copy_files:  Write real file copies (the default — see
+                     ``staging._place``). Set ``False`` for absolute symlinks,
+                     which only work on the host that staged them.
 
     Returns:
         A ``staging.StagingResult`` with ``layout="unknown"``.

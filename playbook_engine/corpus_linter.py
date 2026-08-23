@@ -99,6 +99,105 @@ class LintReport:
 
 
 # ---------------------------------------------------------------------------
+# Symlink escape / dangle scan
+# ---------------------------------------------------------------------------
+
+# How many offending paths to name inline before collapsing into "+N more" —
+# a symlink-staged 161-version corpus would otherwise dump 161 lines.
+_SYMLINK_NAMES_CAP = 5
+
+# Extensions worth reporting on when they arrive as a broken symlink. Anything
+# the engine could conceivably have read: the supported set plus the legacy
+# .doc set, so a corpus of dangling .doc links is still explained rather than
+# silently ignored.
+_LINKABLE_EXTENSIONS = _SUPPORTED_EXTENSIONS | _LEGACY_EXTENSIONS
+
+
+@dataclass(frozen=True)
+class SymlinkScan:
+    """Symlinked version files found in a corpus, split by how they behave.
+
+    ``dangling`` links resolve to nothing on this machine — ``Path.is_file()``
+    is ``False`` for them, so :func:`_discover_versions` drops them without a
+    word and the corpus presents as "no supported files found" (issues #121,
+    #130). That is the failure this scan exists to name.
+
+    ``escaping`` links do resolve here, but to a target outside the corpus
+    root. They work on this host and break the moment the corpus tree is read
+    from somewhere that cannot see the target path — most commonly
+    ``docker run -v "$CORPUS:/work/corpus:ro"``, where only the corpus dir is
+    mounted. Advisory, not blocking: on a plain host run they are fine.
+    """
+
+    dangling: dict[Path, list[Path]] = field(default_factory=dict)
+    escaping: dict[Path, list[Path]] = field(default_factory=dict)
+
+    @property
+    def dangling_count(self) -> int:
+        return sum(len(v) for v in self.dangling.values())
+
+    @property
+    def escaping_count(self) -> int:
+        return sum(len(v) for v in self.escaping.values())
+
+
+def scan_symlinks(corpus_dir: Path, doc_dirs: list[Path]) -> SymlinkScan:
+    """Classify every symlinked version file under *doc_dirs*.
+
+    Args:
+        corpus_dir: Corpus root; a link resolving outside it is "escaping".
+        doc_dirs:   Per-agreement directories to scan (non-recursive — the
+                    engine walker is non-recursive too).
+
+    Returns:
+        A :class:`SymlinkScan`.
+    """
+    corpus_root = corpus_dir.resolve()
+    scan = SymlinkScan()
+    for doc_dir in doc_dirs:
+        dangling: list[Path] = []
+        escaping: list[Path] = []
+        try:
+            entries = sorted(doc_dir.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_symlink():
+                continue
+            if entry.suffix.lower() not in _LINKABLE_EXTENSIONS:
+                continue
+            try:
+                target = entry.resolve(strict=True)
+            except (OSError, RuntimeError):
+                # Missing target, or a symlink loop — either way the engine
+                # cannot read it.
+                dangling.append(entry)
+                continue
+            if corpus_root not in target.parents:
+                escaping.append(entry)
+        if dangling:
+            scan.dangling[doc_dir] = dangling
+        if escaping:
+            scan.escaping[doc_dir] = escaping
+    return scan
+
+
+def _sample(paths: list[Path], corpus_dir: Path) -> str:
+    """Render up to :data:`_SYMLINK_NAMES_CAP` paths relative to *corpus_dir*."""
+    shown = paths[:_SYMLINK_NAMES_CAP]
+    rendered = ", ".join(str(_relative(p, corpus_dir)) for p in shown)
+    extra = len(paths) - len(shown)
+    return f"{rendered} (+{extra} more)" if extra else rendered
+
+
+def _relative(path: Path, base: Path) -> Path:
+    try:
+        return path.relative_to(base)
+    except ValueError:
+        return path
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -151,6 +250,14 @@ def lint_corpus(
     else:
         report.add("ok", "HAS_DOCUMENTS", f"{len(doc_dirs)} document subdirectory(s) found")
 
+    # Broken/escaping symlinks are scanned BEFORE the per-doc-dir walk so the
+    # walk can report the real cause. A dangling symlink is invisible to
+    # ``Path.is_file()``, so without this the whole corpus presents as
+    # "no supported files found" — the exact mis-diagnosis that made a
+    # symlink-staged corpus look empty under `docker run -v ...:ro` (#121/#130).
+    symlinks = scan_symlinks(corpus_dir, doc_dirs)
+    _report_symlinks(symlinks, corpus_dir, report)
+
     total_supported = 0
     # Lower-cased suffixes across every discovered version file in the
     # corpus (e.g. {".docx", ".pdf"}) — collected here, alongside the
@@ -159,12 +266,16 @@ def lint_corpus(
     # THIS corpus without re-walking the tree.
     corpus_suffixes: set[str] = set()
     for doc_dir in doc_dirs:
-        _lint_doc_dir(doc_dir, report)
+        _lint_doc_dir(doc_dir, report, dangling=symlinks.dangling.get(doc_dir, []))
         versions = _discover_versions(doc_dir)
         total_supported += len(versions)
         corpus_suffixes.update(vf.suffix.lower() for vf in versions)
 
-    if doc_dirs and total_supported == 0:
+    # Only claim "no supported files" when that is actually the problem. When
+    # the corpus is full of broken symlinks, _report_symlinks above has already
+    # said so precisely, and repeating the format complaint here would send the
+    # reader off to check file extensions that are perfectly fine.
+    if doc_dirs and total_supported == 0 and not symlinks.dangling:
         report.add(
             "error",
             "NO_SUPPORTED_FILES",
@@ -187,8 +298,58 @@ def lint_corpus(
 # ---------------------------------------------------------------------------
 
 
-def _lint_doc_dir(doc_dir: Path, report: LintReport) -> None:
-    """Check one document subdirectory."""
+def _report_symlinks(scan: SymlinkScan, corpus_dir: Path, report: LintReport) -> None:
+    """Turn a :class:`SymlinkScan` into lint findings.
+
+    Dangling links are a blocking ERROR: they are silently dropped by the
+    walker, so the run would otherwise "succeed" over a corpus with most of
+    its documents missing. Escaping-but-resolvable links are a WARNING: they
+    work here and break elsewhere, which is worth saying once but is not a
+    reason to refuse a host-local run.
+    """
+    if scan.dangling:
+        n = scan.dangling_count
+        report.add(
+            "error",
+            "CORPUS_DANGLING_SYMLINKS",
+            f"{n} file(s) in this corpus are symlinks whose target does not exist "
+            f"here, across {len(scan.dangling)} document folder(s): "
+            f"{_sample([q for v in scan.dangling.values() for q in v], corpus_dir)}. "
+            "The engine cannot read them and would silently skip every one, so this "
+            "corpus would compile as if those documents were never there. This is "
+            "what a symlink-staged corpus looks like from inside a container: "
+            '`docker run -v "$CORPUS:/work/corpus:ro"` mounts only the corpus '
+            "directory, so absolute symlinks pointing outside it resolve to nothing. "
+            "Fix: re-run `playbook stage <src> --out <corpus>` (real copies are the "
+            "default), or point the corpus at a directory whose symlink targets are "
+            "visible from where the engine runs.",
+            corpus_dir,
+        )
+    if scan.escaping:
+        n = scan.escaping_count
+        report.add(
+            "warning",
+            "CORPUS_SYMLINKS_ESCAPE_ROOT",
+            f"{n} file(s) in this corpus are symlinks pointing outside the corpus "
+            f"directory: {_sample([q for v in scan.escaping.values() for q in v], corpus_dir)}. "
+            "They resolve on this machine, so a host run is fine — but only the "
+            "corpus directory is mounted into the container, so these will dangle "
+            "(and be silently skipped) under `make docker-run`. Re-stage without "
+            "`--symlink` to get real copies if you plan to run in Docker.",
+            corpus_dir,
+        )
+
+
+def _lint_doc_dir(doc_dir: Path, report: LintReport, dangling: list[Path] | None = None) -> None:
+    """Check one document subdirectory.
+
+    ``dangling``: broken symlinks already found in *doc_dir* by
+    :func:`scan_symlinks`. They are the reason the directory can look empty,
+    so when there are any, the DOC_NO_SUPPORTED_FILES error is suppressed —
+    the corpus-level CORPUS_DANGLING_SYMLINKS error names the real cause and
+    the real fix.
+    """
+    dangling = dangling or []
     version_files = _discover_versions(doc_dir)
     all_files = [f for f in doc_dir.iterdir() if f.is_file()]
     legacy_doc_files = [f for f in all_files if f.suffix.lower() in _LEGACY_EXTENSIONS]
@@ -222,13 +383,14 @@ def _lint_doc_dir(doc_dir: Path, report: LintReport) -> None:
         )
 
     if not version_files:
-        report.add(
-            "error",
-            "DOC_NO_SUPPORTED_FILES",
-            f"'{doc_dir.name}': no .docx, .pdf, or .rtf files found. "
-            "Add at least one version file, or remove this folder.",
-            doc_dir,
-        )
+        if not dangling:
+            report.add(
+                "error",
+                "DOC_NO_SUPPORTED_FILES",
+                f"'{doc_dir.name}': no .docx, .pdf, or .rtf files found. "
+                "Add at least one version file, or remove this folder.",
+                doc_dir,
+            )
         return
 
     report.add("ok", "DOC_HAS_FILES", f"'{doc_dir.name}': {len(version_files)} version file(s)")

@@ -8,6 +8,52 @@ are additive-only, and any new or changed normative MUST — even one that
 touches no schema field — gets its own entry under a `### Normative rule
 changes` heading in the release it ships under.
 
+## [Unreleased]
+
+Environment-drift prevention. Three real incidents on the same machine — a
+vanished `docling`, a three-day-stale Docker image, and a symlink-staged corpus
+that read as empty inside the container — all had the same shape: the
+environment changed, nothing announced it, and the run completed looking like a
+success. These changes make the wrong environment hard to be in, rather than
+adding warnings after the fact.
+
+- **`playbook stage` writes real file copies by default** (was: absolute
+  symlinks). The documented Docker-first workflow bind-mounts the corpus
+  read-only, where host symlinks dangle — and a dangling symlink is invisible
+  to `Path.is_file()`, so a fully staged 161-version corpus reported "no
+  .docx/.pdf/.rtf files found in any document directory" for every folder.
+  `--copy` was documented as the fix but was not the default, so the documented
+  primary path and actual practice had diverged. **`--symlink` is the opt-out**
+  and prints plainly what it costs; `--copy` is still accepted and is now
+  a no-op. Library callers: `staging.stage()` and
+  `intake_plan.execute_staging_plan()` now default `copy_files=True`.
+- **Broken symlinks in a corpus are named as such.** `lint-corpus` gains
+  `CORPUS_DANGLING_SYMLINKS` (error) and `CORPUS_SYMLINKS_ESCAPE_ROOT`
+  (warning), and suppresses the misleading `NO_SUPPORTED_FILES` /
+  `DOC_NO_SUPPORTED_FILES` errors when broken symlinks are the actual cause.
+  The message names the read-only container mount and the fix.
+- **The preflight is now a precondition, not a suggestion.** `playbook mine`
+  and `playbook segment` run the `lint-corpus` checks before doing any work and
+  refuse to start on errors, so an ad-hoc invocation can no longer skip them.
+  `--skip-preflight` opts out.
+- **`playbook doctor`** — a new corpus-free, config-free command reporting the
+  engine version, the container image stamp, and every external tool the
+  pipeline can shell out to, with what each absent one silently costs. Backed
+  by a new `playbook_engine.environment` module that *declares* that set in one
+  place instead of leaving it implicit in `shutil.which` calls. `--strict`
+  exits non-zero on any missing tool, for setup scripts and CI.
+- **The Docker image is stamped and checked.** The build records the engine
+  version and git commit as OCI labels and at
+  `/etc/playbook-engine-image.json`, and refuses to build if the declared
+  version disagrees with what pip installed. `make docker-run` now depends on a
+  new `make docker-check`, which refuses to start a container whose engine
+  version differs from the source checkout (an unlabelled image fails the same
+  way) and warns on a commit mismatch. `ALLOW_STALE_IMAGE=1` opts out.
+- **The scaffolded `playbook.config.yaml`** now carries a commented
+  `extraction:` block explaining that the default `auto` degrades silently when
+  `docling` is absent, and that declaring `extractor: docling` turns that into a
+  refusal to start.
+
 ## [1.0.1] - 2026-08-22
 
 - **Round-move attribution now recovers real author attribution on the

@@ -23,13 +23,18 @@ user-owned cache directory rather than the world-readable ``/tmp`` — see
 issue #135; real corpus content, even as symlinks, should not land somewhere
 other local users can enumerate).
 
-By default, version files are placed as absolute symlinks back to the
-source corpus (cheap, no duplication). Symlink targets are host paths,
-though — if the staged tree is going to cross a filesystem boundary (e.g.
-staged on the host, then bind-mounted read-only into a container that
-cannot see the host path), pass ``copy_files=True`` (CLI: ``stage --copy``)
-to write real file copies instead, so the staged tree is self-contained.
-See issue #130.
+By default, version files are placed as REAL COPIES of the source files, so
+the staged tree is self-contained and survives crossing a filesystem
+boundary — in particular ``docker run -v "$CORPUS:/work/corpus:ro"``, the
+documented primary workflow. Copying is the default because the failure mode
+of the alternative is silent: absolute symlinks carry *host* paths, every one
+of them dangles inside a container, and a dangling symlink is invisible to
+``Path.is_file()`` — so the whole corpus reads as "no supported files found"
+rather than as a staging problem (issues #130, #121).
+
+Pass ``copy_files=False`` (CLI: ``stage --symlink``) to opt back into absolute
+symlinks when the staged tree will only ever be read on this same host and
+duplication is unwelcome.
 """
 
 from __future__ import annotations
@@ -133,7 +138,8 @@ class StagingResult:
     Attributes:
         out_dir:        Absolute path to the staging output directory.
         layout:         Detected source layout kind.
-        staged_count:   Total number of version-file symlinks created.
+        staged_count:   Total number of version files placed (copies, or
+                        symlinks under ``copy_files=False``).
         agreement_count: Number of agreement folders written.
         missing:        Source files present in the manifest but not on disk.
     """
@@ -206,9 +212,11 @@ def _q(s: str) -> str:
 def _place(src: Path, dest: Path, *, copy_files: bool) -> None:
     """Place *src* at *dest* — a real copy if *copy_files*, else an absolute symlink.
 
-    Symlinks are the default (cheap, no duplication) but carry host paths as
-    their targets; ``copy_files=True`` makes the staged output self-contained
-    so it survives crossing a filesystem/mount boundary (issue #130).
+    Real copies are the default (``copy_files=True`` at every public entry
+    point) because they make the staged output self-contained, so it survives
+    crossing a filesystem/mount boundary such as a read-only container bind
+    mount (issue #130). ``copy_files=False`` writes absolute symlinks — cheap
+    and duplication-free, but valid only on the host that staged them.
     """
     if copy_files:
         shutil.copy2(src, dest)
@@ -302,7 +310,7 @@ def stage(
     *,
     manifest_path: Path | None = None,
     docs_path: Path | None = None,
-    copy_files: bool = False,
+    copy_files: bool = True,
 ) -> StagingResult:
     """Flatten *src_dir* into *out_dir* using the detected layout.
 
@@ -327,11 +335,13 @@ def stage(
                        Each file is resolved against ``docs_path``, the corpus
                        root, and ``src_dir/docs`` (first existing match wins), so
                        both root-relative and docs/-relative manifests work.
-        copy_files:    Write real file copies instead of absolute symlinks.
-                       Use this when the staged output will cross a filesystem
-                       boundary (e.g. staged on the host, then bind-mounted
-                       read-only into a container) — symlink targets are host
-                       paths and dangle in that scenario (issue #130).
+        copy_files:    Write real file copies (the default). Set ``False`` to
+                       write absolute symlinks instead — cheap and
+                       duplication-free, but the staged tree then only works
+                       on this host: symlink targets are host paths and dangle
+                       the moment the tree crosses a filesystem boundary (e.g.
+                       bind-mounted read-only into a container), where the
+                       corpus silently reads as empty (issues #130, #121).
 
     Returns:
         :class:`StagingResult` with counts and missing-file details.
@@ -384,7 +394,7 @@ def _write_hints(dest: Path, order: list[str], signed: str | None) -> None:
 
 
 def _stage_flat(
-    src_dir: Path, out_dir: Path, *, layout: LayoutKind, copy_files: bool = False
+    src_dir: Path, out_dir: Path, *, layout: LayoutKind, copy_files: bool = True
 ) -> StagingResult:
     """Stage a flat layout: ``<agreement>/<version-files>``."""
     staged = 0
@@ -428,7 +438,7 @@ def _stage_flat(
 
 
 def _stage_clm_nested(
-    src_dir: Path, out_dir: Path, *, layout: LayoutKind, copy_files: bool = False
+    src_dir: Path, out_dir: Path, *, layout: LayoutKind, copy_files: bool = True
 ) -> StagingResult:
     """Stage a CLM-nested layout: ``<agreement>/Versions/<files>`` + optional top-level ``EXECUTED_*.pdf``."""
     staged = 0
@@ -510,7 +520,7 @@ def _stage_manifest(
     layout: LayoutKind,
     manifest_path: Path,
     docs_path: Path,
-    copy_files: bool = False,
+    copy_files: bool = True,
 ) -> StagingResult:
     """Stage a manifest-driven layout (JSONL manifest).
 
@@ -694,6 +704,30 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         "  #   (e.g. 'The City University of New York' AND 'CUNY') — empty = NO\n"
         "  #   pseudonymization. Derive these from the corpus, not guesswork.",
     )
+    # extraction — commented, for the same reason as perspective below: there
+    # is no value that is right for both runtimes. Left unset, `extractor`
+    # defaults to "auto", which uses docling when it is on PATH and quietly
+    # drops to the legacy adapters when it is not. That default is correct for
+    # a host install and dangerous for a pipeline that assumes docling: it is
+    # how a host that lost its docling binary between two runs produced a
+    # silently degraded derivation with no announcement anywhere (issue #121).
+    # Declaring `docling` converts that silent downgrade into a refusal to
+    # start, which is what you want once you have decided which runtime you are
+    # on — so the choice is spelled out here rather than left to be discovered.
+    yaml_text += (
+        "\n"
+        "# Optional: extraction — which document extractor to use.\n"
+        "#   (unset)  = 'auto': use docling if it is installed, otherwise fall\n"
+        "#              back to the legacy adapters WITHOUT stopping. Fine on a\n"
+        "#              host; means a missing docling degrades a run silently.\n"
+        "#   docling  = require docling. `mine` refuses to start if it is not\n"
+        "#              installed, instead of quietly producing worse output.\n"
+        "#              Use this whenever you run in the project's Docker image.\n"
+        "#   legacy   = deliberately use python-docx/pdfplumber/pandoc only.\n"
+        "# extraction:\n"
+        "#   extractor: docling\n"
+    )
+
     # Issue #165: perspective — commented and blank, unlike the other
     # sections above, because it's the one block where filling in a
     # placeholder value would be worse than leaving it unset (neither field
