@@ -1968,6 +1968,18 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
         f"Segmentation pending: {n_queued} "
         f"(cached: {n_cached}, versions: {n_versions}, docs: {n_docs})"
     )
+    # Scoped extraction-cache invalidation (extraction._EXTRACTION_CACHE_FORMAT_LADDER):
+    # an older-format entry is migrated in place where the format change
+    # provably did not affect it, and only re-extracted where it did. Reported
+    # because a migration is exactly the extraction an operator did NOT pay for
+    # this run — silence would make that saving invisible.
+    if extraction_cache.migrated_count or extraction_cache.invalidated_count:
+        click.echo(
+            f"Extraction cache: {extraction_cache.migrated_count} entr"
+            f"{'y' if extraction_cache.migrated_count == 1 else 'ies'} migrated to the "
+            f"current format (no re-extraction), {extraction_cache.invalidated_count} "
+            "re-extracted"
+        )
     if n_queued == 0:
         click.secho("OK  all documents segmented (cache full) — run `playbook mine`", fg="green")
     else:

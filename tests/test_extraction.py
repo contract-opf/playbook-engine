@@ -1589,10 +1589,11 @@ def test_extraction_cache_get_tolerates_pre_81_entry_without_reason_key(
     keys at all) must still load without raising KeyError — get() falls back
     to None for both via ``dict.get``. This is a shape-completeness
     guarantee only; it does NOT assert reason=None is the correct real-world
-    contract for a genuinely warm pre-#81 cache — the format-version bump
-    below (test_extraction_cache_format_version_bump_misses_pre_81_key)
-    means a REAL pre-#81 entry can never actually be looked up this way in
-    practice, since its key no longer matches."""
+    contract for a genuinely warm pre-#81 cache. A REAL pre-#81 entry is
+    filed under format_version "1" and never reaches this code path
+    unlabeled: the #81 ladder rung either reconstructs its reason exactly or
+    discards it (see the scoped-invalidation section at the end of this
+    file)."""
     path = _simple_docx(tmp_path)
     cache_path = tmp_path / "extraction_cache.jsonl"
     cache = ExtractionCache(cache_path)
@@ -1616,89 +1617,279 @@ def test_extraction_cache_get_tolerates_pre_81_entry_without_reason_key(
     assert label.fallback_from is None
 
 
-def test_extraction_cache_format_version_bump_misses_pre_81_key(tmp_path: Path) -> None:
-    """A cache entry filed under the PRE-#81 format_version ("1") must MISS
-    under the current code (format_version "2") — the invalidation mechanism
-    that keeps config.extraction.max_fallback/corpus_manifest.json/review
-    flags from silently staying blind on any corpus ever extracted before
-    this fix (issue #81). Hardcodes "1" (rather than calling
-    _extraction_cache_payload, which would pick up today's real value)
-    specifically to simulate genuine on-disk pre-#81 state.
+# ---------------------------------------------------------------------------
+# Scoped cache-format invalidation — the format ladder
+# (playbook_engine.cache_format; see _EXTRACTION_CACHE_FORMAT_LADDER).
+#
+# A format bump used to be a bare number in the cache KEY, so bumping it
+# discarded the whole corpus cache — 1h45m-5h17m of re-extraction on the
+# reference corpus (44 documents / 161 versions) — regardless of how few
+# entries the change actually broke. The tests below pin the replacement:
+# entries are migrated (#81, representational) or invalidated by the specific
+# rung that broke them (#84, redline-DOCX-only), with the blunt full discard
+# kept as a declared, deliberate escape hatch.
+# ---------------------------------------------------------------------------
+
+
+def _fake_pdf(tmp_path: Path, name: str = "draft.pdf") -> Path:
+    """A file with a .pdf extension whose CONTENT is never read.
+
+    Every test below either hits the cache (extraction never runs) or asserts
+    that extraction was attempted; none needs a real PDF, and using a stub
+    keeps these tests free of the optional fpdf2 fixture dependency.
     """
+    path = tmp_path / name
+    path.write_bytes(b"%PDF-1.4 stub")
+    return path
+
+
+def _plant(
+    cache: ExtractionCache,
+    path: Path,
+    *,
+    format_version: str,
+    extractor_env: str,
+    value: dict,
+) -> None:
+    """File *value* under a hand-built cache key at an OLD *format_version*.
+
+    Hardcodes the key shape (rather than calling _extraction_cache_payload,
+    which would pick up today's version) specifically to simulate genuine
+    on-disk state written by an older release.
+    """
+    cache._store.put(
+        {
+            "file_sha256": extraction._sha256_file(path),
+            "format_version": format_version,
+            "extractor_env": extractor_env,
+        },
+        value,
+    )
+
+
+def _success(text: str, extractor: str, **extra: object) -> dict:
+    """A stored SUCCESS value in the on-disk shape (no per-block text — #67)."""
+    return {
+        "canonical_text": text,
+        "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, len(text)]}],
+        "extractor": extractor,
+        **extra,
+    }
+
+
+_PLANTED_TEXT = "Alpha Corp shall indemnify Beta Ltd for direct damages."
+
+
+# --- #81 rung: representational, therefore migrated -------------------------
+
+
+def test_pre_81_docling_entry_is_migrated_instead_of_re_extracted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-#81 entry whose stored extractor is "docling" carries exactly the
+    blocks today's code would produce for the same bytes; only the label's
+    SHAPE changed. It must be rewritten in place — no docling subprocess, no
+    re-extraction (issue #81's bump used to force one for every file in the
+    corpus, this entry included)."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling"),
+    )
+
+    monkeypatch.setattr(
+        extraction.shutil, "which", lambda cmd: "/usr/bin/docling" if cmd == "docling" else None
+    )
+
+    def _never(path: Path) -> list[tuple[str, int]]:
+        raise AssertionError("a migratable pre-#81 entry must not trigger re-extraction")
+
+    monkeypatch.setattr(extraction, "_extract_docling_lines", _never)
+
+    canonical_text, blocks, label = extract_blocks(path, cache=cache)
+
+    assert canonical_text == _PLANTED_TEXT
+    assert blocks[0].text == _PLANTED_TEXT
+    assert label == "docling"
+    assert label.reason is None, "docling ran clean — the one exactly-recoverable reason"
+    assert label.fallback_from is None
+    assert cache.migrated_count == 1
+    assert cache.invalidated_count == 0
+
+
+def test_migrated_entry_is_refiled_under_the_current_format(tmp_path: Path) -> None:
+    """Migration is paid once per entry, not once per lookup: the rewritten
+    value is stored under the CURRENT format key, so the next process (a fresh
+    ExtractionCache loading the same JSONL) hits it directly."""
     path = _simple_docx(tmp_path)
     cache_path = tmp_path / "extraction_cache.jsonl"
     cache = ExtractionCache(cache_path)
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling"),
+    )
 
+    assert cache.get(path, extractor="docling") is not None
+    assert cache.migrated_count == 1
+
+    reloaded = ExtractionCache(cache_path)
+    hit = reloaded.get(path, extractor="docling")
+    assert hit is not None
+    assert reloaded.migrated_count == 0, "the entry is already current — nothing left to migrate"
+
+    stored = [json.loads(line) for line in cache_path.read_text().splitlines()]
+    assert len(stored) == 2, "the migration appended one record; the stale one is superseded"
+    assert stored[-1]["verdict"]["reason"] is None
+    assert stored[-1]["verdict"]["fallback_from"] is None
+
+
+def test_pre_81_legacy_entry_under_docling_env_migrates_to_backend_error(
+    tmp_path: Path,
+) -> None:
+    """The reason for a pre-#81 LEGACY entry under a DOCLING environment is
+    exactly recoverable: legacy output can only exist under a docling
+    environment via a live per-file fallback. Migrating it to
+    "backend-error"/"docling" is strictly better than the old ``dict.get``
+    tolerance, which reloaded it as ``reason=None`` — the mislabel that made
+    max_fallback/corpus_manifest blind and motivated the bump."""
+    path = _fake_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "legacy"),
+    )
+
+    hit = cache.get(path, extractor="docling")
+
+    assert hit is not None
+    _, _, label = hit
+    assert label == "legacy"
+    assert label.reason == "backend-error"
+    assert label.fallback_from == "docling"
+
+
+def test_pre_81_legacy_env_reason_comes_from_the_declared_extractor(tmp_path: Path) -> None:
+    """Under a LEGACY environment docling was never attempted, so the reason is
+    "declared" or "env-missing" purely as a function of what the CURRENT run
+    declared — the same expression extract_blocks uses for a fresh extraction.
+    The caller supplies it, so the entry is migrated rather than discarded."""
+    path = _fake_pdf(tmp_path)
+
+    declared = ExtractionCache(tmp_path / "declared.jsonl")
+    _plant(
+        declared,
+        path,
+        format_version="1",
+        extractor_env="legacy",
+        value=_success(_PLANTED_TEXT, "legacy"),
+    )
+    hit = declared.get(path, extractor="legacy", declared_extractor="legacy")
+    assert hit is not None
+    assert hit[2].reason == "declared", "config asked for legacy — a choice, not a degradation"
+
+    auto = ExtractionCache(tmp_path / "auto.jsonl")
+    _plant(
+        auto,
+        path,
+        format_version="1",
+        extractor_env="legacy",
+        value=_success(_PLANTED_TEXT, "legacy"),
+    )
+    hit = auto.get(path, extractor="legacy", declared_extractor="auto")
+    assert hit is not None
+    assert hit[2].reason == "env-missing", "auto found no docling — a real degradation"
+    assert hit[2].fallback_from is None
+
+
+def test_pre_81_legacy_env_entry_is_invalidated_when_the_reason_is_undecidable(
+    tmp_path: Path,
+) -> None:
+    """Without a declared extractor to consult, a pre-#81 legacy-environment
+    entry could be either "declared" (never counts against
+    config.extraction.max_fallback) or "env-missing" (always does). That
+    difference drives a fail-loud budget gate, so the entry is DISCARDED
+    rather than labeled by guess — re-extraction costs minutes, a wrong label
+    silently poisons every downstream artifact (replaces the old
+    test_extraction_cache_format_version_bump_misses_pre_81_key, which asserted
+    the same outcome via the blanket bump)."""
+    path = _fake_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
     assert extraction._EXTRACTION_CACHE_FORMAT_VERSION != "1", (
         "this test's premise requires the current format version to have moved on from '1'"
     )
-
-    pre_81_key_payload = {
-        "file_sha256": extraction._sha256_file(path),
-        "format_version": "1",
-        "extractor_env": "legacy",
-    }
-    canonical_text = "Alpha Corp shall indemnify Beta Ltd for direct damages."
-    cache._store.put(
-        pre_81_key_payload,
-        {
-            "canonical_text": canonical_text,
-            "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, len(canonical_text)]}],
-            "extractor": "legacy",
-        },
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="legacy",
+        value=_success(_PLANTED_TEXT, "legacy"),
     )
 
-    # Same file, same extractor_env — differs ONLY in format_version — must
-    # be an unconditional miss under the real (bumped) key.
     assert cache.get(path, extractor="legacy") is None
+    assert cache.invalidated_count == 1
 
 
-def test_extraction_cache_format_version_bump_misses_pre_84_key(
+def test_pre_81_entry_with_unrecognised_extractor_is_invalidated(tmp_path: Path) -> None:
+    """A stored extractor that is neither "docling" nor "legacy" (a hand-edit,
+    a foreign writer) has no defensible label to migrate to."""
+    path = _fake_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "tesseract"),
+    )
+
+    assert cache.get(path, extractor="docling") is None
+    assert cache.invalidated_count == 1
+
+
+# --- #84 rung: semantic but narrow, therefore a predicate -------------------
+
+
+def test_84_rung_invalidates_the_redline_docx_fallback_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A cache entry filed under the PRE-#84 format_version ("2") for a
-    tracked-changes DOCX must MISS under the current code (format_version
-    "3") — proving the issue #84 fix (normalize-and-retry recovers docling
-    structure for redlines) actually reaches a corpus extracted before it
-    landed, instead of silently replaying the stale docling->legacy fallback
-    this exact file was cached under pre-fix.
+    """A pre-#84 entry for a tracked-changes DOCX that recorded a
+    docling->legacy fallback must be invalidated: #84 made that exact case
+    retry docling on a normalized copy, so the correct output for the same
+    bytes under the same environment genuinely changed. This is the one class
+    of entry the #84 bump HAD to discard — and now the only one it does.
 
     The planted entry mirrors real pre-#84 on-disk state: the KEY's
     ``extractor_env`` is "docling" (the environment the file was extracted
     UNDER, not the post-fallback adapter — see the pipeline.py comment added
     in d08b895), while the stored VALUE's ``extractor`` is "legacy" with
-    ``reason="backend-error"``/``fallback_from="docling"`` — exactly what a
-    live per-file docling crash on a redline produced before this fix.
-    Hardcodes "2" (rather than referencing _EXTRACTION_CACHE_FORMAT_VERSION,
-    which now reads "3") specifically to simulate genuine on-disk pre-#84
-    state — mirrors test_extraction_cache_format_version_bump_misses_pre_81_key's
-    pattern for the #81 bump.
+    ``reason="backend-error"``/``fallback_from="docling"``.
     """
     from tests.test_docx_ingester import _tracked_docx
 
     path = _tracked_docx(tmp_path)
-    cache_path = tmp_path / "extraction_cache.jsonl"
-    cache = ExtractionCache(cache_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
 
     assert extraction._EXTRACTION_CACHE_FORMAT_VERSION not in ("1", "2"), (
         "this test's premise requires the current format version to have moved on from '2'"
     )
 
     stale_text = "Party A shall provide services to client."
-    pre_84_key_payload = {
-        "file_sha256": extraction._sha256_file(path),
-        "format_version": "2",
-        "extractor_env": "docling",
-    }
-    cache._store.put(
-        pre_84_key_payload,
-        {
-            "canonical_text": stale_text,
-            "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, len(stale_text)]}],
-            "extractor": "legacy",
-            "reason": "backend-error",
-            "fallback_from": "docling",
-        },
+    _plant(
+        cache,
+        path,
+        format_version="2",
+        extractor_env="docling",
+        value=_success(stale_text, "legacy", reason="backend-error", fallback_from="docling"),
     )
 
     def fake_which(cmd: str) -> str | None:
@@ -1737,3 +1928,209 @@ def test_extraction_cache_format_version_bump_misses_pre_84_key(
     assert extractor.fallback_from is None
     assert "Obligations" in canonical_text
     assert blocks[0].text == "Obligations"
+    assert cache.invalidated_count == 1
+
+
+def test_84_rung_keeps_every_entry_the_normalized_retry_cannot_change(tmp_path: Path) -> None:
+    """The entries the #84 bump discarded for nothing. #84's retry is DOCX-only
+    and only fires when docling FAILED, so none of these could have changed —
+    each must survive the bump and hit."""
+    docx = _simple_docx(tmp_path)
+    pdf = _fake_pdf(tmp_path)
+
+    # A DOCX docling success: docling never failed, so the retry never ran.
+    docling_ok = ExtractionCache(tmp_path / "a.jsonl")
+    _plant(
+        docling_ok,
+        docx,
+        format_version="2",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling", reason=None, fallback_from=None),
+    )
+    hit = docling_ok.get(docx, extractor="docling")
+    assert hit is not None and hit[2].reason is None
+
+    # A DOCX under a declared-legacy environment: docling was never attempted.
+    declared = ExtractionCache(tmp_path / "b.jsonl")
+    _plant(
+        declared,
+        docx,
+        format_version="2",
+        extractor_env="legacy",
+        value=_success(_PLANTED_TEXT, "legacy", reason="declared", fallback_from=None),
+    )
+    hit = declared.get(docx, extractor="legacy")
+    assert hit is not None and hit[2].reason == "declared"
+
+    # A PDF that DID fall back on a docling failure: the normalize-and-retry
+    # is DOCX-only, so this entry's output is unchanged by #84.
+    pdf_fallback = ExtractionCache(tmp_path / "c.jsonl")
+    _plant(
+        pdf_fallback,
+        pdf,
+        format_version="2",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "legacy", reason="backend-error", fallback_from="docling"),
+    )
+    hit = pdf_fallback.get(pdf, extractor="docling")
+    assert hit is not None and hit[2].reason == "backend-error"
+
+    for cache in (docling_ok, declared, pdf_fallback):
+        assert cache.invalidated_count == 0
+        assert cache.migrated_count == 1, "carried forward from format 2 without re-extraction"
+
+
+def test_84_rung_invalidates_a_docx_legacy_entry_with_no_recorded_reason(tmp_path: Path) -> None:
+    """Undecidable is treated as affected. A format-2 DOCX entry labeled
+    "legacy" with no ``reason`` key cannot occur through put() or through the
+    #81 migration (both always record one), so it is a hand-edited or foreign
+    entry — exactly when guessing is least defensible."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _plant(
+        cache,
+        path,
+        format_version="2",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "legacy"),
+    )
+
+    assert cache.get(path, extractor="docling") is None
+    assert cache.invalidated_count == 1
+
+
+# --- Failure (negative-cache) entries follow the same ladder ---------------
+
+
+def test_pre_84_docx_failure_under_docling_is_retried_but_pdf_failure_is_kept(
+    tmp_path: Path,
+) -> None:
+    """A DOCX that negative-cached "no text" under a docling environment before
+    the normalize-and-retry existed must be retried (the retry may now yield
+    text). A PDF failure cannot be changed by a DOCX-only retry, so it keeps
+    its negative cache instead of re-burning the full docling/OCR timeout."""
+    docx = _simple_docx(tmp_path)
+    pdf = _fake_pdf(tmp_path)
+
+    docx_cache = ExtractionCache(tmp_path / "docx.jsonl")
+    _plant(
+        docx_cache,
+        docx,
+        format_version="2",
+        extractor_env="docling",
+        value={"error": "extraction yielded no text", "extractor": "docling"},
+    )
+    assert docx_cache.get_failure(docx, extractor="docling") is None
+    assert docx_cache.invalidated_count == 1
+
+    pdf_cache = ExtractionCache(tmp_path / "pdf.jsonl")
+    _plant(
+        pdf_cache,
+        pdf,
+        format_version="2",
+        extractor_env="docling",
+        value={"error": "extraction yielded no text", "extractor": "docling"},
+    )
+    assert pdf_cache.get_failure(pdf, extractor="docling") == "extraction yielded no text"
+    assert pdf_cache.invalidated_count == 0
+
+
+def test_pre_81_failure_entry_migrates_unchanged(tmp_path: Path) -> None:
+    """Failure entries never carried reason/fallback_from in either format, so
+    the #81 rung passes them through — a pre-#81 negative cache for a PDF is
+    still honored instead of costing a fresh (and still fruitless) OCR pass."""
+    pdf = _fake_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    _plant(
+        cache,
+        pdf,
+        format_version="1",
+        extractor_env="docling",
+        value={"error": "extraction yielded no text", "extractor": "docling"},
+    )
+
+    assert cache.get_failure(pdf, extractor="docling") == "extraction yielded no text"
+    assert cache.get(pdf, extractor="docling") is None, "a failure entry is not a success hit"
+
+
+# --- Mechanism-level guarantees --------------------------------------------
+
+
+def test_warm_current_format_hit_never_probes_stale_versions(tmp_path: Path) -> None:
+    """The hot path pays nothing for the ladder: an entry already at the
+    current format costs exactly one store lookup, as before."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    cache.put(path, _PLANTED_TEXT, [], "docling", environment="docling")
+
+    lookups: list[dict] = []
+    real_get = cache._store.get
+
+    def counting_get(payload: dict) -> dict | None:
+        lookups.append(payload)
+        return real_get(payload)
+
+    cache._store.get = counting_get  # type: ignore[method-assign]
+    assert cache.get(path, extractor="docling") is not None
+    assert len(lookups) == 1
+    assert lookups[0]["format_version"] == extraction._EXTRACTION_CACHE_FORMAT_VERSION
+
+
+def test_migration_can_be_disabled(tmp_path: Path) -> None:
+    """``migrate=False`` restores the pre-ladder behavior — an older-format
+    entry is simply invisible — for a caller that wants a provably cold read."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl", migrate=False)
+    _plant(
+        cache,
+        path,
+        format_version="1",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling"),
+    )
+
+    assert cache.get(path, extractor="docling") is None
+    assert cache.migrated_count == 0
+    assert cache.invalidated_count == 0
+
+
+def test_a_discard_all_rung_still_invalidates_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The blunt option survives as a declared escape hatch: a hypothetical
+    future rung that genuinely invalidates every entry discards even a
+    perfectly-shaped current-format entry."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    cache.put(path, _PLANTED_TEXT, [], "docling", environment="docling")
+    assert cache.get(path, extractor="docling") is not None
+
+    superseded = extraction._EXTRACTION_CACHE_FORMAT_VERSION
+    monkeypatch.setattr(
+        extraction,
+        "_EXTRACTION_CACHE_FORMAT_LADDER",
+        (
+            *extraction._EXTRACTION_CACHE_FORMAT_LADDER,
+            extraction.CacheFormatStep(
+                version="4",
+                issue="#999",
+                summary="hypothetical change that no predicate can scope",
+                discard_all=True,
+            ),
+        ),
+    )
+    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_FORMAT_VERSION", "4")
+    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_STALE_VERSIONS", (superseded, "2", "1"))
+
+    fresh = ExtractionCache(tmp_path / "extraction_cache.jsonl")
+    assert fresh.get(path, extractor="docling") is None
+    assert fresh.invalidated_count == 1
+
+
+def test_format_version_constant_tracks_the_ladder_head() -> None:
+    """The constant is derived, not maintained — a new rung IS the bump."""
+    assert (
+        extraction._EXTRACTION_CACHE_FORMAT_LADDER[-1].version
+        == extraction._EXTRACTION_CACHE_FORMAT_VERSION
+    )
+    assert extraction._EXTRACTION_CACHE_STALE_VERSIONS == ("2", "1")
