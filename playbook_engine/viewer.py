@@ -161,6 +161,7 @@ from playbook_engine.opf_accessors import (
     playbook_clauses,
 )
 from playbook_engine.playbook_assembler import write_playbook
+from playbook_engine.rubric import RubricStamp, rubric_version
 
 _log = logging.getLogger(__name__)
 
@@ -1560,13 +1561,21 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
     if verdict_entries:
         verdicts_path = out_dir / "judge" / "verdicts.jsonl"
         store = VerdictStore(verdicts_path)
+        # Stamp the reviewer's correction with the classification rubric in
+        # force, derived from the taxonomy embedded in playbook.opf.json —
+        # the same id/label/description surface the mining path digests from
+        # the YAML, so a correction lands as `current`, not already-stale.
+        classify_stamp = RubricStamp(
+            kind="classify",
+            version=rubric_version("classify", taxonomy=doc.get("taxonomy", {})),
+        )
         seen_sigs: set[str] = set()
         for judge_payload, verdict in verdict_entries:
             sig = json.dumps(judge_payload, sort_keys=True, ensure_ascii=False)
             if sig in seen_sigs:
                 continue
             seen_sigs.add(sig)
-            store.put(judge_payload, verdict)
+            store.put(judge_payload, verdict, rubric=classify_stamp)
         result.verdicts_written = len(seen_sigs)
 
     # Write notes

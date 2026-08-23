@@ -159,7 +159,7 @@ class TestVerdictStore:
         path = tmp_path / "v.jsonl"
         path.write_text('{"key":"k1","verdict":{"r":1}}\nNOT-JSON\n', encoding="utf-8")
         store = VerdictStore(path)
-        assert store._store.get("k1") == {"r": 1}
+        assert store.get_by_key("k1") == {"r": 1}
 
     def test_overwrite_updates_in_memory(self, tmp_path: Path) -> None:
         """Subsequent put for the same payload updates the in-memory view."""
