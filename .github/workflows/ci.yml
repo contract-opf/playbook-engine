@@ -6,6 +6,41 @@ on:
   pull_request:
 
 jobs:
+  # Fast fail-first gate over the synthetic canary corpus (examples/canary/).
+  #
+  # Exists because of the 2026-08-22 production incident: docling silently
+  # disappeared from the host venv, extraction fell back to the legacy
+  # adapter, the extraction cache key (extractor_env, issue #77) changed, the
+  # canonical text changed with it, the segmentation cache missed, and 43 of
+  # 44 documents quarantined as AgentSegmentationPending. The engine reported
+  # a segmentation problem two layers above the actual fault, and NOTHING in
+  # CI caught it. This job asserts the extractor environment a run resolves
+  # to, that a warm-cache replay re-runs with zero re-extraction and zero
+  # quarantine, and that observation/round-move counts match committed values.
+  #
+  # Deliberately installs NO system packages: the canary corpus is DOCX only
+  # and its config pins extraction.extractor: legacy, so it needs neither
+  # pandoc nor docling. If this job ever starts needing one, the canary has
+  # stopped being hermetic — which is itself worth failing over.
+  #
+  # Its tests also run inside the full `pytest` below; this job exists to put
+  # the answer seconds into the run rather than minutes, on the earliest
+  # supported Python only.
+  canary:
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Canary corpus (extractor identity, warm replay, derivation counts)
+        run: pytest tests/test_canary_corpus.py -q -m smoke
+
   lint-and-test:
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     strategy:
