@@ -1,4 +1,4 @@
-.PHONY: install lint fmt typecheck test smoke-nda all hooks docker-build docker-run
+.PHONY: install lint fmt typecheck test smoke-nda smoke-canary smoke all hooks docker-build docker-run
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -32,6 +32,25 @@ test:
 # tests/test_nda_smoke.py.
 smoke-nda:
 	$(RUN)/pytest tests/test_nda_smoke.py -q -m smoke
+
+# Canary corpus gate: the 2026-08-22 incident (docling silently missing ->
+# extraction fell back to legacy -> extraction cache key changed -> canonical
+# text changed -> segmentation cache missed -> 43/44 documents quarantined as
+# AgentSegmentationPending) turned red in seconds instead of not at all.
+#
+# SIBLING of smoke-nda, not a replacement. smoke-nda runs COLD on the
+# deterministic ingest path, which never calls playbook_engine.extraction at
+# all and therefore cannot exercise either the extractor environment or the
+# extraction cache. This target covers exactly that gap: extractor identity,
+# a warm-cache replay with zero re-extraction and zero quarantine, and
+# committed derivation counts. Hermetic and keyless (DOCX only -- no pandoc,
+# no docling, no ANTHROPIC_API_KEY). See examples/canary/README.md and
+# tests/test_canary_corpus.py.
+smoke-canary:
+	$(RUN)/pytest tests/test_canary_corpus.py -q -m smoke
+
+# Both hermetic, keyless smoke gates.
+smoke: smoke-nda smoke-canary
 
 all: lint fmt-check typecheck test
 

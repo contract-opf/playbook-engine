@@ -1,0 +1,29 @@
+{
+  "corpus_sha256": {
+    "halcyon-freight/v1.docx": "348adf9040c3d22a915a7a7ba24b95ead14a72f636e1c97797fe6e10cc2cf1b1",
+    "halcyon-freight/v2.docx": "c7a533e22f123ef85489453534160e319c05dfe2568d5d63435d26b509325a71",
+    "meridian-assay/v1.docx": "3c605ab128abf3ee74582e1d0abb393d544001982527df0e9559a763ab6528b6",
+    "meridian-assay/v2.docx": "2554cefde81dcb768e552158a2b81c91aa77d5170ed8602ea31c601c62ee41b9"
+  },
+  "documents": 2,
+  "extractor_env": [
+    "legacy"
+  ],
+  "extractor_reason": [
+    "declared"
+  ],
+  "observations": 21,
+  "observations_by_document": {
+    "halcyon-freight": 10,
+    "meridian-assay": 11
+  },
+  "playbook_clauses": 10,
+  "quarantined": 0,
+  "round_moves": 7,
+  "round_moves_by_moved_by": {
+    "unknown": 5,
+    "us": 2
+  },
+  "versions": 4,
+  "versions_failed": 0
+}
