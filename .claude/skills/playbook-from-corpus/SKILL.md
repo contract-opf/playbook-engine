@@ -659,6 +659,15 @@ REFERENCE.md for the exact enums); `judge-apply` also rejects those verdicts
 up front with a line number. A queue that will not drain is a malformed-
 verdict bug, never something to wait out.
 
+**Rubric staleness:** `playbook judge` also reports stored verdicts whose
+rubric no longer matches the one in force ("N stored verdicts were made under
+an older rubric") and stored verdicts carrying no rubric version at all. The
+first group is re-queued and must be re-judged; the second is the
+pre-versioning bank — replayed, but its validity is unknown until adopted
+with `playbook judge-migrate`. Neither is a malformed-verdict loop, and both
+are expected to grow the queue on the round after a taxonomy or rubric edit.
+See REFERENCE.md § "Rubric versions".
+
 ### Step 7 — Project the playbook
 
 Once `pending.jsonl` is empty:

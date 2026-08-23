@@ -14,11 +14,14 @@ Components:
 - ``VerdictStore`` — persistent JSONL keyed by a stable SHA-256 content hash
   of the full payload.  Mirrors the style of ``JudgmentCache`` in
   ``judgment.py`` but in its own namespace and without text truncation.
-  Default file: ``<out>/judge/verdicts.jsonl``.
+  Default file: ``<out>/judge/verdicts.jsonl``.  Each record also carries the
+  **rubric stamp** the verdict was produced under (optional on read — absent
+  on records banked before rubric versioning existed).
 
 - ``PendingQueue`` — appends unique full payloads (deduplicated by key) to
   ``<out>/judge/pending.jsonl``.  Each record carries the payload key, the
-  judge kind, and the full payload dict.
+  judge kind, the full payload dict, and the rubric version in force when
+  the item was queued.
 
 - ``StoreBackedClassificationJudge`` — implements ``ClassificationJudge``.
 - ``StoreBackedDeviationJudge``      — implements ``DeviationJudge``.
@@ -28,6 +31,15 @@ Components:
 These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, deviation_judge=…,
 provenance_judge=…)``.
+
+Rubric versioning (see :mod:`playbook_engine.rubric`): because the store key
+is purely content-derived, a change to the *judging criteria* — the taxonomy,
+the deviation vocabulary, the prose rubric in the ``playbook-from-corpus``
+skill — would otherwise replay every banked verdict forever, since the clause
+text never moved.  Each store hit is therefore checked against the rubric
+currently in force: ``current`` replays, ``stale`` re-queues, and ``legacy``
+(unstamped) replays but is counted and reported.  ``RubricPolicy`` carries
+both the policy knobs and the run tally the CLI reports from.
 
 Note on ``StoreBackedScopeJudge`` (issue #87): unlike the other three,
 ``ScopeJudge.judge()`` may only return ``ScopeDecision(basis="judge")`` —
@@ -57,6 +69,7 @@ from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.provenance_detector import ProvenanceResult
+from playbook_engine.rubric import RubricPolicy, RubricStamp, rubric_version
 from playbook_engine.scope_gate import ScopeDecision
 
 _log = logging.getLogger(__name__)
@@ -77,8 +90,16 @@ def _payload_key(payload: Any) -> str:
     """SHA-256 of the JSON-serialised payload.
 
     Unlike ``judgment._payload_key``, this function does NOT include a
-    ``model_id`` component — the store-backed judges are keyed purely by
-    content, and the external verdict-supplier is responsible for versioning.
+    ``model_id`` component, and it deliberately does NOT include the rubric
+    version either: the key stays purely content-derived so that cross-
+    document dedup of identical clause text keeps working and so that a
+    rubric bump does not silently orphan the entire banked verdict store
+    (a key that never matches again is indistinguishable from an empty
+    store). Rubric identity is carried *beside* the verdict instead — see
+    :class:`~playbook_engine.rubric.RubricStamp` and
+    :class:`~playbook_engine.rubric.RubricPolicy` — so a bump is a counted,
+    reported, reversible event rather than a vanishing act.
+
     Also unlike the judgment cache, text is NOT truncated: the full payload
     is hashed to prevent false collisions across clauses that share a long
     prefix but differ later.
@@ -92,21 +113,49 @@ def _payload_key(payload: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class StoredVerdict:
+    """One record read back out of a :class:`VerdictStore`.
+
+    ``rubric`` is ``None`` for every record written before rubric versioning
+    existed (the "legacy" state) — see :mod:`playbook_engine.rubric`.
+    """
+
+    verdict: dict[str, Any]
+    rubric: RubricStamp | None = None
+
+    @property
+    def rubric_version(self) -> str | None:
+        return self.rubric.version if self.rubric else None
+
+    @property
+    def rubric_kind(self) -> str | None:
+        return self.rubric.kind if self.rubric else None
+
+
 class VerdictStore:
-    """Persistent JSONL store: content hash → verdict dict.
+    """Persistent JSONL store: content hash → verdict dict (+ rubric stamp).
 
-    Each record: ``{"key": "<sha256>", "verdict": {…}}``.
+    Each record: ``{"key": "<sha256>", "verdict": {…}, "rubric": {"kind": …,
+    "version": …}}``. The ``rubric`` member is optional on read — records
+    written before rubric versioning carry no stamp and load as
+    ``StoredVerdict(rubric=None)``, so an existing store keeps working
+    untouched and no banked judgment is discarded on upgrade.
 
-    ``get(payload) -> dict | None``  — return stored verdict dict or None.
-    ``put(payload, verdict)``        — append new verdict; update in-memory.
+    ``get(payload) -> dict | None``       — stored verdict dict, or None.
+    ``get_record(payload)``               — verdict + rubric stamp, or None.
+    ``put(payload, verdict, rubric=…)``   — append; update in-memory.
 
     Load-on-init: reads the JSONL file into memory on construction.
     Corrupt lines are silently skipped (same contract as ``JudgmentCache``).
+    Later lines for the same key win, which is what makes ``restamp`` an
+    append rather than a rewrite: the original record stays on disk as an
+    audit trail of what the verdict was banked under.
     """
 
     def __init__(self, store_path: Path) -> None:
         self._store_path = store_path
-        self._store: dict[str, Any] = {}  # key -> verdict dict
+        self._store: dict[str, StoredVerdict] = {}  # key -> record
         self._load()
 
     # ------------------------------------------------------------------
@@ -115,14 +164,18 @@ class VerdictStore:
 
     def get(self, payload: Any) -> dict[str, Any] | None:
         """Return the stored verdict dict for *payload*, or ``None`` on miss."""
-        key = _payload_key(payload)
-        return self._store.get(key)
+        record = self._store.get(_payload_key(payload))
+        return record.verdict if record is not None else None
 
-    def put(self, payload: Any, verdict: dict[str, Any]) -> None:
+    def get_record(self, payload: Any) -> StoredVerdict | None:
+        """Return the full stored record (verdict + rubric stamp), or ``None``."""
+        return self._store.get(_payload_key(payload))
+
+    def put(
+        self, payload: Any, verdict: dict[str, Any], *, rubric: RubricStamp | None = None
+    ) -> None:
         """Store *verdict* for *payload* (JSON-serialisable dicts required)."""
-        key = _payload_key(payload)
-        self._store[key] = verdict
-        self._append(key, verdict)
+        self.put_by_key(_payload_key(payload), verdict, rubric=rubric)
 
     def get_by_key(self, key: str) -> dict[str, Any] | None:
         """Return the stored verdict dict for a pre-computed *key*, or ``None``.
@@ -130,9 +183,16 @@ class VerdictStore:
         Counterpart of ``put_by_key`` — used by ``playbook judge`` to detect
         pending items that are re-queues of stored-but-malformed verdicts.
         """
+        record = self._store.get(key)
+        return record.verdict if record is not None else None
+
+    def get_record_by_key(self, key: str) -> StoredVerdict | None:
+        """Return the full stored record for a pre-computed *key*, or ``None``."""
         return self._store.get(key)
 
-    def put_by_key(self, key: str, verdict: dict[str, Any]) -> None:
+    def put_by_key(
+        self, key: str, verdict: dict[str, Any], *, rubric: RubricStamp | None = None
+    ) -> None:
         """Store *verdict* directly by its pre-computed *key*.
 
         Used by ``playbook judge-apply`` to import verdicts whose keys were
@@ -142,9 +202,36 @@ class VerdictStore:
         Args:
             key:     SHA-256 hex string (as produced by ``_payload_key``).
             verdict: JSON-serialisable verdict dict.
+            rubric:  Rubric the verdict was produced under. ``None`` records
+                     the verdict unstamped (legacy) — reported on every
+                     subsequent judge run until migrated.
         """
-        self._store[key] = verdict
-        self._append(key, verdict)
+        self._store[key] = StoredVerdict(verdict=verdict, rubric=rubric)
+        self._append(key, verdict, rubric)
+
+    def restamp(self, key: str, rubric: RubricStamp) -> bool:
+        """Re-stamp an existing verdict with *rubric*, keeping the verdict.
+
+        The migration primitive behind ``playbook judge-migrate``: it banks
+        an operator's explicit decision that a stored judgment still stands
+        under the named rubric. Implemented as an append (last line wins on
+        load), so the prior stamp — or its absence — remains on disk.
+
+        Returns:
+            ``True`` if the key existed and was re-stamped, ``False`` otherwise.
+        """
+        record = self._store.get(key)
+        if record is None:
+            return False
+        self.put_by_key(key, record.verdict, rubric=rubric)
+        return True
+
+    def records(self) -> list[tuple[str, StoredVerdict]]:
+        """Return ``(key, record)`` for every stored verdict, key-sorted."""
+        return sorted(self._store.items())
+
+    def __len__(self) -> int:
+        return len(self._store)
 
     # ------------------------------------------------------------------
     # Internal
@@ -161,16 +248,22 @@ class VerdictStore:
                     continue
                 try:
                     entry = json.loads(line)
-                    self._store[entry["key"]] = entry["verdict"]
+                    self._store[entry["key"]] = StoredVerdict(
+                        verdict=entry["verdict"],
+                        rubric=RubricStamp.from_dict(entry.get("rubric")),
+                    )
                 except Exception:  # noqa: BLE001
                     pass  # corrupt line — skip; do not crash startup
         except Exception:  # noqa: BLE001
             pass  # unreadable file — start with empty store
 
-    def _append(self, key: str, verdict: dict[str, Any]) -> None:
+    def _append(self, key: str, verdict: dict[str, Any], rubric: RubricStamp | None) -> None:
         """Append a single entry to the JSONL file."""
         self._store_path.parent.mkdir(parents=True, exist_ok=True)
-        entry = json.dumps({"key": key, "verdict": verdict}, ensure_ascii=False) + "\n"
+        record: dict[str, Any] = {"key": key, "verdict": verdict}
+        if rubric is not None:
+            record["rubric"] = rubric.to_dict()
+        entry = json.dumps(record, ensure_ascii=False) + "\n"
         with self._store_path.open("a", encoding="utf-8") as fh:
             fh.write(entry)
 
@@ -197,13 +290,20 @@ class PendingQueue:
         self._queue_path = queue_path
         self._seen_keys: set[str] = set()
 
-    def add(self, key: str, kind: str, payload: Any) -> bool:
+    def add(self, key: str, kind: str, payload: Any, rubric_version: str | None = None) -> bool:
         """Append *payload* to the queue if *key* has not been seen before.
 
         Args:
-            key:     Content hash from ``_payload_key(payload)``.
-            kind:    One of ``"classify"``, ``"deviation"``, ``"provenance"``.
-            payload: The full, untruncated judge payload dict.
+            key:            Content hash from ``_payload_key(payload)``.
+            kind:           One of ``"classify"``, ``"deviation"``,
+                            ``"provenance"``, ``"scope"``, ``"segment"``.
+            payload:        The full, untruncated judge payload dict.
+            rubric_version: Rubric in force when this item was queued. Written
+                            to the record so ``playbook judge-apply`` can stamp
+                            the returned verdict with the rubric the question
+                            was actually asked under — without needing to
+                            re-derive it (and without needing the config at
+                            apply time).
 
         Returns:
             ``True`` if a new entry was written; ``False`` if *key* was already
@@ -212,15 +312,16 @@ class PendingQueue:
         if key in self._seen_keys:
             return False
         self._seen_keys.add(key)
-        self._append(key, kind, payload)
+        self._append(key, kind, payload, rubric_version)
         return True
 
-    def _append(self, key: str, kind: str, payload: Any) -> None:
+    def _append(self, key: str, kind: str, payload: Any, rubric_version: str | None = None) -> None:
         """Write a single record to the JSONL file."""
         self._queue_path.parent.mkdir(parents=True, exist_ok=True)
-        record = (
-            json.dumps({"key": key, "kind": kind, "payload": payload}, ensure_ascii=False) + "\n"
-        )
+        entry: dict[str, Any] = {"key": key, "kind": kind, "payload": payload}
+        if rubric_version is not None:
+            entry["rubric_version"] = rubric_version
+        record = json.dumps(entry, ensure_ascii=False) + "\n"
         with self._queue_path.open("a", encoding="utf-8") as fh:
             fh.write(record)
 
@@ -413,6 +514,9 @@ class StoreBackedClassificationJudge:
 
     store: VerdictStore
     pending: PendingQueue
+    #: Staleness policy + shared run tally (see :mod:`playbook_engine.rubric`).
+    #: The default instance replays legacy verdicts and re-queues stale ones.
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
     _seen_keys: set[str] = field(default_factory=set, init=False, repr=False)
 
     def classify_batch(
@@ -432,6 +536,11 @@ class StoreBackedClassificationJudge:
             One ``ClauseClassification`` per node in the same order.
         """
         tax_labels = sorted(e.id for e in taxonomy.entries) if hasattr(taxonomy, "entries") else []
+        # Computed once per batch from the taxonomy actually in force, so an
+        # edit to spec/taxonomy/*.yaml (a re-worded label or description that
+        # leaves the id set — and therefore the payload key — untouched)
+        # invalidates the classify verdicts it should.
+        current_rubric = rubric_version("classify", taxonomy=taxonomy)
 
         results: list[ClauseClassification] = []
         for node in nodes:
@@ -444,7 +553,20 @@ class StoreBackedClassificationJudge:
             }
             key = _payload_key(payload)
 
-            cached = self.store.get(payload)
+            record = self.store.get_record(payload)
+            if (
+                record is not None
+                and not self.rubric.evaluate(
+                    "classify", record.rubric_version, current_rubric
+                ).replay
+            ):
+                # Stored under a rubric that has since moved (or unstamped
+                # under --strict-rubric): the banked answer is an answer to a
+                # different question. Re-queue instead of replaying silently.
+                self.pending.add(key, "classify", payload, current_rubric)
+                results.append(_classification_needs_review())
+                continue
+            cached = record.verdict if record is not None else None
             if cached is not None:
                 try:
                     results.append(
@@ -466,11 +588,11 @@ class StoreBackedClassificationJudge:
                         key,
                         exc,
                     )
-                    self.pending.add(key, "classify", payload)
+                    self.pending.add(key, "classify", payload, current_rubric)
                     results.append(_classification_needs_review())
             else:
                 # Queue for external verdict (deduplicated by key).
-                self.pending.add(key, "classify", payload)
+                self.pending.add(key, "classify", payload, current_rubric)
                 results.append(_classification_needs_review())
 
         return results
@@ -512,6 +634,8 @@ class StoreBackedDeviationJudge:
 
     store: VerdictStore
     pending: PendingQueue
+    #: See ``StoreBackedClassificationJudge.rubric``.
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
 
     def assess_batch(
         self,
@@ -530,6 +654,7 @@ class StoreBackedDeviationJudge:
         Returns:
             One ``DeviationResult`` per item in the same order.
         """
+        current_rubric = rubric_version("deviation")
         results: list[DeviationResult] = []
         for item in items:
             # Full hunk + full our_standard — NOT truncated (contrast with
@@ -542,7 +667,29 @@ class StoreBackedDeviationJudge:
             }
             key = _payload_key(hash_payload)
 
-            cached = self.store.get(hash_payload)
+            record = self.store.get_record(hash_payload)
+            if (
+                record is not None
+                and not self.rubric.evaluate(
+                    "deviation", record.rubric_version, current_rubric
+                ).replay
+            ):
+                # Rubric moved under this verdict — re-queue with the same
+                # traceability context the miss path records.
+                self.pending.add(
+                    key,
+                    "deviation",
+                    {
+                        **hash_payload,
+                        "taxonomy_id": item.get("taxonomy_id", ""),
+                        "clause_path": item.get("clause_path", ""),
+                        "document_id": item.get("document_id", ""),
+                    },
+                    current_rubric,
+                )
+                results.append(_deviation_needs_review())
+                continue
+            cached = record.verdict if record is not None else None
             if cached is not None:
                 # Reconstruct per-item defensively (issue #182): a single
                 # malformed stored verdict (e.g. a RiskDelta invariant
@@ -584,6 +731,7 @@ class StoreBackedDeviationJudge:
                             "clause_path": item.get("clause_path", ""),
                             "document_id": item.get("document_id", ""),
                         },
+                        current_rubric,
                     )
                     results.append(_deviation_needs_review())
             else:
@@ -596,7 +744,7 @@ class StoreBackedDeviationJudge:
                     "clause_path": item.get("clause_path", ""),
                     "document_id": item.get("document_id", ""),
                 }
-                self.pending.add(key, "deviation", full_payload)
+                self.pending.add(key, "deviation", full_payload, current_rubric)
                 results.append(_deviation_needs_review())
 
         return results
@@ -627,6 +775,10 @@ class StoreBackedProvenanceJudge:
 
     store: VerdictStore
     pending: PendingQueue
+    #: See ``StoreBackedClassificationJudge.rubric``. Provenance has no
+    #: derived input at this seam (``our_party_aliases`` never reaches the
+    #: ``ProvenanceJudge`` protocol), so only the manual half moves.
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
 
     def judge(
         self,
@@ -653,7 +805,16 @@ class StoreBackedProvenanceJudge:
         }
         key = _payload_key(payload)
 
-        cached = self.store.get(payload)
+        current_rubric = rubric_version("provenance")
+
+        record = self.store.get_record(payload)
+        if (
+            record is not None
+            and not self.rubric.evaluate("provenance", record.rubric_version, current_rubric).replay
+        ):
+            self.pending.add(key, "provenance", payload, current_rubric)
+            return _provenance_needs_review()
+        cached = record.verdict if record is not None else None
         if cached is not None:
             try:
                 return ProvenanceResult(
@@ -670,9 +831,9 @@ class StoreBackedProvenanceJudge:
                     key,
                     exc,
                 )
-                self.pending.add(key, "provenance", payload)
+                self.pending.add(key, "provenance", payload, current_rubric)
                 return _provenance_needs_review()
-        self.pending.add(key, "provenance", payload)
+        self.pending.add(key, "provenance", payload, current_rubric)
         return _provenance_needs_review()
 
 
@@ -722,6 +883,10 @@ class StoreBackedScopeJudge:
 
     store: VerdictStore
     pending: PendingQueue
+    #: See ``StoreBackedClassificationJudge.rubric``. The scope rubric's
+    #: derived half is the agreement-type definition being gated on, so
+    #: editing its description/aliases in the config re-queues scope verdicts.
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
 
     def judge(
         self,
@@ -749,7 +914,19 @@ class StoreBackedScopeJudge:
         }
         key = _payload_key(payload)
 
-        cached = self.store.get(payload)
+        current_rubric = rubric_version("scope", agreement_type=agreement_type)
+
+        record = self.store.get_record(payload)
+        if (
+            record is not None
+            and not self.rubric.evaluate("scope", record.rubric_version, current_rubric).replay
+        ):
+            self.pending.add(key, "scope", payload, current_rubric)
+            raise ScopeNeedsReviewError(
+                f"Stored scope verdict for document {tree.document_id!r} was made "
+                "under an older rubric — re-queued for re-judgement."
+            )
+        cached = record.verdict if record is not None else None
         if cached is not None:
             try:
                 return ScopeDecision(
@@ -771,13 +948,13 @@ class StoreBackedScopeJudge:
                     key,
                     exc,
                 )
-                self.pending.add(key, "scope", payload)
+                self.pending.add(key, "scope", payload, current_rubric)
                 raise ScopeNeedsReviewError(
                     f"Malformed stored scope verdict for document {tree.document_id!r} — "
                     "re-queued for external review."
                 ) from exc
 
-        self.pending.add(key, "scope", payload)
+        self.pending.add(key, "scope", payload, current_rubric)
         raise ScopeNeedsReviewError(
             f"No stored scope verdict for document {tree.document_id!r} — "
             "queued for external review."
