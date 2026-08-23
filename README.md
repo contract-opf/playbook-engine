@@ -165,10 +165,10 @@ Two supported runtimes — pick Docker unless you're developing:
 | **Local venv** | Legacy per-format adapters (`pdfplumber`, `python-docx`, `pandoc`) — no OCR | Development, tests, born-digital corpora |
 
 ```sh
-# Docker
-docker build -t playbook-engine .
-docker run --rm -it -v "$CORPUS":/work/corpus:ro -v "$OUT":/work/out \
-  -e ANTHROPIC_API_KEY playbook-engine lint-corpus /work/corpus
+# Docker — build and run through make, so the image is stamped with the engine
+# version it contains and checked against this checkout before each run
+make docker-build
+make docker-run CORPUS="$CORPUS" OUT="$OUT" ARGS="lint-corpus /work/corpus"
 
 # Local venv (Python 3.11+; needs pandoc for the RTF path)
 brew install pandoc   # macOS — Debian/Ubuntu: apt-get install -y pandoc
@@ -181,7 +181,41 @@ never survives a move between machines. Rebuild it any time with the two
 commands above; `make all` verifies the result.
 
 `make docker-build` / `make docker-run` wrap the Docker path; the
-extraction stack is a property of how you installed, not a flag.
+extraction stack is a property of how you installed, not a flag. They expand to
+the plain forms below — but the `make` targets are what stamp the image and
+compare it to your checkout, so a raw `docker build` / `docker run` gives up
+the staleness check:
+
+```sh
+docker build -t playbook-engine .        # unstamped — make docker-run will reject it
+docker run --rm -i -v "$CORPUS":/work/corpus:ro -v "$OUT":/work/out \
+  -e ANTHROPIC_API_KEY playbook-engine lint-corpus /work/corpus
+```
+
+### Confirming the environment
+
+`playbook doctor` reports what the machine actually provides — engine version,
+whether you are inside the project's image and which commit it was built from,
+and every external tool the pipeline can shell out to, with what each missing
+one costs you. It needs no corpus and no config, so it can be the first thing
+you run:
+
+```sh
+playbook doctor          # or: make docker-run ARGS="doctor"
+playbook doctor --strict # non-zero if anything is missing — for setup scripts and CI
+```
+
+Two guards run without being asked:
+
+- **`make docker-run` refuses a stale image.** It compares the image's stamped
+  engine version against the source checkout and stops if they differ, because
+  a stale image otherwise produces a derivation missing exactly the fixes the
+  run was performed to apply — and it looks like a success. Rebuild with
+  `make docker-build`, or set `ALLOW_STALE_IMAGE=1` to run the old image on
+  purpose.
+- **`playbook mine` and `playbook segment` run the `lint-corpus` checks first**
+  and refuse to start if any fail, so an ad-hoc invocation cannot skip the
+  preflight. `--skip-preflight` opts out.
 
 ## Repository layout
 

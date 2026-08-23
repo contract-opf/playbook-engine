@@ -110,11 +110,19 @@ class TestStageFlat:
         stage(src, tmp_path / "out")
         assert (tmp_path / "out").is_dir()
 
-    def test_symlinks_created(self, tmp_path: Path) -> None:
+    def test_version_file_placed(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         (src / "deal-a").mkdir(parents=True)
         _write_rtf(src / "deal-a" / "v1.rtf")
         stage(src, tmp_path / "out")
+        placed = [p for p in (tmp_path / "out" / "deal-a").iterdir() if p.name != "hints.yaml"]
+        assert len(placed) == 1
+
+    def test_symlinks_created_when_requested(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf")
+        stage(src, tmp_path / "out", copy_files=False)
         links = list((tmp_path / "out" / "deal-a").iterdir())
         symlinks = [p for p in links if p.is_symlink()]
         assert len(symlinks) == 1
@@ -590,16 +598,41 @@ class TestStageManifest:
 
 
 class TestStageCopyFiles:
-    """``copy_files=True`` writes real file copies instead of absolute
-    symlinks, so the staged tree survives crossing a filesystem boundary
-    (e.g. staged on the host, then bind-mounted read-only into a container).
+    """``copy_files=True`` — now the DEFAULT — writes real file copies instead
+    of absolute symlinks, so the staged tree survives crossing a filesystem
+    boundary (e.g. staged on the host, then bind-mounted read-only into a
+    container).
+
+    The default flipped because the failure mode of symlink staging is silent:
+    absolute symlinks dangle inside the container, dangling symlinks are
+    invisible to ``Path.is_file()``, and the documented Docker-first workflow
+    therefore reported "no supported files found" for a fully staged corpus.
     """
 
-    def test_default_still_symlinks(self, tmp_path: Path) -> None:
+    def test_default_is_real_copies(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         (src / "deal-a").mkdir(parents=True)
         _write_rtf(src / "deal-a" / "v1.rtf")
         stage(src, tmp_path / "out")
+        staged_file = next((tmp_path / "out" / "deal-a").glob("01__*"))
+        assert not staged_file.is_symlink()
+
+    def test_default_output_survives_source_removal(self, tmp_path: Path) -> None:
+        """The default staged tree must be self-contained — this is the
+        property the read-only container mount depends on."""
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf", text="self contained")
+        stage(src, tmp_path / "out")
+        shutil.rmtree(src)
+        staged_file = next((tmp_path / "out" / "deal-a").glob("01__*"))
+        assert "self contained" in staged_file.read_text(encoding="utf-8")
+
+    def test_symlink_opt_out_still_available(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        (src / "deal-a").mkdir(parents=True)
+        _write_rtf(src / "deal-a" / "v1.rtf")
+        stage(src, tmp_path / "out", copy_files=False)
         staged_file = next((tmp_path / "out" / "deal-a").glob("01__*"))
         assert staged_file.is_symlink()
 

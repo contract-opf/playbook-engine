@@ -208,12 +208,17 @@ Two things this changes about the steps below:
    hit). Also expect: flipping a corpus from emergent to template mode
    re-keys every deviation verdict (payloads embed `our_standard`), so a
    full re-judging pass is normal, not a bug.
-4. **Stage with `--copy`, and keep config + template inside the corpus.**
-   Under the read-only mount, symlinks written by a host-side `stage` dangle
-   inside the container, so stage with `--copy` (real files). The baseline
-   template and `playbook.config.yaml` must live **inside** the corpus dir
-   too — a relative `../../..` template path escapes `/work/corpus` and won't
-   resolve. Put the template beside the config under `$CORPUS`.
+4. **Keep config + template inside the corpus.** The baseline template and
+   `playbook.config.yaml` must live **inside** the corpus dir — a relative
+   `../../..` template path escapes `/work/corpus` and won't resolve. Put the
+   template beside the config under `$CORPUS`. (Staging itself no longer needs
+   care here: `playbook stage` writes real copies by default, so a staged
+   corpus already survives the read-only mount. If you inherit a corpus that
+   was symlink-staged, `lint-corpus` will name it.)
+5. **The image must match the source tree.** `make docker-run` now refuses to
+   start if the image's engine version differs from the checkout's — a stale
+   image otherwise produces a derivation missing the very fixes the run was
+   for, and it looks like a success. If it refuses, run `make docker-build`.
 
 **No API key? The deterministic path renders a full playbook.** Without
 `ANTHROPIC_API_KEY` the engine uses deterministic segmentation and you act as
@@ -258,6 +263,41 @@ run; they are estimates — present the range, not a promise.)
 
 ---
 
+## Check the environment before anything expensive
+
+Run this first, every time, on whichever runtime you are about to use. It is
+instant, needs no corpus and no config, and it is the difference between
+finding out now and finding out after a multi-hour run:
+
+```bash
+make docker-run CORPUS=./corpus OUT=./out ARGS="doctor"
+# venv path: playbook doctor
+```
+
+It reports the engine version, whether you are inside the project's Docker
+image and which commit it was built from, and every external tool the pipeline
+can reach — naming, for each missing one, exactly what its absence costs. Read
+the output rather than just the exit code.
+
+Two things to check by eye:
+
+- **`docling` present** if this corpus has PDFs or scanned documents. Without
+  it, extraction quietly falls back to the legacy adapters: born-digital DOCX
+  still works, scans yield almost nothing. This has happened for real — docling
+  disappeared from a host venv between two runs and the next derivation
+  quarantined 43 of 44 documents with nothing announcing the change. Set
+  `extraction: {extractor: docling}` in the config to turn that silent
+  downgrade into a refusal to start.
+- **`runtime`** says what you think it says. If you meant to be in the
+  container and it reports a host install, your `make docker-run` wrapper is
+  not doing what you assume.
+
+`make docker-run` separately refuses to start if the image's engine version
+does not match the source checkout, so a stale image cannot answer for current
+code. If it refuses, `make docker-build`.
+
+---
+
 ## Ordered pipeline
 
 ### Step 1 — Stage (if needed)
@@ -266,12 +306,16 @@ If the corpus is in a nested export layout:
 
 ```bash
 make docker-run CORPUS=./raw-corpus OUT=~/.cache/playbook-engine/staging \
-  ARGS="stage /work/corpus --out /work/out --copy"
+  ARGS="stage /work/corpus --out /work/out"
 ```
 
-`--copy` writes real files instead of absolute symlinks — required whenever the
-staged output is bind-mounted read-only into a container (host symlinks dangle
-there). Confirm the output: each agreement has its own subfolder, a `hints.yaml`
+Staging writes **real file copies** by default, so the staged tree is
+self-contained and stays readable when it is bind-mounted read-only into a
+container. (`--symlink` opts back into absolute symlinks; do not use it for a
+corpus you intend to run in Docker — the links dangle inside the container and
+the corpus reads as empty. `--copy` is still accepted and is now the default,
+so leaving it in an older command line changes nothing.) Confirm the output:
+each agreement has its own subfolder, a `hints.yaml`
 with `order` and `signed_version`, and no raw corpus files are modified. The
 staged output directory becomes `$CORPUS` for every step from here on — copy the
 baseline template and `playbook.config.yaml` into it too (see Docker note above).
@@ -418,8 +462,15 @@ exit 0. Common fixes:
 |-------|-----|
 | `CORPUS_NOT_FOUND` | Check the path |
 | `DOC_NO_SUPPORTED_FILES` | Add `.docx`/`.pdf`/`.rtf` to the subfolder |
+| `CORPUS_DANGLING_SYMLINKS` | The corpus is symlinks pointing at files that aren't reachable from here — re-run `playbook stage` (real copies are the default) |
 | `CONFIG_NOT_FOUND` | Create `playbook.config.yaml` from the example |
 | `CONFIG_TEMPLATE_NOT_FOUND` | Fix the `baseline.template` path or set to `null` |
+| `CONFIG_EXTRACTION_DOCLING_MISSING` | The config declares docling and it isn't installed — run in the container, or change `extraction.extractor` |
+
+These same checks now run automatically as a preflight inside `mine` and
+`segment`, which refuse to start if any of them fail (`--skip-preflight` opts
+out). Running this step explicitly is still worth it: it is fast, and it tells
+you about layout problems before you have committed to a long run.
 
 ### Step 2a — Agent segmentation (key-free, optional)
 
