@@ -1,0 +1,67 @@
+# Engine config for the CANARY corpus (see examples/canary/README.md).
+#
+# Wholly synthetic: fictional parties (Vantage Orbital Systems / Halcyon
+# Freight / Meridian Assay Group), fictional plain boilerplate, invented
+# reviewer names. Nothing here is copied, adapted, or derived from any real
+# agreement or any gitignored *-corpus/ directory.
+#
+# This config exists to pin an EXACT, reproducible run so that
+# tests/test_canary_corpus.py can assert against committed expectations
+# (examples/canary/expected.json). Three settings are load-bearing:
+#
+#   segmentation.agent  -- key-free store-backed segmentation. This is the
+#     only headless path that exercises playbook_engine.extraction at all:
+#     the deterministic ingest path never calls extract_blocks and therefore
+#     never touches extraction_cache.jsonl (see config.py's
+#     ExtractionConfig docstring). The canary must sit on the extraction
+#     path, because the extraction cache is where the 2026-08-22 incident
+#     started. Segmentation itself is replayed from the committed
+#     examples/canary/segment-verdicts.jsonl via `playbook segment-apply`
+#     -- no API key, no LLM call, no network.
+#
+#   extraction.extractor: legacy -- PINS the extractor environment. "auto"
+#     would resolve to docling on a docling-equipped host and legacy
+#     elsewhere, so the committed canonical text (and therefore the
+#     segmentation cache keys and the observation counts) would depend on
+#     what happens to be installed -- which is exactly the class of drift
+#     this canary is meant to detect, not to suffer from. Pinning makes the
+#     resolved environment a stated EXPECTATION (expected.json's
+#     "extractor_env"), and the canary asserts the run actually resolved to
+#     it. See tests/test_canary_corpus.py.
+#
+#   provenance.our_authors -- personal-name namespace for tracked-change
+#     attribution (issue #119). "A. Whitfield" is our reviewer in the
+#     redline documents; the counterparty reviewers are not listed here, so
+#     round moves get a real two-sided attribution rather than a uniform one.
+agreement_type:
+  id: nda
+  name: "Mutual Non-Disclosure Agreement"
+  description: >
+    Mutual NDA exchanged when evaluating a potential commercial relationship.
+    Two fictional negotiations, one on each side's paper, each carrying a
+    tracked-changes redline round.
+
+baseline:
+  # Emergent mode (no canonical template). Template mode is already covered
+  # end-to-end by examples/nda + `make smoke-nda`; the canary deliberately
+  # keeps its surface small so it stays a seconds-long CI gate.
+  template: null
+
+# Path relative to this config file.
+taxonomy: ../../spec/taxonomy/nda.yaml
+
+segmentation:
+  agent: true
+
+extraction:
+  extractor: legacy
+
+provenance:
+  our_party_aliases:
+    - "Vantage Orbital Systems, Inc."
+    - "Vantage Orbital"
+  our_authors:
+    - "A. Whitfield"
+  # Deliberately EMPTY: every name in this corpus is a fictional placeholder
+  # that exists to be read (same rationale as examples/nda/config.yaml).
+  known_entities: []
