@@ -60,7 +60,9 @@ def _minimal_config(path: Path) -> Path:
         "agreement_type:\n"
         "  id: synthetic\n"
         "  name: Synthetic\n"
-        "taxonomy: builtin:cuad-base\n"
+        "taxonomy: builtin:cuad-base.yaml\n"
+        "baseline:\n"
+        "  template: null\n"
         "provenance:\n"
         "  our_party_aliases: [Acme]\n",
         encoding="utf-8",
@@ -259,7 +261,9 @@ class TestPreflightIsAPrecondition:
             "agreement_type:\n"
             "  id: synthetic\n"
             "  name: Synthetic\n"
-            "taxonomy: builtin:cuad-base\n"
+            "taxonomy: builtin:cuad-base.yaml\n"
+            "baseline:\n"
+            "  template: null\n"
             "provenance:\n"
             "  our_party_aliases: [Acme]\n"
             "segmentation:\n"

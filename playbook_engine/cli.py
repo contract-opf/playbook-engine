@@ -1244,16 +1244,15 @@ def mine_cmd(
     refreshed with the new result, so a subsequent run without --no-cache
     stays warm.
 
-    Runs the ``lint-corpus`` checks first and refuses to start if any of them
-    fail — a broken corpus layout or extraction environment produces a
+    Checks the stored run manifest first (so a changed environment is named as
+    the root cause), then runs the ``lint-corpus`` checks and refuses to start
+    if any of them fail — a broken corpus layout or extraction environment produces a
     plausible-looking but wrong observation store, which is much more expensive
     to notice later than up front. ``--skip-preflight`` opts out.
 
     Does NOT write playbook.opf.json.  Run ``playbook project`` afterwards
     to compile the playbook from the store.
     """
-    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook mine")
-
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -1279,6 +1278,12 @@ def mine_cmd(
     # plain-English explanation and exits, rather than letting a lost docling
     # install quietly re-extract the whole corpus under the legacy adapters
     # and surface hours later as AgentSegmentationPending quarantine.
+    #
+    # Ordered BEFORE _run_corpus_preflight deliberately: when the environment
+    # changed, that IS the root cause, and this explanation subsumes the
+    # downstream symptoms the corpus checks would otherwise report first (a
+    # lost docling makes the corpus checks complain that .rtf sources need
+    # docling — true, but two steps removed from what actually changed).
     environment = _preflight_environment(
         out_dir,
         cfg,
@@ -1286,6 +1291,8 @@ def mine_cmd(
         command="mine",
         accept_change=accept_environment_change,
     )
+
+    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook mine")
 
     # Segment the same way ``judge`` does.
     try:
