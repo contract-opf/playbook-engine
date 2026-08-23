@@ -315,6 +315,46 @@ def _echo_segmentation_cost_line(stats: dict[str, int], echo: Callable[[str], No
     echo(f"Segmentation: {calls} version(s) not yet cached (token estimate: ~{token_estimate:,})")
 
 
+def _echo_rubric_report(policy: Any, echo: Callable[[str], None]) -> None:
+    """Report rubric staleness for a completed store-backed judge run.
+
+    Makes the previously-invisible failure mode visible: a store hit whose
+    banked rubric no longer matches the one in force. ``stale`` items have
+    already been re-queued by the judges (unless ``--accept-stale``);
+    ``legacy`` items replayed but carry no stamp at all, so nobody can say
+    whether they are still valid — that is a standing reminder, printed every
+    run until ``playbook judge-migrate`` resolves it.
+    """
+    from playbook_engine.rubric import STATE_LEGACY, STATE_STALE  # noqa: PLC0415
+
+    stale = policy.total(STATE_STALE)
+    legacy = policy.total(STATE_LEGACY)
+    if stale:
+        tail = (
+            "replayed anyway (--accept-stale) — this run only; make it durable with "
+            "`playbook judge-migrate --accept-stale`"
+            if policy.accept_stale
+            else "re-queued for re-judgement. If you have decided the rubric change does "
+            "not affect them, bank that with `playbook judge-migrate --accept-stale`"
+        )
+        click.secho(
+            f"WARNING: {stale} stored verdict(s) were made under an older rubric "
+            f"({policy.format_breakdown(STATE_STALE)}) — {tail}.",
+            fg="yellow",
+            err=True,
+        )
+    if legacy:
+        verb = "re-queued (--strict-rubric)" if policy.strict_legacy else "replayed"
+        click.secho(
+            f"NOTE: {legacy} stored verdict(s) carry no rubric version "
+            f"({policy.format_breakdown(STATE_LEGACY)}) — banked before rubric "
+            f"versioning existed, so their validity under the current rubric is "
+            f"unknown; {verb}. Stamp them with `playbook judge-migrate`.",
+            fg="yellow",
+            err=True,
+        )
+
+
 def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[str, Any]:
     """Wire store-backed judges when a verdict store exists at ``out_dir/judge/verdicts.jsonl``.
 
@@ -343,16 +383,23 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
         StoreBackedScopeJudge,
         VerdictStore,
     )
+    from playbook_engine.rubric import RubricPolicy  # noqa: PLC0415
 
     store = VerdictStore(verdicts_path)
     pending = PendingQueue(out_dir / "judge" / "pending.jsonl")
+    # One policy instance shared by all four judges so the caller can report a
+    # single coherent rubric tally afterwards (``_echo_rubric_report``).
+    policy = RubricPolicy()
     echo(f"  judge store: {verdicts_path} (store-backed judges active)")
     return {
-        "scope_judge": StoreBackedScopeJudge(store=store, pending=pending),
-        "classification_judge": StoreBackedClassificationJudge(store=store, pending=pending),
-        "deviation_judge": StoreBackedDeviationJudge(store=store, pending=pending),
-        "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending),
+        "scope_judge": StoreBackedScopeJudge(store=store, pending=pending, rubric=policy),
+        "classification_judge": StoreBackedClassificationJudge(
+            store=store, pending=pending, rubric=policy
+        ),
+        "deviation_judge": StoreBackedDeviationJudge(store=store, pending=pending, rubric=policy),
+        "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending, rubric=policy),
         "no_cache": True,
+        "_rubric_policy": policy,
     }
 
 
@@ -1080,6 +1127,9 @@ def mine_cmd(
     # (the exact regression this issue's fix must avoid — see
     # extraction.py's ExtractionCache docstring).
     verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
+    # Not a mine_corpus parameter — the shared RubricPolicy the wired judges
+    # tally into, read back for reporting after the run.
+    rubric_policy = verdict_kwargs.pop("_rubric_policy", None)
     mine_kwargs: dict[str, Any] = {
         "no_cache": no_cache,
         "refresh_extraction": no_cache,
@@ -1102,6 +1152,8 @@ def mine_cmd(
         raise SystemExit(1) from exc
 
     _echo_extractor_summary(out_dir, click.echo)
+    if rubric_policy is not None:
+        _echo_rubric_report(rubric_policy, click.echo)
     click.secho(f"OK  {out_dir / 'observations.jsonl'}", fg="green")
 
 
@@ -1429,12 +1481,36 @@ def stage_cmd(
     default=None,
     help="Record at most N pending items (trial mode).",
 )
+@click.option(
+    "--accept-stale",
+    "accept_stale",
+    is_flag=True,
+    default=False,
+    help=(
+        "Replay stored verdicts whose rubric version no longer matches the current "
+        "one, instead of re-queueing them. Counts are still reported. Use when you "
+        "have decided a rubric change does not affect the banked judgments."
+    ),
+)
+@click.option(
+    "--strict-rubric",
+    "strict_rubric",
+    is_flag=True,
+    default=False,
+    help=(
+        "Treat stored verdicts that carry NO rubric version (banked before rubric "
+        "versioning existed) as stale and re-queue them, instead of replaying them "
+        "with a warning."
+    ),
+)
 def judge_cmd(
     corpus_dir: Path,
     config_path: Path,
     out_path: Path | None,
     plan_only: bool,
     subset: int | None,
+    accept_stale: bool,
+    strict_rubric: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
 
@@ -1459,6 +1535,7 @@ def judge_cmd(
         StoreBackedScopeJudge,
         VerdictStore,
     )
+    from playbook_engine.rubric import RubricPolicy, current_versions  # noqa: PLC0415
 
     try:
         cfg = load_config(config_path)
@@ -1477,10 +1554,16 @@ def judge_cmd(
     verdicts_path = judge_dir / "verdicts.jsonl"
     pending_path = judge_dir / "pending.jsonl"
 
+    # One policy shared by all four judges: the staleness knobs AND the tally
+    # both --plan-only and normal mode report from.
+    rubric_policy = RubricPolicy(strict_legacy=strict_rubric, accept_stale=accept_stale)
+    versions = current_versions(taxonomy=taxonomy, agreement_type=cfg.agreement_type)
+
     click.echo(f"corpus  : {corpus_dir}")
     click.echo(f"config  : {config_path}")
     click.echo(f"out     : {out_dir}")
     click.echo(f"verdicts: {verdicts_path}")
+    click.echo("rubric  : " + "  ".join(f"{k}={v}" for k, v in sorted(versions.items())))
 
     # Segment exactly the way ``mine`` does, or the store-backed judges here
     # generate verdict keys that never match the LLM-segmented observation store
@@ -1523,10 +1606,18 @@ def judge_cmd(
 
         with tempfile.TemporaryDirectory() as _tmp:
             plan_pending = PendingQueue(Path(_tmp) / "pending.jsonl")
-            scope_judge = StoreBackedScopeJudge(store=store, pending=plan_pending)
-            cls_judge = StoreBackedClassificationJudge(store=store, pending=plan_pending)
-            dev_judge = StoreBackedDeviationJudge(store=store, pending=plan_pending)
-            prov_judge = StoreBackedProvenanceJudge(store=store, pending=plan_pending)
+            scope_judge = StoreBackedScopeJudge(
+                store=store, pending=plan_pending, rubric=rubric_policy
+            )
+            cls_judge = StoreBackedClassificationJudge(
+                store=store, pending=plan_pending, rubric=rubric_policy
+            )
+            dev_judge = StoreBackedDeviationJudge(
+                store=store, pending=plan_pending, rubric=rubric_policy
+            )
+            prov_judge = StoreBackedProvenanceJudge(
+                store=store, pending=plan_pending, rubric=rubric_policy
+            )
 
             try:
                 mine_corpus(
@@ -1557,6 +1648,7 @@ def judge_cmd(
             if not plan_pending_path.exists():
                 click.secho("OK  0 pending items (all verdicts already in store)", fg="green")
                 _echo_segmentation_cost_line(seg_stats, click.echo)
+                _echo_rubric_report(rubric_policy, click.echo)
                 return
 
             import json  # noqa: PLC0415
@@ -1603,6 +1695,7 @@ def judge_cmd(
             for kind, count in sorted(counts.items()):
                 click.echo(f"  {kind}: {count}")
             _echo_segmentation_cost_line(seg_stats, click.echo)
+            _echo_rubric_report(rubric_policy, click.echo)
         return
 
     # Normal mode: write observations and update pending queue.
@@ -1613,10 +1706,14 @@ def judge_cmd(
     pending_path.unlink(missing_ok=True)
 
     pending_queue = PendingQueue(pending_path)
-    scope_judge = StoreBackedScopeJudge(store=store, pending=pending_queue)
-    cls_judge = StoreBackedClassificationJudge(store=store, pending=pending_queue)
-    dev_judge = StoreBackedDeviationJudge(store=store, pending=pending_queue)
-    prov_judge = StoreBackedProvenanceJudge(store=store, pending=pending_queue)
+    scope_judge = StoreBackedScopeJudge(store=store, pending=pending_queue, rubric=rubric_policy)
+    cls_judge = StoreBackedClassificationJudge(
+        store=store, pending=pending_queue, rubric=rubric_policy
+    )
+    dev_judge = StoreBackedDeviationJudge(store=store, pending=pending_queue, rubric=rubric_policy)
+    prov_judge = StoreBackedProvenanceJudge(
+        store=store, pending=pending_queue, rubric=rubric_policy
+    )
 
     try:
         mine_corpus(
@@ -1678,7 +1775,16 @@ def judge_cmd(
         # (malformed enum/basis/missing field — issue #182). Surface it:
         # without this the drain loop shrinks-then-stalls with no visible
         # reason (the only trace is a suppressed logging.warning).
-        requeued = [rec for rec in pending_records if store.get_by_key(rec["key"]) is not None]
+        # A rubric-driven re-queue (stored verdict made under an older rubric)
+        # is ALSO a key that is already in the store, but it is expected and
+        # already reported by _echo_rubric_report — excluded here so the
+        # malformed-verdict warning keeps meaning what it says.
+        requeued = [
+            rec
+            for rec in pending_records
+            if (stored := store.get_record_by_key(rec["key"])) is not None
+            and rubric_policy.would_replay(stored.rubric_version, rec.get("rubric_version"))
+        ]
         if requeued:
             requeue_counts: dict[str, int] = {}
             for rec in requeued:
@@ -1692,8 +1798,10 @@ def judge_cmd(
                 fg="yellow",
                 err=True,
             )
+        _echo_rubric_report(rubric_policy, click.echo)
     else:
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
+        _echo_rubric_report(rubric_policy, click.echo)
 
 
 @cli.command(name="judge-apply")
@@ -1727,6 +1835,7 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
         infer_verdict_kind,
         validate_verdict,
     )
+    from playbook_engine.rubric import RubricStamp  # noqa: PLC0415
 
     out_dir_resolved = out_dir.resolve()
     if not out_dir_resolved.is_dir():
@@ -1744,7 +1853,14 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     # Kind lookup for semantic validation: pending.jsonl (when present) maps
     # each key to its item kind; verdicts for keys not currently pending fall
     # back to field-shape inference (see infer_verdict_kind).
+    #
+    # The same pass reads each item's ``rubric_version`` — the rubric that was
+    # in force when the question was posed. Stamping the incoming verdict with
+    # THAT (rather than recomputing "now") is what makes the stamp mean "this
+    # is an answer to the question as asked", and it keeps judge-apply free of
+    # any --config dependency: the version travels with the queue.
     pending_kinds: dict[str, str] = {}
+    pending_rubrics: dict[str, str] = {}
     pending_path = out_dir_resolved / "judge" / "pending.jsonl"
     if pending_path.is_file():
         for pline in pending_path.read_text(encoding="utf-8").splitlines():
@@ -1757,10 +1873,13 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
                 continue
             if isinstance(pitem, dict) and "key" in pitem and "kind" in pitem:
                 pending_kinds[pitem["key"]] = pitem["kind"]
+                rubric_v = pitem.get("rubric_version")
+                if isinstance(rubric_v, str) and rubric_v:
+                    pending_rubrics[pitem["key"]] = rubric_v
 
     # Validate all lines first before touching the store.
     raw_lines = verdicts_path.read_text(encoding="utf-8").splitlines()
-    valid_records: list[tuple[str, dict[str, Any]]] = []
+    valid_records: list[tuple[str, dict[str, Any], str]] = []
     unknown_keys = 0
     for lineno, line in enumerate(raw_lines, start=1):
         line = line.strip()
@@ -1813,7 +1932,7 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
             raise SystemExit(1) from exc
         if record["key"] not in pending_kinds and pending_kinds:
             unknown_keys += 1
-        valid_records.append((record["key"], record["verdict"]))
+        valid_records.append((record["key"], record["verdict"], kind))
 
     if unknown_keys:
         click.secho(
@@ -1831,13 +1950,193 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     # Load all validated records into the store.
     store = VerdictStore(verdicts_store_path)
     loaded = 0
-    for key, verdict in valid_records:
+    unstamped = 0
+    for key, verdict, kind in valid_records:
         # Use put_by_key to load verdicts by their pre-computed key directly,
         # bypassing the payload hashing step (the key was computed by the producer).
-        store.put_by_key(key, verdict)
+        version = pending_rubrics.get(key)
+        stamp = RubricStamp(kind=kind, version=version) if version else None
+        if stamp is None:
+            # No queue entry to source the rubric from (key not in the current
+            # pending.jsonl, or a queue written before rubric versioning).
+            # Deliberately NOT recomputed from the current rubric: that would
+            # assert something about this verdict that nothing here knows.
+            unstamped += 1
+        store.put_by_key(key, verdict, rubric=stamp)
         loaded += 1
 
     click.secho(f"OK  loaded {loaded} verdict(s) into {verdicts_store_path}", fg="green")
+    if unstamped:
+        click.secho(
+            f"WARN: {unstamped} verdict(s) loaded without a rubric stamp — their "
+            "pending entry carried no rubric_version (queue predates rubric "
+            "versioning, or the key is not in the current queue). They will be "
+            "reported as unversioned on the next `playbook judge` run.",
+            fg="yellow",
+            err=True,
+        )
+
+
+@cli.command(name="judge-migrate")
+@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
+@click.option(
+    "--config", "config_path", type=click.Path(exists=True, path_type=Path), required=True
+)
+@click.option(
+    "--kind",
+    "kinds",
+    multiple=True,
+    type=click.Choice(["classify", "deviation", "provenance", "scope"]),
+    help="Restrict the migration to these judge kinds (repeatable; default: all).",
+)
+@click.option(
+    "--accept-stale",
+    "accept_stale",
+    is_flag=True,
+    default=False,
+    help=(
+        "Also re-stamp verdicts whose rubric version is KNOWN to differ from the "
+        "current one. This is an explicit assertion that the rubric change does not "
+        "affect those judgments — not a default."
+    ),
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Report what would be re-stamped and exit without writing.",
+)
+def judge_migrate_cmd(
+    out_dir: Path,
+    config_path: Path,
+    kinds: tuple[str, ...],
+    accept_stale: bool,
+    dry_run: bool,
+) -> None:
+    """Report and repair rubric stamps on the verdict store in OUT_DIR.
+
+    Every stored verdict falls into one of three states against the rubric
+    currently in force (see ``playbook_engine/rubric.py``):
+
+    \b
+      current  — stamped with the rubric in force; replays normally.
+      legacy   — carries no stamp at all; banked before rubric versioning
+                 existed, so nothing knows whether it still holds.
+      stale    — stamped with a rubric that has since changed; `playbook
+                 judge` re-queues these for re-judgement.
+
+    With no flags this command **adopts the legacy verdicts**: it re-stamps
+    every unstamped verdict with the current rubric for its kind. That is the
+    upgrade path for an existing store — it preserves the banked human
+    judgment rather than discarding it, while converting an unbounded unknown
+    into an explicit, dated assertion that from here on those verdicts are
+    answers to the current question. Run ``--dry-run`` first, and only adopt
+    once you have satisfied yourself the rubric has not moved under them.
+
+    ``--accept-stale`` additionally re-stamps KNOWN-stale verdicts. Reach for
+    it when a rubric bump provably cannot change a class of answers (e.g. a
+    taxonomy description reworded for clarity), scoped with ``--kind``.
+
+    Re-stamping appends to ``verdicts.jsonl``; the prior record stays on disk
+    as an audit trail of what the verdict was originally banked under.
+    """
+    import json  # noqa: PLC0415
+
+    from playbook_engine.agent_judge import VerdictStore, infer_verdict_kind  # noqa: PLC0415
+    from playbook_engine.rubric import (  # noqa: PLC0415
+        STATE_CURRENT,
+        STATE_LEGACY,
+        STATE_STALE,
+        RubricPolicy,
+        RubricStamp,
+        current_versions,
+    )
+
+    out_dir_resolved = out_dir.resolve()
+    verdicts_path = out_dir_resolved / "judge" / "verdicts.jsonl"
+    if not verdicts_path.is_file():
+        click.secho(f"ERROR: no verdict store at {verdicts_path}", fg="red", err=True)
+        raise SystemExit(1)
+
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        click.secho(f"Config error: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    try:
+        taxonomy = load_taxonomy(cfg.taxonomy_path)
+    except TaxonomyError as exc:
+        click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+
+    versions = current_versions(taxonomy=taxonomy, agreement_type=cfg.agreement_type)
+    selected = set(kinds) if kinds else set(versions)
+
+    # Kind resolution, best available source first: the stamp itself, then the
+    # pending queue, then verdict field shape.
+    pending_kinds: dict[str, str] = {}
+    pending_path = out_dir_resolved / "judge" / "pending.jsonl"
+    if pending_path.is_file():
+        for pline in pending_path.read_text(encoding="utf-8").splitlines():
+            pline = pline.strip()
+            if not pline:
+                continue
+            try:
+                pitem = json.loads(pline)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(pitem, dict) and "key" in pitem and "kind" in pitem:
+                pending_kinds[pitem["key"]] = pitem["kind"]
+
+    store = VerdictStore(verdicts_path)
+    policy = RubricPolicy()  # neutral: classification only, no run semantics
+
+    click.echo(f"store  : {verdicts_path}  ({len(store)} verdict(s))")
+    click.echo("rubric : " + "  ".join(f"{k}={v}" for k, v in sorted(versions.items())))
+
+    tally: dict[tuple[str, str], int] = {}
+    to_restamp: list[tuple[str, str]] = []  # (key, kind)
+    unknown_kind = 0
+    for key, record in store.records():
+        kind = record.rubric_kind or pending_kinds.get(key) or infer_verdict_kind(record.verdict)
+        if kind is None or kind not in versions:
+            unknown_kind += 1
+            continue
+        state, _replay = policy.classify(record.rubric_version, versions[kind])
+        tally[(kind, state)] = tally.get((kind, state), 0) + 1
+        if kind not in selected:
+            continue
+        if state == STATE_LEGACY or (state == STATE_STALE and accept_stale):
+            to_restamp.append((key, kind))
+
+    for state in (STATE_CURRENT, STATE_LEGACY, STATE_STALE):
+        total = sum(n for (_k, s), n in tally.items() if s == state)
+        breakdown = ", ".join(
+            f"{k}: {n}" for (k, s), n in sorted(tally.items()) if s == state and n
+        )
+        click.echo(f"  {state:<8}: {total}" + (f"  ({breakdown})" if breakdown else ""))
+    if unknown_kind:
+        click.secho(
+            f"  {'unknown':<8}: {unknown_kind}  (kind undeterminable — left untouched)",
+            fg="yellow",
+        )
+
+    if not to_restamp:
+        click.secho("OK  nothing to re-stamp", fg="green")
+        return
+
+    if dry_run:
+        click.secho(
+            f"DRY RUN: would re-stamp {len(to_restamp)} verdict(s) "
+            f"(kinds: {', '.join(sorted({k for _key, k in to_restamp}))})",
+            fg="yellow",
+        )
+        return
+
+    for key, kind in to_restamp:
+        store.restamp(key, RubricStamp(kind=kind, version=versions[kind]))
+    click.secho(f"OK  re-stamped {len(to_restamp)} verdict(s) in {verdicts_path}", fg="green")
 
 
 @cli.command(name="segment")

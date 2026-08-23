@@ -1230,8 +1230,16 @@ def test_apply_feedback_classification_round_trips_through_judge(tmp_path: Path)
     node = tree.resolve_path("12")
     assert node is not None
 
+    # Must mirror the taxonomy embedded in playbook.opf.json field-for-field:
+    # apply_feedback stamps its verdict with the classify rubric digested from
+    # the OPF's taxonomy (id + label + description of classifier-eligible
+    # entries), and a mismatched rubric would re-queue the correction as stale
+    # rather than replay it.
     tax = SimpleNamespace(
-        entries=[SimpleNamespace(id="governing_law"), SimpleNamespace(id="indemnification")]
+        entries=[
+            SimpleNamespace(id="governing_law", label="Governing Law", status="active"),
+            SimpleNamespace(id="indemnification", label="Indemnification", status="active"),
+        ]
     )
     judge = StoreBackedClassificationJudge(
         store=VerdictStore(out_dir / "judge" / "verdicts.jsonl"),

@@ -53,6 +53,33 @@ changes` heading in the release it ships under.
   current. No cache file format change: stale entries are re-filed under the
   current key on first lookup, and `ExtractionCache(..., migrate=False)`
   restores the old cold-read behavior.
+- **Judge verdicts are now versioned by rubric, so a criteria change
+  invalidates the verdicts it should — and only those.** The verdict store is
+  keyed by clause *content*, so previously a change to the judging criteria
+  (the taxonomy under `spec/taxonomy/`, the answer vocabularies, the judge
+  prompts in the `playbook-from-corpus` skill) replayed every banked verdict
+  unchanged and unreported: a re-derivation seeded ~1,444 stored verdicts and
+  re-queued only 246, with no way to tell whether the ~1,200 replays still
+  held. Every verdict now carries the rubric it was produced under
+  (`"<manual>+<derived>"`; see `playbook_engine/rubric.py`) — a
+  hand-maintained half for the prose rubric, and a derived half that tracks
+  the taxonomy for `classify` and the agreement-type definition for `scope`
+  automatically. A hit stamped with a rubric that has since moved is
+  re-queued instead of replayed, and `playbook judge` / `judge --plan-only`
+  report the counts.
+- **New `playbook judge-migrate`** — the upgrade path for an existing store.
+  Reports how many stored verdicts are current / legacy (unstamped) / stale,
+  and adopts the legacy ones by stamping them with the current rubric,
+  preserving the banked human judgment rather than discarding it. Known-stale
+  verdicts are re-stamped only under an explicit `--accept-stale` (scopeable
+  with `--kind`). Re-stamping appends, leaving the prior record as an audit
+  trail. Existing stores keep loading unchanged until migrated.
+- **New `playbook judge --accept-stale` / `--strict-rubric`** — replay
+  known-stale verdicts as-is for one run, or conversely treat unstamped
+  pre-versioning verdicts as stale and re-queue them.
+- `judge/pending.jsonl` records now carry the `rubric_version` in force when
+  the item was queued, so `judge-apply` stamps each incoming verdict with the
+  rubric the question was actually asked under (no `--config` needed).
 
 ## [1.0.1] - 2026-08-22
 

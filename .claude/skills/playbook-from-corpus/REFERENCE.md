@@ -282,6 +282,53 @@ and write one verdict line per document to the verdicts JSONL:
 
 ---
 
+## Rubric versions
+
+Verdicts are cached by a hash of the clause **content**, so nothing about a
+changed *rubric* moves the key. Without a version, edits to the criteria
+below would replay every previously banked verdict forever, silently.
+
+Each stored verdict therefore carries a stamp — `{"rubric": {"kind": ...,
+"version": "<manual>+<derived>"}}` — recording the rubric it was produced
+under. `playbook judge` compares it against the rubric in force:
+
+| state | meaning | behaviour |
+|-------|---------|-----------|
+| current | stamp matches | replays |
+| stale | stamp differs | **re-queued for re-judgement** (`--accept-stale` to replay) |
+| legacy | no stamp (banked before versioning) | replays, reported every run until migrated |
+
+**The manual half** is `RUBRIC_PROMPT_VERSIONS` in
+`playbook_engine/rubric.py`, one entry per kind. Bump the entry for a kind
+when the corresponding **Judge prompts** section above changes in a way that
+could change a reasonable judge's answer: a new or removed answer category, a
+reversed default, a changed definition of "material" or "substantive". Do
+**not** bump for typo fixes, reworded examples, or added guardrails that only
+restate existing rules — that would discard thousands of sound verdicts.
+
+**The derived half** needs no discipline; it moves on its own when the
+machine-readable rubric moves: the classifier-eligible taxonomy entries
+(id + label + description) for `classify`, the agreement-type definition for
+`scope`, the answer vocabularies for `deviation` and `provenance`. Editing
+`spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
+
+Migrating an existing store:
+
+```bash
+playbook judge-migrate ./out --config ./corpus/playbook.config.yaml --dry-run
+playbook judge-migrate ./out --config ./corpus/playbook.config.yaml
+```
+
+The first reports how many verdicts are current / legacy / stale. The second
+adopts the **legacy** ones — stamping them with the current rubric while
+leaving the judgments untouched, so banked human work is preserved rather
+than re-queued. Known-stale verdicts are deliberately left alone unless you
+add `--accept-stale` (optionally scoped with `--kind`), which is an explicit
+assertion that the rubric change does not affect those answers. Re-stamping
+appends to `verdicts.jsonl`; the prior record stays as an audit trail.
+
+---
+
 ## Guardrails
 
 1. **No fabrication.** Every verdict must be grounded in the actual clause
