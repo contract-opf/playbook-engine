@@ -31,6 +31,12 @@ from playbook_engine.posture import (
     apply_posture_interview,
     check_posture_floor_conflict,
 )
+from playbook_engine.run_manifest import (
+    EnvironmentMismatch,
+    RunEnvironment,
+    preflight,
+    write_run_manifest,
+)
 from playbook_engine.segmentation_qa import SegmentationQAError
 from playbook_engine.taxonomy import Taxonomy, TaxonomyError, load_taxonomy, merge_taxonomy
 from playbook_engine.validator import SUPPORTED_OPF_VERSIONS, load_opf_file, validate_document
@@ -482,6 +488,78 @@ def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
     more = len(fallback_names) - len(shown)
     tail = f", +{more} more" if more > 0 else ""
     echo(f"    {', '.join(shown)}{tail}")
+
+
+# ---------------------------------------------------------------------------
+# Run provenance manifest (issue #121)
+# ---------------------------------------------------------------------------
+
+#: Shared ``--accept-environment-change`` flag for ``mine``/``judge``.
+#: Defined once as a reusable decorator so the two commands can never drift
+#: apart on the flag name — the preflight report NAMES this flag as the way
+#: forward, so a mismatch between the text and one command's actual option
+#: would be worse than no message at all.
+_accept_environment_change_option = click.option(
+    "--accept-environment-change",
+    "accept_environment_change",
+    is_flag=True,
+    default=False,
+    help=(
+        "Proceed even though this output folder was built in a different "
+        "environment (different document reader, engine version, or clause "
+        "splitter). The differences are still explained first; this only "
+        "says you accept the rework they cause."
+    ),
+)
+
+
+def _preflight_environment(
+    out_dir: Path,
+    cfg: Any,
+    corpus_dir: Path,
+    *,
+    command: str,
+    accept_change: bool,
+) -> RunEnvironment:
+    """Run the provenance preflight and return the captured environment.
+
+    Silent on the normal path (see :func:`run_manifest.preflight`). On a
+    blocking difference, prints the already-composed plain-English report to
+    stderr and exits 1 — no extra ``ERROR:`` prefix, no exception text: the
+    report IS the message, and wrapping it in CLI chrome would bury the one
+    sentence a non-engineer needs to read.
+
+    Returned so the caller can pass the SAME snapshot to
+    :func:`_record_run_manifest` when the run succeeds — capturing twice
+    would let a mid-run PATH change silently produce a manifest that doesn't
+    describe the run that just happened.
+    """
+    try:
+        return preflight(
+            out_dir,
+            cfg,
+            corpus_dir,
+            command=command,
+            echo=click.echo,
+            accept_change=accept_change,
+        )
+    except EnvironmentMismatch as exc:
+        click.echo(exc.report, err=True)
+        raise SystemExit(1) from exc
+
+
+def _record_run_manifest(out_dir: Path, environment: RunEnvironment, command: str) -> None:
+    """Stamp *out_dir* with the environment that just produced it.
+
+    Best-effort by design: a read-only or full disk must not turn an
+    otherwise-successful mine/judge into a failure over a bookkeeping file.
+    The cost of a missing manifest is one silent run next time — the cost of
+    failing here is throwing away a completed corpus run.
+    """
+    try:
+        write_run_manifest(out_dir, environment, command=command)
+    except OSError as exc:  # pragma: no cover - disk-full / read-only out-dir
+        click.secho(f"note: could not write run_manifest.json ({exc})", fg="yellow", err=True)
 
 
 @click.group()
@@ -1134,6 +1212,7 @@ def _run_corpus_preflight(
         "place. Only relevant when provenance.known_entities is set."
     ),
 )
+@_accept_environment_change_option
 def mine_cmd(
     corpus_dir: Path,
     config_path: Path,
@@ -1141,6 +1220,7 @@ def mine_cmd(
     no_cache: bool,
     skip_preflight: bool,
     entity_registry_path: Path | None,
+    accept_environment_change: bool,
 ) -> None:
     """Mine CORPUS_DIR and write the observation store (L1–L4).
 
@@ -1153,6 +1233,7 @@ def mine_cmd(
       scope.json            — scope-gate decisions
       trail/<doc_id>.json   — version-order and provenance signals
       normalized/           — segmented clause trees
+      run_manifest.json     — the environment this run used (checked by the next run)
 
     Pass --no-cache to disable the content-addressed stage cache and force a
     full recompute even if intermediates already exist — this also forces
@@ -1190,6 +1271,21 @@ def mine_cmd(
     click.echo(f"corpus : {corpus_dir}")
     click.echo(f"config : {config_path}")
     click.echo(f"out    : {out_dir}")
+
+    # Before ANY work starts (issue #121): does this out-dir's stored
+    # run_manifest.json describe the environment we are about to run in?
+    # Silent when it does (or on a fresh out-dir) — the whole point is that
+    # the normal path never says anything. When it doesn't, this prints one
+    # plain-English explanation and exits, rather than letting a lost docling
+    # install quietly re-extract the whole corpus under the legacy adapters
+    # and surface hours later as AgentSegmentationPending quarantine.
+    environment = _preflight_environment(
+        out_dir,
+        cfg,
+        corpus_dir,
+        command="mine",
+        accept_change=accept_environment_change,
+    )
 
     # Segment the same way ``judge`` does.
     try:
@@ -1242,6 +1338,11 @@ def mine_cmd(
     _echo_extractor_summary(out_dir, click.echo)
     if rubric_policy is not None:
         _echo_rubric_report(rubric_policy, click.echo)
+    # Stamp the out-dir with what just built it, so the NEXT run has
+    # something to check itself against (issue #121). Written only after
+    # mine_corpus returned successfully — a manifest is a claim about the
+    # artifacts sitting next to it.
+    _record_run_manifest(out_dir, environment, "mine")
     click.secho(f"OK  {out_dir / 'observations.jsonl'}", fg="green")
 
 
@@ -1705,6 +1806,7 @@ def stage_cmd(
         "with a warning."
     ),
 )
+@_accept_environment_change_option
 def judge_cmd(
     corpus_dir: Path,
     config_path: Path,
@@ -1713,6 +1815,7 @@ def judge_cmd(
     subset: int | None,
     accept_stale: bool,
     strict_rubric: bool,
+    accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
 
@@ -1766,6 +1869,20 @@ def judge_cmd(
     click.echo(f"out     : {out_dir}")
     click.echo(f"verdicts: {verdicts_path}")
     click.echo("rubric  : " + "  ".join(f"{k}={v}" for k, v in sorted(versions.items())))
+
+    # Provenance preflight (issue #121) — same check ``mine`` runs, for the
+    # same reason, and deliberately BEFORE the --plan branch: --plan writes
+    # its observations into a TemporaryDirectory but reads through the real
+    # out_dir's extraction/segmentation caches, so a changed environment
+    # makes a plan estimate wrong (every version reported as uncached) even
+    # though nothing durable is written.
+    environment = _preflight_environment(
+        out_dir,
+        cfg,
+        corpus_dir,
+        command="judge",
+        accept_change=accept_environment_change,
+    )
 
     # Segment exactly the way ``mine`` does, or the store-backed judges here
     # generate verdict keys that never match the LLM-segmented observation store
@@ -1939,6 +2056,12 @@ def judge_cmd(
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+
+    # Stamp the out-dir with the environment that just wrote into it (issue
+    # #121). Normal mode only — the --plan branch above returns before this,
+    # since a plan run writes its observations to a temp dir and has no claim
+    # to make about what produced THIS out-dir's artifacts.
+    _record_run_manifest(out_dir, environment, "judge")
 
     # Report pending counts.
     import json  # noqa: PLC0415
