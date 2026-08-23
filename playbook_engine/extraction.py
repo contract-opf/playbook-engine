@@ -143,6 +143,16 @@ value the judge wiring forces for the verdict-cache layers, while still
 missing cleanly — rather than silently replaying stale output — if the
 extractor environment itself changes between rounds.
 
+Cache-format changes are SCOPED, not global (see "Extraction-cache format
+ladder" below and :mod:`playbook_engine.cache_format`). A change to this
+module's output used to be expressed by bumping a ``format_version`` inside
+the cache key, which discarded every entry for every file — a full corpus
+re-extraction, paid twice in one month for two changes that each affected
+only a subset of entries. Each bump now declares what it did to stored
+entries (rewrite them, invalidate only the ones it broke, or — deliberately —
+discard everything), and a lookup migrates an older-format entry forward
+unless a rung says its output genuinely changed.
+
 ``refresh`` (issue #78): the flip side of the above — an operator who
 suspects bad extraction (e.g. a stale pre-docling-install entry) needs a way
 to force a real re-extraction, not just a re-judgment; before this,
@@ -184,6 +194,14 @@ from docx import Document
 
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.artifact_store import _sha256_file
+from playbook_engine.cache_format import (
+    CacheFormatStep,
+    CacheValue,
+    Context,
+    carry_forward,
+    current_version,
+    ladder_versions,
+)
 from playbook_engine.docx_ingester import (
     DocxIngesterError,
     TextUnit,
@@ -198,36 +216,185 @@ from playbook_engine.segmentation_grounding import Block
 
 _log = logging.getLogger(__name__)
 
-#: Bumped whenever ``extract_blocks``'s output shape changes in a way that
-#: should invalidate previously cached entries (e.g. a block-parsing bug fix).
-#:
-#: v2 (issue #81): the returned/cached ``extractor`` (the tuple's third
-#: element) changed from a plain "docling"/"legacy" string to an
-#: :class:`ExtractorLabel` carrying a structured ``reason`` ("env-missing" |
-#: "backend-error" | "declared" | ``None``) and ``fallback_from``. A warm
-#: ``extraction_cache.jsonl`` entry from before this fix has neither key, so
-#: ``ExtractionCache.get`` would silently reload it as ``reason=None`` — the
-#: same "legacy" label a genuine per-file docling fallback carries — making
-#: ``config.extraction.max_fallback``, ``corpus_manifest.json``, the review
-#: flags, and the CLI's reason breakdown all permanently blind on any corpus
-#: ever extracted before this fix. Bumping this forces one clean re-extraction
-#: per file, after which the cache is warm and correct again.
-#:
-#: v3 (issue #84): a redline (tracked-changes/commented) DOCX that previously
-#: hit the docling->legacy fallback is now retried once on a normalized copy
-#: before falling back (see :func:`_retry_docling_on_normalized_docx` and
-#: :mod:`playbook_engine.docx_normalizer`), so for the SAME file bytes under
-#: the SAME extractor environment, the correct output now differs from what
-#: was cached before this fix: docling block structure and ``reason=None``
-#: instead of legacy blocks and ``reason="backend-error"``. Neither
-#: ``file_sha256`` nor ``extractor_env`` changes for that file (the KEY
-#: records the environment "docling", not the post-fallback adapter
-#: "legacy" — see the pipeline.py comment added in d08b895), so without this
-#: bump a warm pre-#84 entry would silently keep reloading the stale
-#: legacy/backend-error result forever and this fix would never reach any
-#: corpus already extracted. Bumping this forces one clean re-extraction per
-#: file, after which the cache is warm and correct again.
-_EXTRACTION_CACHE_FORMAT_VERSION = "3"
+# ---------------------------------------------------------------------------
+# Extraction-cache format ladder — scoped invalidation
+# ---------------------------------------------------------------------------
+#
+# The cache key carries a ``format_version`` (see
+# :func:`_extraction_cache_payload`). Historically the only way to react to a
+# change in ``extract_blocks``'s output was to bump that number, which
+# discards EVERY entry for EVERY file — a full re-extraction of the corpus.
+# On the reference corpus (44 documents / 161 versions) that is 1h45m-5h17m of
+# docling/pdfplumber wall-clock against ~0 for a warm cache, and it was paid
+# twice in one month for two changes that each invalidated only a subset of
+# entries (details on each rung below).
+#
+# So a bump is no longer a bare number: it is a rung on a ladder (see
+# :mod:`playbook_engine.cache_format`) that declares what it did to
+# already-stored entries — a ``migrate`` callback that rewrites them into the
+# new shape, an ``affects`` predicate that names only the entries the change
+# actually broke, or ``discard_all=True`` for a change that genuinely
+# invalidates everything. ``ExtractionCache`` probes older-version keys on a
+# miss and walks any hit up this ladder (see ``ExtractionCache._lookup``), so
+# an entry survives unless a rung says otherwise.
+#
+# Adding a rung: append a ``CacheFormatStep`` below. Do NOT edit an existing
+# rung's version, and do not reach for ``discard_all`` before establishing
+# that no predicate can separate the broken entries from the intact ones —
+# that flag is the expensive answer, and it should have to be argued for.
+
+#: The format version that existed before the ladder's first bump.
+_EXTRACTION_CACHE_FORMAT_ORIGIN = "1"
+
+#: Sentinel distinguishing "key absent" from a stored ``"reason": null``.
+_UNSET = object()
+
+
+def _migrate_extractor_label(value: CacheValue, context: Context) -> CacheValue | None:
+    """v1 -> v2 (issue #81): rewrite a bare ``extractor`` string into the
+    stored form of an :class:`ExtractorLabel` (``extractor`` + ``reason`` +
+    ``fallback_from``).
+
+    This bump was purely REPRESENTATIONAL — the cached ``canonical_text`` and
+    ``blocks`` a pre-#81 entry holds are exactly what today's code would
+    produce for the same bytes under the same extractor environment. Only the
+    third tuple element's shape changed, and the missing ``reason`` is
+    recoverable from what the key already pins down:
+
+      - ``extractor == "docling"``: docling ran and did not degrade, which is
+        the definition of ``reason=None``/``fallback_from=None``. Exact.
+      - ``extractor == "legacy"`` under a ``"docling"`` environment: the only
+        way legacy output exists under a docling environment is a live
+        per-file fallback, i.e. ``reason="backend-error"``,
+        ``fallback_from="docling"``. Exact — and note this is strictly BETTER
+        than what the old ``dict.get("reason")`` tolerance did for such an
+        entry (silently ``None``, the mislabel issue #81 exists to fix).
+      - ``extractor == "legacy"`` under a ``"legacy"`` environment: docling was
+        never attempted, so the reason is "declared" or "env-missing"
+        depending on whether the config DECLARED legacy or "auto" simply found
+        no docling on PATH. That is not a property of the file or of the
+        stored value — it is a property of the run doing the lookup, and
+        ``extract_blocks`` computes it for a fresh extraction exactly the same
+        way (``"declared" if extractor == "legacy" else "env-missing"``). The
+        caller therefore supplies it as ``context["legacy_reason"]``; when the
+        caller has no declared extractor to offer (a direct
+        ``ExtractionCache.get`` with no ``declared_extractor``), this returns
+        ``None`` and the entry is invalidated rather than labeled by guess —
+        the difference decides whether the entry counts against
+        ``config.extraction.max_fallback``, a fail-loud budget gate.
+
+    Failure entries (``{"error": …, "extractor": …}``) never carried
+    reason/fallback_from in either format and pass through unchanged.
+    """
+    if "error" in value:
+        return dict(value)
+    if "reason" in value:
+        # Already v2-shaped (defensive: an entry hand-written under a v1 key).
+        return dict(value)
+
+    stored = value.get("extractor")
+    migrated = dict(value)
+    if stored == "docling":
+        migrated["reason"] = None
+        migrated["fallback_from"] = None
+        return migrated
+    if stored == "legacy":
+        if context.get("extractor_env") == "docling":
+            migrated["reason"] = "backend-error"
+            migrated["fallback_from"] = "docling"
+            return migrated
+        legacy_reason = context.get("legacy_reason")
+        if legacy_reason is None:
+            return None  # cannot tell "declared" from "env-missing" — discard
+        migrated["reason"] = legacy_reason
+        migrated["fallback_from"] = None
+        return migrated
+    return None  # unrecognised extractor label — never guess
+
+
+def _affected_by_normalized_docx_retry(value: CacheValue, context: Context) -> bool | None:
+    """v2 -> v3 (issue #84): ``True`` only for entries whose correct output
+    actually changed when redline DOCX gained a normalize-and-retry pass.
+
+    #84 made a DOCX docling failure retry once on a pre-normalized copy (see
+    :func:`_retry_docling_on_normalized_docx`) before falling back to the
+    legacy adapter. For the SAME bytes under the SAME environment the correct
+    output therefore changed — docling structure and ``reason=None`` instead
+    of legacy blocks and ``reason="backend-error"`` — but ONLY for entries
+    that took the failing-docling-on-DOCX path. That is a minority of any
+    corpus; every other entry was still correct and was discarded anyway by
+    the global bump this predicate replaces.
+
+    Affected, i.e. invalidated:
+      - a DOCX SUCCESS entry recording a live docling->legacy fallback
+        (``extractor="legacy"``, ``reason="backend-error"``): the retry may
+        now recover real docling structure for it.
+      - a DOCX FAILURE entry under a ``"docling"`` environment: the negative
+        cache recorded "no text" from a run that had no normalized retry
+        available; the retry may now yield text.
+
+    Unaffected, i.e. kept:
+      - anything that is not a DOCX (the retry is DOCX-only).
+      - a docling SUCCESS (docling never failed, so the retry never ran).
+      - a legacy SUCCESS with ``reason`` "declared"/"env-missing" (docling was
+        never attempted at all — there was no failure to retry).
+      - a failure under a ``"legacy"`` environment (same reason).
+
+    Undecidable (``None`` -> invalidated conservatively): a DOCX legacy
+    SUCCESS with no ``reason`` recorded. That shape cannot occur through
+    :meth:`ExtractionCache.put` and cannot occur through the v1->v2 migration
+    above (which always sets one), so it means a hand-edited or foreign entry
+    — exactly when guessing is least defensible.
+    """
+    if context.get("suffix") != ".docx":
+        return False
+
+    if "error" in value:
+        return context.get("extractor_env") == "docling"
+
+    if value.get("extractor") != "legacy":
+        return False
+    reason = value.get("reason", _UNSET)
+    if reason is _UNSET:
+        return None
+    return bool(reason == "backend-error")
+
+
+#: The extraction cache's format ladder, oldest bump first. The head rung's
+#: version is the format entries are written under today.
+_EXTRACTION_CACHE_FORMAT_LADDER: tuple[CacheFormatStep, ...] = (
+    CacheFormatStep(
+        version="2",
+        issue="#81",
+        summary=(
+            "cached extractor became a structured ExtractorLabel "
+            "(reason/fallback_from) instead of a bare 'docling'/'legacy' string"
+        ),
+        migrate=_migrate_extractor_label,
+    ),
+    CacheFormatStep(
+        version="3",
+        issue="#84",
+        summary=(
+            "a failed docling conversion of a DOCX is retried on a normalized "
+            "copy before falling back to the legacy adapter"
+        ),
+        affects=_affected_by_normalized_docx_retry,
+    ),
+)
+
+#: The format version entries are written under today — derived from the
+#: ladder head so the constant and the ladder can never drift apart.
+_EXTRACTION_CACHE_FORMAT_VERSION = current_version(
+    _EXTRACTION_CACHE_FORMAT_LADDER, _EXTRACTION_CACHE_FORMAT_ORIGIN
+)
+
+#: Every older format version worth probing on a miss, NEWEST first (the
+#: newest stale entry needs the fewest migration steps and is the most likely
+#: to survive them).
+_EXTRACTION_CACHE_STALE_VERSIONS: tuple[str, ...] = tuple(
+    reversed(ladder_versions(_EXTRACTION_CACHE_FORMAT_LADDER, _EXTRACTION_CACHE_FORMAT_ORIGIN)[:-1])
+)
 
 # ---------------------------------------------------------------------------
 # Error
@@ -429,10 +596,26 @@ def _extraction_cache_payload(path: Path, environment: str | None = None) -> dic
     bare PATH check) and silently collide with a real docling-environment
     entry for the same file.
     """
+    return _extraction_cache_key(
+        _sha256_file(path),
+        _resolve_cache_environment(path, environment),
+        _EXTRACTION_CACHE_FORMAT_VERSION,
+    )
+
+
+def _extraction_cache_key(digest: str, environment: str, format_version: str) -> dict[str, str]:
+    """The raw key payload for an already-computed *digest*/*environment* at an
+    arbitrary *format_version*.
+
+    Split out of :func:`_extraction_cache_payload` so a single lookup can probe
+    several format versions (see ``ExtractionCache._lookup``'s scoped-migration
+    path) while hashing the source file only once — ``_sha256_file`` reads the
+    whole document, and a stale-version probe must not re-read it per rung.
+    """
     return {
-        "file_sha256": _sha256_file(path),
-        "format_version": _EXTRACTION_CACHE_FORMAT_VERSION,
-        "extractor_env": _resolve_cache_environment(path, environment),
+        "file_sha256": digest,
+        "format_version": format_version,
+        "extractor_env": environment,
     }
 
 
@@ -453,13 +636,135 @@ class ExtractionCache:
     judge runs (issue #132). A docling install/removal between rounds is
     exactly the case that must NOT keep hitting — the environment component
     turns that into a clean miss instead of silently replaying stale output.
+
+    Format-version misses are handled differently from environment/content
+    misses: see :meth:`_lookup`. An entry stored under an older
+    ``format_version`` is walked up the format ladder
+    (:data:`_EXTRACTION_CACHE_FORMAT_LADDER`) and either migrated in place or
+    invalidated by the specific rung that broke it — instead of every entry
+    being discarded because one rung broke some of them.
     """
 
-    def __init__(self, cache_path: Path) -> None:
+    def __init__(self, cache_path: Path, *, migrate: bool = True) -> None:
+        """Open (or create) the cache at *cache_path*.
+
+        ``migrate``: when ``True`` (default), a lookup that misses under the
+        current ``format_version`` probes older versions and migrates any hit
+        forward (see :meth:`_lookup`). ``False`` restores the pre-ladder
+        behavior — an older-format entry is simply invisible — for a caller
+        that wants a provably cold read of stale state (tests, and an operator
+        debugging whether a migrated entry is itself the problem).
+        """
         self._store = VerdictStore(cache_path)
+        self._migrate = migrate
+        #: Entries this instance rewrote into the current format.
+        self.migrated_count = 0
+        #: Older-format entries a ladder rung invalidated for this instance.
+        self.invalidated_count = 0
+        #: (digest, environment) pairs whose stale entry a rung already
+        #: rejected. An invalidated entry stays in the append-only store, so
+        #: without this every later lookup for the same file would re-probe and
+        #: re-log it — and ``extract_blocks`` alone looks twice (``get`` then
+        #: ``get_failure``) before extracting.
+        self._rejected: set[tuple[str, str]] = set()
+
+    def _lookup(
+        self,
+        path: Path,
+        environment: str | None,
+        *,
+        declared_extractor: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the stored value for *path* under *environment*, migrating a
+        stale-format entry forward if one exists. ``None`` on a real miss.
+
+        Order of business:
+
+        1. The current-format key. A warm cache hits here and pays nothing
+           extra — one dict lookup, exactly as before this method existed.
+        2. On a miss, and only when ``migrate`` is enabled, the same
+           file/environment under each older format version, newest first (the
+           newest stale entry needs the fewest rungs and is likeliest to
+           survive them). The source file is hashed ONCE for all probes.
+        3. A stale hit is walked up :data:`_EXTRACTION_CACHE_FORMAT_LADDER`.
+           If it survives, it is re-filed under the current key — so the
+           migration is paid once per entry, not once per lookup — and
+           returned. If a rung invalidates it, this returns ``None`` and the
+           caller re-extracts, exactly as a global bump would have made it.
+
+        Probing stops at the first stale version that has an entry: older
+        entries for the same file/environment necessarily describe the same
+        extraction, so if the newest stale one is invalidated, an older one
+        would be too (the ladder's predicates read the entry, not its age).
+
+        ``declared_extractor`` is the extractor the CALLER declared
+        ("docling"/"legacy"/"auto"), not the resolved environment. It is the
+        only way to recover ``reason`` for a legacy-environment pre-#81 entry
+        — see :func:`_migrate_extractor_label`. Omitting it does not corrupt
+        anything; it just makes that one class of entry undecidable, and
+        therefore discarded.
+        """
+        digest = _sha256_file(path)
+        env = _resolve_cache_environment(path, environment)
+        current_key = _extraction_cache_key(digest, env, _EXTRACTION_CACHE_FORMAT_VERSION)
+
+        hit = self._store.get(current_key)
+        if hit is not None or not self._migrate:
+            return hit
+        if (digest, env) in self._rejected:
+            return None
+
+        context: dict[str, Any] = {
+            "suffix": path.suffix.lower(),
+            "extractor_env": env,
+            # Mirrors extract_blocks's own fresh-extraction expression for a
+            # legacy environment ("declared" if the config asked for legacy,
+            # else "env-missing"); None when the caller declared nothing.
+            "legacy_reason": (
+                None
+                if declared_extractor is None
+                else ("declared" if declared_extractor == "legacy" else "env-missing")
+            ),
+        }
+
+        for stale_version in _EXTRACTION_CACHE_STALE_VERSIONS:
+            stale = self._store.get(_extraction_cache_key(digest, env, stale_version))
+            if stale is None:
+                continue
+            result = carry_forward(
+                stale,
+                from_version=stale_version,
+                ladder=_EXTRACTION_CACHE_FORMAT_LADDER,
+                context=context,
+            )
+            if result.value is None:
+                self._rejected.add((digest, env))
+                self.invalidated_count += 1
+                _log.info(
+                    "extraction cache: discarding format-%s entry for %s — %s",
+                    stale_version,
+                    path.name,
+                    result.detail,
+                )
+                return None
+            self.migrated_count += 1
+            _log.info(
+                "extraction cache: %s for %s (re-filed under format %s, no re-extraction)",
+                result.detail,
+                path.name,
+                _EXTRACTION_CACHE_FORMAT_VERSION,
+            )
+            self._store.put(current_key, result.value)
+            return result.value
+
+        return None
 
     def get(
-        self, path: Path, *, extractor: str | None = None
+        self,
+        path: Path,
+        *,
+        extractor: str | None = None,
+        declared_extractor: str | None = None,
     ) -> tuple[str, list[Block], ExtractorLabel] | None:
         """Return the cached ``(canonical_text, blocks, ExtractorLabel)``, or ``None`` on a miss.
 
@@ -476,6 +781,12 @@ class ExtractionCache:
         (issue #80). Defaults to ``None`` (today's bare PATH-check
         behavior, unchanged for every pre-existing caller).
 
+        ``declared_extractor``: the DECLARED extractor
+        ("docling"/"legacy"/"auto") behind *extractor*, threaded through to
+        stale-format migration — see :meth:`_lookup` and
+        :func:`_migrate_extractor_label`. Defaults to ``None``, which only
+        costs a pre-#81 legacy-environment entry its migration.
+
         The returned label's ``reason``/``fallback_from`` come from
         ``cached.get(...)`` (issue #81) — absent on any entry written before
         that field existed, so a stale (pre-#81) on-disk value still loads
@@ -484,7 +795,7 @@ class ExtractionCache:
         ``detail`` is always ``None`` even for an entry whose live extraction
         did carry one.
         """
-        cached = self._store.get(_extraction_cache_payload(path, extractor))
+        cached = self._lookup(path, extractor, declared_extractor=declared_extractor)
         if cached is None or "error" in cached:
             return None
         canonical_text = cached["canonical_text"]
@@ -557,7 +868,13 @@ class ExtractionCache:
         }
         self._store.put(_extraction_cache_payload(path, environment), value)
 
-    def get_failure(self, path: Path, *, extractor: str | None = None) -> str | None:
+    def get_failure(
+        self,
+        path: Path,
+        *,
+        extractor: str | None = None,
+        declared_extractor: str | None = None,
+    ) -> str | None:
         """Return the cached failure message for *path*, or ``None``.
 
         A failure entry only counts when it was produced by the SAME extractor
@@ -580,9 +897,18 @@ class ExtractionCache:
         as a belt-and-braces guard against the stored *value* ever
         disagreeing with the *key* it was filed under — e.g. a future direct
         ``_store.put`` call that bypasses :func:`_extraction_cache_payload`.
+
+        A failure entry stored under an older ``format_version`` is subject to
+        the same scoped migration as a success entry (see :meth:`_lookup`) —
+        which matters most for the case the issue #84 rung names: a DOCX that
+        negative-cached "no text" under a docling environment BEFORE the
+        normalize-and-retry existed must be retried, while a failure the retry
+        cannot possibly change (any non-DOCX, anything under a legacy
+        environment) keeps its negative cache instead of re-burning the full
+        per-file docling/OCR timeout on the next command.
         """
         resolved = _resolve_cache_environment(path, extractor)
-        cached = self._store.get(_extraction_cache_payload(path, resolved))
+        cached = self._lookup(path, resolved, declared_extractor=declared_extractor)
         if cached is None or "error" not in cached:
             return None
         if cached.get("extractor") != resolved:
@@ -680,10 +1006,12 @@ def extract_blocks(
         raise ExtractionError(f"unsupported file extension: {suffix!r} ({path})")
 
     if cache is not None and not refresh:
-        cached = cache.get(path, extractor=environment)
+        cached = cache.get(path, extractor=environment, declared_extractor=extractor)
         if cached is not None:
             return cached
-        cached_failure = cache.get_failure(path, extractor=environment)
+        cached_failure = cache.get_failure(
+            path, extractor=environment, declared_extractor=extractor
+        )
         if cached_failure is not None:
             raise ExtractionError(f"{cached_failure} (cached failure — same extractor)")
 
@@ -788,7 +1116,8 @@ def extract_blocks(
         # attempt, or a prior same-key failure) still negative-caches as
         # before.
         if cache is not None and not (
-            refresh and cache.get(path, extractor=environment) is not None
+            refresh
+            and cache.get(path, extractor=environment, declared_extractor=extractor) is not None
         ):
             cache.put_failure(path, message, environment)
         raise ExtractionError(message)

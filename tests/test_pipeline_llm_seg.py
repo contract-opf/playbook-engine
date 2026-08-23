@@ -2765,24 +2765,33 @@ def test_stage_cache_reason_version_bump_forces_recompute_on_upgrade(
     assert ingest_2["reason"] == "backend-error"
 
 
-def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
+def test_pre_81_extraction_cache_entry_is_migrated_and_counted_as_a_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The SEPARATE, more persistent extraction_cache.jsonl (kept warm
-    across every judge/mine/compile round, independent of the L1-L4 stage
-    cache) must ALSO not silently replay a pre-#81-shaped entry.
+    """The SEPARATE, more persistent extraction_cache.jsonl (kept warm across
+    every judge/mine/compile round, independent of the L1-L4 stage cache) must
+    never replay a pre-#81 entry as ``reason=None`` — the blindness that made
+    ``config.extraction.max_fallback``, corpus_manifest.json and the review
+    flags report zero fallbacks on a corpus that DID fall back (issue #81,
+    project-note item 6 — the exact scenario that deadlocked the first
+    implementation attempt).
 
-    Seeds a pre-#81-shaped extraction_cache.jsonl entry (extractor="legacy",
-    no reason/fallback_from/detail keys — as a real pre-#81 build would have
-    written for a file that fell back under a docling-available
-    environment), then re-mines into a FRESH out_dir (cold L1-L4 stage
-    cache — the ONLY warm state is extraction_cache.jsonl) with a live
-    docling fallback and max_fallback=0. Asserts the manifest records
-    reason="backend-error" (proving the stale extraction-cache entry was
-    NOT replayed — a bare cache HIT would have loaded reason=None and never
-    even attempted a live extraction) AND PipelineError is raised naming the
-    fallback version (issue #81, project-note item 6 — this is the exact
-    scenario that deadlocked the first implementation attempt).
+    Originally this was enforced by bumping the cache's ``format_version``, so
+    the entry simply missed and the whole corpus was re-extracted. It is now
+    enforced by the #81 ladder rung, which reconstructs the entry's reason
+    exactly — a "legacy" value under a "docling" KEY environment can only be a
+    live per-file fallback — and re-files it under the current format. The
+    outcome this test cares about is unchanged and asserted below (the
+    manifest records ``reason="backend-error"``, and max_fallback=0 raises),
+    but it is now reached WITHOUT re-extracting the file: the seeded blocks
+    survive into the manifest, and the cache reports one migration and zero
+    invalidations.
+
+    Seeds a pre-#81-shaped entry (``extractor="legacy"``, no
+    reason/fallback_from/detail keys — as a real pre-#81 build would have
+    written for a file that fell back under a docling-available environment)
+    and re-mines into a fresh out_dir whose ONLY warm state is
+    extraction_cache.jsonl.
     """
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
@@ -2795,18 +2804,31 @@ def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
 
     # Seed the pre-#81-shaped entry under the PRE-#81 KEY — format_version
     # hardcoded to "1" (NOT via extraction._extraction_cache_payload, which
-    # would pick up today's bumped "2") so this genuinely simulates on-disk
+    # would pick up today's ladder head) so this genuinely simulates on-disk
     # state from before this fix, under the environment a docling-available
     # host would have resolved ("docling" — the per-file fallback pins the
     # KEY to the environment, not the post-fallback adapter label; see
     # extraction._extraction_cache_payload).
-    canonical_text = (
-        "1. Indemnification\n"
+    #
+    # The block stream mirrors what the legacy RTF adapter really produced for
+    # this fixture (one block per paragraph — see _V1_BODY and
+    # _fake_segment_fn): the entry is now REPLAYED rather than discarded, so
+    # it has to be a faithful pre-#81 entry, not a placeholder.
+    lines = [
+        "1. Indemnification",
         "Alpha Corp shall indemnify Beta University against third-party claims "
-        "arising from the placement programme.\n"
-        "2. Governing Law\n"
-        "This agreement is governed by the laws of the State of California."
-    )
+        "arising from the placement programme.",
+        "2. Governing Law",
+        "This agreement is governed by the laws of the State of California.",
+    ]
+    canonical_text = "\n".join(lines)
+    blocks: list[dict[str, object]] = []
+    cursor = 0
+    for index, line in enumerate(lines):
+        blocks.append(
+            {"block_id": f"b{index}", "page": 0, "char_span": [cursor, cursor + len(line)]}
+        )
+        cursor += len(line) + 1  # +1 for the joining newline
     pre_81_key_payload = {
         "file_sha256": extraction._sha256_file(vf),
         "format_version": "1",
@@ -2814,9 +2836,7 @@ def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
     }
     pre_81_value = {
         "canonical_text": canonical_text,
-        "blocks": [
-            {"block_id": "b0", "page": 0, "char_span": [0, 18]},
-        ],
+        "blocks": blocks,
         "extractor": "legacy",
         # No "reason"/"fallback_from" keys — exactly the pre-#81 shape.
     }
@@ -2840,10 +2860,14 @@ def test_extraction_cache_format_bump_forces_recompute_on_upgrade(
     ingest = manifest[0]["version_ingest"][0]
     assert ingest["extractor"] == "legacy"
     assert ingest["reason"] == "backend-error", (
-        "the stale pre-#81 extraction_cache.jsonl entry (reason=None) must not have been "
-        "replayed — a genuine live extraction must have run and correctly recorded the "
-        "backend-error fallback"
+        "a pre-#81 extraction_cache.jsonl entry must never be replayed as reason=None — "
+        "the #81 ladder rung reconstructs the fallback it actually recorded"
     )
+    assert extraction_cache.migrated_count == 1, (
+        "the entry's blocks were still correct, so the reason must have been recovered by "
+        "migration rather than by re-extracting the file"
+    )
+    assert extraction_cache.invalidated_count == 0
 
 
 # ---------------------------------------------------------------------------
