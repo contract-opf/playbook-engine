@@ -1,6 +1,4 @@
-<<<<<<< HEAD
 .PHONY: install lint fmt typecheck test smoke-nda smoke-canary smoke all hooks docker-build docker-run docker-check
->>>>>>> fix/environment-drift-prevention
 
 VENV := .venv
 PY   := $(VENV)/bin/python
