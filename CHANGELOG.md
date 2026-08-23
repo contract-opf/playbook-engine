@@ -31,6 +31,28 @@ changes` heading in the release it ships under.
   that exact cascade and asserts the new extractor check names the real
   layer first. Runs in ~4s and installs no system packages (DOCX only, no
   `pandoc`, no `docling`, no `ANTHROPIC_API_KEY`). No engine behavior change.
+- **Extraction-cache format changes are now scoped instead of discarding the
+  whole cache.** A change to `extract_blocks`'s output used to be expressed by
+  bumping a `format_version` inside the cache KEY, which invalidated every
+  entry for every file — a full corpus re-extraction (1h45m–5h17m on a
+  44-document / 161-version corpus, against ~0 for a warm cache). Two such bumps landed within one month (three hours apart on the same day,
+  so a corpus older than either paid one full re-extraction, not two), for
+  changes that each affected only a subset of entries. A format bump is now a rung on a ladder
+  (`playbook_engine/cache_format.py`) that declares what it did to stored
+  entries: a `migrate` callback that rewrites them into the new shape, an
+  `affects` predicate that names only the entries the change actually broke,
+  or an explicit `discard_all=True` for a change that genuinely invalidates
+  everything. `ExtractionCache` probes older-version keys on a miss and walks
+  any hit up that ladder, so an entry survives unless a rung says otherwise.
+  The two historical bumps are retro-fitted as the first two rungs: issue #81
+  (structured `ExtractorLabel`) is a migration, and issue #84 (normalize-and-
+  retry for redline DOCX) is a predicate matching only DOCX entries that
+  recorded a docling→legacy fallback. Migration is conservative by
+  construction — a predicate that cannot decide, or a label that cannot be
+  reconstructed exactly, invalidates the entry rather than guessing it
+  current. No cache file format change: stale entries are re-filed under the
+  current key on first lookup, and `ExtractionCache(..., migrate=False)`
+  restores the old cold-read behavior.
 
 ## [1.0.1] - 2026-08-22
 
