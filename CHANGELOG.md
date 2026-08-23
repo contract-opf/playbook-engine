@@ -8,6 +8,32 @@ are additive-only, and any new or changed normative MUST — even one that
 touches no schema field — gets its own entry under a `### Normative rule
 changes` heading in the release it ships under.
 
+## [Unreleased]
+
+- **A run now records the environment that produced its output directory,
+  and the next run checks itself against it** (issue #121). `mine`/`judge`
+  write `<out>/run_manifest.json` — engine version and git build, the
+  resolved extractor environment, the extraction/stage cache format
+  versions, the segmentation model/prompt/schema identity, and an opaque
+  config+taxonomy hash — and preflight the next run against it before any
+  work starts. Previously nothing read any provenance back on a later run:
+  when `docling` vanished from a host venv, `extraction.extractor: auto`
+  silently resolved to `legacy`, every version missed the
+  `extractor_env`-keyed extraction cache (#77) and then the
+  canonical-text-keyed segmentation cache, and 43 of 44 documents landed
+  in `AgentSegmentationPending` quarantine with observations down from
+  ~2,400 to 66 — reported two layers below the real fault.
+  A matching environment prints **nothing**. A mismatch that would silently
+  redo or invalidate work (extractor environment changed, extraction cache
+  format bumped, engine downgraded, clause splitter changed) stops the run
+  before it starts and explains in plain English what would be redone, how
+  to fix it, and emits a copy-pasteable block of environment facts — no
+  paths, party names, or contract text — safe to paste into a public issue.
+  Pass `--accept-environment-change` to proceed anyway. Advisory differences
+  (a config edit, an engine upgrade) print one short `note:` line and
+  continue. Existing output directories have no manifest and are treated as
+  a first run: silent, then stamped.
+
 ## [1.0.1] - 2026-08-22
 
 - **Round-move attribution now recovers real author attribution on the
