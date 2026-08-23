@@ -601,6 +601,19 @@ against the same `$OUT` deliberately does NOT replay the cache for affected
 versions — each is re-extracted once under the new environment rather than
 staying frozen at a possibly-worse legacy-only extraction (issue #77).
 
+**You do not have to police this by hand.** A successful `mine`/`judge`
+stamps `$OUT/run_manifest.json` with the environment that produced the
+output directory (engine version and build, resolved extractor, cache format
+versions, config hash), and the *next* `mine`/`judge` against that `$OUT`
+checks itself against it before doing any work. When everything matches it
+says nothing at all. When it doesn't — docling gone from the venv, a stale
+container image running an older engine, a changed clause splitter — it
+stops before touching anything and prints a plain-English explanation of
+what would be redone, how to fix it, and a copy-pasteable block of
+environment facts (no corpus content) to send to the maintainers. Re-run
+with `--accept-environment-change` if the change was deliberate and the
+rework is acceptable (issue #121).
+
 Run the pre-flight estimator (host venv, seconds, no docling needed). It
 checks the cache for **both** the `docling` and `legacy` key variants of
 each file, regardless of whether docling is installed on the host running
