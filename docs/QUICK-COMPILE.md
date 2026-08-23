@@ -52,6 +52,19 @@ this guide's flow against that corpus.
 
 ---
 
+## Step 0 — Check the machine
+
+```bash
+playbook doctor
+```
+
+Needs no corpus and no config. Reports the engine version, whether you are
+inside the project's Docker image, and every external tool the pipeline can
+use — with what each missing one silently costs you. Worth ten seconds before
+a long run.
+
+---
+
 ## Step 1 — Check your layout
 
 ```bash
@@ -60,6 +73,10 @@ playbook lint-corpus ./corpus --config ./playbook.config.yaml
 
 Fix every **ERR** item before proceeding. **WARN** items are advisory.
 
+`playbook mine` runs these same checks itself and refuses to start if any fail
+(`--skip-preflight` opts out), so you cannot skip this by accident — but
+running it explicitly is still faster than finding out at the start of a mine.
+
 ### Common errors and how to fix them
 
 | Error | What to do |
@@ -67,6 +84,7 @@ Fix every **ERR** item before proceeding. **WARN** items are advisory.
 | `CORPUS_NOT_FOUND` | Check the path — the folder doesn't exist yet. |
 | `EMPTY_CORPUS` | Add at least one agreement subfolder with files. |
 | `DOC_NO_SUPPORTED_FILES` | Add `.docx`, `.pdf`, or `.rtf` files to the subfolder, or delete it. |
+| `CORPUS_DANGLING_SYMLINKS` | The files are symlinks whose targets aren't reachable from here (usually a symlink-staged corpus read inside a container). Re-run `playbook stage` — it writes real copies by default. |
 | `CONFIG_NOT_FOUND` | Create a `playbook.config.yaml` (copy the example). |
 | `CONFIG_MISSING_TAXONOMY` | Set `taxonomy:` in your config to the taxonomy YAML path. |
 | `CONFIG_TAXONOMY_NOT_FOUND` | Check the taxonomy path — the file is missing or misspelled. |

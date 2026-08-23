@@ -1018,6 +1018,79 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
     tmp.replace(dest)
 
 
+# ---------------------------------------------------------------------------
+# Corpus preflight (shared by `mine` and `segment`)
+# ---------------------------------------------------------------------------
+
+_SKIP_PREFLIGHT_HELP = (
+    "Skip the corpus/config preflight (the same checks `playbook lint-corpus` "
+    "runs) and go straight to work. Only useful when you have read the errors "
+    "and decided they do not apply."
+)
+
+
+def _run_corpus_preflight(
+    corpus_dir: Path,
+    config_path: Path,
+    *,
+    skip: bool,
+    command: str,
+) -> None:
+    """Run `lint-corpus`'s checks as a PRECONDITION, not a suggestion.
+
+    ``lint-corpus`` has always been the documented preflight, but nothing made
+    it mandatory — an ad-hoc ``playbook mine ...`` skipped it entirely, which is
+    how a corpus of dangling symlinks (issue #130) and a host that had quietly
+    lost its ``docling`` binary (issue #121) both got all the way to a finished,
+    wrong-looking-like-right derivation. Running it here means the expensive,
+    hard-to-audit stages cannot start in an environment the linter can already
+    tell is broken.
+
+    Only errors and warnings are echoed — the per-document "OK" lines belong to
+    ``lint-corpus`` itself, and would bury this command's own output.
+
+    Args:
+        corpus_dir:  Corpus root about to be processed.
+        config_path: Engine config, validated alongside it.
+        skip:        Honour ``--skip-preflight`` and do nothing.
+        command:     Name of the calling command, for the message.
+
+    Raises:
+        SystemExit: preflight found blocking errors.
+    """
+    if skip:
+        click.secho(
+            f"preflight: skipped (--skip-preflight). {command} will run against whatever is there.",
+            fg="yellow",
+            err=True,
+        )
+        return
+
+    report = lint_corpus(corpus_dir, config_path=config_path)
+
+    for item in report.warnings():
+        click.secho(f"  WARN {item.message}", fg="yellow", err=True)
+
+    if not report.has_errors:
+        n_warn = len(report.warnings())
+        suffix = f" ({n_warn} warning(s))" if n_warn else ""
+        click.echo(f"preflight: OK{suffix}")
+        return
+
+    for item in report.errors():
+        click.secho(f"  ERR  {item.message}", fg="red", err=True)
+    click.secho(
+        f"\nPreflight found {len(report.errors())} problem(s) with this corpus or "
+        f"config, so `{command}` stopped before doing any work — running anyway "
+        "would produce a playbook that looks fine and is not. Fix the errors "
+        "above and re-run, or pass --skip-preflight if you are certain they do "
+        "not apply.",
+        fg="red",
+        err=True,
+    )
+    raise SystemExit(1)
+
+
 @cli.command(name="mine")
 @click.argument("corpus_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1042,6 +1115,13 @@ def _write_taxonomy(taxonomy: Taxonomy, dest: Path) -> None:
     ),
 )
 @click.option(
+    "--skip-preflight",
+    "skip_preflight",
+    is_flag=True,
+    default=False,
+    help=_SKIP_PREFLIGHT_HELP,
+)
+@click.option(
     "--entity-registry",
     "entity_registry_path",
     type=click.Path(path_type=Path),
@@ -1059,6 +1139,7 @@ def mine_cmd(
     config_path: Path,
     out_path: Path | None,
     no_cache: bool,
+    skip_preflight: bool,
     entity_registry_path: Path | None,
 ) -> None:
     """Mine CORPUS_DIR and write the observation store (L1–L4).
@@ -1082,9 +1163,16 @@ def mine_cmd(
     refreshed with the new result, so a subsequent run without --no-cache
     stays warm.
 
+    Runs the ``lint-corpus`` checks first and refuses to start if any of them
+    fail — a broken corpus layout or extraction environment produces a
+    plausible-looking but wrong observation store, which is much more expensive
+    to notice later than up front. ``--skip-preflight`` opts out.
+
     Does NOT write playbook.opf.json.  Run ``playbook project`` afterwards
     to compile the playbook from the store.
     """
+    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook mine")
+
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -1207,6 +1295,103 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
     click.secho(f"OK  {out_dir_resolved / 'playbook.opf.json'}", fg="green")
 
 
+@cli.command(name="doctor")
+@click.option(
+    "--strict",
+    "strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero if anything the engine can shell out to is missing, not "
+        "just the things that are definitely wrong. Use this in setup scripts "
+        "and CI, where a partial environment should stop the line."
+    ),
+)
+def doctor_cmd(strict: bool) -> None:
+    """Report what this machine provides, in plain English.
+
+    Corpus-free and config-free, so it can be run before there is anything else
+    to run. Names the engine version, the container image stamp if there is one,
+    and every external tool the pipeline can reach — with what its absence would
+    silently cost you.
+
+    Exit code is 0 unless something is definitely wrong: running inside the
+    project's own Docker image with one of the tools that image installs
+    missing, or an image whose stamp disagrees with the engine actually
+    imported. ``--strict`` additionally fails on any missing tool.
+    """
+    from playbook_engine.environment import probe_environment  # noqa: PLC0415
+
+    env = probe_environment()
+
+    click.echo(f"engine   : {env.engine_version}")
+    click.echo(f"python   : {env.python_version}")
+    click.echo(f"platform : {env.platform_name}")
+    if env.image is not None:
+        click.echo(f"runtime  : project Docker image (built from commit {env.image.git_sha})")
+    else:
+        click.echo("runtime  : host install (not the project Docker image)")
+    click.echo(
+        "api key  : "
+        + ("ANTHROPIC_API_KEY is set" if env.anthropic_key_set else "ANTHROPIC_API_KEY not set")
+    )
+    click.echo("")
+
+    for status in env.tools:
+        if status.present:
+            click.secho(f"  OK   {status.tool.name}  ({status.path})", fg="green")
+        else:
+            click.secho(f"  --   {status.tool.name}  not installed", fg="yellow")
+            click.echo(f"         used for: {status.tool.purpose}")
+            click.echo(f"         without it: {status.tool.consequence}")
+            click.echo(f"         to install: {status.tool.install}")
+
+    problems: list[str] = []
+
+    # An engine/stamp disagreement means the code running is not the code the
+    # image was built and verified around — most often an editable checkout
+    # bind-mounted over the installed package. Results from such a container
+    # cannot be attributed to a version at all.
+    if env.image_matches_engine() is False and env.image is not None:
+        problems.append(
+            f"This container is stamped as engine {env.image.engine_version}, but the "
+            f"engine that actually loaded is {env.engine_version}. Something is "
+            "overriding the installed package (a bind-mounted checkout, usually), so "
+            "results from this container cannot be tied to a released version."
+        )
+
+    # Inside the project image these tools are installed by the Dockerfile. If
+    # one is gone, the image is broken or has been modified — not a user
+    # forgetting an optional dependency.
+    if env.in_project_image:
+        for status in env.missing(expected_in_image_only=True):
+            problems.append(
+                f"{status.tool.name} is missing from inside the project image, which "
+                "installs it. This image is broken or has been modified — rebuild it "
+                "with `make docker-build`."
+            )
+
+    if strict:
+        for status in env.missing():
+            problems.append(f"{status.tool.name} is not installed ({status.tool.install}).")
+
+    click.echo("")
+    if problems:
+        for problem in problems:
+            click.secho(f"  ERR  {problem}", fg="red", err=True)
+        raise SystemExit(1)
+
+    n_missing = len(env.missing())
+    if n_missing:
+        click.secho(
+            f"OK — usable, with {n_missing} optional tool(s) missing (see above for "
+            "what each one costs you).",
+            fg="green",
+        )
+    else:
+        click.secho("OK — everything the engine can use is installed.", fg="green")
+
+
 @cli.command(name="lint-corpus")
 @click.argument("corpus_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1279,6 +1464,18 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
         raise SystemExit(1) from exc
 
 
+# Printed when `stage --symlink` is used. Symlink staging is a deliberate
+# opt-out from the (copying) default, so this is the "if there is an issue,
+# say so in plain English" half — not a warning anyone hits by accident.
+_SYMLINK_STAGING_NOTICE = (
+    "NOTE  staged with --symlink: these are absolute symlinks into the source "
+    "corpus, so this staged tree only works on this machine. It will read as an "
+    "EMPTY corpus inside a container (`make docker-run` bind-mounts it read-only "
+    "and every link dangles). Re-run `playbook stage` without --symlink to get "
+    "real copies."
+)
+
+
 @cli.command(name="stage")
 @click.argument("src_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1293,15 +1490,16 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     ),
 )
 @click.option(
-    "--copy",
+    "--copy/--symlink",
     "copy_files",
-    is_flag=True,
-    default=False,
+    default=True,
     help=(
-        "Write real file copies instead of absolute symlinks. Use this when the "
-        "staged output will cross a filesystem boundary (e.g. staged on the host, "
-        "then bind-mounted read-only into a container) — symlink targets are host "
-        "paths and dangle in that scenario."
+        "--copy (default) writes real file copies, so the staged corpus is "
+        "self-contained and still readable after it crosses a filesystem "
+        "boundary — e.g. bind-mounted read-only into the container by "
+        "`make docker-run`. --symlink writes absolute symlinks instead: cheaper "
+        "and duplication-free, but valid only on this host — inside a container "
+        "every link dangles and the corpus reads as empty."
     ),
 )
 @click.option(
@@ -1342,7 +1540,7 @@ def stage_cmd(
 
     Detects the directory layout (flat, CLM-nested, or manifest-driven),
     flattens each negotiation trail into ``out/<agreement>/<NN>__<name>``
-    using symlinks (or real copies with ``--copy``), writes per-agreement
+    as real file copies (or absolute symlinks with ``--symlink``), writes per-agreement
     ``hints.yaml`` (order + signed_version), and emits a
     ``playbook.config.yaml`` skeleton.
 
@@ -1397,6 +1595,8 @@ def stage_cmd(
             f"staged : {result.staged_count} version(s) across {result.agreement_count} agreement(s)"
             + (" (copied)" if copy_files else " (symlinked)")
         )
+        if not copy_files:
+            click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
         click.echo(f"plan   : {executed_plan_file} (preserved as the staging record)")
         scaffold_config(resolved, dest)
         click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
@@ -1435,6 +1635,8 @@ def stage_cmd(
         f"staged : {result.staged_count} version(s) across {result.agreement_count} agreement(s)"
         + (" (copied)" if copy_files else " (symlinked)")
     )
+    if not copy_files:
+        click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
 
     scaffold_config(resolved, dest)
     click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
@@ -2151,7 +2353,16 @@ def judge_migrate_cmd(
     default=None,
     help="Output directory (default: <corpus_dir>/../out).",
 )
-def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> None:
+@click.option(
+    "--skip-preflight",
+    "skip_preflight",
+    is_flag=True,
+    default=False,
+    help=_SKIP_PREFLIGHT_HELP,
+)
+def segment_cmd(
+    corpus_dir: Path, config_path: Path, out_path: Path | None, skip_preflight: bool
+) -> None:
     """Emit the agent segmentation queue for CORPUS_DIR.
 
     Key-free store-backed segmentation. Extracts each version and, for every
@@ -2164,7 +2375,15 @@ def segment_cmd(corpus_dir: Path, config_path: Path, out_path: Path | None) -> N
     The queue is rewritten from scratch each run, so re-running after
     ``segment-apply`` reports only what still needs segmenting (empty = done).
     Requires ``segmentation.agent: true`` in the config.
+
+    Runs the same ``lint-corpus`` preflight ``mine`` does, for the same reason:
+    this is the stage that actually reads every version file, so a corpus the
+    walker cannot see (dangling symlinks) or an extraction environment that has
+    silently degraded must stop the run here, not surface as a thin playbook
+    later. ``--skip-preflight`` opts out.
     """
+    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook segment")
+
     from playbook_engine.agent_judge import PendingQueue  # noqa: PLC0415
     from playbook_engine.agent_segmenter import (  # noqa: PLC0415
         AGENT_SEGMENTER_MODEL,

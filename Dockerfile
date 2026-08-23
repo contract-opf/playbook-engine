@@ -89,6 +89,37 @@ RUN HF_HUB_DISABLE_XET=1 docling-tools models download --output-dir /opt/docling
 COPY . /app
 RUN pip install --no-cache-dir /app
 
+# Stamp the image with the engine version and source commit it was built from,
+# so a STALE image cannot silently produce a fix-free derivation.
+#
+# Not hypothetical: a local image three days behind the repo held engine 0.2.0
+# while the source tree was at 1.0.1, and the documented Docker workflow ran
+# happily inside it — producing a derivation missing exactly the fixes the run
+# was performed to apply, and looking like a success. Nothing anywhere compared
+# the two.
+#
+# ENGINE_VERSION is supplied by the build (`make docker-build` reads it from
+# playbook_engine/__init__.py) rather than computed here, because LABEL cannot
+# run code. A build arg can lie, so the RUN below refuses to build unless the
+# arg matches the version pip actually installed — which is what makes the
+# labels trustworthy enough for `make docker-run` to gate on via
+# `docker image inspect`, without starting a container.
+ARG ENGINE_VERSION=unknown
+ARG ENGINE_GIT_SHA=unknown
+RUN installed="$(python -c 'import playbook_engine; print(playbook_engine.__version__)')" \
+    && if [ "$ENGINE_VERSION" != "unknown" ] && [ "$installed" != "$ENGINE_VERSION" ]; then \
+         echo "build refused: --build-arg ENGINE_VERSION=$ENGINE_VERSION does not match the engine actually installed ($installed)" >&2; \
+         exit 1; \
+       fi \
+    && printf '{"engine_version": "%s", "git_sha": "%s"}\n' "$installed" "$ENGINE_GIT_SHA" \
+       > /etc/playbook-engine-image.json \
+    && chmod a+r /etc/playbook-engine-image.json
+
+LABEL org.opencontainers.image.title="playbook-engine" \
+      org.opencontainers.image.version="$ENGINE_VERSION" \
+      org.opencontainers.image.revision="$ENGINE_GIT_SHA" \
+      org.opencontainers.image.source="https://github.com/contract-opf/playbook-engine"
+
 # Run as non-root; /work is where corpus/out volumes get mounted, so the
 # runtime user needs to own it.
 RUN useradd --create-home --uid 1000 playbook && mkdir -p /work && chown playbook:playbook /work
