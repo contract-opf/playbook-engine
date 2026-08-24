@@ -94,16 +94,29 @@ context: `taxonomy_id`, `clause_path`, `document_id`.
   A clause APPEARING only (no BEFORE): with a template, judge that single
   text against the standard; without one, judge whether accepting it as
   written is risk-relevant vs standard boilerplate.
-- **Relocation triage FIRST (do this before judging items one by one):** group
-  the pending deviation items by `document_id` and scan each document-pair's
-  full hunk set for relocations — the same (or near-identical) clause text
-  disappearing in one hunk and reappearing, possibly renumbered, in another
-  hunk of the same document. Auto-verdict BOTH sides of each relocation pair
-  as `none` / neutral / none with rationale "alignment artifact — clause
-  relocated, text unchanged" (confidence 0.8+, no needs_review). Only judge
-  the remaining hunks individually. On real corpora a third or more of
-  deviation items are relocation echoes; judging them blind wastes effort and
-  floods the report with needs_review flags.
+- **Relocation triage FIRST (do this before judging items one by one):**
+  **pair-scanning the pending set alone will NOT find most relocations.** A
+  relocation has two sides: the clause disappearing (a hunk) and the same
+  clause reappearing unchanged elsewhere. Only the disappearing side
+  necessarily produces a pending item — an unchanged reappearance is an
+  `unchanged`-kind diff, which is resolved deterministically and never
+  reaches the judge, so it is simply absent from `pending.jsonl`. Scanning
+  hunk pairs within the pending set catches only the minority of relocations
+  where *both* sides happen to also be judge-routed hunks (near-identical
+  rewrites, or a version where the clause also moved to a differently
+  classified taxonomy slot). To find the rest: (1) group the pending
+  deviation items by `document_id`; (2) for each item whose hunk shows a
+  clause disappearing or appearing, use its `version_from`/`version_to`
+  fields to open the adjacent per-version clause trees at
+  `$OUT/normalized/<document_id>/NN__*.clauses.json` (each node carries
+  `clause_path`/`heading`/`text`) and search the other version's node texts
+  for the clause body, after normalizing whitespace/quotes/numbering;
+  presence in both versions ⇒ alignment artifact. Auto-verdict BOTH sides of
+  each confirmed relocation as `none` / neutral / none with rationale
+  "alignment artifact — clause relocated, text unchanged" (confidence 0.8+,
+  no needs_review). Only judge the remaining hunks individually. On real
+  corpora a third or more of deviation items are relocation echoes; judging
+  them blind wastes effort and floods the report with needs_review flags.
 - If no template hunk is provided (`template_hunk` is null), deviation
   assessment is relative to the modal observed position, not a template.
 - Confidence < 0.65: set `needs_review: true`.

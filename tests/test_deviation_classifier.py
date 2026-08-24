@@ -325,6 +325,47 @@ def test_batch_items_carry_clause_context() -> None:
     assert item["clause_path"] == "3.2"
 
 
+def test_batch_items_carry_version_context() -> None:
+    """Issue #166: judge batch items must carry version_from/version_to (the
+    normalized-tree version ids) so a pending deviation record can be traced
+    back to the specific $OUT/normalized/<document_id>/*.clauses.json files a
+    relocation-triage reviewer needs to open — the pending hunk alone carries
+    no version identifiers.
+    """
+    cd = ClauseDiff(
+        taxonomy_id="indemnification",
+        clause_path_before="3.2",
+        clause_path_after="3.3",
+        kind="modified",
+        hunks=(TextHunk(kind="replace", old_text="Alice Corp indemnifies.", new_text="Alice Corp fully indemnifies."),),
+        text_before="Alice Corp indemnifies.",
+        text_after="Alice Corp fully indemnifies.",
+        clause_version_before="v1",
+        clause_version_after="v2",
+    )
+    judge = MockDeviationJudge()
+    assess_deviations([cd], "Alice Corp indemnifies.", judge)
+
+    assert len(judge.received_items) == 1
+    item = judge.received_items[0]
+    assert item["version_from"] == "v1"
+    assert item["version_to"] == "v2"
+
+
+def test_batch_items_default_version_context_to_empty_string() -> None:
+    """When a ClauseDiff carries no clause_version_before/after (e.g. built
+    outside diff_aligned), batch items still carry version_from/version_to
+    as empty strings rather than omitting the keys — same convention as
+    taxonomy_id/clause_path."""
+    cd = _cd("modified", "Alice Corp indemnifies.", "Alice Corp fully indemnifies.", path="1")
+    judge = MockDeviationJudge()
+    assess_deviations([cd], "Alice Corp indemnifies.", judge)
+
+    item = judge.received_items[0]
+    assert item["version_from"] == ""
+    assert item["version_to"] == ""
+
+
 def test_batch_items_carry_document_id_when_provided() -> None:
     """Issue #109: document_id is threaded onto batch items when the caller supplies one."""
     cd = _cd("modified", "Alice Corp indemnifies.", "Alice Corp fully indemnifies.", path="1")

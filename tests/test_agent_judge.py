@@ -677,6 +677,32 @@ class TestStoreBackedDeviationJudge:
         assert payload["clause_path"] == "3.2"
         assert payload["document_id"] == "doc-a"
 
+    def test_pending_payload_records_version_context(self, tmp_path: Path) -> None:
+        """Issue #166: pending payload records version_from/version_to when the
+        item carries it, so a relocation-triage reviewer can find the right
+        $OUT/normalized/<document_id>/*.clauses.json files without having to
+        pair-scan pending.jsonl for a counterpart hunk that may not exist."""
+        store, pending = _make_store_and_pending(tmp_path)
+        judge = StoreBackedDeviationJudge(store=store, pending=pending)
+        items = [
+            {
+                "hunk": "[BEFORE]\nold\n[AFTER]\nnew",
+                "taxonomy_id": "indemnification",
+                "clause_path": "3.2",
+                "document_id": "doc-a",
+                "version_from": "v1",
+                "version_to": "v2",
+            }
+        ]
+
+        judge.assess_batch(items, our_standard="Standard.")
+
+        path = tmp_path / "judge" / "pending.jsonl"
+        record = json.loads(path.read_text().splitlines()[0])
+        payload = record["payload"]
+        assert payload["version_from"] == "v1"
+        assert payload["version_to"] == "v2"
+
     def test_content_hash_ignores_context_preserving_cross_doc_dedup(self, tmp_path: Path) -> None:
         """Issue #109: two items with identical hunk+our_standard but different
         clause_path/taxonomy_id/document_id must share one pending entry AND
@@ -692,12 +718,16 @@ class TestStoreBackedDeviationJudge:
                 "taxonomy_id": "services",
                 "clause_path": "1.1",
                 "document_id": "doc-a",
+                "version_from": "v1",
+                "version_to": "v2",
             },
             {
                 "hunk": hunk,
                 "taxonomy_id": "services",
                 "clause_path": "9.9",
                 "document_id": "doc-b",
+                "version_from": "v9",
+                "version_to": "v10",
             },
         ]
 
