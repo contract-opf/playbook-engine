@@ -302,11 +302,16 @@ code. If it refuses, `make docker-build`.
 
 ### Step 1 — Stage (if needed)
 
-If the corpus is in a nested export layout:
+If the corpus is in a nested export layout, stage it. **Run this on the host
+venv, not through `make docker-run`.** Staging is pure file copying — it needs
+no docling/extraction tooling, so Docker buys nothing here — and
+`make docker-run` mounts `$OUT` directly at `/work/out`; `playbook stage`
+recreates its `--out` directory from scratch on every run, which cannot
+succeed against a bind-mount root itself (`OSError: [Errno 16] Device or
+resource busy`):
 
 ```bash
-make docker-run CORPUS=./raw-corpus OUT=~/.cache/playbook-engine/staging \
-  ARGS="stage /work/corpus --out /work/out"
+playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging
 ```
 
 Staging writes **real file copies** by default, so the staged tree is
@@ -329,11 +334,11 @@ can propose a plan from file contents and embedded metadata but
 cannot resolve everything on its own; this stage is where the skill, acting
 as the LLM, arbitrates the low-confidence parts.
 
-1. Propose a plan instead of staging directly:
+1. Propose a plan instead of staging directly (host venv — see the note on
+   Step 1 above):
 
    ```bash
-   make docker-run CORPUS=./raw-corpus OUT=~/.cache/playbook-engine/staging \
-     ARGS="stage /work/corpus --out /work/out --plan-only"
+   playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging --plan-only
    ```
 
    Read the resulting `staging_plan.json`: `deals` (each with `deal_id`,
@@ -428,11 +433,13 @@ as the LLM, arbitrates the low-confidence parts.
 
 4. Show the operator the final assembled story — one short table per deal
    (deal, version order, which file is signed) — for a single confirm, then
-   execute the plan:
+   execute the plan (host venv — same reason as Step 1: this recreates
+   `--out` from scratch, which a `make docker-run` mount of `$OUT` straight at
+   `/work/out` cannot survive):
 
    ```bash
-   make docker-run CORPUS=./raw-corpus OUT=~/.cache/playbook-engine/staging \
-     ARGS="stage /work/corpus --out /work/out --from-plan /work/out/staging_plan.json"
+   playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging \
+     --from-plan ~/.cache/playbook-engine/staging/staging_plan.json
    ```
 
 Hard rules for this stage:
