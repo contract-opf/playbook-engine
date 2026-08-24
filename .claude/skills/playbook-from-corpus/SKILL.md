@@ -1029,8 +1029,19 @@ coarsened, source paths stripped, and a **residue report** for sign-off.
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="publish /work/out/playbook.opf.json --out /work/out/playbook.public.opf.json"
+  ARGS="publish /work/out/playbook.opf.json --out /work/out/playbook.public.opf.json \
+        --entity-registry /work/out/entity_registry.json"
 ```
+
+`--entity-registry` here MUST point at the run's own sidecar
+(`/work/out/entity_registry.json`, the same file `mine` wrote in Step 3 —
+see "Running commands" above). Without it, `publish` falls back to the
+machine-global `~/.cache/playbook-engine/entity_registry.json`, which is
+empty inside the container, and the command hard-fails rather than silently
+skip the check. **Never reach for `--allow-empty-registry` to make that
+failure go away** — for a corpus-derived playbook it does not relax the
+check, it disables the entire hard backstop (safe only for a no-corpus /
+template-mode playbook with no real entities to catch in the first place).
 
 Two safety layers run automatically:
 
