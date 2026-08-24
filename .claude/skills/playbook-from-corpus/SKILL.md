@@ -716,8 +716,9 @@ make docker-run CORPUS=./corpus OUT=./out \
 **Judging each item** (see `REFERENCE.md` for prompts):
 
 - **Classification:** assign the best-fit `taxonomy_id` from the taxonomy, or
-  `null` if the clause does not fit any entry. Low-confidence items: flag in the
-  report, do not guess.
+  `null` if the clause does not fit any entry. Low-confidence items: mark
+  `needs_review: true` in the verdict, do not guess — see REFERENCE.md
+  Guardrail 2, this is a store audit-trail flag, not a report channel.
 - **Deviation:** classify as `none` / `reworded_equivalent` / `substantive`
   against the baseline template hunk. Assess `risk_delta` direction and
   magnitude.
@@ -725,8 +726,13 @@ make docker-run CORPUS=./corpus OUT=./out \
   `our_paper` vs `counterparty_paper`. Unknown entity aliases: record for
   human review; do not silently guess.
 
-**Low-confidence verdicts:** mark `needs_review: true` in the verdict. These
-are listed in the after-action report (step 9) for human follow-up.
+**Low-confidence verdicts:** mark `needs_review: true` in the verdict as your
+audit trail. **It is not read by the after-action report or any gate today**
+(see REFERENCE.md Guardrail 2) — the report's Needs Attention section only
+ever surfaces a clause's *classification* confidence dropping below 0.5;
+deviation and provenance confidence never reach it. If a doubtful call needs
+a human's eyes this round, say so in your round summary to the human running
+this skill.
 
 `needs_review` is **not** a valid OPF observation enum value — do not let
 un-applied `needs_review` verdicts reach `project`. The drain loop must finish.
