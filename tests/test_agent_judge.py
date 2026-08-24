@@ -70,6 +70,12 @@ class _FakeTaxEntry:
     id: str
 
 
+@dataclass
+class _FakeTaxEntryWithStatus:
+    id: str
+    status: str
+
+
 def _taxonomy(*ids: str) -> _FakeTaxonomy:
     return _FakeTaxonomy(entries=[_FakeTaxEntry(id=i) for i in ids])
 
@@ -353,6 +359,31 @@ class TestStoreBackedClassificationJudge:
         tax = _taxonomy("tax-001", "tax-002")
         results = judge.classify_batch(nodes, tax)
         assert len(results) == 5
+
+    def test_pending_payload_excludes_inactive_taxonomy_ids(self, tmp_path: Path) -> None:
+        """Issue #151: REFERENCE.md calls ``taxonomy_ids`` the "flat list of
+        allowed ids" and tells the judge to never invent one outside it. An
+        ``inactive`` entry is not allowed (OPF §5: a compiler may only
+        classify into active/custom entries) so it must never appear in the
+        payload — a judge that picked one from the list used to bank a
+        verdict that crashed ``classify_tree`` on replay.
+        """
+        store, pending = _make_store_and_pending(tmp_path)
+        judge = StoreBackedClassificationJudge(store=store, pending=pending)
+        node = _make_node("Assignment", "Neither party may assign this agreement.", "1")
+        tax = _FakeTaxonomy(
+            entries=[
+                _FakeTaxEntryWithStatus(id="tax-001", status="active"),
+                _FakeTaxEntryWithStatus(id="tax-002", status="custom"),
+                _FakeTaxEntryWithStatus(id="tax-003", status="inactive"),
+            ]
+        )
+
+        judge.classify_batch([node], tax)
+
+        path = tmp_path / "judge" / "pending.jsonl"
+        record = json.loads(path.read_text().splitlines()[0])
+        assert record["payload"]["taxonomy_ids"] == ["tax-001", "tax-002"]
 
     def test_mixed_hit_and_miss_in_one_batch(self, tmp_path: Path) -> None:
         """Mix of store hit and miss in one batch returns correct results per node."""

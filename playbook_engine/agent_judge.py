@@ -69,7 +69,12 @@ from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.provenance_detector import ProvenanceResult
-from playbook_engine.rubric import RubricPolicy, RubricStamp, rubric_version
+from playbook_engine.rubric import (
+    RubricPolicy,
+    RubricStamp,
+    classifier_eligible_ids,
+    rubric_version,
+)
 from playbook_engine.scope_gate import ScopeDecision
 
 _log = logging.getLogger(__name__)
@@ -535,7 +540,14 @@ class StoreBackedClassificationJudge:
         Returns:
             One ``ClauseClassification`` per node in the same order.
         """
-        tax_labels = sorted(e.id for e in taxonomy.entries) if hasattr(taxonomy, "entries") else []
+        # Active/custom entries only (issue #151) — matches cli.py's
+        # segment_cmd (taxonomy.classifier_entries()) and OPF §5 ("a
+        # compiler MUST only classify clauses into active or custom
+        # entries"). An inactive entry must never appear in the "allowed
+        # ids" a judge is shown, or a verdict naming it passes
+        # validate_verdict at apply time and then crashes classify_tree on
+        # replay.
+        tax_labels = classifier_eligible_ids(taxonomy)
         # Computed once per batch from the taxonomy actually in force, so an
         # edit to spec/taxonomy/*.yaml (a re-worded label or description that
         # leaves the id set — and therefore the payload key — untouched)

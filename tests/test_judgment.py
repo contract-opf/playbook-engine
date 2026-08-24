@@ -261,6 +261,12 @@ class _FakeTaxEntry:
     id: str
 
 
+@dataclass
+class _FakeTaxEntryWithStatus:
+    id: str
+    status: str
+
+
 # ---------------------------------------------------------------------------
 # JudgmentCache unit tests
 # ---------------------------------------------------------------------------
@@ -528,6 +534,36 @@ class TestBatchedClassificationJudge:
         )
         assert delegate.batch_sizes[0] == 1, (
             "Delegate must receive only one (deduplicated) payload, not two"
+        )
+
+    def test_pruning_a_cached_entry_to_inactive_busts_the_cache(self, tmp_path: Path) -> None:
+        """Issue #151: the cache key must depend on the *eligible* (active/
+        custom) id set, not the raw id set, or flagging the id a clause was
+        classified into as ``inactive`` leaves the stale cached verdict
+        served forever — silently reusing an answer to a question (which ids
+        are "allowed"?) that has since changed, and bypassing the delegate's
+        own inactive-id exclusion entirely (it is never called again to
+        re-derive a now-legal answer)."""
+        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
+        delegate = _CountingClassificationJudge()
+        judge = BatchedClassificationJudge(delegate=delegate, cache=cache)
+        node = _make_clause_node("Assignment", "Neither party may assign.", clause_path="1")
+
+        active_taxonomy = _FakeTaxonomy(
+            entries=[_FakeTaxEntryWithStatus(id="tax-001", status="active")]
+        )
+        judge.classify_batch([node], active_taxonomy)
+        assert delegate.call_count == 1
+
+        # Same id set, but now inactive — a pruned entry is no longer an
+        # "allowed" classification target and must not replay from cache.
+        pruned_taxonomy = _FakeTaxonomy(
+            entries=[_FakeTaxEntryWithStatus(id="tax-001", status="inactive")]
+        )
+        judge.classify_batch([node], pruned_taxonomy)
+        assert delegate.call_count == 2, (
+            "Pruning the only entry to inactive must miss the cache and re-dispatch, "
+            "not silently replay the verdict banked while it was active"
         )
 
     def test_batch_size_greater_than_one(self, tmp_path: Path) -> None:
