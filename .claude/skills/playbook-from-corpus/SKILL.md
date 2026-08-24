@@ -919,7 +919,7 @@ playbook view render $OUT        # candidates appear as a "Proposed hard lines"
                                  # $OUT/playbook.review.html
 # Human: accept / reject / undecided on each, then click "Export feedback"
 # Save the export to $OUT/feedback.json, then:
-playbook view apply $OUT
+playbook view apply $OUT $OUT/feedback.json
 ```
 
 `accept` signs the candidate into `floor.invariants` with attribution; `reject`
