@@ -250,6 +250,38 @@ def test_skill_body_references_feedback_reentry() -> None:
     assert "view apply" in body or "view --apply" in body or "feedback" in body.lower()
 
 
+def test_feedback_reentry_block_regenerates_view_artifacts() -> None:
+    """Feedback re-entry must end by regenerating review HTML, bundle, digest.
+
+    Regression test for issue #124 (audit finding #99): the Feedback
+    re-entry command block used to end at ``report``, so after a reviewer's
+    correction round the promoted floor invariants landed in
+    playbook.opf.json (via ``view apply`` + a preserving ``project``, issue
+    #123) but ``playbook.review.html``, ``playbook.opf.html``, and the
+    digest sidecar were never rebuilt — they kept showing the
+    pre-correction state. Extracts just the "## Feedback re-entry" section
+    (up to the next "## " heading) so this doesn't pass merely because
+    Step 10 elsewhere in the doc happens to mention these commands.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    match = re.search(r"^## Feedback re-entry\n(.*?)^## ", body, re.DOTALL | re.MULTILINE)
+    assert match is not None, "SKILL.md must have a '## Feedback re-entry' section"
+    section = match.group(1)
+
+    assert "view render" in section, (
+        "Feedback re-entry block must re-run 'view render' after the correction "
+        "recompile, or playbook.review.html stays stale (issue #124)"
+    )
+    assert "view bundle" in section, (
+        "Feedback re-entry block must re-run 'view bundle' after the correction "
+        "recompile, or playbook.opf.html stays stale (issue #124)"
+    )
+    assert re.search(r"""ARGS=["']digest\b""", section) or "playbook digest" in section, (
+        "Feedback re-entry block must re-run 'digest' after the correction "
+        "recompile, or the digest sidecar stays stale (issue #124)"
+    )
+
+
 def test_skill_body_documents_full_drain_invariant() -> None:
     """SKILL.md must document that pending.jsonl must be empty before project."""
     _, body = _parse_frontmatter(SKILL_MD)
