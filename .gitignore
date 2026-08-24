@@ -30,6 +30,10 @@ pytest-of-*/
 # Local scratch — disposable artifacts, staging adapters, run configs
 ignore/
 
+# Plans / reviews / audit reports — durable but local-only. Review appendices
+# may quote confidential corpus content, so the whole tree stays out of git.
+/reviews/
+
 # Private corpora — confidential, never commit. Generic anchored pattern so
 # the ignore rule itself never discloses a real corpus's name; matches any
 # top-level "*-corpus" directory (root-anchored, so example fixtures nested
