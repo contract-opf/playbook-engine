@@ -335,8 +335,23 @@ appends to `verdicts.jsonl`; the prior record stays as an audit trail.
    text or recital. Do not invent legal interpretations.
 
 2. **Flag, don't guess.** When confidence is below threshold, set
-   `needs_review: true` and include the uncertainty in `rationale`. The
-   after-action report will list these for human follow-up.
+   `needs_review: true` and include the uncertainty in `rationale`. **This
+   flag is not read back anywhere today** — `ClauseClassification`,
+   `DeviationResult`, and `ProvenanceResult` have no `needs_review` field,
+   replay reconstruction (`agent_judge.py`) discards the stored boolean when
+   it rebuilds a verdict from the store, and the after-action report's Needs
+   Attention section never joins back to `verdicts.jsonl` to read it. Setting
+   it is still worth doing — it is a durable, human-auditable record in
+   `verdicts.jsonl` for a future manual pass over the store — but do not tell
+   a reviewer, or assume yourself, that flagging a doubtful verdict here
+   causes it to surface in the report. The only signal Needs Attention
+   currently derives from a judged clause is the compiled observation's
+   **classification** confidence dropping below 0.5 (`aar.py`); deviation and
+   provenance confidence are never copied onto an observation at all, so no
+   threshold on those ever reaches the report. If a low-confidence deviation
+   or provenance call genuinely needs a human's eyes before this round ships,
+   say so directly — in the round summary you give the human running this
+   skill — rather than relying on `needs_review: true` to do that for you.
 
 3. **Unknown aliases.** If a party name in the corpus is not in `known_aliases`,
    record it explicitly in `rationale` and set `needs_review: true`. Supply a
@@ -395,9 +410,16 @@ The derivation is **done** when all three conditions hold:
    echo "Exit: $?"   # must be 0
    ```
 
-Items that remain for human review are **listed in the report** under
-"Needs Attention" — they do not block the done-criteria above, but must not
-be silently suppressed.
+Items that remain for human review may be **listed in the report** under
+"Needs Attention" — they do not block the done-criteria above, but the
+signals that actually land there must not be silently suppressed. Per
+Guardrail 2 above, Needs Attention today only derives from: a compiled
+observation's **classification** confidence below 0.5 (`aar.py`), genuinely
+unresolved/unjudged pending items, and failed version ingests. Setting
+`needs_review: true` on a deviation or provenance verdict is **not** among
+these — it is not currently copied onto an observation, so it does not by
+itself reach the report; if such a call needs a human's eyes before this
+round ships, say so directly in the round summary instead.
 
 ---
 
