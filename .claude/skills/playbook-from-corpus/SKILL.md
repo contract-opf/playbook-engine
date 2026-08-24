@@ -1036,6 +1036,16 @@ Two safety layers run automatically:
 
 1. **Hard backstop** — if any *known* entity name (from the run's entity
    registry) survives, publish fails loud and writes nothing. Non-negotiable.
+   This guarantee holds only for the artifact the *current* run of `publish`
+   just wrote — it says nothing about a `playbook.public.opf.json` already
+   sitting in an out-dir from an earlier run. A backstop fix, an entity-list
+   fix, or a registry re-mine landing in this engine does **not** retroactively
+   re-scan files it produced before the fix. Never hand an on-disk public
+   artifact to a reviewer/GC on the strength of a prior "publish succeeded" —
+   **re-run `publish`** (or at minimum re-run
+   `publisher._entity_backstop_scan` against the file with the run's current
+   `entity_registry.json`) any time the engine version, the entity registry,
+   or `redact_terms.txt` has changed since that artifact was produced.
 2. **`residue_report.json`** (written beside the output) — the
    list-independent sweep: every proper-noun-like string still present in the
    published text, needing no name list. This is the reviewer's checkable
@@ -1054,12 +1064,21 @@ Read `$OUT/residue_report.json` and bucket every entry:
 Hand the reviewer/GC a short grouped summary — **not** the raw JSON — with the
 UNKNOWN bucket first. Then:
 
-- **Any UNKNOWN** → do **not** publish. It means a counterparty name escaped
-  pseudonymization (usually an incomplete `known_entities` list). Fix the
-  entity extraction (re-read recitals + signature/notice blocks for that
-  deal), re-mine, and re-run publish until UNKNOWN is empty.
+- **Any UNKNOWN** → do **not** publish (and do not sign off on a
+  `playbook.public.opf.json` already sitting in the out-dir — it is exactly
+  as UNKNOWN-contaminated as the report you're reading). Every UNKNOWN token
+  MUST land in `redact_terms.txt` in the out-dir (one term per line, `#`
+  comments allowed) before the next publish attempt — this both fixes the
+  immediate artifact and joins the hard no-survival backstop for it, per
+  `--redact-terms` in `playbook publish --help`. Also fix the root cause
+  (re-read recitals + signature/notice blocks for that deal, extend
+  `known_entities`, re-mine) so the *next* run's registry catches it without
+  relying on the redact list. Re-run publish with
+  `--redact-terms $OUT/redact_terms.txt` until UNKNOWN is empty.
 - **UNKNOWN empty (only OUR-PARTY / PLACE / GENERIC remain)** → the artifact
-  is name-clean; the residue report is what the GC signs off against.
+  is name-clean; the residue report is what the GC signs off against. Confirm
+  this is the report for the file being signed off, not a stale one sitting
+  next to a since-replaced artifact.
 
 The confidence comes from the sweep being **exhaustive over name-shaped
 strings**, so "no counterparty names" is a checkable claim, not a promise that
