@@ -1094,6 +1094,19 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="validate /work/out/playbook.opf.
 make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out/report.md"
 ```
 
+`project` carries the prior `playbook.opf.json`'s `posture`/`floor` forward
+**verbatim** (issue #123), so the floor invariants `view apply` just promoted
+above survive this recompile — nothing here re-wipes them. But
+`playbook.review.html`, `playbook.opf.html`, and the digest sidecar are still
+whatever Step 10 last wrote, which is now stale: re-run it so every artifact
+reflects the correction round, not the pre-correction state.
+
+```bash
+make docker-run CORPUS=./corpus OUT=./out ARGS="view render /work/out"
+make docker-run CORPUS=./corpus OUT=./out ARGS="view bundle /work/out"
+make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
+```
+
 ---
 
 ## Guardrails
