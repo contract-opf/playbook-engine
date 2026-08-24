@@ -58,9 +58,19 @@ Before spending any judgment budget:
 
 Carry out the plan from Phase A. Checkpoint after `mine` and report backbone
 health before spending judgment effort. Use `playbook judge --plan-only` to
-estimate token cost and get human go/no-go before a full-corpus judgment pass;
-consider a `--subset` trial first. Produce the final playbook, run `playbook
-validate`, and render the inspection/report outputs for human review.
+get a genuine before-the-fact estimate of judgment token cost and human
+go/no-go — but note that on the LLM-segmentation path `--plan-only` is not a
+dry run: it performs real, billed LLM segmentation calls for any uncached
+document version during the plan run itself, and the `Segmentation: N
+version(s) not yet cached` line it prints is a receipt for that spend, not a
+forecast of it. Set `segmentation.cache: true` before running `--plan-only`
+so that spend is banked rather than repeated on the real run. No tool in
+this repo currently forecasts segmentation cost before spend — the skill's
+pre-flight estimator only probes the extraction cache, not
+`segmentation_cache.jsonl` — so budget for that first billed call rather
+than expecting a pre-flight number. Consider a `--subset` trial first.
+Produce the final playbook, run `playbook validate`, and render the
+inspection/report outputs for human review.
 
 ---
 
@@ -75,6 +85,13 @@ validate`, and render the inspection/report outputs for human review.
   configs, one-off adapters) out of the tracked repo.
 - **Token cost is real.** Dedupe clauses by content hash before judging; judge
   changed hunks, not whole documents; cache verdicts. Estimate judgment volume
-  and surface it before committing to a full-corpus pass.
+  with `playbook judge --plan-only` and surface it before committing to a
+  full-corpus pass — but LLM segmentation cost is not covered by that
+  estimate the same way: `--plan-only` performs and bills real segmentation
+  calls on a cache miss rather than forecasting them. No tool in this repo
+  forecasts that cost before spend; set `segmentation.cache: true` so it is
+  at least banked rather than repeated, and treat the first `--plan-only`
+  (or `judge`/`mine`) run on the LLM-segmentation path as the real spend
+  event rather than expecting `--plan-only` to gate it in advance.
 - **Report honestly.** If a stage is stubbed or a judge seam isn't wired yet,
   say so in the report rather than presenting partial output as complete.

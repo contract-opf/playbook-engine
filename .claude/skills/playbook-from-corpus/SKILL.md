@@ -666,21 +666,43 @@ any reported as cached under the non-target environment only), that count
 is the real remaining OCR cost; surface the ETA to the human before
 committing.
 
-**Plan:** count pending items and estimate token cost before committing to a
-full-corpus pass.
+**Plan:** count pending items and estimate judgment token cost.
+
+**`--plan-only` is not a dry run for segmentation.** On the LLM-segmentation
+path (`segmentation.llm: true`), `--plan-only` runs the real pipeline through
+segmentation: any document version not already in `segmentation_cache.jsonl`
+gets a genuine LLM segmentation call *during this plan run*, billed at the
+moment it happens. The `Segmentation: N version(s) not yet cached` line is
+printed *after* those calls complete, so it reports spend that already
+occurred this run, not a forecast of spend to come — only the judgment-token
+estimate above it is a genuine before-the-fact number. **Before running
+`--plan-only`, set `segmentation.cache: true` in `playbook.config.yaml`** so
+that spend is at least banked (a `cache: false` config repeats the identical
+segmentation calls, and their cost, on the real run right after `--plan-only`
+paid it once already). No tool in this repo currently forecasts segmentation
+cost before spend — the pre-flight estimator (`estimate_runtime.py`) only
+probes the extraction cache, not `segmentation_cache.jsonl`, so it reports
+`~0m` even when every version still needs a first, billed segmentation call.
+Setting `segmentation.cache: true` doesn't give you a number either; it only
+ensures spend that happens isn't repeated. Treat the first `--plan-only` (or
+`judge`/`mine`) run on the LLM-segmentation path as the point where that
+spend actually happens, and budget for it accordingly before invoking
+`--plan-only` at all.
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
   ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out --plan-only"
 ```
 
-Review the deduped counts by kind (classification, deviation, provenance),
-the judgment token estimate (scaled from the real pending payload sizes, not
-a flat guess), and the separate `Segmentation: N version(s) not yet cached`
-line — LLM segmentation is a full block-stream call per un-cached document
-version and is typically the largest spend in the run, so it must be part of
-the go/no-go decision, not just the judgment total. Surface all of this to
-the human before proceeding.
+Review the deduped counts by kind (classification, deviation, provenance)
+and the judgment token estimate (scaled from the real pending payload sizes,
+not a flat guess) — this part is a genuine forecast, made before any
+judgment spend. The `Segmentation: N version(s) not yet cached` line next to
+it is a receipt for calls this `--plan-only` invocation just made, not
+something to weigh before proceeding; weigh it before invoking `--plan-only`
+in the first place, since no pre-flight number exists for segmentation cost
+(see above) — budget for it as a real, billed step rather than expecting a
+forecast. Surface all of this to the human.
 
 **Subset trial:** judge a small sample to validate judgment quality.
 
@@ -1178,7 +1200,11 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
   derivation outputs.
 - **Token efficiency.** Deduplicate clauses by content hash before judging;
   `playbook judge` does this automatically. Judge changed hunks, not full
-  documents. Use `--plan-only` to estimate before committing to a full-corpus pass.
+  documents. Use `--plan-only` to get a genuine before-the-fact estimate of
+  judgment token cost — but note it is not a dry run for LLM segmentation,
+  which it performs and bills for real on a cache miss; no tool in this repo
+  forecasts that cost before spend, so see Step 5's "Plan" section for how to
+  budget for it instead.
 - **Posture and Floor are never derived, and never invented.** They are
   forward-looking intent; no corpus contains them. When the human is available,
   run Step 7a/7b and let them author it. When the human is not available, leave
