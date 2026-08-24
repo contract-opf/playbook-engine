@@ -87,7 +87,7 @@ print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
 |---|---|
 | **A** — full derivation | 1 → 11 (everything below, in order) |
 | **B** — author Posture/Floor | **7a → 7b → 8 → 9 → 10** only |
-| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. |
+| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
 
 Route B needs no corpus and no config — every command in Steps 7a/7b reads and
 writes the single out-dir. If the user only has an out-dir, that is sufficient;
@@ -325,6 +325,17 @@ with `order` and `signed_version`, and no raw corpus files are modified. The
 staged output directory becomes `$CORPUS` for every step from here on — copy the
 baseline template and `playbook.config.yaml` into it too (see Docker note above).
 
+**Re-staging wipes this directory — back up your edits first.** Every
+`playbook stage --out <same dir>` (including the `1 → 7` re-derive in Route
+C below) deletes and recreates the whole staging directory from scratch, not
+just what changed. That destroys the `playbook.config.yaml` and template you
+copied in above, plus every hand-edited `hints.yaml` from Step 4's trail
+corrections — staging regenerates `hints.yaml` from its own heuristics, which
+is not the same file you edited. Before re-running Step 1 against an
+already-staged `--out`, copy `playbook.config.yaml`, the template, and any
+corrected `hints.yaml` files out to a safe location (or into version control),
+then restore them once the fresh stage completes.
+
 ### Step 1a — Assemble the corpus story (layout `unknown`)
 
 Run this when `playbook stage` reports layout `unknown`, or the operator
@@ -469,7 +480,7 @@ exit 0. Common fixes:
 |-------|-----|
 | `CORPUS_NOT_FOUND` | Check the path |
 | `DOC_NO_SUPPORTED_FILES` | Add `.docx`/`.pdf`/`.rtf` to the subfolder |
-| `CORPUS_DANGLING_SYMLINKS` | The corpus is symlinks pointing at files that aren't reachable from here — re-run `playbook stage` (real copies are the default) |
+| `CORPUS_DANGLING_SYMLINKS` | The corpus is symlinks pointing at files that aren't reachable from here — re-run `playbook stage` (real copies are the default). This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it (see the Step 1 warning above). |
 | `CONFIG_NOT_FOUND` | Create `playbook.config.yaml` from the example |
 | `CONFIG_TEMPLATE_NOT_FOUND` | Fix the `baseline.template` path or set to `null` |
 | `CONFIG_EXTRACTION_DOCLING_MISSING` | The config declares docling and it isn't installed — run in the container, or change `extraction.extractor` |
@@ -591,7 +602,9 @@ Sanity-check before proceeding:
 
 If trails or provenance signals are wrong, add `hints.yaml` files to the
 relevant corpus subfolders (see the "Step 4 — Review the intermediates" section of `docs/QUICK-COMPILE.md`), then re-run
-`playbook mine`.
+`playbook mine`. These edits live in the staging directory, so they do not
+survive a re-run of Step 1 (see the warning there) — keep a copy outside the
+staged tree before re-staging.
 
 ### Step 5 — Estimate and trial
 
