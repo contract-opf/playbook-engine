@@ -337,7 +337,13 @@ def test_batch_items_carry_version_context() -> None:
         clause_path_before="3.2",
         clause_path_after="3.3",
         kind="modified",
-        hunks=(TextHunk(kind="replace", old_text="Alice Corp indemnifies.", new_text="Alice Corp fully indemnifies."),),
+        hunks=(
+            TextHunk(
+                kind="replace",
+                old_text="Alice Corp indemnifies.",
+                new_text="Alice Corp fully indemnifies.",
+            ),
+        ),
         text_before="Alice Corp indemnifies.",
         text_after="Alice Corp fully indemnifies.",
         clause_version_before="v1",
