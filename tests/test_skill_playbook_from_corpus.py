@@ -67,6 +67,8 @@ REQUIRED_SUBCOMMANDS = [
     # only appear in the SUBcommand's help).
     "posture",
     "floor",
+    # Step 11 of SKILL.md (issue #137) — publish cites --redact-terms.
+    "publish",
 ]
 
 
