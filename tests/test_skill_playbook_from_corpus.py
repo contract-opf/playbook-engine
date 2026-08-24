@@ -252,6 +252,29 @@ def test_skill_body_references_feedback_reentry() -> None:
     assert "view apply" in body or "view --apply" in body or "feedback" in body.lower()
 
 
+def test_view_apply_invocations_include_feedback_file_argument() -> None:
+    """Every ``playbook view apply`` command line must pass FEEDBACK_FILE.
+
+    Regression test for issue #145 (audit finding #0/#31): Step 7b used to
+    read ``playbook view apply $OUT`` with only one positional argument,
+    but ``view_apply_cmd`` (playbook_engine/cli.py) declares ``out_dir``
+    AND a required ``feedback_file`` positional with no default — the
+    documented one-argument form always fails with a CLI usage error at
+    exactly the moment a human has just finished reviewing Floor
+    candidates. Every ``playbook view apply ...`` line in the doc body
+    must carry a second path argument.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    invocations = re.findall(r"^playbook view apply .*$", body, re.MULTILINE)
+    assert invocations, "expected at least one 'playbook view apply' invocation in SKILL.md"
+    for line in invocations:
+        tokens = line.split()
+        assert len(tokens) >= 5, (
+            f"'playbook view apply' invocation is missing the required "
+            f"FEEDBACK_FILE argument: {line!r}"
+        )
+
+
 def test_feedback_reentry_block_regenerates_view_artifacts() -> None:
     """Feedback re-entry must end by regenerating review HTML, bundle, digest.
 
