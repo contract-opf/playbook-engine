@@ -48,6 +48,7 @@ from playbook_engine.clause_classifier import ClassificationJudge, ClauseClassif
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
 from playbook_engine.deviation_classifier import DeviationJudge, DeviationResult, RiskDelta
+from playbook_engine.rubric import classifier_eligible_ids
 from playbook_engine.scope_gate import ScopeDecision, ScopeJudge
 
 # ---------------------------------------------------------------------------
@@ -306,7 +307,11 @@ class BatchedClassificationJudge:
         5. Reconstruct results in original order.
         """
         # Build payloads (stable, compact JSON-serialisable dicts).
-        tax_labels = sorted(e.id for e in taxonomy.entries) if hasattr(taxonomy, "entries") else []
+        # Active/custom entries only (issue #151) — an inactive entry is not
+        # a legal classification target (OPF §5), so it must never be
+        # offered to the delegate judge as an "allowed" id; classify_tree
+        # rejects a returned id outside the eligible set, crashing the run.
+        tax_labels = classifier_eligible_ids(taxonomy)
         payloads: list[dict[str, Any]] = []
         for node in nodes:
             # TRADE-OFF — 500-char text truncation in classification key: two

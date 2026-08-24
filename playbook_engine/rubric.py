@@ -119,8 +119,19 @@ JUDGE_KINDS: tuple[str, ...] = ("classify", "deviation", "provenance", "scope")
 #: deviation judge reasons over are no longer assembled the way they were for
 #: the July-2026 verdict bank. Verdicts stamped ``v1`` (or stamped by a
 #: migration as pre-#117) are answers to a materially different question.
+#:
+#: ``classify`` moved to ``"v2"`` for issue #151: the pending payload's
+#: ``taxonomy_ids`` used to list every taxonomy entry, including
+#: ``inactive`` ones, contradicting REFERENCE.md's "flat list of allowed
+#: ids" and letting a judge bank a verdict that crashes replay. The payload
+#: now uses :func:`classifier_eligible_ids` (active/custom only, matching
+#: ``Taxonomy.classifier_entries()``). This changes the payload content —
+#: and therefore its content-hash key — for any taxonomy carrying inactive
+#: entries, so it is stamped as a deliberate rubric event (not left as a
+#: silent re-key) even though the content-hash change alone would already
+#: force a re-queue.
 RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
-    "classify": "v1",
+    "classify": "v2",
     "deviation": "v2",
     "provenance": "v1",
     "scope": "v1",
@@ -201,6 +212,24 @@ def taxonomy_digest(taxonomy: Any) -> str:
         if str(_entry_field(e, "status", "active")) in ("active", "custom")
     )
     return _digest(surface)
+
+
+def classifier_eligible_ids(taxonomy: Any) -> list[str]:
+    """Sorted ids of entries a classify judge may legally emit (OPF §5).
+
+    Same eligibility rule as :func:`taxonomy_digest` (``status`` in
+    ``active``/``custom``) and the same dataclass/Mapping/bare-list
+    duck-typing via :func:`taxonomy_entries_of`. Used to build the classify
+    payload's ``taxonomy_ids`` field so the "allowed ids" a judge is shown
+    can never include a pruned (``inactive``) entry — mirrors
+    ``Taxonomy.classifier_entries()`` for callers that only have a
+    taxonomy-shaped stand-in (an OPF-embedded dict, or a test double).
+    """
+    return sorted(
+        str(_entry_field(e, "id"))
+        for e in taxonomy_entries_of(taxonomy)
+        if str(_entry_field(e, "status", "active")) in ("active", "custom")
+    )
 
 
 def _agreement_type_surface(agreement_type: Any) -> Any:
