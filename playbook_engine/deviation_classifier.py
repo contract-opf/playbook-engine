@@ -274,6 +274,10 @@ def assess_deviations(
                       ``None`` (single-document callers/tests that have no
                       document context to give).
 
+    Each batch item also carries ``"version_from"``/``"version_to"``
+    (``ClauseDiff.clause_version_before``/``clause_version_after``, issue
+    #166) — traceability context only, same as ``document_id`` above.
+
     Returns:
         One ``(ClauseDiff, DeviationResult)`` pair per input diff, same order.
 
@@ -355,6 +359,13 @@ def assess_deviations(
             "clause_path": clause_diffs[i].clause_path_after
             or clause_diffs[i].clause_path_before
             or "",
+            # version_from/version_to (issue #166) — same traceability-only
+            # pattern: the normalized-tree version ids (ClauseDiff.
+            # clause_version_before/after) a relocation-triage reviewer needs
+            # to open the right $OUT/normalized/<document_id>/*.clauses.json
+            # files. Never part of the content hash (see above).
+            "version_from": clause_diffs[i].clause_version_before or "",
+            "version_to": clause_diffs[i].clause_version_after or "",
             **({"document_id": document_id} if document_id else {}),
         }
         for i in judge_indices

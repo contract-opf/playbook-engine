@@ -626,8 +626,8 @@ class StoreBackedDeviationJudge:
     from the stored verdict dict.
 
     On a store miss: appends the full deviation payload (hunk + our_standard
-    plus traceability context — taxonomy_id, clause_path, document_id when
-    present) to the pending queue and returns
+    plus traceability context — taxonomy_id, clause_path, document_id,
+    version_from, version_to when present) to the pending queue and returns
     ``DeviationResult(basis="needs_review")``.
 
     Duplicate payloads within a single ``assess_batch`` call produce exactly one
@@ -635,13 +635,21 @@ class StoreBackedDeviationJudge:
 
     Content-hash key vs. stored context (issue #109): the cache/dedup key is
     derived from ``stage`` + ``hunk`` + ``our_standard`` only. Traceability
-    context (``taxonomy_id``, ``clause_path``, ``document_id``) is recorded
-    in the pending payload for human/tooling review but deliberately excluded
-    from the hash — those fields are per-clause/per-document metadata, not
-    judgment content, and folding them in would defeat cross-document dedup
-    of an identical hunk/standard pair (e.g. the same boilerplate clause
-    appearing verbatim in two different agreements would otherwise queue as
-    two distinct pending items and never share a verdict).
+    context (``taxonomy_id``, ``clause_path``, ``document_id``, and — since
+    issue #166 — ``version_from``/``version_to``) is recorded in the pending
+    payload for human/tooling review but deliberately excluded from the
+    hash — those fields are per-clause/per-document metadata, not judgment
+    content, and folding them in would defeat cross-document dedup of an
+    identical hunk/standard pair (e.g. the same boilerplate clause appearing
+    verbatim in two different agreements would otherwise queue as two
+    distinct pending items and never share a verdict).
+
+    ``version_from``/``version_to`` (issue #166) are the normalized-tree
+    version ids (``ClauseDiff.clause_version_before``/``clause_version_after``)
+    a relocation-triage reviewer needs to open the right
+    ``$OUT/normalized/<document_id>/*.clauses.json`` files when checking
+    whether a clause that disappeared in one hunk reappears, unchanged, in an
+    adjacent version — see REFERENCE.md's relocation-triage bullet.
     """
 
     store: VerdictStore
@@ -659,7 +667,8 @@ class StoreBackedDeviationJudge:
         Args:
             items:        Hunk payload dicts (each must have at minimum a
                          ``"hunk"`` key; ``"taxonomy_id"``, ``"clause_path"``,
-                         and ``"document_id"`` are optional traceability
+                         ``"document_id"``, ``"version_from"``, and
+                         ``"version_to"`` are optional traceability
                          context — see class docstring).
             our_standard: Canonical text from the playbook standard for this clause type.
 
@@ -671,7 +680,8 @@ class StoreBackedDeviationJudge:
         for item in items:
             # Full hunk + full our_standard — NOT truncated (contrast with
             # judgment.py). This is the content-hash payload only: it must NOT
-            # include taxonomy_id/clause_path/document_id (see class docstring).
+            # include taxonomy_id/clause_path/document_id/version_from/
+            # version_to (see class docstring).
             hash_payload = {
                 "stage": "deviation",
                 "hunk": item.get("hunk", ""),
@@ -696,6 +706,8 @@ class StoreBackedDeviationJudge:
                         "taxonomy_id": item.get("taxonomy_id", ""),
                         "clause_path": item.get("clause_path", ""),
                         "document_id": item.get("document_id", ""),
+                        "version_from": item.get("version_from", ""),
+                        "version_to": item.get("version_to", ""),
                     },
                     current_rubric,
                 )
@@ -742,6 +754,8 @@ class StoreBackedDeviationJudge:
                             "taxonomy_id": item.get("taxonomy_id", ""),
                             "clause_path": item.get("clause_path", ""),
                             "document_id": item.get("document_id", ""),
+                            "version_from": item.get("version_from", ""),
+                            "version_to": item.get("version_to", ""),
                         },
                         current_rubric,
                     )
@@ -755,6 +769,8 @@ class StoreBackedDeviationJudge:
                     "taxonomy_id": item.get("taxonomy_id", ""),
                     "clause_path": item.get("clause_path", ""),
                     "document_id": item.get("document_id", ""),
+                    "version_from": item.get("version_from", ""),
+                    "version_to": item.get("version_to", ""),
                 }
                 self.pending.add(key, "deviation", full_payload, current_rubric)
                 results.append(_deviation_needs_review())

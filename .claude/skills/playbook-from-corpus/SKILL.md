@@ -555,6 +555,14 @@ Writes `scope.json`, `trail/`, `observations.jsonl`, `corpus_manifest.json`,
 prints a WARNING — treat it as a signal that "us" is misconfigured (see "Derive
 party names").
 
+`normalized/<document_id>/NN__*.clauses.json` is more than a mine
+by-product — it is the relocation-triage resource at Step 6's judge stage:
+each file holds one document version's full clause tree (`clause_path`,
+`heading`, `text` per node), which is where a relocation's *unchanged*
+counterpart clause lives when it generates no `pending.jsonl` hunk of its
+own (see REFERENCE.md's "Relocation triage FIRST" bullet under
+`deviation`).
+
 By default this uses the **deterministic** segmenter/classifier skeleton — no
 LLM calls, no token spend. For a real corpus run, opt in to **LLM-first
 segmentation** by adding a `segmentation:` block to `playbook.config.yaml`:
@@ -605,6 +613,12 @@ relevant corpus subfolders (see the "Step 4 — Review the intermediates" sectio
 `playbook mine`. These edits live in the staging directory, so they do not
 survive a re-run of Step 1 (see the warning there) — keep a copy outside the
 staged tree before re-staging.
+
+This is also the point to note where `normalized/<document_id>/NN__*.clauses.json`
+landed — at Step 6's judge stage, relocation triage reads those per-version
+clause trees directly (a relocation's unchanged counterpart clause never
+shows up in `pending.jsonl`); see REFERENCE.md's "Relocation triage FIRST"
+bullet under `deviation`.
 
 ### Step 5 — Estimate and trial
 
@@ -1204,7 +1218,12 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
   judgment token cost — but note it is not a dry run for LLM segmentation,
   which it performs and bills for real on a cache miss; no tool in this repo
   forecasts that cost before spend, so see Step 5's "Plan" section for how to
-  budget for it instead.
+  budget for it instead. Do relocation triage (REFERENCE.md's "Relocation
+  triage FIRST" bullet under `deviation`) before judging item-by-item — a
+  relocation's unchanged counterpart never appears in `pending.jsonl`, so
+  finding it means reading the per-version clause trees at
+  `$OUT/normalized/<document_id>/NN__*.clauses.json`, not pair-scanning the
+  pending set.
 - **Posture and Floor are never derived, and never invented.** They are
   forward-looking intent; no corpus contains them. When the human is available,
   run Step 7a/7b and let them author it. When the human is not available, leave
