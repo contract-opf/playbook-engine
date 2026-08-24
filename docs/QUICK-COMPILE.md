@@ -84,7 +84,7 @@ running it explicitly is still faster than finding out at the start of a mine.
 | `CORPUS_NOT_FOUND` | Check the path — the folder doesn't exist yet. |
 | `EMPTY_CORPUS` | Add at least one agreement subfolder with files. |
 | `DOC_NO_SUPPORTED_FILES` | Add `.docx`, `.pdf`, or `.rtf` files to the subfolder, or delete it. |
-| `CORPUS_DANGLING_SYMLINKS` | The files are symlinks whose targets aren't reachable from here (usually a symlink-staged corpus read inside a container). Re-run `playbook stage` — it writes real copies by default. |
+| `CORPUS_DANGLING_SYMLINKS` | The files are symlinks whose targets aren't reachable from here (usually a symlink-staged corpus read inside a container). Re-run `playbook stage` — it writes real copies by default. This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it. |
 | `CONFIG_NOT_FOUND` | Create a `playbook.config.yaml` (copy the example). |
 | `CONFIG_MISSING_TAXONOMY` | Set `taxonomy:` in your config to the taxonomy YAML path. |
 | `CONFIG_TAXONOMY_NOT_FOUND` | Check the taxonomy path — the file is missing or misspelled. |

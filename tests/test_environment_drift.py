@@ -171,6 +171,9 @@ class TestDanglingSymlinksAreNamed:
         assert "docker run" in msg
         assert "playbook stage" in msg
         assert "silently" in msg
+        assert "wipes" in msg
+        assert "back up" in msg
+        assert "hints.yaml" in msg
 
     def test_escaping_links_warn_but_do_not_block_a_host_run(self, tmp_path: Path) -> None:
         outside = tmp_path / "outside"

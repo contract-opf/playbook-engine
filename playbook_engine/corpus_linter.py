@@ -322,7 +322,9 @@ def _report_symlinks(scan: SymlinkScan, corpus_dir: Path, report: LintReport) ->
             "directory, so absolute symlinks pointing outside it resolve to nothing. "
             "Fix: re-run `playbook stage <src> --out <corpus>` (real copies are the "
             "default), or point the corpus at a directory whose symlink targets are "
-            "visible from where the engine runs.",
+            "visible from where the engine runs. Re-staging wipes the destination "
+            "directory first, so back up `playbook.config.yaml`, the template, and "
+            "any hand-edited `hints.yaml` before re-running it.",
             corpus_dir,
         )
     if scan.escaping:
