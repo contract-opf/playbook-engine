@@ -180,6 +180,8 @@ def assemble_playbook(
     supersedes: str | None = None,
     min_evidence_n: int = MIN_EVIDENCE_N,
     existing_curation: dict[str, Any] | None = None,
+    existing_posture: dict[str, Any] | None = None,
+    existing_floor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate a complete OPF v0.2 playbook document.
 
@@ -263,6 +265,23 @@ def assemble_playbook(
                           ``playbook_engine/curation.py``). ``None`` (the
                           default) means no prior pins to carry forward — a
                           first compile, or a store with no curation history.
+        existing_posture: The prior compile's ``playbook["posture"]`` dict
+                          (issue #123), read by the caller from the previous
+                          ``playbook.opf.json`` before it's overwritten.
+                          Carried forward VERBATIM — the engine never
+                          authors or edits Posture itself (that's
+                          ``playbook posture interview``'s job); a recompile
+                          only refreshes Evidence. ``None`` (the default, or
+                          an explicit ``{}``) means no prior Posture to carry
+                          forward — a first compile, or one that hasn't been
+                          authored yet.
+        existing_floor:   The prior compile's ``playbook["floor"]`` dict
+                          (issue #123), read the same way and carried forward
+                          VERBATIM for the same reason — Floor invariants are
+                          authored by ``playbook floor sign``/``floor
+                          propose``, never fabricated by a recompile. ``None``
+                          (the default, or an explicit ``{}``) means no prior
+                          Floor to carry forward.
 
     Returns:
         A validated playbook dict conforming to OPF v0.2 (evidence-wrapped
@@ -335,14 +354,22 @@ def assemble_playbook(
         "clauses": [cp.to_dict() for cp in clause_positions],
         "clause_library": [cc.to_dict() for cc in clause_library],
     }
-    # Posture/Floor (§3.6/§3.7): empty-but-present. No interview has been run
-    # and no invariants have been authored/derived yet in this slice (#140
-    # scope excludes Floor invariant content — see #145) — the engine must
-    # never fabricate negotiation intent or hard lines, so both sections are
+    # Posture/Floor (§3.6/§3.7): empty-but-present by default (#140 scope
+    # excludes Floor invariant content — see #145) — the engine must never
+    # fabricate negotiation intent or hard lines, so both sections are always
     # structurally present (satisfying every consumer's "the section exists"
-    # expectation) but carry no content until a later slice populates them.
-    playbook["posture"] = {}
-    playbook["floor"] = {}
+    # expectation). But "no content yet" is only true on a FIRST compile:
+    # once a human has authored Posture (`playbook posture interview`) or
+    # signed a Floor invariant (`playbook floor sign`), those sections live
+    # ONLY inside the previously-written playbook.opf.json — nothing else in
+    # the out-dir can reconstruct them. A recompile must carry them forward
+    # verbatim, exactly like `existing_curation` above, or Route C's "the
+    # Posture and Floor you already signed should survive" promise
+    # (SKILL.md) is false (issue #123). Unlike curation, there is no
+    # per-clause merge/conflict step here — Posture/Floor are not derived
+    # from clause_stances, so a straight carry-forward is the whole contract.
+    playbook["posture"] = existing_posture if existing_posture is not None else {}
+    playbook["floor"] = existing_floor if existing_floor is not None else {}
     playbook["corpus"] = {
         "documents": corpus_documents,
         "stats": stats,

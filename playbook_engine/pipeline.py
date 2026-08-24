@@ -3478,14 +3478,30 @@ def project_playbook(
     # inside assemble_playbook can preserve pins across this recompile and
     # flag/clear conflicts against the freshly recomputed historical_stance.
     # Absent on a first compile — no prior pins to carry forward.
+    #
+    # Issue #123: the same prior-playbook read also carries forward
+    # `posture` and `floor` VERBATIM. Both are human-authored (`playbook
+    # posture interview` / `playbook floor sign`) and live ONLY inside
+    # playbook.opf.json — a recompile that doesn't preserve them destroys a
+    # GC's signed Posture/Floor with no other recovery path, contradicting
+    # SKILL.md Route C's "the Posture and Floor you already signed should
+    # survive" promise. `.get(...)` defaults to None (not {}) so an absent
+    # key on the prior document is indistinguishable from "nothing to carry
+    # forward" for assemble_playbook's existing_posture/existing_floor.
     out_file = out_dir / "playbook.opf.json"
     existing_curation: dict[str, Any] | None = None
+    existing_posture: dict[str, Any] | None = None
+    existing_floor: dict[str, Any] | None = None
     if out_file.exists():
         try:
             prior_playbook = json.loads(out_file.read_text(encoding="utf-8"))
             existing_curation = prior_playbook.get("curation")
+            existing_posture = prior_playbook.get("posture")
+            existing_floor = prior_playbook.get("floor")
         except (json.JSONDecodeError, OSError):
             existing_curation = None
+            existing_posture = None
+            existing_floor = None
 
     playbook = assemble_playbook(
         agreement_type=agreement_type_dict,
@@ -3501,6 +3517,8 @@ def project_playbook(
         perspective=perspective_dict,
         min_evidence_n=config.provenance.min_evidence_n,
         existing_curation=existing_curation,
+        existing_posture=existing_posture,
+        existing_floor=existing_floor,
     )
 
     write_playbook(playbook, out_file)

@@ -24,8 +24,10 @@ from lxml import etree
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import load_config
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.floor_candidates import sign_floor_invariant
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.pipeline import mine_corpus, project_playbook
+from playbook_engine.posture import apply_posture_interview
 from playbook_engine.taxonomy import load_taxonomy
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -1346,6 +1348,72 @@ def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -
     assert conflict is not None, "contradicting evidence must raise a conflict flag"
     assert conflict["recomputed_historical_stance"] == recomputed_stance
     assert baseline_stance in conflict["reason"]
+
+
+def test_posture_and_floor_survive_recompile(tmp_path: Path) -> None:
+    """Issue #123 regression: a re-run of `project_playbook` (Route C's
+    "re-derive Evidence from a changed corpus") must carry forward the
+    prior playbook's authored Posture and signed Floor VERBATIM, exactly
+    like curation pins — not reset them to `{}`.
+
+    Before the fix, `assemble_playbook` unconditionally wrote
+    `playbook["posture"] = {}` / `playbook["floor"] = {}` on every compile,
+    and `project_playbook` only ever read the prior playbook's `curation`
+    key forward — so a GC's `playbook posture interview` + `playbook floor
+    sign` work was silently destroyed by the next `project`, contradicting
+    SKILL.md Route C's "the Posture and Floor you already signed should
+    survive" promise.
+    """
+    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+
+    # Simulate a GC authoring Posture (Route B step 7a) and signing an extra
+    # hard line (`playbook floor sign`), exactly as they would between two
+    # `project` runs.
+    apply_posture_interview(
+        out_dir,
+        {
+            "rounds": "Usually 2 rounds before escalating.",
+            "leverage": "Collaborative; we often want the deal.",
+            "risk_appetite": "Default to accept-to-close on non-material changes.",
+            "sacred_clauses": "Liability cap and indemnification.",
+            "flexible_clauses": "Term length and renewal mechanics.",
+            "audience": "Terse rationale for a GC audience.",
+        },
+        generated_at="2026-01-01T00:00:00Z",
+    )
+    opf_path = out_dir / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    signed_invariants = sign_floor_invariant(
+        "Never accept unlimited liability.",
+        rationale="Hand-signed for this test.",
+        existing_invariants=doc["floor"]["invariants"],
+    )
+    doc["floor"]["invariants"] = signed_invariants
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    posture_before = json.loads(opf_path.read_text(encoding="utf-8"))["posture"]
+    floor_before = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]
+    assert posture_before, "premise: the interview must have actually written a Posture"
+    assert floor_before["invariants"], "premise: signing must have actually recorded an invariant"
+
+    # Route C: re-derive Evidence from the (unchanged) corpus.
+    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+
+    assert playbook_v2["posture"] == posture_before, (
+        "authored Posture must survive a recompile verbatim — Route C's promise"
+    )
+    assert playbook_v2["floor"] == floor_before, (
+        "signed Floor invariants must survive a recompile verbatim — Route C's promise"
+    )
+    # And the carried-forward content is reflected in the recomputed identity
+    # hashes (posture/floor ARE part of content_hash, unlike curation).
+    assert playbook_v2["identity"]["content_hash"] == content_hash(playbook_v2)
+    assert playbook_v2["identity"]["section_digests"] == compute_section_digests(playbook_v2)
 
 
 def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_path: Path) -> None:
