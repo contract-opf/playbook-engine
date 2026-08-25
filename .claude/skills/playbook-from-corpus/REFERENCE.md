@@ -347,6 +347,28 @@ add `--accept-stale` (optionally scoped with `--kind`), which is an explicit
 assertion that the rubric change does not affect those answers. Re-stamping
 appends to `verdicts.jsonl`; the prior record stays as an audit trail.
 
+**This is not unconditionally safe.** Adopting a legacy verdict stamps it
+with the rubric *currently* in force for its kind — it does not ask whether
+that verdict was actually produced under an equivalent question. Run
+`--dry-run` first, and only adopt once you have satisfied yourself the
+rubric has not moved under those verdicts since they were banked.
+
+**Concrete rule for `deviation`:** issues #117/#118/#119 changed extraction
+and tracked-change attribution, so the `[BEFORE]`/`[AFTER]` hunks the
+deviation judge reasons over are no longer assembled the way they were for
+verdict stores produced before that landed (July-2026 runs). Those legacy
+deviation verdicts are answers to a materially different question than
+today's rubric asks (see `RUBRIC_PROMPT_VERSIONS` in
+`playbook_engine/rubric.py`). For a store whose deviation verdicts predate
+#117, do **not** run unscoped `judge-migrate` — it will blank-stamp them as
+current. Scope adoption to the other kinds instead and let `deviation`
+re-queue for real re-judgement:
+
+```bash
+playbook judge-migrate ./out --config ./corpus/playbook.config.yaml \
+  --kind classify --kind provenance --kind scope
+```
+
 ---
 
 ## Guardrails
