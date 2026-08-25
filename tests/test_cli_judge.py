@@ -1046,3 +1046,33 @@ def test_judge_apply_accepts_valid_verdicts_of_each_kind(tmp_path: Path) -> None
     code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(good_file))
     assert code == 0, output
     assert "loaded 4 verdict(s)" in output
+
+
+def test_judge_apply_loads_nothing_when_a_later_line_fails(tmp_path: Path) -> None:
+    """All-or-nothing load (issue #160): a valid line preceding an invalid one
+    must NOT be banked in the store — validation happens for every line
+    before anything is written, so one bad line downstream voids the whole
+    batch, not just itself.
+    """
+    mixed_file = tmp_path / "verdicts.jsonl"
+    lines = [
+        # Valid classification verdict — would load fine on its own.
+        {
+            "key": "a" * 64,
+            "verdict": {"taxonomy_id": "indemnification", "confidence": 0.9, "basis": "judge"},
+        },
+        # Invalid: missing 'verdict' field entirely.
+        {"key": "b" * 64},
+    ]
+    mixed_file.write_text("\n".join(json.dumps(rec) for rec in lines) + "\n", encoding="utf-8")
+    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(mixed_file))
+    assert code != 0, output
+
+    store_path = tmp_path / "judge" / "verdicts.jsonl"
+    if store_path.exists():
+        stored_keys = {json.loads(line)["key"] for line in store_path.read_text().splitlines()}
+        assert "a" * 64 not in stored_keys, (
+            "the earlier valid line was banked despite a later line failing — "
+            "judge-apply must validate all lines before loading any"
+        )
+    # else: store file was never created at all, which also satisfies "nothing loaded".

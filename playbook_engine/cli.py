@@ -2182,8 +2182,8 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     be a JSON object with a ``key`` (SHA-256 string) and a ``verdict`` dict.
 
     Malformed lines are rejected with a non-zero exit code and the line number
-    reported.  Valid lines are appended to the store even if earlier lines fail
-    (partial loads are not performed — all lines are validated first).
+    reported.  All lines are validated first; nothing is loaded if any line
+    fails.
 
     After applying verdicts, re-run ``playbook judge`` to confirm the pending
     queue is empty, then run ``playbook mine`` + ``playbook project`` to compile
