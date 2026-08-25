@@ -172,6 +172,8 @@ Open `./out/` to review what the engine inferred:
 | `trail/*.json` | Inferred version order, signed copy, and provenance for each agreement. |
 | `normalized/*/*.clauses.json` | Extracted clause trees — useful for debugging ingestion. |
 | `observations.jsonl` | One row per clause observation feeding the playbook. |
+| `quarantine.json` | Documents `mine` excluded entirely (failed segmentation/ingest) — rewritten fresh every run. Any entry here is a document the playbook silently lost; triage it before trusting the result. |
+| `coherence_flags.json` | Clauses the L5 coherence judge flagged as unreliable — empty (`[]`) when no `coherence_judge` is configured, but always written by `playbook project`. |
 | `playbook.opf.json` | The final playbook. |
 
 Review `scope.json` and `trail/` before trusting the playbook. If the engine got the signed copy wrong or misidentified provenance, add a `hints.yaml` to the relevant subfolder:

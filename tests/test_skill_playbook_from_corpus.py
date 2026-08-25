@@ -364,6 +364,49 @@ def test_skill_body_documents_full_drain_invariant() -> None:
     )
 
 
+def test_skill_step4_sanity_check_mentions_quarantine_json() -> None:
+    """SKILL.md's Step 4 checkpoint list must tell the agent to read
+    out/quarantine.json (issue #199): it is a real ``mine`` output — a
+    document quarantine.json lists is one the playbook silently lost — but
+    was previously mentioned only at Step 6, after judgment effort was
+    already spent.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    step4 = body.split("### Step 4 —", 1)[1].split("### Step 5 —", 1)[0]
+    assert "quarantine.json" in step4, (
+        "SKILL.md Step 4 (checkpoint before judging) must mention out/quarantine.json"
+    )
+
+
+def test_skill_step7_mentions_coherence_flags_json() -> None:
+    """SKILL.md's Step 7 (``playbook project``) must mention
+    out/coherence_flags.json (issue #199) — a real output of ``project``
+    (always written, even empty) that no doc previously named.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    step7 = body.split("### Step 7 —", 1)[1].split("### Step 7a —", 1)[0]
+    assert "coherence_flags.json" in step7, (
+        "SKILL.md Step 7 (project the playbook) must mention out/coherence_flags.json"
+    )
+
+
+def test_quick_compile_intermediates_table_lists_quarantine_and_coherence_flags() -> None:
+    """QUICK-COMPILE.md's Step 4 intermediates table must list both
+    quarantine.json and coherence_flags.json (issue #199) — both are real
+    files in a mine+project out-dir that the table previously omitted.
+    """
+    content = ROOT_SKILL_MD.read_text(encoding="utf-8")
+    table = content.split("## Step 4 — Review the intermediates", 1)[1].split(
+        "## Re-running after changes", 1
+    )[0]
+    assert "`quarantine.json`" in table, (
+        "QUICK-COMPILE.md's Step 4 intermediates table must list quarantine.json"
+    )
+    assert "`coherence_flags.json`" in table, (
+        "QUICK-COMPILE.md's Step 4 intermediates table must list coherence_flags.json"
+    )
+
+
 def test_skill_body_references_no_gitignored_path() -> None:
     """SKILL.md must not point readers at a gitignored path (issue #135).
 
