@@ -660,9 +660,7 @@ def _build_needs_attention(
         )
         manifest_mined = sum(int(d.get("versions_mined") or 0) for d in manifest.values())
         playbook_mined = sum(
-            int(d.get("versions_mined") or 0)
-            for d in playbook_corpus_docs
-            if isinstance(d, dict)
+            int(d.get("versions_mined") or 0) for d in playbook_corpus_docs if isinstance(d, dict)
         )
         if manifest_in_scope != playbook_in_scope or manifest_mined != playbook_mined:
             item_num += 1
