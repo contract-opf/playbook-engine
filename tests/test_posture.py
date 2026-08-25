@@ -7,7 +7,9 @@ Acceptance criteria verified here (mirrors the issue's Required verification):
     (``system_prompt`` assembled from the answers, ``generation.interview``
     recorded).
   - The Posture is versioned: a first generation starts at ``version=1``;
-    re-running the interview against the resulting Posture bumps the version.
+    re-running the interview against the resulting Posture with changed
+    answers bumps the version; a byte-identical re-run is a no-op
+    (issue #132).
   - The SHOULD-warn (``check_posture_floor_conflict``) fires when the Posture
     softens language around a Floor-protected concept, and is wired into
     ``validate_document()`` as a non-blocking warning (never a hard error, per
@@ -28,7 +30,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from playbook_engine.canonicalize import content_hash
+from playbook_engine.canonicalize import content_hash, section_digest
 from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.posture import (
@@ -55,13 +57,23 @@ _ANSWERS: dict[str, str] = {
 }
 
 
+_EMPTY_EVIDENCE_SECTION: dict[str, Any] = {"clauses": [], "clause_library": []}
+# Issue #132 review finding 1: self-consistent with `_EMPTY_EVIDENCE_SECTION`
+# above (rather than an arbitrary placeholder digest) so a re-run against an
+# unchanged `evidence` section is a genuine no-op on `grounded_in` too —
+# apply_posture_interview recomputes this digest from the section's actual
+# content on every write, so a placeholder that didn't match it would make
+# every second run look like the Evidence had moved when it hadn't.
+_EVIDENCE_DIGEST = section_digest(_EMPTY_EVIDENCE_SECTION)
+
+
 def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
         "opf_version": "0.2",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": dict(_EMPTY_EVIDENCE_SECTION),
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},
@@ -74,7 +86,7 @@ def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
         "identity": {
             "content_hash": "sha256:" + "0" * 64,
             "section_digests": {
-                "evidence": "sha256:" + "1" * 64,
+                "evidence": _EVIDENCE_DIGEST,
                 "posture": "sha256:" + "2" * 64,
                 "floor": "sha256:" + "3" * 64,
                 "curation": "sha256:" + "4" * 64,
@@ -521,20 +533,90 @@ def test_apply_posture_interview_writes_versioned_posture(tmp_path: Path) -> Non
     assert written["posture"]["version"] == 1
     assert written["posture"]["system_prompt"].strip()
     # grounded_in derived from identity.section_digests.evidence.
-    assert written["posture"]["generation"]["grounded_in"] == ("evidence@sha256:" + "1" * 64)
+    assert written["posture"]["generation"]["grounded_in"] == f"evidence@{_EVIDENCE_DIGEST}"
 
 
-def test_apply_posture_interview_rerun_bumps_version(tmp_path: Path) -> None:
+def test_apply_posture_interview_rerun_with_changed_answers_bumps_version(tmp_path: Path) -> None:
     doc = _minimal_v02_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
     apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-10T00:00:00Z")
-    result2 = apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-11T00:00:00Z")
+    changed_answers = {**_ANSWERS, "audience": "Verbose rationale for outside counsel."}
+    result2 = apply_posture_interview(
+        tmp_path, changed_answers, generated_at="2026-07-11T00:00:00Z"
+    )
 
     assert result2.version == 2
+    assert result2.changed is True
     written = json.loads(opf_path.read_text(encoding="utf-8"))
     assert written["posture"]["version"] == 2
+
+
+def test_apply_posture_interview_byte_identical_rerun_is_a_noop(tmp_path: Path) -> None:
+    """Issue #132 regression: re-running the interview with an unchanged
+    answers file must NOT bump posture.version -- a version bump is a
+    governance signal that a revision happened, and none did. Nothing is
+    written on the second (no-op) run: identity.content_hash stays exactly
+    what the first run computed."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    result1 = apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-10T00:00:00Z")
+    assert result1.version == 1
+    assert result1.changed is True
+    after_first = json.loads(opf_path.read_text(encoding="utf-8"))
+
+    # Re-run with the SAME answers file, on a later date -- a byte-identical
+    # re-run, exactly as SKILL.md's "re-running is safe" promise describes.
+    result2 = apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-11T00:00:00Z")
+
+    assert result2.version == 1  # unchanged -- NOT 2
+    assert result2.changed is False
+    after_second = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert after_second == after_first  # nothing was rewritten at all
+    assert after_second["posture"]["version"] == 1
+    # generated_at from the no-op second run was never recorded -- proves
+    # the ORIGINAL posture block was kept, not merely a matching version.
+    assert after_second["posture"]["generation"]["generated_at"] == "2026-07-10T00:00:00Z"
+
+
+def test_apply_posture_interview_rerun_with_moved_evidence_digest_is_not_a_noop(
+    tmp_path: Path,
+) -> None:
+    """Issue #132 review finding 1 regression: a re-run with byte-identical
+    answers but a MOVED identity.section_digests.evidence (simulating a
+    re-mine between runs) must NOT be misreported as a no-op that silently
+    retains a stale generation.grounded_in -- the recorded grounding is
+    refreshed to the current digest even though nothing about the
+    answers/interview changed. `version` stays untouched: no textual
+    revision happened, so this isn't a governed bump."""
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    result1 = apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-10T00:00:00Z")
+    assert result1.version == 1
+    after_first = json.loads(opf_path.read_text(encoding="utf-8"))
+    first_grounded_in = after_first["posture"]["generation"]["grounded_in"]
+
+    # Simulate a re-mine between runs: only identity.section_digests.evidence
+    # moves -- nothing else in the on-disk document changes.
+    after_first["identity"]["section_digests"]["evidence"] = "sha256:" + "9" * 64
+    opf_path.write_text(json.dumps(after_first), encoding="utf-8")
+
+    # Re-run with the SAME (byte-identical) answers file.
+    result2 = apply_posture_interview(tmp_path, _ANSWERS, generated_at="2026-07-11T00:00:00Z")
+
+    assert result2.changed is True
+    assert result2.version == 1  # unchanged -- the answers didn't change
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["posture"]["version"] == 1
+    assert written["posture"]["generation"]["grounded_in"] == ("evidence@sha256:" + "9" * 64)
+    assert written["posture"]["generation"]["grounded_in"] != first_grounded_in
+    # Provenance of the refresh itself is recorded too.
+    assert written["posture"]["generation"]["generated_at"] == "2026-07-11T00:00:00Z"
 
 
 def test_apply_posture_interview_refreshes_identity_content_hash(tmp_path: Path) -> None:
@@ -803,15 +885,16 @@ def test_apply_posture_interview_promotion_is_idempotent_on_rerun(tmp_path: Path
     apply_posture_interview(tmp_path, answers, generated_at="2026-07-10T00:00:00Z")
     first_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
 
-    # Re-run with the SAME answers file — posture.version bumps, but the
-    # promoted invariant must not duplicate or otherwise change.
+    # Re-run with the SAME answers file — a byte-identical re-run is a
+    # no-op (issue #132): posture.version does NOT bump, and the promoted
+    # invariant must not duplicate or otherwise change either.
     apply_posture_interview(tmp_path, answers, generated_at="2026-07-11T00:00:00Z")
     second_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
 
     assert len(second_invariants) == 1
     assert second_invariants == first_invariants  # byte-for-byte unchanged
     written = json.loads(opf_path.read_text(encoding="utf-8"))
-    assert written["posture"]["version"] == 2  # posture itself did advance
+    assert written["posture"]["version"] == 1  # no-op re-run: version untouched
 
 
 def test_apply_posture_interview_promotion_preserves_hand_authored_invariants(
@@ -965,11 +1048,27 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     assert exit_code == 0, output
     assert "posture.version=1" in output
 
+    # Issue #132: a second run against the SAME answers file is a no-op --
+    # the version must NOT bump to 2, and the output must say so.
     exit_code2, output2 = _invoke(
         "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
     )
     assert exit_code2 == 0, output2
-    assert "posture.version=2" in output2
+    assert "posture.version=1" in output2
+    assert "no-op" in output2
+    assert "posture.version=2" not in output2
+
+    # A third run with genuinely different answers DOES bump the version.
+    changed_answers_path = tmp_path / "answers2.json"
+    changed_answers_path.write_text(
+        json.dumps({**_ANSWERS, "audience": "Verbose rationale for outside counsel."}),
+        encoding="utf-8",
+    )
+    exit_code3, output3 = _invoke(
+        "posture", "interview", str(tmp_path), "--answers-file", str(changed_answers_path)
+    )
+    assert exit_code3 == 0, output3
+    assert "posture.version=2" in output3
 
 
 def test_cli_posture_interview_base_version_continues_counter_across_rederivation(
