@@ -236,6 +236,33 @@ def test_generate_posture_rejects_unknown_question_id() -> None:
         generate_posture(answers, generated_at="2026-07-10T00:00:00Z")
 
 
+def test_audience_question_is_not_double_barreled() -> None:
+    """Issue #205: Q6 ("audience") used to ask two unrelated things under one
+    label — deal-value sensitivity and output-reader — with no option set,
+    so an answer to only one half (e.g. a bare "yes") produced a muddled
+    templated sentence that silently dropped the other half. The reworded
+    question keeps a single question id, but now supplies an explicit,
+    enumerated option set covering the full (audience x deal-size) space so
+    any answer necessarily addresses both axes at once.
+    """
+    audience_q = next(iq for iq in INTERVIEW_QUESTIONS if iq.q == "audience")
+    # Must not regress to the old bare double-barreled wording with no
+    # option set to disambiguate a partial answer.
+    assert (
+        "Does your posture change above a deal-value threshold? Who reads"
+        not in audience_q.question
+    )
+    # Must supply an explicit combination-covering option set (the
+    # Cartesian product of audience x deal-size sensitivity).
+    for combo in (
+        "GC audience, terse rationale, no change by deal size",
+        "GC audience, terse rationale, but tightens above a threshold",
+        "junior-reviewer audience, needs it explained, no change by deal size",
+        "junior-reviewer audience, needs it explained, and tightens above a threshold",
+    ):
+        assert combo in audience_q.question
+
+
 def test_generate_posture_allows_pruned_subset_of_3() -> None:
     minimal_answers = {
         "rounds": "2 rounds.",
