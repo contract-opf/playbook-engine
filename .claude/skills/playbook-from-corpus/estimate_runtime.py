@@ -6,7 +6,7 @@ Counts agreements/versions, classifies each PDF as born-digital vs scanned
 range plus rough corpus-size and judgment-load estimates. Uses only pdfplumber
 (no docling/torch), so it runs on the host venv in seconds.
 
-Usage: python estimate_runtime.py <corpus_dir> [out_dir]
+Usage: .venv/bin/python estimate_runtime.py <corpus_dir> [out_dir]
 
 If an ``out_dir`` with a warm extraction cache exists (``<out>/extraction_cache.jsonl``,
 written by a prior/parallel ``mine``/``judge``/``segment`` run over the same
@@ -195,11 +195,25 @@ def load_cached_keys(out_dir: str) -> set[str]:
     return keys
 
 
+_warned_missing_pdfplumber = False
+
+
 def is_scanned_pdf(path: str) -> bool:
     """True when the PDF's first pages carry almost no extractable text."""
+    global _warned_missing_pdfplumber
     try:
         import pdfplumber
     except ImportError:
+        if not _warned_missing_pdfplumber:
+            print(
+                "WARNING: pdfplumber not installed in this Python — "
+                "scanned-PDF detection disabled, every PDF is counted as "
+                "born-digital. ETA may be several times too low. Run this "
+                "script with the repo venv: .venv/bin/python "
+                "estimate_runtime.py ...",
+                file=sys.stderr,
+            )
+            _warned_missing_pdfplumber = True
         return False  # can't tell; treat as born-digital (optimistic)
     try:
         with pdfplumber.open(path) as doc:
