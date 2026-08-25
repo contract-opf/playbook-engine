@@ -270,7 +270,7 @@ Run the bundled estimator against the (staged) corpus — it only uses
 pdfplumber, so it runs on the host venv in seconds and needs no Docker:
 
 ```bash
-python .claude/skills/playbook-from-corpus/estimate_runtime.py <corpus_dir>
+.venv/bin/python .claude/skills/playbook-from-corpus/estimate_runtime.py <corpus_dir>
 ```
 
 It classifies every version (born-digital PDF / scanned PDF / DOCX), prints a
@@ -698,7 +698,7 @@ host venv typically does not). Pass the **same `$OUT`** so it reports
 what's already cached:
 
 ```bash
-python .claude/skills/playbook-from-corpus/estimate_runtime.py ./corpus ./out
+.venv/bin/python .claude/skills/playbook-from-corpus/estimate_runtime.py ./corpus ./out
 ```
 
 Only a hit under the **target environment** — the one the upcoming

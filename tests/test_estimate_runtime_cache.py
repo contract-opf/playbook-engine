@@ -37,6 +37,7 @@ EITHER target-environment selection (the issue #77 fix-round-3 finding).
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import sys
 from pathlib import Path
@@ -351,4 +352,70 @@ def test_estimator_dual_cached_file_credited_as_hit_under_either_target(
     assert "will be re-extracted under" not in out, (
         "a dual-cached file (hit under the target env) must not also be "
         "reported in the 'cached under X only' bucket"
+    )
+
+
+def test_is_scanned_pdf_warns_when_pdfplumber_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression test for issue #192.
+
+    ``is_scanned_pdf`` used to catch ``ImportError`` on ``pdfplumber`` and
+    silently return ``False`` (treat every PDF as born-digital) with no
+    warning printed anywhere. On a machine where pdfplumber lives only in
+    the repo venv (e.g. system ``python3``), running the estimator with
+    bare ``python`` produced a confidently wrong, several-fold-low ETA —
+    defeating the pre-flight's entire purpose. This pins that a missing
+    pdfplumber now prints a one-line stderr warning instead of failing
+    silently.
+    """
+    est = _load_estimator()
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pdfplumber":
+            raise ImportError("simulated: pdfplumber not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    fake_pdf = tmp_path / "doc.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4 fictional placeholder, not a real corpus file")
+
+    result = est.is_scanned_pdf(str(fake_pdf))
+
+    assert result is False, "with detection disabled, the file must fall back to born-digital"
+    err = capsys.readouterr().err
+    assert "pdfplumber" in err and "WARNING" in err, (
+        "missing pdfplumber must print a warning to stderr — a silent "
+        "fallback lets a scanned-heavy corpus be costed ~5.5x too low with "
+        "no indication anything is wrong (issue #192)"
+    )
+
+
+def test_is_scanned_pdf_warns_only_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The missing-pdfplumber warning must not spam once per file."""
+    est = _load_estimator()
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "pdfplumber":
+            raise ImportError("simulated: pdfplumber not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    fake_pdf = tmp_path / "doc.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4 fictional placeholder, not a real corpus file")
+
+    for _ in range(5):
+        est.is_scanned_pdf(str(fake_pdf))
+
+    err = capsys.readouterr().err
+    assert err.count("WARNING") == 1, (
+        f"expected exactly one warning across repeated calls, got {err.count('WARNING')}"
     )
