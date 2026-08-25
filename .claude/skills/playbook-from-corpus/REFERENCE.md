@@ -191,10 +191,19 @@ The `key` is the SHA-256 from the `pending.jsonl` item. The `verdict` schema
 depends on kind.
 
 **`basis` is NOT one shared enum — each judge type has its own, and they do
-NOT all include `"llm"`.** Using the wrong value doesn't raise where you'd
-notice it: the verdict hits the store, fails reconstruction on the bad
-`basis`, and is silently re-queued as `needs_review` — which then fails
-schema validation much later, at `project`/`validate`. Use exactly the value
+NOT all include `"llm"`.** Using the wrong value is rejected at
+`playbook judge-apply`, with the offending line number, before it ever
+reaches the store: `validate_verdict` reconstructs the exact dataclass the
+store-backed judge would build on replay (`deviation` accepts only
+`{"judge"}`, `classify` accepts `{"judge", "unclassified"}`, `provenance`
+builds a `ProvenanceResult` that rejects `"judge"` — see `agent_judge.py`'s
+`_DEVIATION_REPLAYABLE_BASES` / `_CLASSIFY_REPLAYABLE_BASES`) and raises on
+the first mismatch. The silent-requeue-then-late-`project`/`validate`-failure
+chain this section used to describe is exactly what that apply-time
+validation (issue #182) exists to prevent; it can still happen for a verdict
+written straight into the store by hand (bypassing `judge-apply`) or banked
+before the #182 hardening — and even then `playbook judge` surfaces the
+re-queue loudly, as a `WARNING`, rather than silently. Use exactly the value
 shown for each kind below:
 - Classification (`ClauseClassification.basis`, `clause_classifier.py`) — use
   `"judge"` for an agent-produced verdict (also accepts `exact_match` /
