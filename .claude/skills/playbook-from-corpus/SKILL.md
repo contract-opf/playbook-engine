@@ -119,7 +119,7 @@ Before starting, ask the human only what you cannot derive yourself:
 
 > "Two quick questions before I begin:
 > 1. What display name should appear in the playbook? (e.g. 'Educational Affiliation Agreement')
-> 2. Do you have a baseline template file I should use as the canonical standard? (optional — I'll derive an emergent playbook if not)"
+> 2. Do you have your own standard form/template for this agreement type? If yes I'll measure every deal against it; if not, I'll build the playbook from what your negotiated history shows (a weaker but still valid baseline)."
 
 Do **not** ask "which party is us" or "who are your counterparties" — derive
 those yourself in the next step. Record the two answers; they drive the report
