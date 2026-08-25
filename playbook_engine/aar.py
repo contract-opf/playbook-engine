@@ -50,12 +50,6 @@ from playbook_engine.pipeline import _LLM_SEGMENTER_CONFIDENCE
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Token estimate constants
-# ---------------------------------------------------------------------------
-
-_AVG_TOKENS_PER_ITEM = 200
-
-# ---------------------------------------------------------------------------
 # Silent-degradation thresholds
 # ---------------------------------------------------------------------------
 
@@ -413,6 +407,16 @@ def _build_judgment_economics(
         except Exception:  # noqa: BLE001
             _log.warning("Could not read verdicts.jsonl")
 
+    # Token estimate from the real payload sizes (issue #134 / #184) — kept
+    # in sync with `judge --plan-only`'s estimator in cli.py so the report
+    # and the plan never disagree about the same pending queue. A flat
+    # per-item average ignores that a provenance payload (preamble +
+    # letterhead) and a deviation payload (a full diff hunk) can differ
+    # from a short classify payload by an order of magnitude. ``//4`` is
+    # the same chars-per-token rule of thumb used in cli.py (there is no
+    # tokenizer dependency in this codebase).
+    pending_chars = 0
+
     if pending_path.exists():
         try:
             pending_lines = [
@@ -426,6 +430,9 @@ def _build_judgment_economics(
                     rec = json.loads(line)
                     kind = rec.get("kind", "unknown")
                     pending_by_kind[kind] = pending_by_kind.get(kind, 0) + 1
+                    pending_chars += len(
+                        json.dumps(rec.get("payload", {}), sort_keys=True, ensure_ascii=False)
+                    )
                 except Exception:  # noqa: BLE001
                     pass
         except Exception:  # noqa: BLE001
@@ -444,7 +451,7 @@ def _build_judgment_economics(
     )
 
     total_judged = verdicts_count
-    token_estimate = pending_count * _AVG_TOKENS_PER_ITEM
+    token_estimate = pending_chars // 4
 
     return {
         "verdicts_in_store": verdicts_count,

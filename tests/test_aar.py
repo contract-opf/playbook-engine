@@ -1279,6 +1279,43 @@ def test_judgment_economics_with_judge_dir(tmp_path: Path) -> None:
     assert je["pending_by_kind"].get("classify", 0) == 1
 
 
+def test_judgment_economics_token_estimate_from_payload_bytes(tmp_path: Path) -> None:
+    """token_estimate is derived from real payload bytes (issue #184), not a
+    flat per-item average — it must track wildly different payload sizes
+    instead of reporting the same total regardless of what's pending."""
+    out_dir = _make_out_dir(tmp_path)
+    judge_dir = out_dir / "judge"
+    judge_dir.mkdir()
+    pending_path = judge_dir / "pending.jsonl"
+
+    # A tiny classify payload vs. a much larger deviation payload (a
+    # synthetic diff hunk stand-in). If token_estimate were still
+    # pending_count * flat_average, these two records (same count) would
+    # report identical estimates regardless of payload size.
+    small_payload = {"clause_id": "c1"}
+    large_payload = {"clause_id": "c2", "diff_text": "x" * 4000}
+    pending_path.write_text(
+        json.dumps({"key": "a", "kind": "classify", "payload": small_payload})
+        + "\n"
+        + json.dumps({"key": "b", "kind": "deviation", "payload": large_payload})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    data = build_after_action_data(out_dir)
+    je = data["judgment_economics"]
+
+    expected_chars = len(json.dumps(small_payload, sort_keys=True, ensure_ascii=False)) + len(
+        json.dumps(large_payload, sort_keys=True, ensure_ascii=False)
+    )
+    expected_estimate = expected_chars // 4
+
+    assert je["token_estimate"] == expected_estimate
+    # A flat 200-tokens-per-item average over 2 pending items would be 400 —
+    # the real payload bytes here are far larger, so the two must diverge.
+    assert je["token_estimate"] != 2 * 200
+
+
 # ---------------------------------------------------------------------------
 # CLI: playbook report
 # ---------------------------------------------------------------------------
