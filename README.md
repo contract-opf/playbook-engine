@@ -107,8 +107,10 @@ Some things adopters tend to care about, built in from the start:
 - **Confidentiality is architectural, not aspirational.** Known
   counterparty names are pseudonymized at ingest (*born-safe* — raw names
   never reach a stored artifact); `playbook publish` produces a
-  party-anonymous export with an LLM residue pass over every free-text
-  surface. See [SECURITY.md](SECURITY.md).
+  party-anonymous export with a deterministic no-known-entity backstop and
+  a semantic-residue report over every free-text surface — reviewed by an
+  LLM/agent (the `playbook-from-corpus` skill, or a wired judge) rather
+  than by `publish` itself. See [SECURITY.md](SECURITY.md).
 - **Extensible without forking.** The schema reserves an `x_*` vendor
   namespace at the sanctioned levels; extensions travel with the document
   and participate in its content hash.
