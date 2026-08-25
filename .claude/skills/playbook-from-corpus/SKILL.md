@@ -948,9 +948,11 @@ playbook posture interview $OUT --answers-file $OUT/posture-answers.json
 
 Rules that are easy to get wrong:
 
-- **Three answers is enough.** Each answered question becomes one sentence of
-  `posture.system_prompt`. Skipping questions is legitimate; inventing answers
-  is not.
+- **Three answers is enough — and also the enforced minimum.** Each answered
+  question becomes one sentence of `posture.system_prompt`. Skipping questions
+  is legitimate; inventing answers is not. But fewer than 3 answers is
+  rejected by `posture interview` (OPF §7) — make sure at least three
+  questions get answers before you submit.
 - **Q4 is different in kind, and signs itself — for name-shaped items.** Naming
   what is non-negotiable is a human authoring a hard line in natural language,
   so a bare clause-type name ("Uncapped liability") is written **directly into
