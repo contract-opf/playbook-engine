@@ -148,7 +148,7 @@ OK  ./out/playbook.opf.json
 
 - **Config/taxonomy errors:** re-run `lint-corpus` and fix the reported errors.
 - **Scope gate errors:** the engine couldn't determine if a document is the right agreement type. Check that your corpus subfolders contain the right documents. Add a `hints.yaml` file if needed (see corpus layout guide).
-- **Validation errors:** the assembled playbook failed internal consistency checks. Open an issue with the full error output.
+- **Validation errors:** the assembled playbook failed internal consistency checks. Open an issue, but strip any agreement text or party names from the error output first — validation errors can quote your documents, and this repo is public. If the error doesn't require quoting document content, a plain description plus the command you ran is enough.
 
 ---
 
