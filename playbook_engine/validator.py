@@ -17,6 +17,7 @@ from typing import Any
 import jsonschema
 import yaml
 
+from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_position_compiler import MIN_EVIDENCE_N
 from playbook_engine.opf_accessors import playbook_clause_library, playbook_clauses
 
@@ -832,6 +833,68 @@ def _check_digest_v3(doc: dict[str, Any], result: ValidationResult) -> None:
     walk(digest, "digest")
 
 
+def _check_identity_hash_v2(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF v0.2/v0.3 (issue #143 / #178): a present ``identity.content_hash``
+    or ``identity.section_digests`` must match what
+    :mod:`playbook_engine.canonicalize` recomputes over the document's
+    current content.
+
+    ``validate_document`` runs schema + normative checks but, before this
+    check, never recomputed identity — so a hand-edited playbook (which the
+    skill/spec forbid precisely because it corrupts the hash) or any
+    stale-hash producer bug passed ``playbook validate`` exit 0, while a
+    downstream consumer verifying ``identity.content_hash`` would reject the
+    artifact. This closes that gap directly in the validator, the one local
+    command positioned as the integrity gate.
+
+    ``identity`` (and each of its sub-fields) is OPTIONAL — not every
+    producer populates it (see the schema's own description) — so this is a
+    pure no-op when ``identity``/``content_hash``/``section_digests`` is
+    absent or malformed; the schema check above already reports a malformed
+    ``identity`` shape. When a value IS present, though, it is asserting a
+    verifiable fact about the document's own bytes, so a mismatch is
+    blocking, not advisory — an unverifiable identity is worse than none.
+
+    ``section_digests`` is compared key-by-key against what's actually
+    present in the document (not the full recomputed dict) because
+    ``curation`` is an optional key within ``section_digests`` too (schema:
+    only evidence/posture/floor are ``required``) — a document that omits it
+    has asserted nothing about the curation digest, so there is nothing to
+    contradict.
+    """
+    identity = doc.get("identity")
+    if not isinstance(identity, dict):
+        return
+
+    doc_hash = identity.get("content_hash")
+    if isinstance(doc_hash, str):
+        expected_hash = content_hash(doc)
+        if doc_hash != expected_hash:
+            result.add(
+                f"identity.content_hash {doc_hash!r} does not match the hash recomputed "
+                f"over the document's current content ({expected_hash!r}) — the document "
+                "was hand-edited or otherwise changed after its identity was stamped "
+                "(OPF-SPEC.md §3.10/§8)",
+                path="identity.content_hash",
+            )
+
+    doc_digests = identity.get("section_digests")
+    if isinstance(doc_digests, dict):
+        expected_digests = compute_section_digests(doc)
+        for name, doc_digest in doc_digests.items():
+            if not isinstance(doc_digest, str):
+                continue
+            expected_digest = expected_digests.get(name)
+            if expected_digest is not None and doc_digest != expected_digest:
+                result.add(
+                    f"identity.section_digests.{name} {doc_digest!r} does not match "
+                    f"the digest recomputed over the current {name!r} section "
+                    f"({expected_digest!r}) — the section was changed after its "
+                    "identity was stamped (OPF-SPEC.md §3.10/§8)",
+                    path=f"identity.section_digests.{name}",
+                )
+
+
 def validate_document(
     doc: dict[str, Any], *, min_evidence_n: int = MIN_EVIDENCE_N
 ) -> ValidationResult:
@@ -877,6 +940,7 @@ def validate_document(
             _check_posture_floor_conflict_v2(doc, result)
             _check_posture_interview_provenance_v2(doc, result)
             _check_dynamics_v2(doc, result)
+            _check_identity_hash_v2(doc, result)
             if opf_version == "0.3":
                 _check_digest_v3(doc, result)
         else:

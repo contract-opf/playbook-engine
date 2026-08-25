@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.validator import ValidationResult, load_opf_file, validate_document
 
 FIXTURES = Path(__file__).parent.parent / "examples" / "fixtures"
@@ -469,6 +470,83 @@ def test_v0_2_empty_posture_and_floor_are_valid() -> None:
     doc = _load("valid_v0_2_minimal.json")
     doc["posture"] = {}
     doc["floor"] = {}
+    result = validate_document(doc)
+    assert result.ok, [str(e) for e in result.errors]
+
+
+# ---------------------------------------------------------------------------
+# _check_identity_hash_v2 — issue #178
+# ---------------------------------------------------------------------------
+
+
+def test_identity_absent_does_not_affect_validity() -> None:
+    """No identity section at all (e.g. a corpus-only compile) has nothing to
+    verify — must not be treated as a mismatch."""
+    doc = _load("valid_v0_2_minimal.json")
+    assert "identity" not in doc
+    result = validate_document(doc)
+    assert result.ok, [str(e) for e in result.errors]
+
+
+def test_identity_matching_hashes_pass() -> None:
+    """A genuinely fresh identity — computed from this exact document — must
+    validate clean."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["identity"] = {
+        "content_hash": content_hash(doc),
+        "section_digests": compute_section_digests(doc),
+    }
+    result = validate_document(doc)
+    assert result.ok, [str(e) for e in result.errors]
+
+
+def test_identity_stale_content_hash_fails_blocking() -> None:
+    """A hand-edited playbook (content changed after identity was stamped)
+    must fail validate — the exact gap the ticket's Consequence describes:
+    the one local integrity gate must catch what it's positioned to catch."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["identity"] = {
+        "content_hash": content_hash(doc),
+        "section_digests": compute_section_digests(doc),
+    }
+    # Hand-edit content without recomputing identity.
+    doc["posture"]["system_prompt"] = "hand-edited after stamping"
+    result = validate_document(doc)
+
+    assert not result.ok
+    offending = [e for e in result.errors if e.path == "identity.content_hash"]
+    assert offending, [str(e) for e in result.errors]
+    assert offending[0].blocking
+
+
+def test_identity_stale_section_digest_fails_blocking() -> None:
+    """A section_digests entry that no longer matches its own section must
+    fail validate, even reported independently of content_hash."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["identity"] = {
+        "content_hash": content_hash(doc),
+        "section_digests": compute_section_digests(doc),
+    }
+    doc["floor"]["invariants"][0]["statement"] = "hand-edited after stamping"
+    # Keep content_hash consistent with the edit so only the digest mismatch fires.
+    doc["identity"]["content_hash"] = content_hash(doc)
+    result = validate_document(doc)
+
+    assert not result.ok
+    offending = [e for e in result.errors if e.path == "identity.section_digests.floor"]
+    assert offending, [str(e) for e in result.errors]
+    assert offending[0].blocking
+
+
+def test_identity_missing_optional_curation_digest_is_not_a_mismatch() -> None:
+    """section_digests.curation is optional (schema `required` omits it) — a
+    document that never populated it has asserted nothing about it, so its
+    absence must not be flagged even though compute_section_digests always
+    returns a curation entry."""
+    doc = _load("valid_v0_2_minimal.json")
+    digests = compute_section_digests(doc)
+    del digests["curation"]
+    doc["identity"] = {"content_hash": content_hash(doc), "section_digests": digests}
     result = validate_document(doc)
     assert result.ok, [str(e) for e in result.errors]
 
