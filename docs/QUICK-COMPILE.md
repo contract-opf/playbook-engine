@@ -104,7 +104,7 @@ running it explicitly is still faster than finding out at the start of a mine.
 | `CORPUS_NOT_FOUND` | Check the path — the folder doesn't exist yet. |
 | `EMPTY_CORPUS` | Add at least one agreement subfolder with files. |
 | `DOC_NO_SUPPORTED_FILES` | Add `.docx`, `.pdf`, or `.rtf` files to the subfolder, or delete it. |
-| `CORPUS_DANGLING_SYMLINKS` | The files are symlinks whose targets aren't reachable from here (usually a symlink-staged corpus read inside a container). Re-run `playbook stage` — it writes real copies by default. This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it. |
+| `CORPUS_DANGLING_SYMLINKS` | The files are shortcut files (symlinks) whose targets the container can't see. Re-run `playbook stage` — it writes real copies by default. This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it. |
 | `CONFIG_NOT_FOUND` | Create a `playbook.config.yaml` (copy the example). |
 | `CONFIG_MISSING_TAXONOMY` | Set `taxonomy:` in your config to the taxonomy YAML path. |
 | `CONFIG_TAXONOMY_NOT_FOUND` | Check the taxonomy path — the file is missing or misspelled. |
@@ -122,8 +122,8 @@ running it explicitly is still faster than finding out at the start of a mine.
 
 ## Step 2 — Compile the playbook
 
-Two commands, run in sequence — `mine` (L1–L4: ingest, structure, classify,
-assess) then `project` (L5: roll the observation store up into a validated
+Two commands, run in sequence — `mine` (the automated stages: ingest, structure,
+classify, assess) then `project` (roll the observation store up into a validated
 playbook) — stub judges throughout. The judged derivation path the packaged
 skill drives runs the same two stages with a judgment round in between
 (`mine` → `judge` / `judge-apply` → `project`); see
@@ -173,7 +173,7 @@ Open `./out/` to review what the engine inferred:
 | `normalized/*/*.clauses.json` | Extracted clause trees — useful for debugging ingestion. |
 | `observations.jsonl` | One row per clause observation feeding the playbook. |
 | `quarantine.json` | Documents `mine` excluded entirely (failed segmentation/ingest) — rewritten fresh every run. Any entry here is a document the playbook silently lost; triage it before trusting the result. |
-| `coherence_flags.json` | Clauses the L5 coherence judge flagged as unreliable — empty (`[]`) when no `coherence_judge` is configured, but always written by `playbook project`. |
+| `coherence_flags.json` | Clauses the coherence judge flagged as unreliable — empty (`[]`) when no `coherence_judge` is configured, but always written by `playbook project`. |
 | `playbook.opf.json` | The final playbook. |
 
 Review `scope.json` and `trail/` before trusting the playbook. If the engine got the signed copy wrong or misidentified provenance, add a `hints.yaml` to the relevant subfolder:
@@ -188,7 +188,7 @@ order:
   - v3-fully-executed.pdf
 ```
 
-Then re-run `playbook mine` (no flag needed) followed by `playbook project` to pick up the hints. The cache key for each document is derived in part from a hash of its `hints.yaml` content, so editing the file already invalidates that document's cached artifacts and forces it to be re-mined — reserve `--no-cache` for suspect extractions (it forces a full re-extraction — docling/pdfplumber/python-docx/pandoc — of the *entire* corpus, even if `extraction_cache.jsonl` is already warm, so it is not a cheap flag to reach for routinely).
+Then re-run `playbook mine` (no flag needed) followed by `playbook project` to pick up the hints. The cache key for each document is derived in part from a hash of its `hints.yaml` content, so editing the file already invalidates that document's cached artifacts and forces it to be re-mined — reserve `--no-cache` for suspect extractions (it forces a full re-extraction — docling/pdfplumber/python-docx/pandoc — of the *entire* corpus, even if the documents were already extracted once, so it is not a cheap flag to reach for routinely).
 
 ---
 
@@ -199,7 +199,7 @@ Then re-run `playbook mine` (no flag needed) followed by `playbook project` to p
 playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out
 playbook project ./out --config ./corpus/playbook.config.yaml
 
-# Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if extraction_cache.jsonl is warm
+# Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if the documents were already extracted once
 playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out --no-cache
 playbook project ./out --config ./corpus/playbook.config.yaml
 ```
@@ -214,7 +214,7 @@ The engine ships with **stub judges** that run without LLM access. They produce 
 
 - Every document is accepted as in-scope.
 - All clause deviations are marked as substantive + neutral risk.
-- Clause classification relies on keyword matching (Jaccard similarity) only.
+- Clause classification relies on simple word-overlap matching (Jaccard similarity) only.
 
 For real semantic judgment, you don't write code: use the packaged
 [`playbook-from-corpus` skill](../.claude/skills/playbook-from-corpus/SKILL.md)
@@ -233,7 +233,7 @@ ADOPTING.md.
 
 **"no .docx/.pdf/.rtf files found"** — Check that your files are in a *subfolder*, not directly in the corpus root. Each agreement needs its own subfolder.
 
-**"Only 1 version file"** — The engine can still compile with a single version, but cannot show negotiation history. Positions will carry low confidence (`historical_stance: no_signal`) without a signed-vs-draft comparison.
+**"Only 1 version file"** — The engine can still compile with a single version, but cannot show negotiation history. Positions will be marked low-confidence (`historical_stance: no_signal`) without a signed-vs-draft comparison.
 
 **Playbook has no clauses** — If all clauses are unclassified (taxonomy_id=None), the compiled clauses list will be empty. This usually means the taxonomy doesn't match the document content. Check that your taxonomy covers the agreement type, or switch to a more appropriate taxonomy.
 
