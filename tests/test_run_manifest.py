@@ -373,6 +373,29 @@ def test_extraction_cache_format_bump_is_blocking(config, tmp_path):
     assert all(f.blocking for f in findings if f.code == "extraction-cache-format-changed")
 
 
+def test_artifact_cache_format_bump_is_blocking(config, tmp_path):
+    """A stage-cache (L1-L4 ArtifactStore) format bump silently orphans every
+    cached per-document stage result — the same failure shape as extraction
+    cache format, and must get the same blocking treatment (#179)."""
+    previous = replace(rm.capture_environment(config, tmp_path), artifact_cache_format="0")
+    current = rm.capture_environment(config, tmp_path)
+    findings = rm.compare(previous, current, {"documents": 44})
+    assert "artifact-cache-format-changed" in [f.code for f in findings]
+    assert all(f.blocking for f in findings if f.code == "artifact-cache-format-changed")
+
+
+def test_collect_counts_sums_both_segmentation_cache_paths(tmp_path):
+    """agent-mode (segment/cache.jsonl) and llm-mode (segmentation_cache.jsonl)
+    caches live at different paths; an out-dir only ever populates one, but
+    collect_counts must not blind itself to whichever one is llm-mode's (#179)."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    entry = '{"key": "x", "verdict": {}}\n'
+    (out_dir / "segmentation_cache.jsonl").write_text(entry * 7, encoding="utf-8")
+    counts = rm.collect_counts(out_dir)
+    assert counts["segmentation_cache_entries"] == 7
+
+
 def test_engine_downgrade_is_blocking_but_upgrade_is_not(config, tmp_path):
     """The stale-Docker-image case: an older engine would look successful."""
     current = rm.capture_environment(config, tmp_path)
