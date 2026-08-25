@@ -1063,6 +1063,34 @@ Keep the Floor small. §3.7.1's admission test is the standard — a Floor
 invariant is something that forces the outcome on every review, fail-closed, so
 a bloated Floor turns into noise the consumer must still evaluate on every run.
 
+### Step 7c — Curation (Rung 3): pin a position, note a clause
+
+An attorney can also override a single clause's asserted position, or leave
+a free-text note, without a full recompile. There are exactly two sanctioned
+ways to do this — never hand-edit `curation.pins` or `viewer_notes.md`'s
+source data directly:
+
+```bash
+playbook curate $OUT --command "pin governing_law to usually_conceded: keep as filed" --by "<attorney name>"
+# or note a clause instead of pinning it:
+playbook curate $OUT --command "note indemnification: check again once the MSA renews"
+# batch form: --file commands.txt, one instruction per line ('#' starts a comment line)
+```
+
+`--by` stamps attribution onto `curation.pins[].pinned_by`. Every `curate`
+run also refreshes conflict status on every already-embedded pin — so a pin
+that fresh evidence now contradicts (via a recompile, a hand edit, or any
+other path) is flagged the next time `curate` runs, not silently stale.
+
+The other sanctioned path is the review HTML round-trip: an `override`
+correction inside `feedback.json` (exported from `playbook.review.html`),
+applied with `playbook view apply $OUT $OUT/feedback.json` (see "Feedback
+re-entry" below), embeds the same kind of pin.
+
+Pins created either way are embedded directly in `curation.pins` and survive
+a later recompile by design — this is what Route C's table above means by
+"Curation pins ... survive a recompile."
+
 ### Step 8 — Validate (must exit 0)
 
 ```bash

@@ -69,6 +69,8 @@ REQUIRED_SUBCOMMANDS = [
     "floor",
     # Step 11 of SKILL.md (issue #137) — publish cites --redact-terms.
     "publish",
+    # Step 7c of SKILL.md (issue #130) — curate cites --command/--file/--by.
+    "curate",
 ]
 
 
