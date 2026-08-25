@@ -892,6 +892,11 @@ questions 1–6, but only one of them creates hard-binding content. Lead with it
 | 5 | `flexible_clauses` | The mirror of Q1, but soft — shapes concession order, binds nothing. |
 | 6 | `audience` | Style of the rationale, not the substance of the judgment. |
 
+`flexible_clauses` "binds nothing" in `floor.invariants`, but it is not inert:
+candidates whose clause type you name here arrive in `playbook.review.html`
+already marked **Recommended reject**, attributed back to this answer — you
+can still accept them; an explicit decision clears the recommendation.
+
 Batch them as **two `AskUserQuestion` rounds** (the tool takes at most 4
 questions and 2–4 options each): rounds 1–4 first, then 5–6. Do not send six
 separate prompts.
