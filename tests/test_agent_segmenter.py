@@ -149,6 +149,35 @@ def test_llm_segmentation_kwargs_binds_real_taxonomy_ids_for_agent_mode(
     assert kwargs["llm_segment_fn"].taxonomy_ids == expected
 
 
+def test_llm_segmentation_kwargs_resets_stale_pending_queue(tmp_path: Path) -> None:
+    """Regression for issue #156: ``_llm_segmentation_kwargs`` must reset
+    (unlink) ``seg_dir/pending.jsonl`` before constructing its
+    ``PendingQueue``, mirroring ``segment_cmd``'s "fresh queue each round"
+    behavior (cli.py, issue #182) — a ``PendingQueue`` only dedups within its
+    own instance (see its docstring), so leaving a prior round's file in
+    place means every subsequent ``mine``/``judge`` invocation re-appends on
+    top of it, letting already-resolved entries linger and duplicate
+    indefinitely instead of a fresh queue reflecting only this round's
+    actual cache misses."""
+    config_path = _write_config(tmp_path, agent=True)
+    cfg = load_config(config_path)
+    taxonomy = load_taxonomy(tmp_path / "tax.yaml")
+    out_dir = tmp_path / "out"
+    seg_dir = out_dir / "segment"
+    seg_dir.mkdir(parents=True)
+    stale_path = seg_dir / "pending.jsonl"
+    stale_path.write_text(
+        json.dumps({"key": "stale", "kind": "segment", "payload": {}}) + "\n", encoding="utf-8"
+    )
+
+    _llm_segmentation_kwargs(cfg, taxonomy, out_dir, lambda _msg: None)
+
+    assert not stale_path.exists(), (
+        "a stale segment/pending.jsonl left by a previous mine/judge round "
+        "must be reset, not silently carried forward and appended to"
+    )
+
+
 def test_mine_queued_verdict_with_valid_taxonomy_id_passes_segment_apply(
     tmp_path: Path,
 ) -> None:
