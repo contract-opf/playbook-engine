@@ -67,8 +67,9 @@ def _make_obs(
     magnitude: str = "none",
     outcome: str = "signed",
     provenance: str = "our_paper",
+    confidence: float | None = None,
 ) -> dict:
-    return {
+    obs = {
         "observation_id": f"{doc_id}/{version}/1",
         "taxonomy_id": tid,
         "text_summary": text,
@@ -83,6 +84,9 @@ def _make_obs(
         "provenance": provenance,
         "outcome": outcome,
     }
+    if confidence is not None:
+        obs["confidence"] = confidence
+    return obs
 
 
 def _make_minimal_playbook(generated_at: str = "2026-01-15T09:00:00Z") -> dict:
@@ -377,6 +381,43 @@ def test_needs_attention_data_item_numbers(tmp_path: Path) -> None:
     data = build_after_action_data(out_dir)
     item_numbers = [item["item_number"] for item in data["needs_attention"]]
     assert item_numbers == [1, 2]
+
+
+def test_llm_segmenter_flat_confidence_cohort_aggregated(tmp_path: Path) -> None:
+    """issue #181: observations carrying the flat, by-design LLM-segmenter
+    confidence (``pipeline._LLM_SEGMENTER_CONFIDENCE`` == 0.45) must collapse
+    into ONE aggregate needs_attention row, not one row per observation —
+    otherwise a handful of genuine problems (ingest failures, real low-
+    confidence judge calls) drown in hundreds of by-design review flags.
+    A genuinely low-confidence observation at a DIFFERENT value (e.g. 0.0,
+    the unclassified sentinel) must still get its own individual row.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    obs = [
+        _make_obs("deal-alice", "v1", f"Clause {i}.", tid=f"TERM{i}", confidence=0.45)
+        for i in range(20)
+    ]
+    obs.append(_make_obs("deal-alice", "v1", "Unclassified clause.", tid=None, confidence=0.0))
+    _write_observations(out_dir, obs)
+
+    data = build_after_action_data(out_dir)
+    needs_attention = data["needs_attention"]
+
+    flat_045_rows = [item for item in needs_attention if any("0.45" in r for r in item["reasons"])]
+    assert len(flat_045_rows) == 1, (
+        f"expected the flat-0.45 cohort to collapse into a single aggregate "
+        f"row, got {len(flat_045_rows)}: {flat_045_rows}"
+    )
+    assert "20" in flat_045_rows[0]["reasons"][0], flat_045_rows[0]
+
+    zero_conf_rows = [item for item in needs_attention if any("0.00" in r for r in item["reasons"])]
+    assert len(zero_conf_rows) == 1, (
+        "a genuinely unclassified (0.00-confidence) observation must still "
+        f"get its own individual row, got {zero_conf_rows}"
+    )
 
 
 def test_honesty_section_lists_blank_fields(tmp_path: Path) -> None:

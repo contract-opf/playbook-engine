@@ -796,12 +796,18 @@ below both review thresholds this codebase checks against a classification's
 confidence: ``clause_classifier.AMBIGUITY_THRESHOLD`` (0.70 — trips
 ``ClauseClassification.is_ambiguous``) and the hardcoded 0.5 cutoff in
 ``aar._build_needs_attention`` (trips the after-action report's "needs
-attention" low-confidence flag). Every LLM-segmented, taxonomy-assigned
-clause therefore always surfaces for human review — there is no real signal
-yet to distinguish a confident LLM call from a shaky one; see this constant's
-docstring for the two follow-up options (per-clause LLM confidence,
-cross-version ``normalize_trail`` disagreement) that could replace the flat
-default with a calibrated one.
+attention" low-confidence flag). Because this sentinel is stamped on every
+LLM-segmented, taxonomy-assigned clause, ``aar._build_needs_attention``
+treats it as a special case (issue #181): rather than surfacing each such
+clause as its own individual row — which would drown real problems in
+hundreds or thousands of by-design flags on a fully agent-segmented corpus —
+it rolls the whole cohort into one aggregate row for a human to spot-check,
+while still giving an observation its own row when it also carries another
+flaggable reason (e.g. ``needs_review``, ``judge_error``). There is no real
+signal yet to distinguish a confident LLM call from a shaky one; see this
+constant's docstring for the two follow-up options (per-clause LLM
+confidence, cross-version ``normalize_trail`` disagreement) that could
+replace the flat default with a calibrated one.
 """
 
 

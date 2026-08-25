@@ -559,6 +559,15 @@ required; scripting the SEGMENTATION JUDGMENT is fabrication.
 classification for free (the judge loop then has **no `classify` items** left —
 only deviation/provenance/scope).
 
+**Trade-off:** that first-pass classification carries no dedicated judge
+verdict, so the engine stamps every one of it at a flat, deliberately-low
+confidence (`pipeline._LLM_SEGMENTER_CONFIDENCE`, 0.45 — issue #86) rather
+than asserting an unverified certainty. `report.md`'s Needs Attention section
+knows this: it rolls that whole flat-confidence cohort into a single
+spot-check line instead of one row per clause (issue #181), so it stays
+readable — but it also means agent-segmented classifications are, by design,
+unreviewed unless you spot-check that sample yourself.
+
 **Honest ceiling:** the agent segments at **block boundaries** — it groups the
 extractor's blocks but cannot sub-split one. So granularity is capped by
 extraction (a document that extracts to a few giant blocks stays coarse);
