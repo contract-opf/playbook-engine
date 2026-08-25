@@ -474,6 +474,56 @@ def test_v0_2_empty_posture_and_floor_are_valid() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _check_posture_interview_provenance_v2 — issue #133
+# ---------------------------------------------------------------------------
+
+
+def test_posture_with_no_interview_record_gets_should_warn() -> None:
+    """A drafted system_prompt with no generation.interview behind it -- the
+    exact gap the ticket's Consequence describes: a hand-edited or
+    third-party playbook that strips the interview provenance still
+    validates clean without this check."""
+    doc = _load("valid_v0_2_minimal.json")
+    del doc["posture"]["generation"]["interview"]
+    result = validate_document(doc)
+
+    warn_messages = [e for e in result.errors if not e.blocking]
+    offending = [e for e in warn_messages if "interview" in e.message and "§3.6" in e.message]
+    assert offending, [str(e) for e in result.errors]
+    assert offending[0].path == "posture.generation.interview"
+    # Advisory only -- a Posture with no traceable provenance is still a
+    # structurally valid document, just one a human should look at.
+    assert all(not e.blocking for e in offending)
+
+
+def test_posture_with_empty_interview_list_still_warns() -> None:
+    doc = _load("valid_v0_2_minimal.json")
+    doc["posture"]["generation"]["interview"] = []
+    result = validate_document(doc)
+
+    assert any("§3.6" in e.message for e in result.errors)
+
+
+def test_posture_with_interview_record_suppresses_the_warning() -> None:
+    doc = _load("valid_v0_2_minimal.json")
+    result = validate_document(doc)
+
+    assert not any("§3.6" in e.message and "interview" in e.message for e in result.errors)
+
+
+def test_empty_posture_does_not_trigger_interview_provenance_warning() -> None:
+    """No system_prompt at all -- e.g. a corpus-only compile -- has nothing
+    to provide provenance for, so it must not warn (would otherwise
+    contradict test_v0_2_empty_posture_and_floor_are_valid's `result.ok`)."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["posture"] = {}
+    result = validate_document(doc)
+
+    assert not any("interview" in e.message and "§3.6" in e.message for e in result.errors)
+    assert result.ok, [str(e) for e in result.errors]
+
+
+# ---------------------------------------------------------------------------
 # YAML input
 # ---------------------------------------------------------------------------
 
