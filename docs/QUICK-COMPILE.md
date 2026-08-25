@@ -19,6 +19,26 @@ Turn a folder of contract files into a negotiation playbook — without writing 
 
 ---
 
+## Step -1 — Get set up
+
+This guide assumes the `playbook` command is already on your machine. If
+Step 0 below gives you "command not found", you haven't installed it yet —
+that's expected, this guide doesn't cover installation.
+
+- **Fastest path for non-engineers:** skip the manual steps in this guide
+  and open this repository in [Claude Code](https://claude.com/claude-code),
+  then ask it to run the
+  [`playbook-from-corpus`](../.claude/skills/playbook-from-corpus/SKILL.md)
+  skill on your corpus. It drives every step below for you, and — unlike the
+  stub-judge run this guide produces — gives you a playbook with real
+  semantic judgment.
+- **To run the commands yourself:** open **Terminal.app** (macOS) or your
+  shell of choice, then follow
+  [README.md § Installation](../README.md#installation) — pick Docker
+  (recommended) or a local Python venv — before continuing to Step 0.
+
+---
+
 ## Before you start: layout your folder
 
 Your corpus must follow this structure. Every agreement gets its own subfolder; put all drafts plus the final signed copy inside it.
