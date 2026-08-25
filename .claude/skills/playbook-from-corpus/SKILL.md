@@ -509,12 +509,18 @@ clean born-digital DOCX, coarse on irregular/table-heavy layouts). With
 `segmentation.agent: true` in the config, **the agent segments instead** — the
 same store-backed loop the judges use, no API key:
 
-**Resume rule (check FIRST):** if `$OUT/segment-verdicts.jsonl` already
-exists from a prior session, run `segment-apply` on it immediately — a prior
-run may have banked hours of segmentation work and died one command short
-(the verdicts are validated and QA-gated at apply, so a stale/partial file is
-rejected loudly, never silently cached). Only re-segment items still pending
-after that.
+**Resume rule (check FIRST, in this exact order):** if `$OUT/segment-verdicts.jsonl`
+already exists from a prior session, run `segment-apply` on it **before**
+re-running `segment` — a prior run may have banked hours of segmentation work
+and died one command short, and applying while `segment/pending.jsonl` still
+matches that work is what makes each verdict QA-gated. Re-running `segment`
+first rewrites the pending queue out from under the old verdicts: `apply` then
+finds no matching pending item for them, skips the QA gates entirely, and
+caches them anyway behind a single `WARN: ... cached without QA gating` —
+**not** rejected, not loud. If you see that WARN, stop: it means an ungated,
+unvalidated segmentation just got cached; discard the verdicts file and
+regenerate the queue rather than trusting the result. Only re-segment items
+still pending after a clean (zero-WARN) apply.
 
 ```bash
 # 1. Emit the segmentation queue (one item per un-cached document version):
