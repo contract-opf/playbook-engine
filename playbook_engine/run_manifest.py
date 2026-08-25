@@ -417,7 +417,14 @@ def collect_counts(out_dir: Path) -> dict[str, int]:
         "documents": 0,
         "versions": 0,
         "extraction_cache_entries": _count_lines(out_dir / "extraction_cache.jsonl"),
-        "segmentation_cache_entries": _count_lines(out_dir / "segment" / "cache.jsonl"),
+        # Two mutually-exclusive segmentation caches depending on segmentation
+        # mode: agent mode writes segment/cache.jsonl, llm mode writes
+        # segmentation_cache.jsonl at the out-dir root (cli.py). Only one of
+        # the two is ever populated for a given out-dir, so summing is safe.
+        "segmentation_cache_entries": (
+            _count_lines(out_dir / "segment" / "cache.jsonl")
+            + _count_lines(out_dir / "segmentation_cache.jsonl")
+        ),
         "observations": _count_lines(out_dir / "observations.jsonl"),
         "judge_verdicts": _count_lines(out_dir / "judge" / "verdicts.jsonl"),
     }
@@ -664,6 +671,36 @@ def compare(  # noqa: C901
                     "from scratch (this is a one-time cost — after this run the saved "
                     "extractions are current again).",
                     "For scanned or image-heavy documents this can take a long time.",
+                ],
+                fix=[
+                    "This is expected after an engine upgrade and the result will be "
+                    "correct. Re-run with --accept-environment-change to go ahead.",
+                    "If you did not mean to change engine version, check which engine "
+                    "you are running (`playbook --version`) — a container image can be "
+                    "older than your checkout.",
+                ],
+            )
+        )
+
+    # --- 2b. The other silent-unreachable-cache case (stage cache bumps) ---
+    if _known(previous.artifact_cache_format, current.artifact_cache_format) and (
+        previous.artifact_cache_format != current.artifact_cache_format
+    ):
+        findings.append(
+            Finding(
+                code="artifact-cache-format-changed",
+                blocking=True,
+                headline=(
+                    "This version of the engine computes per-document stage results "
+                    "differently than the version that built this output folder, so "
+                    "none of the saved stage results can be reused."
+                ),
+                consequence=[
+                    f"All {docs or 'the'} document(s) would have every pipeline stage "
+                    "(L1-L4) recomputed from scratch (this is a one-time cost — after "
+                    "this run the saved stage results are current again).",
+                    "This happens silently: the old cache entries are not read as "
+                    "wrong, they are simply never looked up again.",
                 ],
                 fix=[
                     "This is expected after an engine upgrade and the result will be "
