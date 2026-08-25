@@ -142,6 +142,50 @@ def test_generate_posture_rerun_bumps_version() -> None:
     assert v3["version"] == 3
 
 
+def test_generate_posture_base_version_used_when_no_existing_posture() -> None:
+    """Issue #126: a re-derivation into a wiped/fresh out-dir has no
+    existing_posture of its own, but the caller may know the last published
+    version (e.g. read from the playbook this run supersedes). base_version
+    lets the counter continue instead of restarting at 1."""
+    posture = generate_posture(
+        _ANSWERS, generated_at="2026-07-10T00:00:00Z", existing_posture=None, base_version=2
+    )
+    assert posture["version"] == 3
+
+
+def test_generate_posture_base_version_wins_when_higher_than_existing() -> None:
+    posture = generate_posture(
+        _ANSWERS,
+        generated_at="2026-07-10T00:00:00Z",
+        existing_posture={"version": 1},
+        base_version=5,
+    )
+    assert posture["version"] == 6
+
+
+def test_generate_posture_existing_wins_when_higher_than_base_version() -> None:
+    posture = generate_posture(
+        _ANSWERS,
+        generated_at="2026-07-10T00:00:00Z",
+        existing_posture={"version": 5},
+        base_version=1,
+    )
+    assert posture["version"] == 6
+
+
+def test_generate_posture_base_version_none_matches_prior_behavior() -> None:
+    # Omitting base_version entirely must be a pure no-op vs. before #126.
+    posture = generate_posture(
+        _ANSWERS, generated_at="2026-07-10T00:00:00Z", existing_posture={"version": 4}
+    )
+    assert posture["version"] == 5
+
+
+def test_generate_posture_rejects_non_positive_base_version() -> None:
+    with pytest.raises(PostureError, match="base_version"):
+        generate_posture(_ANSWERS, generated_at="2026-07-10T00:00:00Z", base_version=0)
+
+
 def test_generate_posture_grounded_in_recorded_when_supplied() -> None:
     posture = generate_posture(
         _ANSWERS,
@@ -514,6 +558,28 @@ def test_apply_posture_interview_surfaces_floor_conflict_warning(tmp_path: Path)
 
     assert result.warnings
     assert any("no-uncapped-liability" in w for w in result.warnings)
+
+
+def test_apply_posture_interview_base_version_continues_counter_across_rederivation(
+    tmp_path: Path,
+) -> None:
+    """Issue #126 regression: reproduces the exact bug — a freshly
+    re-derived out-dir's playbook.opf.json carries no posture of its own
+    (as if the corpus were re-mined into a new/wiped out-dir), so without
+    base_version the interview would silently restart at version=1 even
+    though a prior playbook already reached a higher version. Passing the
+    last known version as base_version keeps the counter monotonic."""
+    doc = _minimal_v02_doc()  # no "posture" key at all — a fresh re-derivation
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    result = apply_posture_interview(
+        tmp_path, _ANSWERS, generated_at="2026-08-24T00:00:00Z", base_version=2
+    )
+
+    assert result.version == 3  # NOT 1 — continues past the prior playbook's version=2
+    written = json.loads(opf_path.read_text(encoding="utf-8"))
+    assert written["posture"]["version"] == 3
 
 
 def test_apply_posture_interview_missing_playbook_raises(tmp_path: Path) -> None:
@@ -900,6 +966,52 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     )
     assert exit_code2 == 0, output2
     assert "posture.version=2" in output2
+
+
+def test_cli_posture_interview_base_version_continues_counter_across_rederivation(
+    tmp_path: Path,
+) -> None:
+    """Issue #126: --base-version lets a re-derivation into a fresh/wiped
+    out-dir continue the governed counter instead of restarting at 1."""
+    doc = _minimal_v02_doc()  # fresh out-dir: no prior posture of its own
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps(_ANSWERS), encoding="utf-8")
+
+    exit_code, output = _invoke(
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--base-version",
+        "2",
+    )
+    assert exit_code == 0, output
+    assert "posture.version=3" in output
+
+
+def test_cli_posture_interview_base_version_rejects_non_positive(tmp_path: Path) -> None:
+    doc = _minimal_v02_doc()
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps(_ANSWERS), encoding="utf-8")
+
+    exit_code, output = _invoke(
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--base-version",
+        "0",
+    )
+    assert exit_code != 0
+    assert "error" in output.lower()
 
 
 def test_cli_posture_interview_rerun_does_not_duplicate_floor_invariants(tmp_path: Path) -> None:
