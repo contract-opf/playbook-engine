@@ -505,10 +505,12 @@ exit 0. Common fixes:
 | `CONFIG_TEMPLATE_NOT_FOUND` | Fix the `baseline.template` path or set to `null` |
 | `CONFIG_EXTRACTION_DOCLING_MISSING` | The config declares docling and it isn't installed — run in the container, or change `extraction.extractor` |
 
-These same checks now run automatically as a preflight inside `mine` and
-`segment`, which refuse to start if any of them fail (`--skip-preflight` opts
-out). Running this step explicitly is still worth it: it is fast, and it tells
-you about layout problems before you have committed to a long run.
+These same checks now run automatically as a preflight inside `mine`,
+`segment`, and `judge`, which refuse to start if any of them fail
+(`--skip-preflight` opts out). Running this step explicitly is still worth it:
+it is fast, and it tells you about layout problems before you have committed
+to a long run — including the drain loop's repeated `judge` rounds, where the
+corpus can go bad between rounds (staged tree moved, symlinks now dangling).
 
 ### Step 2a — Agent segmentation (key-free, optional)
 

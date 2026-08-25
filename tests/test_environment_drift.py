@@ -206,9 +206,10 @@ class TestDanglingSymlinksAreNamed:
 
 class TestPreflightIsAPrecondition:
     """``lint-corpus`` existed but was optional, so an ad-hoc ``mine`` skipped
-    it entirely. It now gates the two commands that read the corpus."""
+    it entirely. It now gates the commands that read the corpus — including
+    ``judge`` (issue #172), the command the drain loop runs most."""
 
-    @pytest.mark.parametrize("command", ["mine", "segment"])
+    @pytest.mark.parametrize("command", ["mine", "segment", "judge"])
     def test_command_refuses_a_corpus_of_dangling_symlinks(
         self, tmp_path: Path, command: str
     ) -> None:
@@ -227,7 +228,7 @@ class TestPreflightIsAPrecondition:
         # It stopped BEFORE doing any work.
         assert not (tmp_path / "out" / "observations.jsonl").exists()
 
-    @pytest.mark.parametrize("command", ["mine", "segment"])
+    @pytest.mark.parametrize("command", ["mine", "segment", "judge"])
     def test_skip_preflight_is_available_and_says_so(self, tmp_path: Path, command: str) -> None:
         corpus = tmp_path / "corpus"
         (corpus / "deal-a").mkdir(parents=True)

@@ -1837,6 +1837,13 @@ def stage_cmd(
         "provenance.known_entities is set."
     ),
 )
+@click.option(
+    "--skip-preflight",
+    "skip_preflight",
+    is_flag=True,
+    default=False,
+    help=_SKIP_PREFLIGHT_HELP,
+)
 @_accept_environment_change_option
 def judge_cmd(
     corpus_dir: Path,
@@ -1847,6 +1854,7 @@ def judge_cmd(
     accept_stale: bool,
     strict_rubric: bool,
     entity_registry_path: Path | None,
+    skip_preflight: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
@@ -1863,6 +1871,12 @@ def judge_cmd(
     Use ``playbook judge-apply`` to load verdicts into the store, then re-run
     ``playbook judge`` to confirm no new items are pending.  Finally run
     ``playbook mine`` + ``playbook project`` for the final playbook.
+
+    Runs the same ``lint-corpus`` preflight ``mine``/``segment`` run and refuses
+    to start if it fails — the drain loop calls ``judge`` over hours or days, so
+    a corpus that breaks between rounds (staged tree moved, symlinks now
+    dangling, config template path broken) must not sail into a judge round.
+    ``--skip-preflight`` opts out.
     """
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
@@ -1915,6 +1929,17 @@ def judge_cmd(
         command="judge",
         accept_change=accept_environment_change,
     )
+
+    # Corpus preflight (issue #172) — the same `lint-corpus` gate ``mine`` and
+    # ``segment`` run, and for the same reason: without it, a corpus that goes
+    # bad between drain-loop rounds (staged tree moved, symlinks now dangling,
+    # config template path broken) sails straight into `mine_corpus` below and
+    # either produces a confusing raw pipeline error or — for per-file
+    # extraction failures, which only warn-and-quarantine — a "finished,
+    # wrong-looking-like-right" thin derivation. Ordered AFTER the environment
+    # preflight and BEFORE the --plan branch, matching `mine`: --plan still
+    # reads the corpus (see the --plan comment below), so it needs this gate too.
+    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook judge")
 
     # Segment exactly the way ``mine`` does, or the store-backed judges here
     # generate verdict keys that never match the LLM-segmented observation store

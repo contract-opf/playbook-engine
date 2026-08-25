@@ -213,9 +213,9 @@ Two guards run without being asked:
   run was performed to apply — and it looks like a success. Rebuild with
   `make docker-build`, or set `ALLOW_STALE_IMAGE=1` to run the old image on
   purpose.
-- **`playbook mine` and `playbook segment` run the `lint-corpus` checks first**
-  and refuse to start if any fail, so an ad-hoc invocation cannot skip the
-  preflight. `--skip-preflight` opts out.
+- **`playbook mine`, `playbook segment`, and `playbook judge` run the
+  `lint-corpus` checks first** and refuse to start if any fail, so an ad-hoc
+  invocation cannot skip the preflight. `--skip-preflight` opts out.
 
 ## Repository layout
 
