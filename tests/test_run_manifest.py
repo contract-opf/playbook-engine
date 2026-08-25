@@ -448,7 +448,7 @@ def test_mine_and_judge_expose_the_flag_the_report_names():
     than printing nothing at all.
     """
     runner = CliRunner()
-    for command in ("mine", "judge"):
+    for command in ("mine", "judge", "segment"):
         result = runner.invoke(cli, [command, "--help"])
         assert result.exit_code == 0
         assert "--accept-environment-change" in result.output
@@ -473,3 +473,55 @@ def test_mine_stops_before_doing_work_when_docling_vanished(config, tmp_path, mo
     assert result.exit_code == 1
     assert "docling isn't available here" in _flat(result.output)
     assert not (out_dir / "observations.jsonl").exists()
+
+
+def test_segment_stops_before_doing_work_when_docling_vanished(config, tmp_path, monkeypatch):
+    """End-to-end regression for issue #173.
+
+    Before the fix, ``segment`` had no provenance preflight at all: it would
+    silently re-extract every version under the degraded (legacy) environment
+    and bank agent-segmentation work against canonical_text hashes that a
+    later ``mine`` would never recognize, only refusing at that later ``mine``.
+    Now it must refuse here, before any of that work starts, exactly the way
+    ``mine`` does.
+    """
+    corpus_dir = Path(__file__).parent.parent / "examples" / "nda" / "corpus"
+    out_dir = tmp_path / "out"
+    _seed_out_dir(out_dir, _docling_env(config, corpus_dir))
+    # Blow away the caches `segment` would otherwise (re)write, so "did it do
+    # any extraction work?" is unambiguous.
+    (out_dir / "extraction_cache.jsonl").unlink(missing_ok=True)
+    (out_dir / "segment" / "cache.jsonl").unlink(missing_ok=True)
+    pending_path = out_dir / "segment" / "pending.jsonl"
+
+    import playbook_engine.run_manifest as target
+
+    monkeypatch.setattr(target.shutil, "which", lambda name: None)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["segment", str(corpus_dir), "--config", str(_EXAMPLE_CONFIG), "--out", str(out_dir)]
+    )
+    assert result.exit_code == 1
+    assert "docling isn't available here" in _flat(result.output)
+    assert not pending_path.exists()
+
+
+def test_segment_stamps_the_run_manifest_on_success(config, tmp_path):
+    """A fresh, successful `segment` run leaves a run_manifest.json behind.
+
+    Mirrors `mine`'s stamp at the end of a successful run (issue #121) — this
+    is the half of issue #173 that lets the *next* `segment`/`mine`/`judge`
+    against this out_dir detect a subsequently-drifted environment at all.
+    """
+    corpus_dir = Path(__file__).parent.parent / "examples" / "nda" / "corpus"
+    out_dir = tmp_path / "out"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["segment", str(corpus_dir), "--config", str(_EXAMPLE_CONFIG), "--out", str(out_dir)]
+    )
+    assert result.exit_code == 0, result.output
+    manifest = rm.read_run_manifest(out_dir)
+    assert manifest is not None
+    assert manifest.written_by == "segment"

@@ -503,8 +503,8 @@ def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
 # Run provenance manifest (issue #121)
 # ---------------------------------------------------------------------------
 
-#: Shared ``--accept-environment-change`` flag for ``mine``/``judge``.
-#: Defined once as a reusable decorator so the two commands can never drift
+#: Shared ``--accept-environment-change`` flag for ``mine``/``judge``/``segment``.
+#: Defined once as a reusable decorator so the three commands can never drift
 #: apart on the flag name — the preflight report NAMES this flag as the way
 #: forward, so a mismatch between the text and one command's actual option
 #: would be worse than no message at all.
@@ -561,7 +561,8 @@ def _record_run_manifest(out_dir: Path, environment: RunEnvironment, command: st
     """Stamp *out_dir* with the environment that just produced it.
 
     Best-effort by design: a read-only or full disk must not turn an
-    otherwise-successful mine/judge into a failure over a bookkeeping file.
+    otherwise-successful mine/judge/segment into a failure over a bookkeeping
+    file.
     The cost of a missing manifest is one silent run next time — the cost of
     failing here is throwing away a completed corpus run.
     """
@@ -2564,8 +2565,13 @@ def judge_migrate_cmd(
     default=False,
     help=_SKIP_PREFLIGHT_HELP,
 )
+@_accept_environment_change_option
 def segment_cmd(
-    corpus_dir: Path, config_path: Path, out_path: Path | None, skip_preflight: bool
+    corpus_dir: Path,
+    config_path: Path,
+    out_path: Path | None,
+    skip_preflight: bool,
+    accept_environment_change: bool,
 ) -> None:
     """Emit the agent segmentation queue for CORPUS_DIR.
 
@@ -2580,14 +2586,15 @@ def segment_cmd(
     ``segment-apply`` reports only what still needs segmenting (empty = done).
     Requires ``segmentation.agent: true`` in the config.
 
-    Runs the same ``lint-corpus`` preflight ``mine`` does, for the same reason:
-    this is the stage that actually reads every version file, so a corpus the
-    walker cannot see (dangling symlinks) or an extraction environment that has
-    silently degraded must stop the run here, not surface as a thin playbook
-    later. ``--skip-preflight`` opts out.
+    Checks the stored run manifest first (so a changed environment is named as
+    the root cause), then runs the same ``lint-corpus`` preflight ``mine``
+    does, for the same reason: this is the stage that actually reads every
+    version file and pays for extraction, so a corpus the walker cannot see
+    (dangling symlinks) or an extraction environment that has silently
+    degraded must stop the run here, not hours later when the banked
+    segmentation work turns out to be keyed to canonical_text extracted under
+    the wrong environment. ``--skip-preflight`` opts out.
     """
-    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook segment")
-
     from playbook_engine.agent_judge import PendingQueue  # noqa: PLC0415
     from playbook_engine.agent_segmenter import (  # noqa: PLC0415
         AGENT_SEGMENTER_MODEL,
@@ -2603,6 +2610,28 @@ def segment_cmd(
     except ConfigError as exc:
         click.secho(f"Config error: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+
+    out_dir = (out_path or corpus_dir.parent / "out").resolve()
+
+    # Provenance preflight — same check `mine`/`judge` run, for the same
+    # reason, and deliberately BEFORE `_run_corpus_preflight` (mirrors
+    # `mine`'s ordering comment): `segment` is the first stage on the agent
+    # path that reads every version file and pays for extraction, so a
+    # docling that vanished from the venv must be named as the root cause
+    # here — not surfaced two steps removed by the corpus linter, and not
+    # left to be discovered only at the subsequent `mine`, after an entire
+    # agent segmentation pass has already been banked against canonical_text
+    # hashes that changed out from under it.
+    environment = _preflight_environment(
+        out_dir,
+        cfg,
+        corpus_dir,
+        command="segment",
+        accept_change=accept_environment_change,
+    )
+
+    _run_corpus_preflight(corpus_dir, config_path, skip=skip_preflight, command="playbook segment")
+
     if not cfg.segmentation.agent:
         click.secho(
             "ERROR: `segment` requires `segmentation.agent: true` in the config.",
@@ -2634,7 +2663,6 @@ def segment_cmd(
         click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
-    out_dir = (out_path or corpus_dir.parent / "out").resolve()
     seg_dir = out_dir / "segment"
     seg_dir.mkdir(parents=True, exist_ok=True)
     pending_path = seg_dir / "pending.jsonl"
@@ -2708,6 +2736,12 @@ def segment_cmd(
         click.secho(
             f"OK  {pending_path} — segment each item, then `playbook segment-apply`", fg="green"
         )
+    # Stamp the out-dir with what just extracted it (issue #173), so a
+    # subsequent `segment`/`mine`/`judge` against this out_dir has something
+    # to check itself against — mirrors `mine`'s identical stamp at the end
+    # of its own run. Written only after the extraction pass above finished,
+    # not on the early-exit paths above it.
+    _record_run_manifest(out_dir, environment, "segment")
 
 
 @cli.command(name="segment-apply")

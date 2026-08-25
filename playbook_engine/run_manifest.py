@@ -191,7 +191,7 @@ class RunManifest:
 
     schema_version: str
     written_at: str  # ISO-8601 UTC, seconds precision
-    written_by: str  # "mine" | "judge"
+    written_by: str  # "mine" | "judge" | "segment"
     environment: RunEnvironment
     counts: dict[str, int] = field(default_factory=dict)
 
@@ -1061,8 +1061,9 @@ def preflight(
     it matters.
 
     Args:
-        command: ``"mine"`` or ``"judge"`` — named in the report so the
-                 remediation text refers to the command the user actually ran.
+        command: ``"mine"``, ``"judge"``, or ``"segment"`` — named in the
+                 report so the remediation text refers to the command the
+                 user actually ran.
         echo:    ``click.echo``-like sink. Receives the one-line ``note:``
                  form for advisory differences, or the full report when a
                  blocking difference is accepted via *accept_change*. Blocking
