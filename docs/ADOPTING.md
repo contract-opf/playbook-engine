@@ -234,10 +234,18 @@ reach for them:
 
 `playbook publish` produces a **party-anonymous** export: role-label
 party ("the company" / "the counterparty"), quarter-coarsened dates,
-numbered deal pseudonyms, and an LLM residue pass over every free-text
-surface with an independent verify pass behind it. That's what makes it
-plausible to publish a real playbook as an educational artifact — or just
-to share one across teams — without shipping your counterparties' names.
+numbered deal pseudonyms, a deterministic no-known-entity backstop (a
+hard, unconditional fail if any registered real name survives), and a
+full-surface semantic-residue judgment + independent verify pass. By
+default that judgment runs on stub judges (`basis="stub"`) — no LLM is
+wired into `publish` itself — so it writes `residue_report.json` for
+review rather than a sign-off. The
+[`playbook-from-corpus` skill](../.claude/skills/playbook-from-corpus/SKILL.md)
+supplies the LLM/agent classification of that report before a human
+signs off (or wire a real judge — see `playbook_engine/export_profile.py`).
+That's what makes it plausible to publish a real playbook as an
+educational artifact — or just to share one across teams — without
+shipping your counterparties' names.
 
 ## Why bet on the format?
 
