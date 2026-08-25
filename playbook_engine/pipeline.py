@@ -184,7 +184,18 @@ _MEDIA_TYPES: dict[str, str] = {
 # degraded template mode to emergent). template_std_by_tid now populates, so
 # per-doc deviation assessments computed against the old empty standards must
 # not be replayed.
-_DEVIATION_VS_TEMPLATE_VERSION = 6
+#
+# v7 (issue #167): assess_deviations gained a third deterministic fast path
+# — an added/removed clause whose normalized text also occurs in the
+# counterpart version's clause tree is now classified basis="alignment"
+# instead of being sent to the judge (see deviation_classifier module
+# docstring and pipeline._assess_deviations_with_standards's
+# counterpart_clause_texts). A warm cache from before this change has
+# per-doc deviation results computed without this fast path — it would keep
+# replaying the old judge-routed (and judge-cost-heavy) verdicts forever
+# without this bump, even though the deterministic result for identical
+# source content is now available for free.
+_DEVIATION_VS_TEMPLATE_VERSION = 7
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1058,6 +1069,7 @@ def _assess_deviations_with_standards(
     template_std_by_tid: dict[str, str],
     deviation_judge: DeviationJudge,
     document_id: str | None = None,
+    counterpart_clause_texts: tuple[frozenset[str], frozenset[str]] | None = None,
 ) -> list[Any]:
     """Call assess_deviations per taxonomy_id so each group gets the correct our_standard.
 
@@ -1066,6 +1078,11 @@ def _assess_deviations_with_standards(
     ``document_id`` (issue #109) is passed straight through to
     ``assess_deviations`` so every judge batch item carries the owning
     document's id for traceability — see that function's docstring.
+
+    ``counterpart_clause_texts`` (issue #167) is threaded through unchanged
+    to every per-taxonomy_id ``assess_deviations`` call — it is document-wide
+    (the full before/after version clause trees), not taxonomy-scoped, so it
+    does not need to be filtered per group like ``diffs``/``our_std`` below.
     """
     from itertools import groupby
 
@@ -1085,7 +1102,13 @@ def _assess_deviations_with_standards(
         indices = [i for i, _ in group_items]
         diffs = [d for _, d in group_items]
         our_std = template_std_by_tid.get(tid or "", "")
-        assessed = assess_deviations(diffs, our_std, deviation_judge, document_id=document_id)
+        assessed = assess_deviations(
+            diffs,
+            our_std,
+            deviation_judge,
+            document_id=document_id,
+            counterpart_clause_texts=counterpart_clause_texts,
+        )
         for orig_idx, pair in zip(indices, assessed, strict=True):
             result[orig_idx] = pair
 
@@ -2337,8 +2360,24 @@ def _compute_doc_result(
         trail["reversals"] = [r.to_dict() for r in reversals]
 
         net_diffs = list(doc_diff.net.diffs)
+        # Issue #167: the full clause text of the net diff's two endpoint
+        # versions (first and last of ordered_ids — same pair diff_aligned
+        # used for doc_diff.net above), so assess_deviations can deterministically
+        # recognize an added/removed clause whose text also occurs in the
+        # counterpart version's clause tree as an alignment/relocation
+        # artifact instead of spending a judge call on it.
+        net_before_texts = frozenset(
+            (cc.node.text or "") for cc in classified_by_version[ordered_ids[0]]
+        )
+        net_after_texts = frozenset(
+            (cc.node.text or "") for cc in classified_by_version[ordered_ids[-1]]
+        )
         deviation_results = _assess_deviations_with_standards(
-            net_diffs, template_std_by_tid, _dev_judge, document_id=doc_id
+            net_diffs,
+            template_std_by_tid,
+            _dev_judge,
+            document_id=doc_id,
+            counterpart_clause_texts=(net_before_texts, net_after_texts),
         )
 
         # Per-version confidence map (issue #65) — see

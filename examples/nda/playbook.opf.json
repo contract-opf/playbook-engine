@@ -1947,15 +1947,14 @@
                 1011
               ]
             },
-            "deviation": "substantive",
+            "deviation": "none",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "proposed_then_reversed",
             "precedent_count": 5,
-            "proposed_by": "unknown",
             "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
           },
           {
@@ -2064,15 +2063,14 @@
                   1011
                 ]
               },
-              "deviation": "substantive",
+              "deviation": "none",
               "risk_delta": {
-                "direction": "worse",
-                "magnitude": "material"
+                "direction": "neutral",
+                "magnitude": "none"
               },
               "provenance": "our_paper",
               "outcome": "proposed_then_reversed",
               "precedent_count": 5,
-              "proposed_by": "unknown",
               "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
             }
           ],
@@ -2764,15 +2762,14 @@
                 2147
               ]
             },
-            "deviation": "substantive",
+            "deviation": "none",
             "risk_delta": {
-              "direction": "better",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
             "precedent_count": 2,
-            "proposed_by": "unknown",
             "x_search_snippet": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed"
           },
           {
@@ -4806,15 +4803,14 @@
                 2760
               ]
             },
-            "deviation": "substantive",
+            "deviation": "none",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "proposed_then_reversed",
             "precedent_count": 5,
-            "proposed_by": "unknown",
             "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
           },
           {
@@ -4923,15 +4919,14 @@
                   2760
                 ]
               },
-              "deviation": "substantive",
+              "deviation": "none",
               "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
+                "direction": "neutral",
+                "magnitude": "none"
               },
               "provenance": "our_paper",
               "outcome": "proposed_then_reversed",
               "precedent_count": 5,
-              "proposed_by": "unknown",
               "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
             },
             {
@@ -6322,8 +6317,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "better",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -7468,7 +7463,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-08-22T10:11:50+00:00",
+      "generated_at": "2026-08-25T08:48:34+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -7501,7 +7496,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:d73343538cb6fb890aa003df1cfa4cf50e5e3c898a1346b5c8e94d98401acd3c"
+      "grounded_in": "evidence@sha256:bb93885426295be61389c462c3f073b74bd694d4c0d088c5b291662353edc2ba"
     }
   },
   "floor": {
@@ -7520,9 +7515,9 @@
         "id": "limitation-of-liability-confidentiality-carveout",
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
-        "x_taxonomy_id": "limitation_of_liability",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-08-25T00:54:57+00:00"
+        "x_signed_at": "2026-08-25T08:48:40+00:00",
+        "x_taxonomy_id": "limitation_of_liability"
       }
     ]
   },
@@ -7882,7 +7877,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.0",
-    "generated_at": "2026-08-22T10:11:48+00:00",
+    "generated_at": "2026-08-25T08:48:33+00:00",
     "stub_basis_present": false
   },
   "digest": {
@@ -8539,16 +8534,16 @@
             "n": 10,
             "band": "often",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "beta-industries",
-              "version": 1,
+              "version": 4,
               "clause_path": "4",
               "char_span": [
-                968,
-                1011
+                1027,
+                1070
               ]
             }
           }
@@ -8558,18 +8553,18 @@
             "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or u",
             "n": 25,
             "band": "often",
-            "deviation": "substantive",
+            "deviation": "none",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "beta-industries",
-              "version": 1,
+              "version": 4,
               "clause_path": "4",
               "char_span": [
-                968,
-                1011
+                1027,
+                1070
               ]
             }
           }
@@ -8854,12 +8849,12 @@
               "magnitude": "material"
             },
             "example_ref": {
-              "document_id": "zeta-diagnostics",
+              "document_id": "theta-logistics",
               "version": 1,
               "clause_path": "13",
               "char_span": [
-                2120,
-                2147
+                2118,
+                2145
               ]
             }
           }
@@ -9824,11 +9819,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:71a157ba54c8b34644f1328c147206a78da5c0e66b6535aa3afd1454d32538ed",
+    "content_hash": "sha256:cb4ad00e52997403589c1403a7d6c96998dbebcf0e8f47d67c961de14a467ba5",
     "section_digests": {
-      "evidence": "sha256:d73343538cb6fb890aa003df1cfa4cf50e5e3c898a1346b5c8e94d98401acd3c",
-      "posture": "sha256:5773d0a1b7bb781f9c9fc5c2b782a2f5ccc5a19e2421e6740e11240e7e341262",
-      "floor": "sha256:f221700c6af61f3d516a9eaf852bc61efeb8a47f07f284b1fa128711e2121804",
+      "evidence": "sha256:bb93885426295be61389c462c3f073b74bd694d4c0d088c5b291662353edc2ba",
+      "posture": "sha256:6e6404e47ed57eaee9e071bdb4a9818b3226d43817f4045b1dec12dee20badfb",
+      "floor": "sha256:dd07922d9ec8e4912eb4d3bc6104a911f377db9a52b8ffa9d69c0270842a4eca",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }
