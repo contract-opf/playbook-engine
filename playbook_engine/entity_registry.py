@@ -324,9 +324,7 @@ def residue_tokens(name: str) -> list[str]:
     return [w for w in words if len(w) >= 4 and w.casefold() not in _RESIDUE_SCAN_STOPWORDS]
 
 
-def find_residue(
-    alias_map: dict[str, str], texts: dict[str, str]
-) -> list[tuple[str, str, str]]:
+def find_residue(alias_map: dict[str, str], texts: dict[str, str]) -> list[tuple[str, str, str]]:
     """Scan *texts* (label -> content) for residue of any real name in *alias_map*.
 
     ``alias_map`` is alias -> real (registered) entity name — e.g.
