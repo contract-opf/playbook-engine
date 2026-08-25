@@ -1064,7 +1064,7 @@ Rules that are easy to get wrong:
   moves forward.
 
 **If the human is not available**, stop here. Do not fabricate a Posture. Leave
-`posture: {}`, note it as pending human input in the Step 9 report, and say
+`posture: {}`, note it as pending human input in the Step 10 report, and say
 plainly that the playbook is a complete evidence-only document (Rung 0) that can
 ship as-is — `render-prompt` will mark it **ADVISORY ONLY — NOTHING BELOW IS
 BINDING** rather than shipping unmarked guidance.
@@ -1189,27 +1189,7 @@ A non-zero exit here means the pipeline is not done. Common causes:
 
 Do not paper over validation failures. Fix the root cause.
 
-### Step 9 — Report and inspect
-
-```bash
-make docker-run CORPUS=./out OUT=./out ARGS="report /work/out --out /work/out/report.md"
-make docker-run CORPUS=./out OUT=./out ARGS="inspect /work/out --out /work/out/inspection.md"
-```
-
-Review both outputs. The report surfaces:
-
-- Corpus coverage (how many agreements contributed)
-- Backbone health (trail quality, provenance distribution)
-- Judgment economics (items judged, low-confidence count)
-- Semantic coverage (classified vs unclassified clauses)
-- Needs-attention items (unknown aliases, low-confidence provenance, and
-  Posture/Floor fields that require the GC interview — listed, never invented).
-  If `posture`/`floor` are still empty here, say so explicitly and offer Step 7a
-  rather than filing it as a defect: evidence-only is Rung 0, a legitimate
-  endpoint, not an unfinished state.
-- Honesty section (what remains stubbed or unresolved)
-
-### Step 10 — View (render + bundle) and digest
+### Step 9 — View (render + bundle) and digest
 
 ```bash
 make docker-run CORPUS=./out OUT=./out ARGS="view render /work/out"
@@ -1248,6 +1228,37 @@ longer emitted as a separate artifact. `view bundle` takes no `--alias-map`
 — only `view render --alias-map /work/out/alias_map.json` resolves real
 names, for an internal-eyes-only copy; without it every rendering stays
 alias-only.
+
+### Step 10 — Report and inspect
+
+```bash
+make docker-run CORPUS=./out OUT=./out ARGS="report /work/out --out /work/out/report.md"
+make docker-run CORPUS=./out OUT=./out ARGS="inspect /work/out --out /work/out/inspection.md"
+```
+
+Runs last, after Step 9, on purpose: `report`'s Artifacts section inventories
+`playbook.digest.json`/`playbook.review.html`/`playbook.opf.html` by checking
+disk presence at report time, and nothing re-runs the report afterward — so
+if it ran before Step 9 rendered those files, the checklist would read as
+missing artifacts that are actually just not-yet-rendered, and stay wrong
+for good. Running it last means the checklist reflects the finished
+directory.
+
+Review both outputs. The report surfaces:
+
+- Corpus coverage (how many agreements contributed)
+- Backbone health (trail quality, provenance distribution)
+- Judgment economics (items judged, low-confidence count)
+- Semantic coverage (classified vs unclassified clauses)
+- Needs-attention items (unknown aliases, low-confidence provenance, and
+  Posture/Floor fields that require the GC interview — listed, never invented).
+  If `posture`/`floor` are still empty here, say so explicitly and offer Step 7a
+  rather than filing it as a defect: evidence-only is Rung 0, a legitimate
+  endpoint, not an unfinished state.
+- Honesty section (what remains stubbed or unresolved)
+- Artifacts (which of `playbook.opf.json`/`playbook.digest.json`/
+  `playbook.review.html`/`playbook.opf.html` are present in `OUT_DIR` as of
+  this report run)
 
 ---
 
@@ -1386,7 +1397,7 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out
 **verbatim** (issue #123), so the floor invariants `view apply` just promoted
 above survive this recompile — nothing here re-wipes them. But
 `playbook.review.html`, `playbook.opf.html`, and the digest sidecar are still
-whatever Step 10 last wrote, which is now stale: re-run it so every artifact
+whatever Step 9 last wrote, which is now stale: re-run it so every artifact
 reflects the correction round, not the pre-correction state.
 
 ```bash
