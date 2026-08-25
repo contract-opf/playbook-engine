@@ -434,6 +434,157 @@ def test_removed_clause_goes_to_judge() -> None:
     assert dr.basis == "judge"
 
 
+# ---------------------------------------------------------------------------
+# Alignment-artifact fast path (issue #167)
+# ---------------------------------------------------------------------------
+
+
+def test_removed_clause_present_in_counterpart_is_alignment_artifact() -> None:
+    """A 'removed' clause whose text also occurs in the after-version's clause
+    tree is a deterministic alignment artifact — no judge call."""
+    cd = _cd(
+        "removed",
+        text_before="Notices shall be delivered by certified mail.",
+        path="4",
+    )
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(
+            frozenset(),
+            frozenset({"Section 9. Notices shall be delivered by certified mail. See Exhibit A."}),
+        ),
+    )
+    assert judge.received_items == []
+    _, dr = results[0]
+    assert dr.deviation == "none"
+    assert dr.basis == "alignment"
+    assert dr.risk_delta.direction == "neutral"
+    assert dr.risk_delta.magnitude == "none"
+
+
+def test_added_clause_present_in_counterpart_is_alignment_artifact() -> None:
+    """An 'added' clause whose text also occurs in the before-version's clause
+    tree is a deterministic alignment artifact — no judge call."""
+    cd = _cd(
+        "added",
+        text_after="Notices shall be delivered by certified mail.",
+        path="7",
+    )
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(
+            frozenset({"1. Notices shall be delivered by certified mail."}),
+            frozenset(),
+        ),
+    )
+    assert judge.received_items == []
+    _, dr = results[0]
+    assert dr.deviation == "none"
+    assert dr.basis == "alignment"
+
+
+def test_removed_clause_normalization_tolerates_numbering_and_punctuation() -> None:
+    """Containment survives renumbering/punctuation differences — the same
+    tolerance clause_aligner._normalize applies for move-matching."""
+    cd = _cd(
+        "removed",
+        text_before="Confidential Information; each party shall keep it secret.",
+        path="2",
+    )
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(
+            frozenset(),
+            frozenset({"3.2  confidential information  each party shall keep it secret!!"}),
+        ),
+    )
+    assert judge.received_items == []
+    _, dr = results[0]
+    assert dr.basis == "alignment"
+
+
+def test_removed_clause_not_present_in_counterpart_still_goes_to_judge() -> None:
+    """counterpart_clause_texts supplied but no containment match → judge, as before."""
+    cd = _cd("removed", text_before="Governing law is Delaware.", path="9")
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(frozenset(), frozenset({"Entirely unrelated clause text."})),
+    )
+    _, dr = results[0]
+    assert dr.basis == "judge"
+    assert len(judge.received_items) == 1
+
+
+def test_added_removed_default_to_judge_when_counterpart_clause_texts_omitted() -> None:
+    """Backward compatibility: omitting counterpart_clause_texts (the default)
+    disables the fast path entirely, even for text that would otherwise match."""
+    cd = _cd("removed", text_before="Notices shall be delivered by certified mail.", path="4")
+    judge = MockDeviationJudge()
+    results = assess_deviations([cd], "standard", judge)
+    _, dr = results[0]
+    assert dr.basis == "judge"
+    assert len(judge.received_items) == 1
+
+
+def test_alignment_artifact_empty_text_never_matches() -> None:
+    """An empty removed-clause text must not vacuously match every counterpart
+    (it would be a substring of everything)."""
+    cd = _cd("removed", text_before="", path="1")
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(frozenset(), frozenset({"Some real clause text."})),
+    )
+    _, dr = results[0]
+    assert dr.basis == "judge"
+
+
+def test_alignment_artifact_requires_minimum_length_floor() -> None:
+    """A short, generic added clause that merely happens to be a substring of
+    an unrelated, longer counterpart clause must NOT be auto-suppressed as an
+    alignment artifact (issue #167 fix-round-1) — it still goes to the judge,
+    mirroring clause_aligner.MOVE_EXACT_MIN_CHARS's length floor."""
+    cd = _cd(
+        "added",
+        text_after="Time is of the essence.",
+        path="12",
+    )
+    judge = MockDeviationJudge()
+    results = assess_deviations(
+        [cd],
+        "standard",
+        judge,
+        counterpart_clause_texts=(
+            frozenset(
+                {
+                    "No failure or delay by either party in exercising any right under "
+                    "this Agreement shall operate as a waiver, and the parties agree "
+                    "that time is of the essence with respect to the delivery "
+                    "obligations in Section 5."
+                }
+            ),
+            frozenset(),
+        ),
+    )
+    _, dr = results[0]
+    assert dr.basis == "judge"
+    assert len(judge.received_items) == 1
+
+
 def test_mixed_unchanged_and_modified() -> None:
     """Unchanged → deterministic; modified → judge."""
     diffs = [

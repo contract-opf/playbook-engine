@@ -17,12 +17,26 @@ Fast path (deterministic):
     deterministic, same as before.
   - Near-identical rewrites (Jaccard ≥ ``REWORDED_EQUIVALENT_THRESHOLD``) →
     ``deviation="none"``, ``basis="reworded_equivalent"``, no judge call.
+  - Added/removed clauses whose normalized text occurs verbatim somewhere in
+    the counterpart version's clause tree (issue #167) → ``deviation="none"``,
+    ``basis="alignment"``, no judge call. This is the same containment check
+    a human relocation-triage reviewer performs by hand (see
+    ``.claude/skills/playbook-from-corpus/REFERENCE.md``'s "Relocation triage
+    FIRST" bullet): the clause_aligner's global move-matching phase
+    (``clause_aligner._match_moves``) already pairs most relocated clauses
+    back into a single ``unchanged``/``modified`` row, but a residual set
+    still surfaces as an added/removed hunk (short clauses below the
+    move-matcher's length/token gates, or one side matched into a *different*
+    slot by the positional bucket path) whose text nonetheless still appears,
+    unchanged, in the other version. Only engaged when the caller supplies
+    ``counterpart_clause_texts``; callers that omit it (or pre-#167 callers)
+    keep routing every added/removed clause to the judge, unchanged.
 
 Slow path (LLM — injected ``DeviationJudge``):
-  - Changed clauses (added/removed/modified) that do not pass the Jaccard
-    pre-filter are batched and passed to the judge.  The judge receives a
-    compact hunk payload (not the full clause text) and the ``our_standard``
-    text for context.
+  - Changed clauses (added/removed/modified) that do not pass a deterministic
+    fast path above are batched and passed to the judge.  The judge receives
+    a compact hunk payload (not the full clause text) and the
+    ``our_standard`` text for context.
 
 ``DeviationResult.deviation`` values:
   ``"none"``                — clause unchanged from our standard.
@@ -44,6 +58,10 @@ Slow path (LLM — injected ``DeviationJudge``):
 ``DeviationResult.basis`` values:
   ``"deterministic"``       — decided without LLM (unchanged clause).
   ``"reworded_equivalent"`` — Jaccard pre-filter; no judge call needed.
+  ``"alignment"``           — added/removed clause whose text also occurs in
+                              the counterpart version's clause tree (issue
+                              #167); an alignment/relocation artifact, not a
+                              negotiated change. No judge call needed.
   ``"judge"``               — decided by injected ``DeviationJudge``.
   ``"judge_error"``         — judge raised; clause assessed as unknown deviation.
 """
@@ -54,6 +72,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from playbook_engine.clause_aligner import MOVE_EXACT_MIN_CHARS
 from playbook_engine.clause_differ import ClauseDiff
 
 # ---------------------------------------------------------------------------
@@ -64,7 +83,7 @@ _DEVIATION_VALUES = frozenset({"none", "reworded_equivalent", "substantive", "ne
 _DIRECTION_VALUES = frozenset({"better", "neutral", "worse"})
 _MAGNITUDE_VALUES = frozenset({"none", "minor", "material"})
 _BASIS_VALUES = frozenset(
-    {"deterministic", "reworded_equivalent", "judge", "judge_error", "needs_review"}
+    {"deterministic", "reworded_equivalent", "alignment", "judge", "judge_error", "needs_review"}
 )
 
 # Jaccard similarity threshold above which a modified clause is treated as a
@@ -236,6 +255,53 @@ def _text_jaccard(a: str, b: str) -> float:
     return intersection / union
 
 
+def _normalize_for_containment(text: str) -> str:
+    """Normalize text for the alignment-artifact containment check (issue #167).
+
+    Lowercase, strip punctuation/numbering to single spaces, collapse
+    whitespace. Deliberately the same shape as ``clause_aligner._normalize``
+    so a clause whose only difference from its counterpart is a renumbered
+    heading prefix ("2.6 Notices..." vs "Notices...") or trailing punctuation
+    still matches as a substring.
+    """
+    s = text.lower()
+    s = re.sub(r"[^\w\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _is_alignment_artifact(clause_text: str, normalized_counterpart_texts: frozenset[str]) -> bool:
+    """True if *clause_text*, normalized, occurs verbatim in any counterpart clause.
+
+    ``normalized_counterpart_texts`` must already be normalized (via
+    ``_normalize_for_containment``) — callers normalize the counterpart set
+    once per ``assess_deviations`` call rather than per candidate clause.
+
+    Deliberately a plain substring test (containment), not equality: an
+    added/removed clause frequently reappears as a sub-span of a merged or
+    renumbered clause in the counterpart version, not as a standalone
+    identical clause. Empty/whitespace-only text never matches — it would be
+    a substring of everything, producing false suppressions.
+
+    Also requires the normalized text to be at least ``MOVE_EXACT_MIN_CHARS``
+    long, mirroring the length floor ``clause_aligner``'s own near-exact move
+    matcher applies to its containment-shaped comparison. Below that floor a
+    short, generic clause (e.g. a one-line addition) can coincidentally be a
+    substring of an unrelated, longer counterpart clause; without the floor
+    that coincidence would silently suppress a genuine negotiated change.
+    """
+    norm = _normalize_for_containment(clause_text)
+    if len(norm) < MOVE_EXACT_MIN_CHARS:
+        return False
+    return any(norm in counterpart for counterpart in normalized_counterpart_texts)
+
+
+_ALIGNMENT_ARTIFACT_RATIONALE = (
+    "alignment artifact — this clause's text is present in two or more "
+    "versions of the same document, so the aligner paired it differently "
+    "between versions rather than the clause being added or removed. "
+    "No negotiated change."
+)
+
 _HUNK_CONTEXT_LINES = 3
 
 
@@ -266,6 +332,7 @@ def assess_deviations(
     our_standard: str,
     judge: DeviationJudge,
     document_id: str | None = None,
+    counterpart_clause_texts: tuple[frozenset[str], frozenset[str]] | None = None,
 ) -> list[tuple[ClauseDiff, DeviationResult]]:
     """Assess deviation for each changed clause in *clause_diffs*.
 
@@ -283,6 +350,17 @@ def assess_deviations(
                       (issue #109). Omitted from batch items entirely when
                       ``None`` (single-document callers/tests that have no
                       document context to give).
+        counterpart_clause_texts: Optional ``(before_texts, after_texts)`` —
+                      the full, un-normalized clause text of every clause in
+                      the diff's "before" version and "after" version,
+                      respectively (issue #167). When supplied, an
+                      added/removed clause whose normalized text occurs in
+                      the *other* side's set is classified deterministically
+                      as an alignment artifact (``basis="alignment"``)
+                      instead of being sent to the judge — see module
+                      docstring. ``None`` (the default) disables this fast
+                      path entirely; every added/removed clause is judged,
+                      same as before issue #167.
 
     Each batch item also carries ``"version_from"``/``"version_to"``
     (``ClauseDiff.clause_version_before``/``clause_version_after``, issue
@@ -296,6 +374,9 @@ def assess_deviations(
                     ``basis`` / vocabulary values.
     """
     results: list[tuple[ClauseDiff, DeviationResult] | None] = [None] * len(clause_diffs)
+    before_texts, after_texts = counterpart_clause_texts or (frozenset(), frozenset())
+    norm_before_texts = frozenset(_normalize_for_containment(t) for t in before_texts)
+    norm_after_texts = frozenset(_normalize_for_containment(t) for t in after_texts)
 
     # Fast path 1 (deterministic): unchanged clauses need no LLM call ONLY if
     # they actually match our_standard (the template clause for this
@@ -303,6 +384,10 @@ def assess_deviations(
     # judge_indices entries need a template-vs-clause hunk below rather than
     # the (identical, hence useless) before/after hunk.
     # Fast path 2 (Jaccard): near-identical rewrites are classified without the judge.
+    # Fast path 3 (alignment, issue #167): added/removed clauses whose text
+    # also occurs in the counterpart version are alignment artifacts, not
+    # negotiated changes. Only engaged when the caller supplied
+    # counterpart_clause_texts.
     judge_indices: list[int] = []
     against_template: set[int] = set()
     for i, cd in enumerate(clause_diffs):
@@ -339,6 +424,18 @@ def assess_deviations(
                     deviation="none",
                     risk_delta=_NEUTRAL_ZERO,
                     basis="reworded_equivalent",
+                ),
+            )
+        elif (
+            cd.kind == "removed" and _is_alignment_artifact(cd.text_before, norm_after_texts)
+        ) or (cd.kind == "added" and _is_alignment_artifact(cd.text_after, norm_before_texts)):
+            results[i] = (
+                cd,
+                DeviationResult(
+                    deviation="none",
+                    risk_delta=_NEUTRAL_ZERO,
+                    basis="alignment",
+                    rationale=_ALIGNMENT_ARTIFACT_RATIONALE,
                 ),
             )
         else:
