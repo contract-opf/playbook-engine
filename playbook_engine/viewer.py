@@ -147,6 +147,7 @@ from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.curation import CurationPin
+from playbook_engine.entity_registry import entity_slug
 from playbook_engine.floor_candidates import (
     _Q5_REJECTION_COMMENT,
     apply_floor_review,
@@ -176,7 +177,11 @@ class ApplyResult:
 
     Attributes:
         hints_written:    Document IDs for which ``hints.yaml`` was written
-                          or updated.
+                          or updated **in the corpus document directory**.
+                          A document whose corpus directory could not be
+                          located or written (issue #169) is NOT included
+                          here even though a fallback copy was parked under
+                          ``out_dir/hints/`` — see ``skipped``.
         verdicts_written: Number of VerdictStore entries written.
         notes_written:    ``True`` if ``viewer_notes.md`` was updated.
         pins_written:     Item numbers whose ``override`` was embedded as a
@@ -196,8 +201,10 @@ class ApplyResult:
                           ``apply_feedback`` recognised as unsupported.
                           Also carries malformed/unknown ``"floor"`` entries,
                           keyed ``"floor"`` (malformed top-level block) or
-                          ``f"floor:{candidate_id}"`` (issue #90). Empty if
-                          every key was applied.
+                          ``f"floor:{candidate_id}"`` (issue #90), and a
+                          hints.yaml correction that could not reach the
+                          corpus, keyed ``f"hints:{doc_id}"`` (issue #169).
+                          Empty if every key was applied.
     """
 
     hints_written: list[str] = field(default_factory=list)
@@ -1272,7 +1279,9 @@ def render_review_html(
 # ---------------------------------------------------------------------------
 
 
-def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
+def apply_feedback(
+    out_dir: Path, feedback_path: Path, corpus_dir: Path | None = None
+) -> ApplyResult:
     """Translate reviewer feedback into engine-actionable corrections.
 
     Reads *feedback_path* (``feedback.json`` produced by the HTML viewer)
@@ -1289,11 +1298,36 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
       render shows it as rejected instead of re-proposing it. See the
       module docstring for the full ``"floor"`` feedback shape.
 
+    Locating the corpus document directory for a hints.yaml write (issue
+    #169): the cited ``document_id`` may be a pseudonymized alias (when the
+    corpus was mined with ``known_entities`` configured — issue #153), which
+    never matches a raw-named corpus folder. If ``<out_dir>/alias_map.json``
+    (the held-out ``alias -> real name`` sidecar written by
+    ``entity_registry.write_holdout_map``) exists, it is used to reverse the
+    alias span embedded in ``document_id`` back to the real folder name
+    before searching. *corpus_dir*, when given, is searched first (needed
+    under the documented Docker flow, where the corpus is mounted at
+    ``/work/corpus`` — a sibling of ``/work/out``, not a parent — so the
+    legacy ``out_dir.parent``/``out_dir.parent.parent`` search never finds
+    it). When no corpus document directory can be located or found writable
+    (the Docker corpus mount is read-only — SKILL.md's "Running commands"
+    section), the correction is written to
+    ``out_dir/hints/<doc_id>.yaml`` as a last-resort capture that no engine
+    code reads back, and is reported via ``ApplyResult.skipped`` (key
+    ``"hints:<doc_id>"``) rather than counted in ``hints_written`` — do not
+    mistake a populated ``out_dir/hints/`` for the correction having reached
+    the corpus.
+
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` and corpus
                        staging (to locate ``hints.yaml`` files).
         feedback_path: Path to the ``feedback.json`` file produced by the
                        viewer's Export button.
+        corpus_dir:    Optional corpus root to search first when locating a
+                       cited document's directory (see above). Defaults to
+                       ``None``, preserving the legacy out_dir-relative
+                       search for callers that share a parent directory
+                       between corpus and out (the non-Docker host layout).
 
     Returns:
         ``ApplyResult`` summarising what was written.
@@ -1528,31 +1562,59 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
             floor_invariants_changed = True
 
     # Write hints.yaml files
-    # Locate document directories: scan out_dir and one level up for doc dirs
-    # The hints.yaml lives alongside the corpus document folder.
-    # Convention from version_orderer.py: hints live at <corpus_dir>/<doc_id>/hints.yaml
-    # We search for a hints.yaml sibling folder relative to out_dir's parent.
+    # Locate document directories: search corpus_dir (if given), then scan
+    # out_dir and one level up for doc dirs. The hints.yaml lives alongside
+    # the corpus document folder. Convention from version_orderer.py: hints
+    # live at <corpus_dir>/<doc_id>/hints.yaml. document_id may be a
+    # pseudonymized alias (issue #153) that matches no raw corpus folder, so
+    # try reversing it through <out_dir>/alias_map.json first (issue #169).
+    alias_map: dict[str, str] = {}
+    try:
+        alias_map = load_alias_map(out_dir / "alias_map.json")
+    except FileNotFoundError:
+        pass
+    except (json.JSONDecodeError, OSError):  # noqa: BLE001
+        alias_map = {}
+
     hints_written: list[str] = []
     for doc_id, hint_updates in hints_by_doc.items():
-        hints_path = _find_hints_path(out_dir, doc_id)
-        if hints_path is None:
-            # Write into out_dir/hints/<doc_id>.yaml as a fallback
-            hints_path = out_dir / "hints" / f"{doc_id}.yaml"
-        hints_path.parent.mkdir(parents=True, exist_ok=True)
+        hints_path = _find_hints_path(out_dir, doc_id, corpus_dir=corpus_dir, alias_map=alias_map)
+        wrote_to_corpus = False
+        skip_reason: str | None = None
 
-        # Merge with existing hints
-        existing: dict[str, Any] = {}
-        if hints_path.exists():
+        if hints_path is not None:
             try:
-                existing = yaml.safe_load(hints_path.read_text(encoding="utf-8")) or {}
-            except Exception:  # noqa: BLE001
-                existing = {}
-        existing.update(hint_updates)
+                hints_path.parent.mkdir(parents=True, exist_ok=True)
+                _merge_write_hints_file(hints_path, hint_updates)
+                wrote_to_corpus = True
+            except OSError as exc:
+                # Most commonly the Docker corpus mount, which is read-only
+                # by design (SKILL.md's "Running commands" section) — the
+                # directory was found but cannot be written from here.
+                skip_reason = (
+                    f"found the corpus document directory ({hints_path.parent}) but "
+                    f"could not write hints.yaml there ({exc}) — likely a read-only "
+                    "corpus mount; apply this correction directly on the host "
+                    "corpus tree instead"
+                )
+        else:
+            searched = [str(p) for p in (corpus_dir, out_dir.parent, out_dir.parent.parent) if p]
+            skip_reason = (
+                f"no corpus document directory found for '{doc_id}' "
+                f"(searched: {', '.join(searched)})"
+            )
 
-        hints_path.write_text(
-            yaml.dump(existing, allow_unicode=True, sort_keys=True), encoding="utf-8"
-        )
-        hints_written.append(doc_id)
+        if wrote_to_corpus:
+            hints_written.append(doc_id)
+        else:
+            fallback_path = out_dir / "hints" / f"{doc_id}.yaml"
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            _merge_write_hints_file(fallback_path, hint_updates)
+            result.skipped.setdefault(f"hints:{doc_id}", []).append(
+                f"{skip_reason}; correction parked at {fallback_path} instead — this "
+                f"file is NOT read by any pipeline stage, copy it onto "
+                f"<corpus>/{doc_id}/hints.yaml by hand"
+            )
 
     result.hints_written = hints_written
 
@@ -1633,17 +1695,87 @@ def apply_feedback(out_dir: Path, feedback_path: Path) -> ApplyResult:
 # ---------------------------------------------------------------------------
 
 
-def _find_hints_path(out_dir: Path, doc_id: str) -> Path | None:
+def _reverse_alias_document_id(document_id: str, alias_map: dict[str, str]) -> str:
+    """Reverse a pseudonymized ``document_id``'s alias span back to a real name slug.
+
+    Mirrors ``entity_registry.pseudonymize_document_id`` in the opposite
+    direction: matches each alias's normalized token sequence against
+    *document_id*'s normalized tokens and substitutes the real entity name's
+    slug tokens in place, leaving the rest of the slug (e.g. a trailing
+    year) untouched. Longest aliases are tried first so a shorter alias that
+    happens to prefix a longer one never partially shadows it. Returns
+    *document_id* unchanged when no alias's slug form appears in it (issue
+    #169).
+    """
+    if not document_id or not alias_map:
+        return document_id
+    tokens = entity_slug(document_id).split("-")
+    for alias, real_name in sorted(alias_map.items(), key=lambda kv: len(kv[0]), reverse=True):
+        alias_tokens = entity_slug(alias).split("-")
+        n = len(alias_tokens)
+        if n == 0:
+            continue
+        for i in range(len(tokens) - n + 1):
+            if tokens[i : i + n] == alias_tokens:
+                real_tokens = entity_slug(real_name).split("-")
+                tokens = tokens[:i] + real_tokens + tokens[i + n :]
+                break
+    return "-".join(tokens)
+
+
+def _find_hints_path(
+    out_dir: Path,
+    doc_id: str,
+    corpus_dir: Path | None = None,
+    alias_map: dict[str, str] | None = None,
+) -> Path | None:
     """Search for an existing or natural hints.yaml location for *doc_id*.
 
-    Looks in:
-    1. ``out_dir/../<doc_id>/hints.yaml`` (standard corpus layout)
-    2. ``out_dir/../../<doc_id>/hints.yaml`` (two-level layout)
+    *doc_id* may be a pseudonymized alias (issue #153); when *alias_map*
+    (``alias -> real entity name``, as loaded from ``alias_map.json``) is
+    given, both the alias-form and the reversed real-name-form of *doc_id*
+    are tried.
+
+    Search order (first existing directory wins):
+    1. ``corpus_dir/<doc_id>/hints.yaml`` and its alias-reversed form, if
+       *corpus_dir* is given — needed under the documented Docker flow,
+       where the corpus is a sibling of out_dir (``/work/corpus`` vs.
+       ``/work/out``), not its parent (issue #169).
+    2. ``out_dir/../<doc_id>/hints.yaml`` (standard host layout: corpus and
+       out share a parent) and its alias-reversed form.
+    3. ``out_dir/../../<doc_id>/hints.yaml`` (two-level layout) and its
+       alias-reversed form.
 
     Returns the path to use, or ``None`` if no canonical location is found.
     """
-    for parent in (out_dir.parent, out_dir.parent.parent):
-        candidate = parent / doc_id / "hints.yaml"
-        if candidate.parent.exists():
-            return candidate
+    candidate_ids = [doc_id]
+    reversed_id = _reverse_alias_document_id(doc_id, alias_map or {})
+    if reversed_id != doc_id:
+        candidate_ids.append(reversed_id)
+
+    search_roots: list[Path] = []
+    if corpus_dir is not None:
+        search_roots.append(corpus_dir)
+    search_roots.extend([out_dir.parent, out_dir.parent.parent])
+    for parent in search_roots:
+        for candidate_id in candidate_ids:
+            candidate = parent / candidate_id / "hints.yaml"
+            if candidate.parent.exists():
+                return candidate
     return None
+
+
+def _merge_write_hints_file(path: Path, updates: dict[str, Any]) -> None:
+    """Merge *updates* into the hints.yaml at *path*, creating/overwriting it.
+
+    Existing keys not present in *updates* are preserved (issue #68's
+    "merges with, does not overwrite" contract).
+    """
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            existing = {}
+    existing.update(updates)
+    path.write_text(yaml.dump(existing, allow_unicode=True, sort_keys=True), encoding="utf-8")
