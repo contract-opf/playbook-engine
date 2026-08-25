@@ -767,7 +767,17 @@ changed since they were banked, adopt them with `judge-migrate` (drop
 REFERENCE.md § "Rubric versions" for what "legacy" vs. "stale" means and when
 adoption is and isn't safe.
 
-**Loop invariant:** repeat until `out/judge/pending.jsonl` is empty.
+**Loop invariant:** repeat until `out/judge/pending.jsonl` is empty. This
+drains judged clauses only — a document that was **quarantined** during
+`mine` (SegmentationQAError, HintsError, all-versions-failed-ingest) never
+queues any pending items for it, so the loop above converging tells you
+nothing about quarantined documents. Before moving to Step 7, also check
+`out/quarantine.json` (rewritten fresh every `mine` run) and triage every
+entry — re-segment and re-run `mine`, or explicitly accept the exclusion by
+name in your round summary to the human running this skill (the report's
+Needs Attention section is tool-generated and cannot itself record a human
+decision). See REFERENCE.md's done-criterion 4 for the exact check and
+REFERENCE.md's `_load_quarantine` note for how the report surfaces it.
 
 ```bash
 # Round N:
