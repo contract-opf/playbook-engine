@@ -3238,13 +3238,35 @@ def posture_questions_cmd() -> None:
         "for the canonical ids). When omitted, prompts interactively on the terminal."
     ),
 )
-def posture_interview_cmd(out_dir: Path, answers_file: Path | None) -> None:
+@click.option(
+    "--base-version",
+    "base_version",
+    type=click.IntRange(min=1),
+    default=None,
+    help=(
+        "The last known posture.version from a prior playbook this run's "
+        "OUT_DIR does NOT itself carry (e.g. a re-derivation into a wiped "
+        "or freshly re-derived out-dir). The new posture.version is one more "
+        "than max(OUT_DIR's own carried-forward version, this value), so the "
+        "governed counter continues forward instead of silently restarting at "
+        "1. Omit when recompiling in place — OUT_DIR's own prior posture is "
+        "sufficient there."
+    ),
+)
+def posture_interview_cmd(
+    out_dir: Path, answers_file: Path | None, base_version: int | None
+) -> None:
     """Run the Posture interview and write a versioned Posture into OUT_DIR/playbook.opf.json.
 
     Asks the canonical 3-6 question set (OPF-SPEC.md §7), assembles
     the answers deterministically into ``posture.system_prompt``, and writes
     the result into OUT_DIR/playbook.opf.json as a governed, versioned block:
     each re-run against an existing Posture bumps ``posture.version`` by 1.
+
+    A re-derivation into a wiped or freshly re-derived OUT_DIR has no prior
+    Posture of its own to bump from — pass ``--base-version`` with the last
+    known version from the playbook this run supersedes so the counter
+    continues forward instead of restarting at 1.
 
     Warns (non-blocking) if the assembled Posture softens language around a
     concept a Floor invariant protects — a possible Posture-vs-Floor conflict
@@ -3283,7 +3305,12 @@ def posture_interview_cmd(out_dir: Path, answers_file: Path | None) -> None:
     generated_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
     try:
-        result = apply_posture_interview(out_dir_resolved, answers, generated_at=generated_at)
+        result = apply_posture_interview(
+            out_dir_resolved,
+            answers,
+            generated_at=generated_at,
+            base_version=base_version,
+        )
     except (FileNotFoundError, PostureError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc

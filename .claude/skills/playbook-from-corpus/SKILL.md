@@ -942,6 +942,18 @@ Three rules that are easy to get wrong:
 - **Re-running is safe.** The same statement always resolves to the same id and
   updates in place — never a duplicate (a repeated id is a blocking validator
   error, §3.13). Offer to re-run whenever the user's answers change.
+- **`posture.version` only carries forward on its own when OUT_DIR is
+  recompiled in place** (Route C reuses the same out-dir, so `project`'s
+  carry-forward keeps the version climbing automatically — nothing to do
+  here). A re-derivation into a **different or wiped** OUT_DIR has no prior
+  Posture of its own to bump from, so a plain re-run there silently restarts
+  at `version=1` — an OLDER number than the playbook it's meant to supersede
+  (issue #126). Before running the interview into a new/wiped OUT_DIR, check
+  whether a prior playbook exists and read its `posture.version`; if so, pass
+  it forward: `playbook posture interview $OUT --answers-file ... --base-version
+  <prior playbook's posture.version>`. This makes the new version
+  `max(OUT_DIR's own version, --base-version) + 1`, so the counter only ever
+  moves forward.
 
 **If the human is not available**, stop here. Do not fabricate a Posture. Leave
 `posture: {}`, note it as pending human input in the Step 9 report, and say

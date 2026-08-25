@@ -38,7 +38,13 @@ API
                                  into ``floor.invariants``, refresh
                                  ``identity``, write back atomically. The
                                  CLI's thin ``playbook posture interview``
-                                 command calls this.
+                                 command calls this. Accepts an optional
+                                 ``base_version`` (issue #126) so the
+                                 governed version counter can continue
+                                 across a re-derivation into an out-dir
+                                 whose own document doesn't carry the prior
+                                 Posture, instead of silently restarting at
+                                 1 — see ``generate_posture()``'s docstring.
 """
 
 from __future__ import annotations
@@ -205,6 +211,7 @@ def generate_posture(
     generated_by: str = "playbook-engine",
     grounded_in: str | None = None,
     existing_posture: dict[str, Any] | None = None,
+    base_version: int | None = None,
 ) -> dict[str, Any]:
     """Assemble a schema-0.2 ``posture`` dict from interview *answers*.
 
@@ -221,10 +228,20 @@ def generate_posture(
                           Omitted from ``generation`` when not supplied.
         existing_posture: The prior compile's ``playbook["posture"]`` dict, or
                           ``None``/``{}`` for a first-ever interview. Its
-                          ``version`` (if present) is incremented by 1; a
-                          missing/absent prior version starts at 1. This is
-                          the governed-versioning mechanism the issue asks
-                          for: re-running the interview bumps the version.
+                          ``version`` (if present) is one input to the
+                          governed-versioning bump below.
+        base_version:     Issue #126 — the last known posture version from a
+                          playbook this run's document does NOT itself carry
+                          (e.g. the out-dir was wiped or the interview is
+                          being applied to a freshly re-derived, previously
+                          unrelated out-dir during a re-derivation). When the
+                          document was recompiled in place, ``existing_posture``
+                          alone is sufficient and this can be omitted. When
+                          supplied, the effective prior version is
+                          ``max(existing_posture.version, base_version)`` so
+                          the counter can never go backwards across a
+                          re-derivation — only forward, and never below what
+                          the document itself already carries.
 
     Returns:
         A ``posture`` dict: ``{system_prompt, version, generation: {
@@ -232,7 +249,7 @@ def generate_posture(
 
     Raises:
         PostureError: fewer than 3 answers, or an answer keyed by an
-            unrecognized question id.
+            unrecognized question id, or a non-positive ``base_version``.
     """
     unknown = sorted(set(answers) - set(_QUESTIONS_BY_ID))
     if unknown:
@@ -240,6 +257,8 @@ def generate_posture(
             f"unrecognized interview question id(s): {unknown!r} — must be one of "
             f"{sorted(_QUESTIONS_BY_ID)!r}"
         )
+    if base_version is not None and base_version < 1:
+        raise PostureError(f"base_version must be >= 1 if supplied; got {base_version!r}")
     answered = {q: a for q, a in answers.items() if a is not None and str(a).strip()}
     if len(answered) < _MIN_ANSWERS:
         raise PostureError(
@@ -255,8 +274,16 @@ def generate_posture(
         if iq.q in answered
     ]
 
-    prior_version = (existing_posture or {}).get("version")
-    version = prior_version + 1 if isinstance(prior_version, int) else 1
+    # Issue #126: the bump must never regress across a re-derivation. The
+    # document's own carried-forward posture version and an externally
+    # supplied `base_version` (the last known version from a playbook this
+    # freshly re-derived document doesn't itself carry — see the docstring)
+    # are both candidate "prior" versions; the effective prior is whichever
+    # is higher, so the new version is always > either.
+    doc_version = (existing_posture or {}).get("version")
+    doc_version = doc_version if isinstance(doc_version, int) else None
+    candidates = [v for v in (doc_version, base_version) if v is not None]
+    version = max(candidates) + 1 if candidates else 1
 
     generation: dict[str, Any] = {
         "generated_by": generated_by,
@@ -447,6 +474,7 @@ def apply_posture_interview(
     *,
     generated_at: str,
     generated_by: str = "playbook-engine",
+    base_version: int | None = None,
 ) -> PostureApplyResult:
     """Read ``{out_dir}/playbook.opf.json``, write a freshly generated,
     versioned Posture into it — promoting the Q4 ("sacred_clauses") answer
@@ -495,6 +523,13 @@ def apply_posture_interview(
         answers:       Interview answers — see ``generate_posture()``.
         generated_at:  ISO-8601 datetime (supplied by caller).
         generated_by:  Recorded in ``posture.generation.generated_by``.
+        base_version:  Issue #126 — see ``generate_posture()``'s docstring.
+                       Lets the governed version counter continue across a
+                       re-derivation into an out-dir whose own
+                       ``playbook.opf.json`` doesn't carry the prior
+                       Posture (a wiped or freshly re-derived out-dir), by
+                       naming the last known version explicitly instead of
+                       silently restarting at 1.
 
     Returns:
         ``PostureApplyResult`` — the new version number, any SHOULD-warn
@@ -532,6 +567,7 @@ def apply_posture_interview(
         generated_by=generated_by,
         grounded_in=grounded_in,
         existing_posture=existing_posture,
+        base_version=base_version,
     )
 
     existing_invariants = (doc.get("floor") or {}).get("invariants") or []
