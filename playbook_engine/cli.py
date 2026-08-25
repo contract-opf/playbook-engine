@@ -2288,7 +2288,12 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
             raise SystemExit(1)
         try:
             validate_verdict(kind, record["verdict"])
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
+            # TypeError is a defensive backstop: validate_verdict type-checks
+            # confidence fields up front (issue #161) so a malformed verdict
+            # should already surface as ValueError here, but any dataclass
+            # construction this function reaches must never leak a bare,
+            # line-number-free traceback to the producer.
             click.secho(f"ERROR: line {lineno} ({kind}): {exc}", fg="red", err=True)
             raise SystemExit(1) from exc
         if record["key"] not in pending_kinds and pending_kinds:
