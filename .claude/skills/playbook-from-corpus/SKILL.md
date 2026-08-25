@@ -89,9 +89,14 @@ print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
 | **B** — author Posture/Floor | **7a → 7b → 8 → 9 → 10** only |
 | **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
 
-Route B needs no corpus and no config — every command in Steps 7a/7b reads and
-writes the single out-dir. If the user only has an out-dir, that is sufficient;
-do not ask them to produce a corpus they do not need.
+Route B needs no corpus — every command in Steps 7a/7b reads and writes the
+single out-dir; do not ask the user to produce a corpus they do not need. A
+**config is optional**, not required: pass one to Step 7b's `floor propose`
+(`--config $CORPUS/playbook.config.yaml`) whenever the user has one, since it
+supplies the structural-exclusion taxonomy. When they genuinely have only an
+out-dir, omit `--config` and run `floor propose` without it — but tell the
+user that structural clauses (e.g. Parties & Recitals) may then appear among
+the floor candidates and must be rejected in review (issue #106).
 
 One mechanical caveat: `make docker-run` **always** mounts `CORPUS` (defaulting
 to `./corpus`, see the Makefile), so a Route B user with no corpus directory
@@ -1023,9 +1028,13 @@ the compiler may surface but must never assert on its own.
 ```bash
 playbook floor propose $OUT --config $CORPUS/playbook.config.yaml
 # writes $OUT/floor.candidates.json + a summary table.
-# --config supplies the taxonomy, so candidates classified under a
-# 'structural: true' entry (e.g. Parties & Recitals) are excluded — omit it
-# and structural exclusion silently turns off (issue #106).
+# --config is OPTIONAL — pass it whenever a config is available; it supplies
+# the taxonomy, so candidates classified under a 'structural: true' entry
+# (e.g. Parties & Recitals) are excluded. If the user genuinely has only an
+# out-dir (Route B, no config), omit --config and run the command as-is —
+# structural exclusion silently turns off, so warn the user that structural
+# entries may appear among the candidates and must be rejected in review
+# (issue #106).
 # --min-deals (default 2) additionally requires a reversal be corroborated
 # across at least that many distinct documents before it becomes a candidate.
 ```
