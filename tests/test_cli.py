@@ -1390,6 +1390,104 @@ def test_judge_segmentation_llm_true_invokes_anthropic_client(
 
 
 # ---------------------------------------------------------------------------
+# ``judge`` must accept --entity-registry, mirroring ``mine`` (issue #140).
+# Before this fix, judge_cmd had no such option, so every judge round (the
+# command run repeatedly in the drain loop) silently loaded/wrote the
+# machine-global DEFAULT_REGISTRY_PATH regardless of an operator's intent to
+# keep the sensitive alias->real-name registry inside the gitignored out-dir.
+# ---------------------------------------------------------------------------
+
+
+def _corpus_with_known_entity(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """``_make_corpus`` plus ``provenance.known_entities`` so mine_corpus's
+    born-safe pseudonymization pass actually touches the entity registry
+    (a no-op, no file written at all, when known_entities is empty)."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
+    with config_path.open() as fh:
+        cfg = yaml.safe_load(fh)
+    cfg["provenance"]["known_entities"] = ["Beta University"]
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    return corpus_dir, config_path, out_dir
+
+
+def test_judge_entity_registry_flag_avoids_global_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--entity-registry on normal-mode ``judge`` must reach ``mine_corpus``
+    exactly like ``mine`` does — the sensitive registry lands at the custom
+    path, never at the machine-global default (issue #140)."""
+    import playbook_engine.pipeline as pipeline_module
+
+    fake_global = tmp_path / "fake-global-cache" / "entity_registry.json"
+    monkeypatch.setattr(pipeline_module, "DEFAULT_REGISTRY_PATH", fake_global)
+
+    corpus_dir, config_path, out_dir = _corpus_with_known_entity(tmp_path)
+    custom_registry = out_dir / "entity_registry.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "judge",
+            str(corpus_dir),
+            "--config",
+            str(config_path),
+            "--out",
+            str(out_dir),
+            "--entity-registry",
+            str(custom_registry),
+        ],
+    )
+    assert result.exit_code == 0, f"judge failed:\n{result.output}"
+    assert custom_registry.exists(), (
+        "the custom --entity-registry path must receive the registry write"
+    )
+    assert not fake_global.exists(), (
+        "judge must not fall back to the machine-global default when "
+        "--entity-registry is explicitly passed"
+    )
+
+
+def test_judge_plan_only_entity_registry_avoids_global_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same guarantee on the --plan-only branch — it runs its own, separate
+    ``mine_corpus`` call and must wire the flag through identically (issue
+    #140's fix touches both branches)."""
+    import playbook_engine.pipeline as pipeline_module
+
+    fake_global = tmp_path / "fake-global-cache" / "entity_registry.json"
+    monkeypatch.setattr(pipeline_module, "DEFAULT_REGISTRY_PATH", fake_global)
+
+    corpus_dir, config_path, out_dir = _corpus_with_known_entity(tmp_path)
+    custom_registry = out_dir / "entity_registry.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "judge",
+            str(corpus_dir),
+            "--config",
+            str(config_path),
+            "--out",
+            str(out_dir),
+            "--entity-registry",
+            str(custom_registry),
+            "--plan-only",
+        ],
+    )
+    assert result.exit_code == 0, f"judge --plan-only failed:\n{result.output}"
+    assert custom_registry.exists(), (
+        "the custom --entity-registry path must receive the registry write even in --plan-only mode"
+    )
+    assert not fake_global.exists(), (
+        "judge --plan-only must not fall back to the machine-global default "
+        "when --entity-registry is explicitly passed"
+    )
+
+
+# ---------------------------------------------------------------------------
 # publish: fail-closed on an empty entity registry (issue #32)
 # ---------------------------------------------------------------------------
 

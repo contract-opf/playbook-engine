@@ -229,13 +229,19 @@ correct and honestly labelled. LLM segmentation (`segmentation.llm: true` +
 a key) is the quality upgrade, not a requirement.
 
 **Born-safe sidecar — keep it in one gitignored place.** Pass
-`--entity-registry /work/out/entity_registry.json` to `mine` so the
-sensitive alias→real-name registry co-locates with `alias_map.json` under
-`$OUT` (both gitignored) instead of the machine-global
-`~/.cache/playbook-engine/entity_registry.json` default. Under Docker the
-in-container `~/.cache` copy is ephemeral anyway, so `$OUT/alias_map.json` +
-`$OUT/entity_registry.json` are the only durable sensitive artifacts — no
-post-run "purge the global registry?" step needed.
+`--entity-registry /work/out/entity_registry.json` to **every** `mine` *and*
+`judge` invocation against this `$OUT` (both accept the flag identically) so
+the sensitive alias→real-name registry co-locates with `alias_map.json`
+under `$OUT` (both gitignored) instead of the machine-global
+`~/.cache/playbook-engine/entity_registry.json` default. `judge` runs the
+identical `mine_corpus` work every drain-loop round (see Step 6) — passing
+the flag to `mine` alone is not enough, since a `judge` round without it
+still loads/writes the machine-global default, and an operator alternating
+`mine`/`judge` calls that disagree on the registry path can end up with the
+SAME entity aliased differently between rounds. Under Docker the in-container
+`~/.cache` copy is ephemeral anyway, so consistently passing `--entity-registry`
+keeps `$OUT/alias_map.json` + `$OUT/entity_registry.json` as the only durable
+sensitive artifacts — no post-run "purge the global registry?" step needed.
 
 ---
 
@@ -705,7 +711,8 @@ spend actually happens, and budget for it accordingly before invoking
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out --plan-only"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out \
+        --entity-registry /work/out/entity_registry.json --plan-only"
 ```
 
 Review the deduped counts by kind (classification, deviation, provenance)
@@ -722,7 +729,8 @@ forecast. Surface all of this to the human.
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out --subset 20"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out \
+        --entity-registry /work/out/entity_registry.json --subset 20"
 ```
 
 Read `out/judge/pending.jsonl`. Apply verdicts for the sample items, confirm
@@ -735,7 +743,8 @@ the format is correct, then proceed to the full drain.
 ```bash
 # Round N:
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out \
+        --entity-registry /work/out/entity_registry.json"
 # → writes $OUT/judge/pending.jsonl (freshly rewritten each round)
 
 # Agent: read $OUT/judge/pending.jsonl; judge each item; write
@@ -745,7 +754,8 @@ make docker-run CORPUS=./corpus OUT=./out \
 
 # Loop: re-run judge to confirm queue is drained or get next batch
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out \
+        --entity-registry /work/out/entity_registry.json"
 # → if pending.jsonl is empty, loop exits
 ```
 
@@ -1279,7 +1289,8 @@ agent's own file tools before continuing. Then re-judge and re-project:
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out"
+  ARGS="judge /work/corpus --config /work/corpus/playbook.config.yaml --out /work/out \
+        --entity-registry /work/out/entity_registry.json"
 # Agent: judge any new pending items, write $OUT/correction-verdicts.jsonl
 make docker-run CORPUS=./corpus OUT=./out \
   ARGS="judge-apply /work/out --verdicts /work/out/correction-verdicts.jsonl"

@@ -1813,6 +1813,21 @@ def stage_cmd(
         "with a warning."
     ),
 )
+@click.option(
+    "--entity-registry",
+    "entity_registry_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Path to the born-safe entity registry (alias->real-name map). Defaults "
+        "to ~/.cache/playbook-engine/entity_registry.json — a machine-global, "
+        "persistent file. Point it into your gitignored output dir (e.g. "
+        "<out>/entity_registry.json, matching 'playbook mine --entity-registry') "
+        "to keep all sensitive real-name data in one place across mine and judge "
+        "rounds against the same out-dir. Only relevant when "
+        "provenance.known_entities is set."
+    ),
+)
 @_accept_environment_change_option
 def judge_cmd(
     corpus_dir: Path,
@@ -1822,6 +1837,7 @@ def judge_cmd(
     subset: int | None,
     accept_stale: bool,
     strict_rubric: bool,
+    entity_registry_path: Path | None,
     accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
@@ -1963,6 +1979,9 @@ def judge_cmd(
                     # every round re-burns docling OCR from scratch (issue
                     # #78; the regression issue #132 originally fixed).
                     refresh_extraction=False,
+                    entity_registry_path=(
+                        entity_registry_path.resolve() if entity_registry_path else None
+                    ),
                     progress=click.echo,
                     **seg_kwargs,
                 )
@@ -2057,6 +2076,7 @@ def judge_cmd(
             # request — extraction_cache must stay warm across judge rounds
             # (issue #78).
             refresh_extraction=False,
+            entity_registry_path=(entity_registry_path.resolve() if entity_registry_path else None),
             progress=click.echo,
             **seg_kwargs,
         )
