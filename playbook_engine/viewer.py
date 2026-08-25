@@ -831,9 +831,10 @@ def _render_floor_candidates_section(
         '<div id="floor-candidates" class="floor-section">'
         "<h2>Proposed hard lines</h2>"
         '<p class="floor-section-help">Machine-proposed Floor candidates, pending your '
-        "sign-off — never auto-promoted (OPF-SPEC.md §3.7 rule 4). "
-        "<b>Accept</b> promotes a candidate into the signed "
-        "<code>floor.invariants</code>, a categorical, judge-checkable hard line. "
+        "sign-off. <b>Accept</b> signs this in as a hard line: every future contract "
+        "review will treat it as non-negotiable and flag any deal that violates it — "
+        "no reviewer or AI can override it (never auto-promoted; footnote: "
+        "OPF-SPEC.md &sect;3.7 rule 4). "
         "<b>Reject</b> records that you looked at it and declined; it will not be "
         "re-proposed. Undecided candidates reappear on every render until you "
         "decide.</p>" + "\n".join(rows) + "</div>"
