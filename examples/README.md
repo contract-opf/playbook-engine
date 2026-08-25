@@ -125,10 +125,13 @@ Authors the OPF Posture from a short GC interview — six canonical
 questions, answered here from a committed fixture file so the walkthrough
 stays non-interactive (`--answers-file` skips the terminal prompt entirely).
 This is the first rung of the [control
-ladder](../docs/ADOPTING.md#how-much-control-do-you-want): the `sacred_clauses`
-answer is promoted directly into `floor.invariants` — a human (here, the
-fixture file) authoring hard lines outright, no compiled candidate to
-review first.
+ladder](../docs/ADOPTING.md#how-much-control-do-you-want): a name-shaped
+`sacred_clauses` answer (like the fixture's, below) is promoted directly into
+`floor.invariants` — a human (here, the fixture file) authoring hard lines
+outright, no compiled candidate to review first. A sentence-shaped item
+(one reading as a full clause rather than a bare clause-type name) is
+skipped instead and needs a follow-up `playbook floor sign` — see
+ADOPTING.md.
 
 ```sh
 playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
