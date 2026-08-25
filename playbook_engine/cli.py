@@ -134,12 +134,21 @@ def _llm_segmentation_kwargs(
 
         seg_dir = out_dir / "segment"
         kwargs["use_llm_segmentation"] = True
+        pending_path = seg_dir / "pending.jsonl"
+        # Fresh queue each round (mirrors the standalone `segment` command,
+        # issue #182) — PendingQueue only dedups within its own instance
+        # (see its docstring), so leaving a prior round's file in place
+        # would make every subsequent mine/judge invocation append on top of
+        # it, letting already-resolved entries linger and duplicate forever
+        # instead of a fresh queue reflecting only this round's actual cache
+        # misses (issue #156).
+        pending_path.unlink(missing_ok=True)
         # taxonomy_ids must match the allow-list `playbook segment` writes into
         # its own queued payload (segment_cmd), or segment_apply_cmd's taxonomy
         # gate rejects every mine-queued verdict that assigns a real
         # taxonomy_id (issue #40).
         kwargs["llm_segment_fn"] = StoreBackedSegmentFn(
-            pending=PendingQueue(seg_dir / "pending.jsonl"),
+            pending=PendingQueue(pending_path),
             taxonomy_ids=[e.id for e in taxonomy.classifier_entries()],
         )
         kwargs["segmentation_cache"] = SegmentationVerdictCache(seg_dir / "cache.jsonl")
