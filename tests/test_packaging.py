@@ -164,6 +164,10 @@ def test_sdist_excludes_claude_scratch_but_keeps_skills(
     worktrees_dir = claude_dir / "worktrees"
     probe_worktree_file = worktrees_dir / "_sdist_exclude_probe.txt"
     settings_file = claude_dir / "settings.local.json"
+    # Written by the scheduled-tasks MCP server for any live Claude Code
+    # session — present on a maintainer's checkout at build time but never
+    # part of the tracked repo (issue #114 follow-up).
+    scheduled_tasks_lock = claude_dir / "scheduled_tasks.lock"
 
     created_worktrees_dir = not worktrees_dir.exists()
     worktrees_dir.mkdir(parents=True, exist_ok=True)
@@ -172,6 +176,10 @@ def test_sdist_excludes_claude_scratch_but_keeps_skills(
     created_settings_file = not settings_file.exists()
     if created_settings_file:
         settings_file.write_text("{}", encoding="utf-8")
+
+    created_scheduled_tasks_lock = not scheduled_tasks_lock.exists()
+    if created_scheduled_tasks_lock:
+        scheduled_tasks_lock.write_text("probe", encoding="utf-8")
 
     try:
         workdir = tmp_path_factory.mktemp("sdist-exclude")
@@ -213,6 +221,8 @@ def test_sdist_excludes_claude_scratch_but_keeps_skills(
             worktrees_dir.rmdir()
         if created_settings_file:
             settings_file.unlink(missing_ok=True)
+        if created_scheduled_tasks_lock:
+            scheduled_tasks_lock.unlink(missing_ok=True)
 
 
 def test_builtin_taxonomy_resolves_from_packaged_install(
