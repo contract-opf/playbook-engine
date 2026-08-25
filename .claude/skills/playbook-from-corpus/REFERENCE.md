@@ -17,7 +17,7 @@ the judgment task.
 (flat list of allowed ids — labels/descriptions live in the taxonomy YAML;
 read it once and keep it at hand).
 
-**Task:** Assign the best-fit `taxonomy_id` from `taxonomy_entries`. Return
+**Task:** Assign the best-fit `taxonomy_id` from `taxonomy_ids`. Return
 `null` if no entry fits with reasonable confidence.
 
 **Prompt (adapt as needed):**
