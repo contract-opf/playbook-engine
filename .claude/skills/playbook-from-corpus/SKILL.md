@@ -725,6 +725,10 @@ Sanity-check before proceeding:
 - Is the signed copy identified for each agreement?
 - Are reversals detected where expected?
 - Does provenance signal look plausible (not all documents the same)?
+- Read `out/quarantine.json` — any entry is a document the playbook silently
+  lost (excluded before it could contribute any observations). Triage it now
+  rather than at Step 6, where a thin-but-clean-looking drain can mask it
+  (see Step 6 below).
 
 If trails or provenance signals are wrong, add `hints.yaml` files to the
 relevant corpus subfolders (see the "Step 4 — Review the intermediates" section of `docs/QUICK-COMPILE.md`), then re-run
@@ -901,7 +905,11 @@ make docker-run CORPUS=./corpus OUT=./out \
 ```
 
 `mine` replays the verdict store to populate full semantics. `project` compiles
-L5 (playbook assembly) deterministically from the observation store.
+L5 (playbook assembly) deterministically from the observation store, and also
+writes `out/coherence_flags.json` — clauses the L5 coherence judge flagged as
+unreliable. The CLI `project` path wires no `coherence_judge` (zero LLM calls,
+per its own `--help`), so today this file is always `[]`; check it anyway —
+if a future `coherence_judge` wiring lands, this is the file that surfaces it.
 
 ### Step 7a — Posture interview (Rung 1) — THE ONLY STEP THAT NEEDS THE HUMAN
 
