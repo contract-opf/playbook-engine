@@ -1118,6 +1118,14 @@ plainly that the playbook is a complete evidence-only document (Rung 0) that can
 ship as-is — `render-prompt` will mark it **ADVISORY ONLY — NOTHING BELOW IS
 BINDING** rather than shipping unmarked guidance.
 
+**What a consuming review application sees at Rung 0:** stopping here is a
+legitimate endpoint, but it is not free for the consumer. In
+`contract-toaster`, an empty `posture` makes review composition refuse to run
+until the operator explicitly passes `accept_empty_posture=True` — a
+deliberate, on-the-record choice, never a silent default. Say this to the
+user before they walk away: whoever consumes this artifact for review will
+hit that refusal (or have to opt into it) the first time they run one.
+
 ### Step 7b — Floor: propose, then let the human sign (Rung 2)
 
 Every ask the user's own history reversed is a *candidate* hard line — a pattern
@@ -1190,6 +1198,14 @@ a one-word fix.
 Keep the Floor small. §3.7.1's admission test is the standard — a Floor
 invariant is something that forces the outcome on every review, fail-closed, so
 a bloated Floor turns into noise the consumer must still evaluate on every run.
+
+**Same caveat for an empty Floor:** if `floor.invariants` stays empty,
+`floor_judge` has nothing to check — hard-line enforcement is inert for any
+review this playbook drives (no Binding block, no fail-closed coverage, no
+invariant that can ever force a `REQUEST_CHANGE`). That is valid Rung 0 OPF,
+not a defect, but tell the user plainly: an empty Floor is not merely
+advisory, it is *absent* enforcement, and they should know that before
+deciding to stop here.
 
 ### Step 7c — Curation (Rung 3): pin a position, note a clause
 
@@ -1303,7 +1319,12 @@ Review both outputs. The report surfaces:
   Posture/Floor fields that require the GC interview — listed, never invented).
   If `posture`/`floor` are still empty here, say so explicitly and offer Step 7a
   rather than filing it as a defect: evidence-only is Rung 0, a legitimate
-  endpoint, not an unfinished state.
+  endpoint, not an unfinished state. Remind the user what that means
+  downstream too: a consuming review application will either refuse until an
+  operator opts in (empty Posture) or run with no hard-line enforcement at
+  all (empty Floor) — see the consumer notes under Step 7a/7b. An OPF 0.2
+  document (no `digest` section) cannot drive a digest-mode review at any
+  rung.
 - Honesty section (what remains stubbed or unresolved)
 - Artifacts (which of `playbook.opf.json`/`playbook.digest.json`/
   `playbook.review.html`/`playbook.opf.html` are present in `OUT_DIR` as of
