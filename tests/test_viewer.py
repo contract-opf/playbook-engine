@@ -659,6 +659,26 @@ def test_render_html_floor_candidates_section_present(tmp_path: Path) -> None:
     assert 'data-candidate-id="cand-001"' in html
 
 
+def test_render_html_floor_candidates_help_text_states_legal_weight(
+    tmp_path: Path,
+) -> None:
+    """The "Proposed hard lines" help paragraph is the exact surface where
+    the GC clicks Accept, so it must state the operative legal
+    consequence in plain language, not spec/engineer jargon (issue #183).
+
+    "judge-checkable" reads to a lawyer as courtroom-judge, and
+    ``floor.invariants`` is a JSON path -- neither belongs at the point of
+    the click. The plain-language meaning (a signed hard line binds every
+    future review and cannot be overridden) must be present instead.
+    """
+    _make_opf(tmp_path)
+    _write_floor_candidates(tmp_path, [_floor_candidate()])
+    html = render_review_html(tmp_path / "out")
+    assert "judge-checkable" not in html
+    assert "non-negotiable" in html
+    assert "no reviewer or AI can override it" in html
+
+
 def test_render_html_undecided_candidate_has_three_way_control(tmp_path: Path) -> None:
     _make_opf(tmp_path)
     _write_floor_candidates(tmp_path, [_floor_candidate()])
