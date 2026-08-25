@@ -316,7 +316,7 @@ under. `playbook judge` compares it against the rubric in force:
 |-------|---------|-----------|
 | current | stamp matches | replays |
 | stale | stamp differs | **re-queued for re-judgement** (`--accept-stale` to replay) |
-| legacy | no stamp (banked before versioning) | replays, reported every run until migrated |
+| legacy | no stamp (banked before versioning) | replays, reported every run until migrated (`--strict-rubric` to re-queue instead) |
 
 **The manual half** is `RUBRIC_PROMPT_VERSIONS` in
 `playbook_engine/rubric.py`, one entry per kind. Bump the entry for a kind
@@ -477,7 +477,7 @@ round ships, say so directly in the round summary instead.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `validate` exits non-zero after `project` | Residual `needs_review` or malformed `deviation` value in store | Drain the judge loop; fix malformed verdicts |
-| `pending.jsonl` grows every round | Verdicts not applied or wrong `key` | Check `judge-apply` output; confirm keys match |
+| `pending.jsonl` does not shrink between rounds | Verdicts not applied or wrong `key` | Check `judge-apply` output; confirm keys match |
 | All provenance = `counterparty_paper` | Recitals not loaded or entity alias list empty | Supply `known_aliases`; re-run provenance round |
 | All clauses unclassified (`taxonomy_id: null`) | Taxonomy mismatch with document content | Check taxonomy covers the agreement type; refine taxonomy entries |
 | Trail ordering wrong | No `order:` hint; version-orderer used greedy fallback | Add explicit `order:` list to `hints.yaml`; re-run `mine` |
