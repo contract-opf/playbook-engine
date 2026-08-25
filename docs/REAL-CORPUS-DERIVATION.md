@@ -80,7 +80,8 @@ inspection/report outputs for human review.
   (`needs_review: true`), never guessed — especially provenance and entity
   aliases.
 - **Real corpus content stays out of git.** Stage to a user-owned cache
-  directory (`playbook stage` defaults to `~/.cache/playbook-engine/staging`),
+  directory (`playbook stage` defaults to
+  `~/.cache/playbook-engine/staging/<corpus-name>`),
   never to a world-readable shared path. Keep any local scratch files (staging
   configs, one-off adapters) out of the tracked repo.
 - **Token cost is real.** Dedupe clauses by content hash before judging; judge
