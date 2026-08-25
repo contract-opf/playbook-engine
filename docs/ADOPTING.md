@@ -4,13 +4,17 @@ This is the adopter's path. Each stage is useful on its own; stop wherever
 you like. Time-to-value is deliberately front-loaded — the first two stages
 take minutes.
 
-## Stage 0 — See it work (1 minute, no API key)
+## Stage 0 — See it work (1 minute once installed, no API key)
 
 Run the [quickstart](../examples/README.md) on the committed synthetic
-corpus. You end with a validating `playbook.opf.json` and — the part worth
-pausing on — `playbook render-prompt`, which turns it into a system prompt
-you can paste into any chat LLM next to a contract. That loop (corpus →
-playbook → prompt → review) is the whole product in miniature.
+corpus. One-time setup (venv + `make install`, ~10 min) is Step 0 of the
+quickstart — see the main [README's Installation
+section](../README.md#installation) for the Docker alternative. After
+that, the fixture walkthrough itself is well under a minute. You end with
+a validating `playbook.opf.json` and — the part worth pausing on —
+`playbook render-prompt`, which turns it into a system prompt you can
+paste into any chat LLM next to a contract. That loop (corpus → playbook →
+prompt → review) is the whole product in miniature.
 
 ## Stage 1 — Point it at your own agreements
 
