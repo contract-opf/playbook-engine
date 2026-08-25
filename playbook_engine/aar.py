@@ -89,10 +89,14 @@ def build_after_action_data(out_dir: Path) -> dict[str, Any]:
         judgment_economics, semantic_coverage, needs_attention, honesty.
 
     Raises:
-        FileNotFoundError: If *out_dir* does not exist.
+        FileNotFoundError: If *out_dir* does not exist, or if it is a
+            partial/out-of-order copy of a pipeline output directory (see
+            :func:`_check_out_dir_completeness`).
     """
     if not out_dir.exists():
         raise FileNotFoundError(f"Output directory not found: {out_dir}")
+
+    _check_out_dir_completeness(out_dir)
 
     scope = _load_scope(out_dir)
     trails = _load_trails(out_dir)
@@ -222,6 +226,41 @@ def write_after_action_report(out_dir: Path, dest: Path) -> None:
 # ---------------------------------------------------------------------------
 # Section builders — return structured dicts
 # ---------------------------------------------------------------------------
+
+
+def _check_out_dir_completeness(out_dir: Path) -> None:
+    """Refuse to report on a partial or out-of-order pipeline output directory.
+
+    The pipeline writes ``trail/<doc>.json`` in the same mining pass that
+    writes ``observations.jsonl`` (see ``pipeline.py``'s per-document write
+    loop, around ``trail_dir.mkdir`` / ``_atomic_json_write(trail, ...)``) —
+    so a directory with ``observations.jsonl`` but no ``trail/`` at all is
+    not a legitimate pipeline state, it is a partial or out-of-order copy.
+    Left unchecked, ``_build_corpus_coverage`` treats every document as
+    having 0 versions and the report renders confident-looking wrong
+    numbers instead of an error (issue #177).
+
+    This deliberately does NOT gate on a missing ``judge/`` directory:
+    unlike ``trail/``, ``judge/`` is written by a later, optional pipeline
+    step (``playbook judge``), so "mine ran, judge hasn't yet" is a normal
+    state — it already renders its own explicit "stub-judge mode" banner in
+    ``_render_judgment_economics`` rather than a silent zero.
+
+    Raises:
+        FileNotFoundError: If ``observations.jsonl`` exists but ``trail/``
+            does not.
+    """
+    obs_path = out_dir / "observations.jsonl"
+    trail_dir = out_dir / "trail"
+    if obs_path.exists() and not trail_dir.exists():
+        raise FileNotFoundError(
+            f"{out_dir} has observations.jsonl but no trail/ directory. "
+            "This looks like a partial or out-of-order copy of a pipeline "
+            "output directory, not a complete one — reporting on it would "
+            "render every document as having 0 versions. Re-copy the "
+            "complete out/ directory (or re-run 'playbook mine') before "
+            "running 'playbook report'."
+        )
 
 
 def _load_playbook(out_dir: Path) -> dict[str, Any]:
