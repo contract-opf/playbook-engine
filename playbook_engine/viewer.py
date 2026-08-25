@@ -85,6 +85,7 @@ inert "rejected" row. No candidates -> no section at all (no empty shell).
 Feedback JSON schema (produced by the viewer's **Export feedback** button)::
 
     {
+      "_export": {"content_hash": "sha256:...", "generated_at": "2026-01-01T00:00:00Z"},
       "floor": {
         "cand-001": {"decision": "accept", "comment": "agreed, categorical"},
         "cand-002": {"decision": "reject", "comment": "too broad as worded"}
@@ -128,6 +129,23 @@ place, never append). A malformed ``"floor"`` block, an unknown candidate
 id, or an unknown ``decision`` value is reported via ``ApplyResult.skipped``
 under the key ``"floor"`` or ``f"floor:{candidate_id}"`` — never a false
 "OK" (issue #138), same as every other unsupported key.
+
+``"_export"`` (issue #174) is the other reserved top-level, non-item key:
+the render-time binding the viewer's ``exportFeedback()`` stamps onto every
+``feedback.json`` it produces — ``{"content_hash": <the rendered
+playbook's identity.content_hash, or null>, "generated_at": <its
+compiler.generated_at, or null>}``. It exists so a ``feedback.json``
+collected against one render can never be silently applied to a
+DIFFERENT ``playbook.opf.json`` (e.g. the out-dir was re-mined/re-projected
+between render and apply, shifting which clause a still-valid ``Cx``/``Cx.y``
+number refers to) — see the module's audit-finding history for #174.
+``apply_feedback`` compares ``_export["content_hash"]`` against the
+CURRENT ``playbook.opf.json``'s ``identity.content_hash`` whenever both are
+present: a mismatch raises ``ValueError`` unless ``force=True`` is passed,
+in which case it proceeds and logs a warning instead. When either side is
+absent (a pre-#174 ``feedback.json``, or a document with no ``identity``
+block), the binding cannot be verified either way, so ``apply_feedback``
+logs a warning and proceeds — absence is not itself treated as a mismatch.
 """
 
 from __future__ import annotations
@@ -1000,6 +1018,24 @@ function collectFeedback() {
 
 function exportFeedback() {
   var fb = collectFeedback();
+  // Bind this export to the exact playbook.opf.json it was rendered from
+  // (issue #174) — apply_feedback refuses (or requires --force) a
+  // feedback.json whose content_hash no longer matches the on-disk
+  // playbook, so a stale review page can never silently apply corrections
+  // to the wrong clauses after a re-render/re-project.
+  var meta = {content_hash: null, generated_at: null};
+  try {
+    var dataEl = document.getElementById('playbook-data');
+    var playbook = dataEl ? JSON.parse(dataEl.textContent) : null;
+    if (playbook) {
+      meta.content_hash = (playbook.identity && playbook.identity.content_hash) || null;
+      meta.generated_at = (playbook.compiler && playbook.compiler.generated_at) || null;
+    }
+  } catch (e) {
+    // Leave meta as nulls; apply_feedback treats a missing/unverifiable
+    // binding as unverifiable rather than a hard failure.
+  }
+  fb._export = meta;
   var blob = new Blob([JSON.stringify(fb, null, 2)], {type: 'application/json'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1279,8 +1315,54 @@ def render_review_html(
 # ---------------------------------------------------------------------------
 
 
+def _check_export_binding(
+    doc: dict[str, Any], feedback: dict[str, Any], feedback_path: Path, *, force: bool
+) -> None:
+    """Refuse a *feedback* whose ``"_export"`` binding is stale (issue #174).
+
+    Compares ``feedback["_export"]["content_hash"]`` (stamped by the
+    viewer's Export button) against ``doc["identity"]["content_hash"]`` — the
+    hash of the ``playbook.opf.json`` ``apply_feedback`` is about to apply
+    corrections to. A mismatch means *feedback_path* was collected against a
+    different render, so ``Cx``/``Cx.y`` item numbers may now resolve to
+    different clauses; raises ``ValueError`` unless *force* is set. Either
+    side being absent (a pre-#174 export, or a document with no ``identity``
+    block) makes the binding unverifiable rather than mismatched — this
+    function only warns in that case, and never raises.
+    """
+    export_meta = feedback.get("_export")
+    exported_hash = export_meta.get("content_hash") if isinstance(export_meta, dict) else None
+    current_hash = (doc.get("identity") or {}).get("content_hash")
+
+    if not exported_hash or not current_hash:
+        _log.warning(
+            "apply_feedback: %s carries no verifiable _export.content_hash binding "
+            "(exported=%r, current=%r) — cannot confirm it matches the current "
+            "playbook.opf.json; applying without verification",
+            feedback_path,
+            exported_hash,
+            current_hash,
+        )
+        return
+
+    if exported_hash != current_hash:
+        message = (
+            f"{feedback_path} is stale: it was exported against "
+            f"content_hash {exported_hash!r}, but the current playbook.opf.json's "
+            f"content_hash is {current_hash!r}. Re-render the review page (playbook view "
+            "html) and re-export feedback before applying, or pass force=True / --force to "
+            "apply it anyway (corrections may land on the wrong clauses)."
+        )
+        if not force:
+            raise ValueError(message)
+        _log.warning("apply_feedback: %s — applying anyway (force=True)", message)
+
+
 def apply_feedback(
-    out_dir: Path, feedback_path: Path, corpus_dir: Path | None = None
+    out_dir: Path,
+    feedback_path: Path,
+    corpus_dir: Path | None = None,
+    force: bool = False,
 ) -> ApplyResult:
     """Translate reviewer feedback into engine-actionable corrections.
 
@@ -1297,6 +1379,19 @@ def apply_feedback(
       ``reject`` records the rejection on the candidate itself so a later
       render shows it as rejected instead of re-proposing it. See the
       module docstring for the full ``"floor"`` feedback shape.
+
+    Stale-export guard (issue #174): if *feedback_path* carries a top-level
+    ``"_export"`` binding (``{"content_hash": ..., "generated_at": ...}``,
+    stamped by the viewer's Export button) AND the current
+    ``playbook.opf.json`` carries ``identity.content_hash``, the two hashes
+    must match. A mismatch means *feedback_path* was collected against a
+    DIFFERENT render — item numbers (``Cx``/``Cx.y``) may now point at
+    different clauses — so ``apply_feedback`` raises ``ValueError`` instead
+    of applying corrections to the wrong clause. Pass ``force=True`` to
+    apply anyway (a warning is logged either way). If either side of the
+    binding is missing, it cannot be verified; ``apply_feedback`` logs a
+    warning and proceeds — see the module docstring's ``"_export"``
+    paragraph.
 
     Locating the corpus document directory for a hints.yaml write (issue
     #169): the cited ``document_id`` may be a pseudonymized alias (when the
@@ -1328,13 +1423,20 @@ def apply_feedback(
                        ``None``, preserving the legacy out_dir-relative
                        search for callers that share a parent directory
                        between corpus and out (the non-Docker host layout).
+        force:         If ``True``, apply *feedback_path* even when its
+                       ``"_export"`` binding does not match the current
+                       ``playbook.opf.json`` (issue #174) — a warning is
+                       still logged. Defaults to ``False`` (refuse on a
+                       detected mismatch).
 
     Returns:
         ``ApplyResult`` summarising what was written.
 
     Raises:
         FileNotFoundError: If ``playbook.opf.json`` does not exist.
-        ValueError: If *feedback_path* contains invalid JSON.
+        ValueError: If *feedback_path* contains invalid JSON, or if its
+            ``"_export"`` content_hash does not match the current
+            ``playbook.opf.json`` and *force* is not set.
     """
     opf_path = out_dir / "playbook.opf.json"
     if not opf_path.exists():
@@ -1348,6 +1450,8 @@ def apply_feedback(
         feedback: dict[str, Any] = json.loads(feedback_raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {feedback_path}: {exc}") from exc
+
+    _check_export_binding(doc, feedback, feedback_path, force=force)
 
     index = _build_index(doc)
     # Build item_num → (kind, payload) map
@@ -1374,6 +1478,11 @@ def apply_feedback(
             # Reserved top-level key (issue #90) — a map of candidate_id ->
             # decision, not a Cx/Cx.y item number. Handled separately below
             # (_apply_floor_feedback), after this loop.
+            continue
+        if item_num == "_export":
+            # Reserved top-level key (issue #174) — the render-time binding
+            # already consumed by _check_export_binding() above, not a
+            # Cx/Cx.y item number.
             continue
 
         if not isinstance(corrections, dict):
