@@ -192,9 +192,9 @@ counterparty's paper.
 > Respond with JSON: `{"provenance": "<our_paper|counterparty_paper>", "confidence": 0.0–1.0, "rationale": "...", "needs_review": false}`
 
 **Rules:**
-- Unknown entity name (a party name in the recital not in `known_aliases`):
-  record the alias in `rationale`, set `needs_review: true`. Do not silently
-  assume it is us.
+- Unknown entity name (a party name in the recital not in
+  `provenance.our_party_aliases`): record the alias in `rationale`, set
+  `needs_review: true`. Do not silently assume it is us.
 - Confidence < 0.7: set `needs_review: true`. **Calibration matters:** the
   engine SILENTLY flips any stored provenance verdict with confidence below
   0.70 to `counterparty_paper` at mine time (`pipeline.py` ambiguity rule)
@@ -434,9 +434,10 @@ playbook judge-migrate ./out --config ./corpus/playbook.config.yaml \
    say so directly — in the round summary you give the human running this
    skill — rather than relying on `needs_review: true` to do that for you.
 
-3. **Unknown aliases.** If a party name in the corpus is not in `known_aliases`,
-   record it explicitly in `rationale` and set `needs_review: true`. Supply a
-   curated alias list to the human before the next round.
+3. **Unknown aliases.** If a party name in the corpus is not in
+   `provenance.known_entities`, record it explicitly in `rationale` and set
+   `needs_review: true`. Supply a curated alias list to the human before the
+   next round.
 
 4. **`needs_review` is an internal flag only.** It must be resolved (by human
    review or re-judgment) before `project`. The OPF observation schema enum is
@@ -568,6 +569,6 @@ round ships, say so directly in the round summary instead.
 |---------|-------|-----|
 | `validate` exits non-zero after `project` | Residual `needs_review` or malformed `deviation` value in store | Drain the judge loop; fix malformed verdicts |
 | `pending.jsonl` does not shrink between rounds | Verdicts not applied or wrong `key` | Check `judge-apply` output; confirm keys match |
-| All provenance = `counterparty_paper` | Recitals not loaded or entity alias list empty | Supply `known_aliases`; re-run provenance round |
+| All provenance = `counterparty_paper` | Recitals not loaded or entity alias list empty | Supply `provenance.our_party_aliases`; re-run provenance round |
 | All clauses unclassified (`taxonomy_id: null`) | Taxonomy mismatch with document content | Check taxonomy covers the agreement type; refine taxonomy entries |
 | Trail ordering wrong | No `order:` hint; version-orderer used greedy fallback | Add explicit `order:` list to `hints.yaml`; re-run `mine` |
