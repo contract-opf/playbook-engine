@@ -73,9 +73,11 @@ The LLM-judgment stages run three ways — pick one
 
 1. **Claude plan, no API key** (first-class path): the packaged
    `playbook-from-corpus` Claude Code skill drives the pipeline and acts
-   as the judge interactively. One command from the repo root — and if
-   you use this path, you can skip the config-writing above; the skill
-   interviews you for it:
+   as the judge interactively. One command from the repo root — you still
+   write the config above (`agreement_type`, `taxonomy`, `baseline`); the
+   skill fills in `provenance` for you by reading the corpus itself (no
+   interview — see "Derive party names automatically" in the skill), and
+   asks only two quick questions (display name, baseline template):
 
    ```sh
    claude "$(cat docs/prompts/create-playbook.md)"
