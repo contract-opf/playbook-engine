@@ -61,10 +61,13 @@ Two of these matter more than they look:
   side proposed or moved a given change. An author matching neither list
   is recorded as `"unknown"`; it is never guessed as the counterparty.
 - `known_entities` activates the **born-safe rule**: counterparty names
-  are replaced with stable aliases *at ingest*, so no stored artifact ever
-  carries a raw name. The reverse map is written to a restricted sidecar
-  that never enters the playbook. If you skip this, real names flow into
-  the artifacts — configure it before the first real run.
+  listed there are replaced with stable aliases *at ingest*. Matching is
+  best-effort (whole-word, contiguous-sequence), so a misconfigured or
+  incomplete list can still leave real names in the output — this is not
+  a guarantee of pseudonymization. The reverse map is written to a
+  restricted sidecar that never enters the playbook. Configure the list
+  before the first real run, and always run the mandatory residue check
+  (see the skill's Step 9) before treating any artifact as shareable.
 
 **Taxonomy:** start with `builtin:cuad-base.yaml` (the genuine CUAD v1
 41 categories) plus `builtin:general-commercial.yaml`, prune what doesn't

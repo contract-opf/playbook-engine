@@ -8,9 +8,13 @@ bottom or hand to a stakeholder.
 
 The readable document is no longer an artifact of its own. It ships inside
 the single-file bundle ``playbook.opf.html`` (:func:`render_bundle_html`),
-which is the one shareable/uploadable HTML: the same document body, plus a
-digest summary, plus the canonical OPF JSON and digest embedded as
-machine-readable ``<script type="application/json">`` blocks. The bare
+which packages the same document body, plus a digest summary, plus the
+canonical OPF JSON and digest embedded as machine-readable
+``<script type="application/json">`` blocks. This is NOT a guarantee of
+pseudonymization: ``known_entities`` matching is best-effort, and a
+misconfigured or incomplete list can leave real names in this file (see the
+mandatory residue check in the ``playbook-from-corpus`` skill, issue #136) —
+run that check before treating the bundle as shareable. The bare
 ``playbook.opf.json`` remains the canonical source of truth on disk.
 :func:`render_document_html` stays as the internal document renderer the
 bundle composes; it is no longer exposed as its own CLI command (the former
@@ -28,11 +32,14 @@ and accepted exemplar forms from the clause library. Empty Posture/Floor
 sections render as an explicit "pending GC interview" note rather than being
 omitted — same honesty-first convention as the after-action report.
 
-Alias handling: the document body shows the born-safe ``Counterparty-N``
-aliases exactly as stored in ``playbook.opf.json``. The bundle takes no alias
-map by design — it embeds the canonical pseudonymized JSON, so resolving real
-names would leak and break hash verification. Internal-eyes review with real
-names lives in ``view render --alias-map``. The on-disk OPF is never modified.
+Alias handling: the document body shows the ``Counterparty-N`` aliases
+exactly as stored in ``playbook.opf.json`` — best-effort ``known_entities``
+matching, not a guarantee no raw name reached that JSON (run the mandatory
+residue check before calling it shareable). The bundle takes no alias map by
+design — it embeds the canonical JSON, so resolving real names into it would
+both leak them and break hash verification. Internal-eyes review with real
+names lives in ``view render --alias-map``. The on-disk OPF is never
+modified.
 """
 
 from __future__ import annotations
@@ -655,10 +662,13 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     - ``id="opf-digest"`` — the digest section (built on the fly for a
       pre-0.3 document that carries none).
 
-    Deliberately takes no alias map: the bundle is the shareable artifact and
-    embeds the canonical (pseudonymized) JSON; resolving real names into it
-    would both leak and break hash verification. Internal-eyes review with
-    real names belongs to ``view render --alias-map``.
+    Deliberately takes no alias map: the bundle embeds the canonical JSON
+    verbatim, so resolving real names into it would both leak them and break
+    hash verification. This is NOT a guarantee of pseudonymization —
+    ``known_entities`` matching is best-effort; run the mandatory residue
+    check (``playbook-from-corpus`` skill, issue #136) before treating the
+    bundle as shareable. Internal-eyes review with real names belongs to
+    ``view render --alias-map``.
     """
     from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
 

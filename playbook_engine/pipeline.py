@@ -55,6 +55,7 @@ from playbook_engine.entity_registry import (
     DEFAULT_REGISTRY_PATH,
     EntityRegistry,
     entity_slug,
+    known_entities_with_no_match,
     pseudonymize_document_id,
     pseudonymize_text,
     write_holdout_map,
@@ -3278,6 +3279,35 @@ def mine_corpus(
                 "versions scanned, headings and body text) — 'us' may be "
                 "misconfigured (check the party names your agreements' recitals "
                 "actually use). Provenance may be mis-detected for the whole corpus."
+            )
+
+    # Known-entity residue warning (issue #136): if a configured
+    # provenance.known_entities name matches none of the raw corpus text,
+    # pseudonymize_text (below) has nothing to substitute for it — either the
+    # name is a config typo, or it appears in a form
+    # entity_registry._fuzzy_name_pattern's contiguous word-sequence matcher
+    # can't catch (e.g. a stopword-stripped registry entry like "University
+    # <City>" that skips over the "of" an actual "University of <City>"
+    # recital uses — the exact shape that let real counterparty names survive
+    # into the "shareable" playbook.opf.html, skill-QA finding #57). Checked
+    # on RAW observation text, before the pseudonymization pass below
+    # rewrites it. Mirrors the our_party_aliases zero-match warning above
+    # (issue #182) for the counterparty side.
+    known_entities_configured = [e for e in config.provenance.known_entities if e]
+    if known_entities_configured:
+        unmatched_entities = known_entities_with_no_match(
+            known_entities_configured, [obs.full_text for obs in all_observations]
+        )
+        if unmatched_entities:
+            names = ", ".join(repr(n) for n in unmatched_entities)
+            progress(
+                f"  WARNING: {len(unmatched_entities)} of {len(known_entities_configured)} "
+                f"configured provenance.known_entities name(s) match no observation text "
+                f"and will NOT be pseudonymized ({names}) — verify each is spelled exactly "
+                "as it appears in the corpus (a stopword-stripped or otherwise inexact "
+                "spelling silently fails to redact); if the name genuinely never occurs, "
+                "remove it. An unmatched known-entity name is a pseudonymization gap, not "
+                "a benign no-op."
             )
 
     # Born-safe pseudonymization (issue #153): known entity names configured

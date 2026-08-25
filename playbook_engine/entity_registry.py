@@ -192,6 +192,36 @@ def _fuzzy_name_pattern(name: str) -> re.Pattern[str] | None:
     return re.compile(r"(?<!\w)" + body + r"(?!\w)", re.IGNORECASE)
 
 
+def known_entities_with_no_match(
+    known_entities: list[str], observation_texts: list[str]
+) -> list[str]:
+    """Return the subset of *known_entities* that match none of *observation_texts*.
+
+    Uses :func:`_fuzzy_name_pattern` — the SAME matcher :func:`pseudonymize_text`
+    substitutes with — so a "no match" result here means the name genuinely
+    has nothing to replace at ingest: either it truly never appears in the raw
+    corpus (a config typo), or it appears in a form the matcher's contiguous
+    word-sequence check can't catch (issue #136 — e.g. a registry entry
+    written as a stopword-stripped "University <City>" that skips over the
+    "of" an actual "University of <City>" recital uses). Either way the name
+    risks surviving unredacted into the persisted artifacts, so the caller
+    should warn.
+
+    Preserves *known_entities*' original order; skips blank entries the same
+    way :func:`pseudonymize_text` does.
+    """
+    unmatched: list[str] = []
+    for name in known_entities:
+        if not name or not name.strip():
+            continue
+        pattern = _fuzzy_name_pattern(name)
+        if pattern is None:
+            continue
+        if not any(pattern.search(text) for text in observation_texts if text):
+            unmatched.append(name)
+    return unmatched
+
+
 def pseudonymize_text(text: str, known_entities: list[str], registry: EntityRegistry) -> str:
     """Replace every whole-word occurrence of a known entity name in *text* with its alias.
 
@@ -236,6 +266,114 @@ def pseudonymize_document_id(
                 tokens = tokens[:i] + [entity_slug(alias)] + tokens[i + n :]
                 break
     return "-".join(tokens)
+
+
+# ---------------------------------------------------------------------------
+# Post-hoc residue scan (issue #136)
+# ---------------------------------------------------------------------------
+
+# Generic institutional/legal words common enough that matching one alone is
+# noise, not signal: "State" or "Institute" appears constantly in unrelated,
+# legitimately-public text, so a token-level residue hit needs a token that
+# actually IDENTIFIES the registered entity.
+_RESIDUE_SCAN_STOPWORDS = frozenset(
+    {
+        "the",
+        "of",
+        "and",
+        "for",
+        "inc",
+        "incorporated",
+        "llc",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "ltd",
+        "limited",
+        "university",
+        "college",
+        "institute",
+        "school",
+        "state",
+        "group",
+        "foundation",
+        "association",
+        "national",
+        "international",
+        "holdings",
+        "partners",
+        "llp",
+    }
+)
+
+_RESIDUE_TOKEN_RE = re.compile(r"[A-Za-z']+")
+
+
+def residue_tokens(name: str) -> list[str]:
+    """Return *name*'s distinctive word tokens for a spelling-independent residue scan.
+
+    Filters out short (<4 char) words and generic institutional/legal terms
+    (:data:`_RESIDUE_SCAN_STOPWORDS`) that carry no identifying signal on
+    their own. Deliberately does NOT require the remaining tokens to appear
+    contiguously or in *name*'s own word order when scanned for later — that
+    independence from word order/spelling is the whole point; see
+    :func:`find_residue`.
+    """
+    words = _RESIDUE_TOKEN_RE.findall(name)
+    return [w for w in words if len(w) >= 4 and w.casefold() not in _RESIDUE_SCAN_STOPWORDS]
+
+
+def find_residue(
+    alias_map: dict[str, str], texts: dict[str, str]
+) -> list[tuple[str, str, str]]:
+    """Scan *texts* (label -> content) for residue of any real name in *alias_map*.
+
+    ``alias_map`` is alias -> real (registered) entity name — e.g.
+    :meth:`EntityRegistry.alias_map`'s output, or the on-disk sidecar
+    ``mine --entity-registry`` writes. Returns ``(label, real_name, token)``
+    triples: one per distinctive token (:func:`residue_tokens`) of a
+    registered name found verbatim (case-insensitive, whole-word) anywhere in
+    the corresponding text.
+
+    Token-level, not full-phrase, on purpose. A full-phrase substring check
+    only ever catches the EXACT registered spelling — but
+    :func:`pseudonymize_text` unconditionally registers whatever spelling
+    ``known_entities`` configured, including a wrong one (issue #136: a
+    stopword-stripped entry like ``"Example Institute Fictional City"`` that
+    the corpus actually spells ``"Example Institute of Fictional City"``
+    never matches :func:`pseudonymize_text`'s own contiguous-sequence
+    pattern, so the real, differently-spelled text survives unredacted while
+    :meth:`EntityRegistry.alias_map` still reports the WRONG spelling as the
+    "real name" it substituted for). A full-phrase check of the wrong
+    spelling against output that only contains the right spelling finds
+    nothing — this is precisely how an earlier, naive version of this check
+    missed skill-QA finding #57's leak. Matching on distinctive tokens
+    individually survives exactly this kind of stopword/word-order drift,
+    because e.g. ``"Fictional"``/``"City"`` are common to both spellings.
+
+    Not exhaustive: a name with no token distinctive enough to survive
+    :func:`residue_tokens`' filter (e.g. registered only as ``"State
+    University"``) produces no tokens and cannot be checked this way at all.
+    This is a fast, offline residue check for the born-safe pseudonymization
+    pass — not a substitute for ``publish``'s independent, LLM-verified
+    residue sweep.
+    """
+    hits: list[tuple[str, str, str]] = []
+    for real_name in alias_map.values():
+        if not real_name:
+            continue
+        tokens = residue_tokens(real_name)
+        if not tokens:
+            continue
+        for label, text in texts.items():
+            if not text:
+                continue
+            for token in tokens:
+                pattern = r"(?<!\w)" + re.escape(token) + r"(?!\w)"
+                if re.search(pattern, text, re.IGNORECASE):
+                    hits.append((label, real_name, token))
+    return hits
 
 
 # ---------------------------------------------------------------------------

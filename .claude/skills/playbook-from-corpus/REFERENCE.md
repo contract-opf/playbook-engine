@@ -503,17 +503,22 @@ The derivation is **done** when all four conditions hold:
    echo "Exit: $?"   # must be 0
    ```
 
-3. **Report, viewer, and the two shareable artifacts are generated**
+3. **Report, viewer, and the two packaged artifacts are generated**
    (`report.md`, `report.json`, `playbook.review.html`, `playbook.opf.html`,
    `playbook.digest.json` exist in `out/`).
 
-   SKILL.md Step 9 names `playbook.opf.html` as *the* shareable/uploadable
-   playbook and `playbook.digest.json` as the model-facing digest — both are
-   produced before Step 10's report runs, on every route (A, B, and C all
-   reach Steps 9 and 10). A run that stops after `report`/`inspect` without
-   `view bundle`/`digest` is not done: the GC has the internal annotation
-   surface (`playbook.review.html`) but not the artifact meant to leave the
-   room.
+   SKILL.md Step 9 names `playbook.opf.html` as the **packaged
+   internal/stakeholder playbook** and `playbook.digest.json` as the
+   model-facing digest — both are produced before Step 10's report runs, on
+   every route (A, B, and C all reach Steps 9 and 10). A run that stops after
+   `report`/`inspect` without `view bundle`/`digest` is not done: the GC has
+   the internal annotation surface (`playbook.review.html`) but not the
+   artifact meant to leave the room. `playbook.opf.html` is **not** a
+   guarantee of pseudonymization on its own — SKILL.md Step 9's mandatory
+   residue check must be run before treating it as shareable, and a
+   genuinely external release must go through Step 11 (`publish`)'s hard,
+   list-independent backstop; `playbook.opf.html` is not the "hand it to
+   anyone" artifact it used to be described as.
 
    ```bash
    test -f ./out/report.md && test -f ./out/report.json \
