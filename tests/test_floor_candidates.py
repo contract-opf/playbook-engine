@@ -2233,31 +2233,45 @@ _CONDITIONAL_STATEMENT = (
     "Limitation of liability, if present, must not be unilateral in the counterparty's favor."
 )
 
+# issue #127: `sign_floor_invariant`/`playbook floor sign` now REQUIRE a human
+# attribution — a synthetic, obviously-fictional name (never a real person),
+# reused across every test below that isn't itself testing the requirement.
+_TEST_SIGNED_BY = "Test Legal Owner"
+
 
 def test_sign_floor_invariant_records_statement_verbatim() -> None:
     """A conditional statement with commas — exactly the shape Q4's
     semicolon-split templating would garble — must survive byte-for-byte."""
-    result = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
+    result = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
 
     assert len(result) == 1
     assert result[0]["statement"] == _CONDITIONAL_STATEMENT
 
 
 def test_sign_floor_invariant_default_id_is_slug_of_statement() -> None:
-    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.", signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
     assert result[0]["id"] == sign_invariant_id("Never accept uncapped liability.")
     assert result[0]["id"] == "never-accept-uncapped-liability"
 
 
 def test_sign_floor_invariant_id_override() -> None:
     result = sign_floor_invariant(
-        _CONDITIONAL_STATEMENT, invariant_id="liability-not-unilateral", existing_invariants=[]
+        _CONDITIONAL_STATEMENT,
+        invariant_id="liability-not-unilateral",
+        signed_by=_TEST_SIGNED_BY,
+        existing_invariants=[],
     )
     assert result[0]["id"] == "liability-not-unilateral"
 
 
 def test_sign_floor_invariant_default_rationale() -> None:
-    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.", signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
     assert result[0]["rationale"] == "Hand-authored via `playbook floor sign`."
 
 
@@ -2265,6 +2279,7 @@ def test_sign_floor_invariant_custom_rationale() -> None:
     result = sign_floor_invariant(
         "Never accept uncapped liability.",
         rationale="Signed off by the GC 2026-08-20.",
+        signed_by=_TEST_SIGNED_BY,
         existing_invariants=[],
     )
     assert result[0]["rationale"] == "Signed off by the GC 2026-08-20."
@@ -2277,6 +2292,7 @@ def test_sign_floor_invariant_taxonomy_id_stored_as_x_prefixed() -> None:
     result = sign_floor_invariant(
         "Never accept uncapped liability.",
         taxonomy_id="uncapped_liability",
+        signed_by=_TEST_SIGNED_BY,
         existing_invariants=[],
     )
     assert result[0]["x_taxonomy_id"] == "uncapped_liability"
@@ -2284,25 +2300,68 @@ def test_sign_floor_invariant_taxonomy_id_stored_as_x_prefixed() -> None:
 
 
 def test_sign_floor_invariant_no_taxonomy_id_key_when_clause_omitted() -> None:
-    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.", signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
     assert "x_taxonomy_id" not in result[0]
+
+
+def test_sign_floor_invariant_stamps_signed_by_and_signed_at() -> None:
+    """The structural attribution fields issue #127 adds: `x_signed_by` is
+    recorded verbatim, `x_signed_at` defaults to a non-blank timestamp when
+    the caller doesn't supply one."""
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.", signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
+    assert result[0]["x_signed_by"] == _TEST_SIGNED_BY
+    assert isinstance(result[0]["x_signed_at"], str) and result[0]["x_signed_at"]
+
+
+def test_sign_floor_invariant_signed_at_override_recorded_verbatim() -> None:
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.",
+        signed_by=_TEST_SIGNED_BY,
+        signed_at="2026-01-01T00:00:00+00:00",
+        existing_invariants=[],
+    )
+    assert result[0]["x_signed_at"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_sign_floor_invariant_rejects_blank_signed_by() -> None:
+    """issue #127: --signed-by is not optional — this is the structural
+    guarantee the ticket exists to add. Blank/whitespace-only and omitted
+    (default None) must both be refused."""
+    with pytest.raises(FloorCandidateError):
+        sign_floor_invariant("Never accept uncapped liability.", existing_invariants=[])
+    with pytest.raises(FloorCandidateError):
+        sign_floor_invariant(
+            "Never accept uncapped liability.", signed_by="   ", existing_invariants=[]
+        )
 
 
 def test_sign_floor_invariant_appends_after_existing_entries() -> None:
     existing = [{"id": "existing-one", "statement": "Existing.", "rationale": "r"}]
-    result = sign_floor_invariant("Never accept uncapped liability.", existing_invariants=existing)
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.",
+        signed_by=_TEST_SIGNED_BY,
+        existing_invariants=existing,
+    )
     assert result[0] == existing[0]
     assert len(result) == 2
 
 
 def test_sign_floor_invariant_rejects_blank_statement() -> None:
     with pytest.raises(FloorCandidateError):
-        sign_floor_invariant("   ", existing_invariants=[])
+        sign_floor_invariant("   ", signed_by=_TEST_SIGNED_BY, existing_invariants=[])
 
 
 def test_sign_floor_invariant_same_id_same_statement_is_idempotent_noop() -> None:
-    first = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
-    second = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=first)
+    first = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
+    second = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, signed_by=_TEST_SIGNED_BY, existing_invariants=first
+    )
     assert second == first
     assert second[0] is first[0]  # not even a fresh dict — true no-op
 
@@ -2315,26 +2374,36 @@ def test_sign_floor_invariant_noop_ignores_a_new_rationale_or_clause() -> None:
     change rationale/taxonomy_id on an already-signed statement removes or
     edits the invariant directly."""
     first = sign_floor_invariant(
-        _CONDITIONAL_STATEMENT, rationale="Original rationale.", existing_invariants=[]
+        _CONDITIONAL_STATEMENT,
+        rationale="Original rationale.",
+        signed_by=_TEST_SIGNED_BY,
+        existing_invariants=[],
     )
     second = sign_floor_invariant(
         _CONDITIONAL_STATEMENT,
         rationale="A different rationale.",
         taxonomy_id="limitation_of_liability",
+        signed_by="A Different Signer",
         existing_invariants=first,
     )
     assert second == first
     assert second[0]["rationale"] == "Original rationale."
+    assert second[0]["x_signed_by"] == _TEST_SIGNED_BY
     assert "x_taxonomy_id" not in second[0]
 
 
 def test_sign_floor_invariant_same_id_different_statement_refuses() -> None:
-    first = sign_floor_invariant(_CONDITIONAL_STATEMENT, existing_invariants=[])
+    first = sign_floor_invariant(
+        _CONDITIONAL_STATEMENT, signed_by=_TEST_SIGNED_BY, existing_invariants=[]
+    )
     inv_id = first[0]["id"]
 
     with pytest.raises(FloorCandidateError, match=inv_id):
         sign_floor_invariant(
-            "A completely different statement.", invariant_id=inv_id, existing_invariants=first
+            "A completely different statement.",
+            invariant_id=inv_id,
+            signed_by=_TEST_SIGNED_BY,
+            existing_invariants=first,
         )
 
     # Never mutated in place.
@@ -2357,6 +2426,7 @@ def test_sign_floor_invariant_never_overwrites_a_foreign_entry() -> None:
         sign_floor_invariant(
             "Never accept uncapped liability.",
             invariant_id="no-uncapped-liability",
+            signed_by=_TEST_SIGNED_BY,
             existing_invariants=[hand_authored],
         )
     assert hand_authored == {
@@ -2426,18 +2496,42 @@ def test_cli_floor_sign_writes_verbatim_statement(tmp_path: Path) -> None:
     opf_path = _write_signable_doc(tmp_path)
 
     exit_code, output = _invoke(
-        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
 
     assert exit_code == 0, output
     written = json.loads(opf_path.read_text(encoding="utf-8"))
-    assert written["floor"]["invariants"] == [
-        {
-            "id": sign_invariant_id(_CONDITIONAL_STATEMENT),
-            "statement": _CONDITIONAL_STATEMENT,
-            "rationale": "Hand-authored via `playbook floor sign`.",
-        }
-    ]
+    assert len(written["floor"]["invariants"]) == 1
+    invariant = written["floor"]["invariants"][0]
+    signed_at = invariant.pop("x_signed_at")
+    assert isinstance(signed_at, str) and signed_at
+    assert invariant == {
+        "id": sign_invariant_id(_CONDITIONAL_STATEMENT),
+        "statement": _CONDITIONAL_STATEMENT,
+        "rationale": "Hand-authored via `playbook floor sign`.",
+        "x_signed_by": _TEST_SIGNED_BY,
+    }
+
+
+def test_cli_floor_sign_requires_signed_by(tmp_path: Path) -> None:
+    """issue #127: the CLI, not just the underlying function, refuses to
+    sign without a human attribution — this is the primary gap the ticket
+    closes (an agent could previously run this command with no identifying
+    field at all)."""
+    _write_signable_doc(tmp_path)
+
+    exit_code, output = _invoke(
+        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+    )
+
+    assert exit_code != 0
+    assert "signed-by" in output.lower()
 
 
 def test_cli_floor_sign_refreshes_content_hash(tmp_path: Path) -> None:
@@ -2451,7 +2545,13 @@ def test_cli_floor_sign_refreshes_content_hash(tmp_path: Path) -> None:
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
     exit_code, output = _invoke(
-        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
     assert exit_code == 0, output
 
@@ -2477,7 +2577,13 @@ def test_cli_floor_sign_warns_on_posture_floor_conflict(tmp_path: Path) -> None:
     )
 
     exit_code, output = _invoke(
-        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
 
     assert exit_code == 0, output
@@ -2494,6 +2600,8 @@ def test_cli_floor_sign_output_passes_playbook_validate(tmp_path: Path) -> None:
         str(tmp_path),
         "--statement",
         _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
         "--clause",
         "limitation_of_liability",
         "--config",
@@ -2505,17 +2613,34 @@ def test_cli_floor_sign_output_passes_playbook_validate(tmp_path: Path) -> None:
     result = validate_document(written)
     blocking = [str(e) for e in result.errors if e.blocking]
     assert result.ok, blocking
+    # A signed invariant carries structural attribution — no SHOULD-warn
+    # about it either (issue #127).
+    assert not any("structural attribution" in str(e) for e in result.errors)
 
 
 def test_cli_floor_sign_idempotent_rerun_does_not_rewrite_the_file(tmp_path: Path) -> None:
     opf_path = _write_signable_doc(tmp_path)
 
-    exit_code, _ = _invoke("floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT)
+    exit_code, _ = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
+    )
     assert exit_code == 0
     first_bytes = opf_path.read_bytes()
 
     exit_code2, output2 = _invoke(
-        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
     assert exit_code2 == 0, output2
     assert "no-op" in output2
@@ -2524,7 +2649,15 @@ def test_cli_floor_sign_idempotent_rerun_does_not_rewrite_the_file(tmp_path: Pat
 
 def test_cli_floor_sign_collision_refuses_and_exits_nonzero(tmp_path: Path) -> None:
     opf_path = _write_signable_doc(tmp_path)
-    exit_code, _ = _invoke("floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT)
+    exit_code, _ = _invoke(
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
+    )
     assert exit_code == 0
     inv_id = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"][0]["id"]
     original_bytes = opf_path.read_bytes()
@@ -2537,6 +2670,8 @@ def test_cli_floor_sign_collision_refuses_and_exits_nonzero(tmp_path: Path) -> N
         "A totally different statement.",
         "--id",
         inv_id,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
 
     assert exit_code2 != 0
@@ -2555,6 +2690,8 @@ def test_cli_floor_sign_unknown_clause_lists_valid_ids_and_exits_nonzero(tmp_pat
         str(tmp_path),
         "--statement",
         _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
         "--clause",
         "not_a_real_clause",
         "--config",
@@ -2576,6 +2713,8 @@ def test_cli_floor_sign_clause_without_config_exits_nonzero(tmp_path: Path) -> N
         str(tmp_path),
         "--statement",
         _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
         "--clause",
         "limitation_of_liability",
     )
@@ -2586,14 +2725,26 @@ def test_cli_floor_sign_clause_without_config_exits_nonzero(tmp_path: Path) -> N
 
 def test_cli_floor_sign_missing_out_dir_fails() -> None:
     exit_code, output = _invoke(
-        "floor", "sign", "/nonexistent/out/dir", "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        "/nonexistent/out/dir",
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
     assert exit_code != 0
 
 
 def test_cli_floor_sign_missing_playbook_fails(tmp_path: Path) -> None:
     exit_code, output = _invoke(
-        "floor", "sign", str(tmp_path), "--statement", _CONDITIONAL_STATEMENT
+        "floor",
+        "sign",
+        str(tmp_path),
+        "--statement",
+        _CONDITIONAL_STATEMENT,
+        "--signed-by",
+        _TEST_SIGNED_BY,
     )
     assert exit_code != 0
     assert "playbook.opf.json" in output

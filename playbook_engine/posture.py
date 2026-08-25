@@ -510,7 +510,8 @@ def apply_posture_interview(
     function additionally surfaces one actionable warning per such item,
     through the same warnings channel as ``check_posture_floor_conflict()``,
     naming the exact command to record it verbatim instead: ``playbook
-    floor sign {out_dir} --statement "<the item>"``. The item itself stays
+    floor sign {out_dir} --statement "<the item>" --signed-by "<your
+    name>"``. The item itself stays
     exactly as typed in the recorded interview
     (``posture.generation.interview`` — see ``generate_posture()``); only
     the Floor-promotion and templating steps skip it.
@@ -588,7 +589,7 @@ def apply_posture_interview(
             f'Posture interview Q4 ("sacred_clauses") item {item!r} reads as a full '
             "sentence, not a clause-type name — not templated or promoted into "
             f"floor.invariants. To record it verbatim, run: playbook floor sign {out_dir} "
-            f'--statement "{item}"'
+            f'--statement "{item}" --signed-by "<your name>"'
         )
         for item in q4_sentence_shaped_items(answers)
     ]

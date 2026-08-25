@@ -695,6 +695,57 @@ def _check_duplicate_ids(doc: dict[str, Any], result: ValidationResult) -> None:
             seen_document_ids[document_id] = i
 
 
+def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Non-blocking SHOULD-warn: name each ``floor.invariants[]`` entry that
+    carries no structural attribution marker (issue #127).
+
+    Three producers write into ``floor.invariants``, and each leaves a
+    distinct, mechanically-checkable trace — see
+    :func:`playbook_engine.floor_candidates.floor_invariant_attribution` for
+    the three it recognizes (a hand-signed ``x_signed_by``, a Posture-
+    interview Q4 promotion, or an accepted review-feedback candidate).
+    Advisory only, same convention as every other SHOULD finding in this
+    validator: the schema and the blocking checks above already accept an
+    unattributed entry structurally (``floor.invariants[].id``/``statement``
+    are the only required properties) — this exists purely so a human
+    reading ``validate``'s output sees which invariants lack a traceable
+    author, rather than assuming every entry in the Floor was genuinely
+    signed off. It does not, by itself, prove an entry IS genuine — see
+    that function's docstring for what this can and cannot catch.
+
+    Version-agnostic (``floor.invariants`` is identical in shape across
+    v0.1/v0.2/v0.3 — see :func:`_check_duplicate_ids`'s own floor handling),
+    so this runs unconditionally rather than being gated to v0.2/v0.3 like
+    :func:`_check_posture_floor_conflict_v2`.
+
+    Deferred import (same reason as ``_check_posture_floor_conflict_v2``'s,
+    just above) — :mod:`playbook_engine.floor_candidates` imports
+    :func:`load_opf_file` from this module at ITS top level, so a top-level
+    import here the other way would cycle.
+    """
+    from playbook_engine.floor_candidates import floor_invariant_attribution  # noqa: PLC0415
+
+    floor_section = doc.get("floor")
+    invariants = floor_section.get("invariants") if isinstance(floor_section, dict) else None
+    if not isinstance(invariants, list):
+        return
+    for i, invariant in enumerate(invariants):
+        if not isinstance(invariant, dict):
+            continue
+        if floor_invariant_attribution(invariant) is not None:
+            continue
+        invariant_id = invariant.get("id")
+        label = f"{invariant_id!r} " if isinstance(invariant_id, str) else ""
+        result.add(
+            f"floor invariant {label}carries no structural attribution — no "
+            "x_signed_by, and its rationale doesn't match a Posture-interview "
+            "or review-feedback promotion marker; confirm a human actually "
+            "authored/signed this hard line.",
+            path=f"floor.invariants[{i}]",
+            blocking=False,
+        )
+
+
 def _check_digest_v3(doc: dict[str, Any], result: ValidationResult) -> None:
     """OPF 0.3 digest consistency (normative, beyond the schema).
 
@@ -758,6 +809,7 @@ def validate_document(
     result = ValidationResult()
     _check_invisible_chars(doc, result)
     _check_duplicate_ids(doc, result)
+    _check_floor_attribution(doc, result)
     opf_version = doc.get("opf_version")
     schema = _load_schema(opf_version)
 

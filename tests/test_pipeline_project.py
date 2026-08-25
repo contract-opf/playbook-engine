@@ -1391,6 +1391,7 @@ def test_posture_and_floor_survive_recompile(tmp_path: Path) -> None:
     signed_invariants = sign_floor_invariant(
         "Never accept unlimited liability.",
         rationale="Hand-signed for this test.",
+        signed_by="Test Legal Owner",
         existing_invariants=doc["floor"]["invariants"],
     )
     doc["floor"]["invariants"] = signed_invariants

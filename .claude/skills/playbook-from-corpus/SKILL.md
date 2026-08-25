@@ -1000,14 +1000,24 @@ above only ever produce "Do not concede on {clause type}." — fine for an
 unconditional rule, but a real hard line is often conditional ("limitation of
 liability, *if present*, must not be unilateral in the counterparty's favor"),
 and neither template can express that; forcing it through either one just
-garbles the sentence. When the human dictates a hard line like that, write it
-down **verbatim**:
+garbles the sentence. When the human dictates a hard line like that, show them
+the EXACT statement you are about to sign and get an explicit in-chat
+"yes, sign it" before running the command — `floor sign` writes it into the
+Floor immediately, no separate review round-trip like the checklist above, so
+this confirmation is the only human-in-the-loop check before it takes effect.
+Then write it down **verbatim**, with `--signed-by` naming the human who just
+confirmed it (required — the command refuses to run without it):
 
 ```bash
-playbook floor sign $OUT --statement "Limitation of liability, if present, must not be unilateral in the counterparty's favor."
+playbook floor sign $OUT --statement "Limitation of liability, if present, must not be unilateral in the counterparty's favor." --signed-by "<the human's name>"
 # Optional: --id a-slug, --rationale "attribution", and --clause TAXONOMY_ID
 # (validated against --config's taxonomy — pass --config when you use --clause)
 ```
+
+`--signed-by` is recorded as a structural `x_signed_by` field, not folded into
+`--rationale` — `playbook validate` warns on any `floor.invariants` entry that
+carries neither this nor a Posture-interview/candidate-acceptance attribution
+marker, so never type a placeholder name; use the human's own.
 
 Re-running with the identical `--statement` under the same id is a no-op;
 re-running with a different `--statement` under an id that already carries one

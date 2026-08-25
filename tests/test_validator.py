@@ -597,6 +597,74 @@ def test_validate_rejects_duplicate_clause_id_v0_2_evidence_shape() -> None:
     assert offending and offending[0].path == "evidence.clauses[1].id"
 
 
+# ---------------------------------------------------------------------------
+# _check_floor_attribution — issue #127
+# ---------------------------------------------------------------------------
+
+
+def test_floor_invariant_with_no_attribution_gets_should_warn() -> None:
+    """The fixture's own floor invariant carries no x_signed_by and no
+    Posture-interview/candidate rationale marker -- exactly the shape an
+    LLM agent could fabricate end-to-end (issue #127's Consequence)."""
+    doc = _load("valid_v0_2_minimal.json")
+    result = validate_document(doc)
+
+    warn_messages = [e for e in result.errors if not e.blocking]
+    offending = [e for e in warn_messages if "structural attribution" in e.message]
+    assert offending, [str(e) for e in result.errors]
+    assert offending[0].path == "floor.invariants[0]"
+    assert "no-uncapped-liability" in offending[0].message
+    # Never blocking -- an unattributed invariant is still a structurally
+    # valid document, just one a human should look at.
+    assert all(not e.blocking for e in offending)
+
+
+def test_floor_invariant_signed_by_suppresses_the_warning() -> None:
+    doc = _load("valid_v0_2_minimal.json")
+    doc["floor"]["invariants"][0]["x_signed_by"] = "Test Legal Owner"
+    result = validate_document(doc)
+
+    assert not any("structural attribution" in e.message for e in result.errors)
+
+
+def test_floor_invariant_posture_interview_marker_suppresses_the_warning() -> None:
+    """The exact rationale `promote_interview_q4_invariants` stamps -- see
+    `floor_candidates._Q4_ATTRIBUTION_RE`."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["floor"]["invariants"][0]["rationale"] = (
+        "Authored by the legal owner in posture interview v1, question sacred_clauses."
+    )
+    result = validate_document(doc)
+
+    assert not any("structural attribution" in e.message for e in result.errors)
+
+
+def test_floor_invariant_review_feedback_marker_suppresses_the_warning() -> None:
+    """The exact rationale suffix `promote_floor_candidate` stamps on an
+    accepted candidate -- see `floor_candidates._CANDIDATE_ATTRIBUTION_RE`."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["floor"]["invariants"][0]["rationale"] = (
+        "Proposed then reversed before signing. Accepted via review feedback (floor candidate cand-001)."
+    )
+    result = validate_document(doc)
+
+    assert not any("structural attribution" in e.message for e in result.errors)
+
+
+def test_floor_invariant_agent_typed_rationale_still_warns() -> None:
+    """Text that merely CLAIMS a sign-off, with no structural marker, must
+    still trip the warning -- this is the exact gap the ticket's
+    Consequence section describes (an agent-fabricated 'signed' hard line
+    indistinguishable from a genuine one by rationale text alone)."""
+    doc = _load("valid_v0_2_minimal.json")
+    doc["floor"]["invariants"][0]["rationale"] = (
+        "Hand-authored and signed by the legal owner, 2026-08-21."
+    )
+    result = validate_document(doc)
+
+    assert any("structural attribution" in e.message for e in result.errors)
+
+
 def test_validate_tolerates_null_floor_invariants() -> None:
     # Hand-authored YAML `floor:\n  invariants:` maps `invariants` to `None`
     # (a valueless key), not `[]` — _check_duplicate_ids runs before schema

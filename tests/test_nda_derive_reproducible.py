@@ -73,6 +73,10 @@ _FLOOR_SIGN_ARGS = {
         "remedy."
     ),
     "clause": "limitation_of_liability",
+    # issue #127: --signed-by is now required. A generic, obviously-fictional
+    # signer -- never a real name -- matching this example's synthetic
+    # convention throughout (fictional parties, no real corpus material).
+    "signed_by": "Legal Owner",
 }
 
 
@@ -96,6 +100,11 @@ def _strip_volatile(doc: dict[str, Any]) -> dict[str, Any]:
     # derived doc still carries the deriving machine's own path, so drop it
     # here too rather than asserting path equality.
     doc.get("baseline", {}).get("template_ref", {}).pop("source", None)
+    # issue #127: `playbook floor sign` stamps `x_signed_at` with the
+    # wall-clock time it ran -- same volatility class as the fields above.
+    for invariant in doc.get("floor", {}).get("invariants", []) or []:
+        if isinstance(invariant, dict):
+            invariant.pop("x_signed_at", None)
     return doc
 
 
@@ -158,6 +167,8 @@ def test_nda_derivation_reproducible_from_committed_inputs(
         _FLOOR_SIGN_ARGS["rationale"],
         "--clause",
         _FLOOR_SIGN_ARGS["clause"],
+        "--signed-by",
+        _FLOOR_SIGN_ARGS["signed_by"],
         "--config",
         str(_SMOKE_CONFIG),
     ]
