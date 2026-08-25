@@ -1480,6 +1480,160 @@ def test_apply_feedback_empty_feedback_no_changes(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# apply_feedback — issue #174: stale _export.content_hash binding
+# ---------------------------------------------------------------------------
+
+
+def _set_identity_content_hash(tmp_path: Path, content_hash_value: str) -> None:
+    """Mutate out/playbook.opf.json (already written by _make_opf) to carry
+    an identity.content_hash — for #174 stale-export fixtures."""
+    opf_path = tmp_path / "out" / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    doc["identity"] = {"content_hash": content_hash_value}
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_apply_feedback_matching_content_hash_applies_normally(tmp_path: Path) -> None:
+    """A feedback.json whose _export.content_hash matches the current
+    playbook.opf.json applies exactly as it would with no binding at all."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:abc123")
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:abc123", "generated_at": "2026-01-01T00:00:00Z"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+    assert "state-university-2023" in result.hints_written
+    assert "_export" not in result.skipped
+
+
+def test_apply_feedback_mismatched_content_hash_raises(tmp_path: Path) -> None:
+    """A stale feedback.json (content_hash no longer matches) is refused —
+    the exact scenario from issue #174: item numbers may now point at
+    different clauses after a re-mine/re-project."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:current")
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:stale", "generated_at": "2025-01-01T00:00:00Z"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    with pytest.raises(ValueError, match="stale"):
+        apply_feedback(out_dir, fp)
+    # Refused BEFORE any correction was applied — no hints.yaml written.
+    assert not (doc_dir / "hints.yaml").exists()
+
+
+def test_apply_feedback_mismatched_content_hash_force_applies(tmp_path: Path) -> None:
+    """--force / force=True overrides the stale-export refusal."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:current")
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:stale", "generated_at": "2025-01-01T00:00:00Z"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp, force=True)
+    assert "state-university-2023" in result.hints_written
+
+
+def test_apply_feedback_no_export_key_applies_without_error(tmp_path: Path) -> None:
+    """A pre-#174 feedback.json (no "_export" key at all) is unverifiable,
+    not stale — it still applies, matching every pre-existing test fixture
+    in this file that predates the binding."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:current")
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+    assert "state-university-2023" in result.hints_written
+
+
+def test_apply_feedback_no_identity_on_doc_applies_without_error(tmp_path: Path) -> None:
+    """A playbook.opf.json with no identity block (e.g. an older/hand-built
+    document) makes the binding unverifiable, not stale — still applies."""
+    _make_opf(tmp_path)  # no identity block written
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:whatever", "generated_at": "2026-01-01T00:00:00Z"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+    assert "state-university-2023" in result.hints_written
+
+
+def test_render_html_export_button_embeds_content_hash_binding(tmp_path: Path) -> None:
+    """The rendered page's exportFeedback() reads identity.content_hash off
+    the embedded playbook-data script and stamps it onto the export as
+    "_export" — the client-side half of the issue #174 fix."""
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    html = render_review_html(out_dir)
+    assert "fb._export" in html
+    assert "playbook-data" in html
+    assert "content_hash" in html
+
+
+def test_view_apply_cmd_stale_export_exits_nonzero(tmp_path: Path) -> None:
+    """CLI ``view apply`` refuses a stale feedback.json without --force."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:current")
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:stale"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
+    assert result.exit_code != 0
+    assert "stale" in result.output
+
+
+def test_view_apply_cmd_stale_export_with_force_succeeds(tmp_path: Path) -> None:
+    """CLI ``view apply --force`` applies a stale feedback.json anyway."""
+    _make_opf(tmp_path)
+    _set_identity_content_hash(tmp_path, "sha256:current")
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {
+        "_export": {"content_hash": "sha256:stale"},
+        "C2.1": {"provenance": "counterparty_paper"},
+    }
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp), "--force"])
+    assert result.exit_code == 0, result.output
+    assert "OK" in result.output
+
+
+# ---------------------------------------------------------------------------
 # apply_feedback — issue #138: comment persistence + honest skip reporting
 # ---------------------------------------------------------------------------
 

@@ -3241,7 +3241,21 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
         "it, only OUT_DIR's parent/grandparent are searched."
     ),
 )
-def view_apply_cmd(out_dir: Path, feedback_file: Path, corpus_dir: Path | None) -> None:
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help=(
+        "Apply FEEDBACK_FILE even if its _export.content_hash binding does "
+        "not match OUT_DIR/playbook.opf.json's current content_hash — i.e. "
+        "the review page was rendered from a different playbook. Without "
+        "this flag, a detected mismatch is refused with an error. "
+        "Corrections may land on the wrong clauses when forced."
+    ),
+)
+def view_apply_cmd(
+    out_dir: Path, feedback_file: Path, corpus_dir: Path | None, force: bool
+) -> None:
     """Apply FEEDBACK_FILE corrections to OUT_DIR.
 
     Translates provenance/signed/order corrections into per-document
@@ -3262,6 +3276,13 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path, corpus_dir: Path | None) 
     in the output — even though a copy is parked under OUT_DIR/hints/ for
     manual recovery.
 
+    FEEDBACK_FILE carries an ``_export`` binding stamped by the viewer's
+    Export button: if it does not match OUT_DIR's current playbook.opf.json
+    content_hash — e.g. the out-dir was re-mined or re-projected since the
+    review page was rendered — this command refuses with an error rather
+    than risk silently landing corrections on the wrong clauses. Pass
+    ``--force`` to apply anyway.
+
     OUT_DIR is the output directory produced by ``playbook mine`` followed
     by ``playbook project``.
     FEEDBACK_FILE is the feedback.json produced by the HTML viewer.
@@ -3272,7 +3293,9 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path, corpus_dir: Path | None) 
     corpus_resolved = corpus_dir.resolve() if corpus_dir is not None else None
 
     try:
-        result = apply_feedback(resolved, feedback_file.resolve(), corpus_dir=corpus_resolved)
+        result = apply_feedback(
+            resolved, feedback_file.resolve(), corpus_dir=corpus_resolved, force=force
+        )
     except (FileNotFoundError, ValueError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
