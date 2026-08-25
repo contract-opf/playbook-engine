@@ -204,7 +204,8 @@ def build_inspection_report(
     lines.append(
         "> Review **Version order**, **Signed copy**, and **Provenance** for each document "
         "before trusting the playbook. If any inference is wrong, add a `hints.yaml` to "
-        "the document folder and re-run with `--no-cache`."
+        "the document folder and re-run `playbook mine` (no flag needed — the hints file "
+        "is hashed into that document's cache key)."
     )
     lines.append("")
 

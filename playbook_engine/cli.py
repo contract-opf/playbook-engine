@@ -1569,7 +1569,8 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     Lets a lawyer verify the engine's structural inferences — version ordering,
     signed-copy identification, provenance, and per-clause deviations — before
     trusting the compiled playbook.  If an inference is wrong, add a
-    ``hints.yaml`` to the document folder and re-run with ``--no-cache``.
+    ``hints.yaml`` to the document folder and re-run ``playbook mine`` (no
+    flag needed — the hints file is hashed into that document's cache key).
     """
     try:
         if report_path:
