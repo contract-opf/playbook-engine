@@ -776,10 +776,17 @@ make docker-run CORPUS=./corpus OUT=./out \
         --entity-registry /work/out/entity_registry.json"
 # → writes $OUT/judge/pending.jsonl (freshly rewritten each round)
 
-# Agent: read $OUT/judge/pending.jsonl; judge each item; write
-# $OUT/my-verdicts.jsonl (must live under $OUT so the container can see it)
+# Agent: read $OUT/judge/pending.jsonl; judge each item; write this round's
+# verdicts to a NAME UNIQUE TO THIS ROUND — e.g.
+# $OUT/my-verdicts-<date>-r<N>.jsonl (must live under $OUT so the container
+# can see it). Do not write or append to a bare $OUT/my-verdicts.jsonl: on a
+# re-run against a copied out-dir, a file already sitting at that literal
+# path is a *previous* run's artifact, not a template for this round — writing
+# to it either clobbers that prior audit trail or silently re-applies stale
+# verdicts. judge-apply may be pointed at each round's file in turn; nothing
+# requires the name to match across rounds or runs.
 make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="judge-apply /work/out --verdicts /work/out/my-verdicts.jsonl"
+  ARGS="judge-apply /work/out --verdicts /work/out/my-verdicts-<date>-r<N>.jsonl"
 
 # Loop: re-run judge to confirm queue is drained or get next batch
 make docker-run CORPUS=./corpus OUT=./out \
