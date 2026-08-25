@@ -62,7 +62,7 @@ Rules:
 - **Include the signed copy** if you have it — it anchors the negotiation trail.
 - **Anything goes in.** Off-topic documents are flagged and excluded automatically.
 
-You also need a **config file** (`playbook.config.yaml`) in the same directory as your corpus. Use the example at `examples/affiliation-config/playbook.config.yaml` as a starting point.
+You also need a **config file** (`playbook.config.yaml`), placed *inside* your corpus folder, next to the agreement subfolders (e.g. `corpus/playbook.config.yaml`) — this is also where the packaged skill's Docker path expects it, so one config location works for both. Use the example at `examples/affiliation-config/playbook.config.yaml` as a starting point.
 
 For a second, fully committed worked example of exactly this stub-judge flow
 — a different agreement type (NDA) run end-to-end with no LLM calls — see
@@ -88,7 +88,7 @@ a long run.
 ## Step 1 — Check your layout
 
 ```bash
-playbook lint-corpus ./corpus --config ./playbook.config.yaml
+playbook lint-corpus ./corpus --config ./corpus/playbook.config.yaml
 ```
 
 Fix every **ERR** item before proceeding. **WARN** items are advisory.
@@ -131,11 +131,11 @@ skill drives runs the same two stages with a judgment round in between
 
 ```bash
 playbook mine ./corpus \
-  --config ./playbook.config.yaml \
+  --config ./corpus/playbook.config.yaml \
   --out ./out
 
 playbook project ./out \
-  --config ./playbook.config.yaml
+  --config ./corpus/playbook.config.yaml
 ```
 
 This runs the full pipeline. Progress is printed to the console. When it finishes:
@@ -194,12 +194,12 @@ Then re-run `playbook mine --no-cache` followed by `playbook project` to pick up
 
 ```bash
 # Default: resumes from saved observations (fast)
-playbook mine ./corpus --config ./playbook.config.yaml --out ./out
-playbook project ./out --config ./playbook.config.yaml
+playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out
+playbook project ./out --config ./corpus/playbook.config.yaml
 
 # Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if extraction_cache.jsonl is warm
-playbook mine ./corpus --config ./playbook.config.yaml --out ./out --no-cache
-playbook project ./out --config ./playbook.config.yaml
+playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out --no-cache
+playbook project ./out --config ./corpus/playbook.config.yaml
 ```
 
 The engine auto-detects corpus changes (new files, modified files) and forces a full re-run even without `--no-cache`.

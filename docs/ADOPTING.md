@@ -26,7 +26,9 @@ some other shape? `playbook stage` proposes a `staging_plan.json` from the
 files' contents and metadata — you review the plan, then execute it.
 Nothing moves until you approve.
 
-**Write the config.** Four decisions, one YAML:
+**Write the config.** Four decisions, one YAML — save it inside your corpus
+folder, next to the agreement subfolders (e.g. `corpus/playbook.config.yaml`),
+so it's visible under the Docker runtime's read-only mount too:
 
 ```yaml
 agreement_type: { id: msa, name: "Master Services Agreement" }
@@ -62,9 +64,9 @@ corpus with `playbook induce-taxonomy` and curate the result.
 **Compile:**
 
 ```sh
-playbook lint-corpus ./corpus --config playbook.config.yaml   # catches layout problems first
-playbook mine ./corpus --config playbook.config.yaml --out ./out
-playbook project ./out --config playbook.config.yaml
+playbook lint-corpus ./corpus --config ./corpus/playbook.config.yaml   # catches layout problems first
+playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out
+playbook project ./out --config ./corpus/playbook.config.yaml
 playbook validate ./out/playbook.opf.json
 ```
 

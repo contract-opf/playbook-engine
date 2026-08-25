@@ -173,7 +173,7 @@ make docker-run CORPUS="$CORPUS" OUT="$OUT" ARGS="lint-corpus /work/corpus"
 # Local venv (Python 3.11+; needs pandoc for the RTF path)
 brew install pandoc   # macOS — Debian/Ubuntu: apt-get install -y pandoc
 python3 -m venv .venv && source .venv/bin/activate && make install
-playbook lint-corpus ./corpus --config ./playbook.config.yaml
+playbook lint-corpus ./corpus --config ./corpus/playbook.config.yaml
 ```
 
 `.venv/` is disposable and machine-local — it hard-codes absolute paths, so it
