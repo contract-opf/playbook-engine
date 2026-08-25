@@ -117,8 +117,6 @@ context: `taxonomy_id`, `clause_path`, `document_id`.
   no needs_review). Only judge the remaining hunks individually. On real
   corpora a third or more of deviation items are relocation echoes; judging
   them blind wastes effort and floods the report with needs_review flags.
-- If no template hunk is provided (`template_hunk` is null), deviation
-  assessment is relative to the modal observed position, not a template.
 - Confidence < 0.65: set `needs_review: true`.
 - ALWAYS include `risk_delta` — for `none` / `reworded_equivalent` use
   `{"direction": "neutral", "magnitude": "none"}` (omitting it fails
