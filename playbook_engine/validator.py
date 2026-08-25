@@ -543,6 +543,51 @@ def _check_posture_floor_conflict_v2(doc: dict[str, Any], result: ValidationResu
         result.add(message, path="posture.system_prompt", blocking=False)
 
 
+def _check_posture_interview_provenance_v2(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Non-blocking SHOULD-warn: a drafted ``posture.system_prompt`` with no
+    ``posture.generation.interview`` record behind it (issue #133, skill QA
+    audit finding #85).
+
+    OPF-SPEC.md §3.6 rule 2 makes the interview record provenance and says
+    "It MUST be retained" -- it lets an auditor see *why* the Posture says
+    what it says. Neither the schema (``generation``/``interview`` are
+    optional, with no conditional requirement) nor any prior validator check
+    enforces that MUST, so a hand-edited or third-party playbook can strip
+    the interview and still validate clean. Advisory only, same convention
+    as every other SHOULD finding in this validator (see
+    :func:`_check_floor_attribution`) -- this exists so a human reading
+    ``validate``'s output sees a Posture with no traceable provenance,
+    rather than assuming every ``system_prompt`` was genuinely interview-
+    derived.
+
+    An *empty* Posture (no ``system_prompt`` at all) is untouched by this
+    check -- the schema explicitly allows that shape for a corpus-only
+    compile with no interview yet run (see
+    ``spec/playbook.schema-0.3.json``'s posture description, and
+    ``test_v0_2_empty_posture_and_floor_are_valid``); there is nothing to
+    provide provenance for until prose actually exists.
+    """
+    posture = doc.get("posture")
+    if not isinstance(posture, dict):
+        return
+    system_prompt = posture.get("system_prompt")
+    if not (isinstance(system_prompt, str) and system_prompt.strip()):
+        return
+
+    generation = posture.get("generation")
+    interview = generation.get("interview") if isinstance(generation, dict) else None
+    if isinstance(interview, list) and len(interview) > 0:
+        return
+
+    result.add(
+        "posture.system_prompt is drafted but posture.generation.interview "
+        "is absent/empty -- the interview record MUST be retained as "
+        "provenance for the drafted Posture (OPF-SPEC.md §3.6 rule 2).",
+        path="posture.generation.interview",
+        blocking=False,
+    )
+
+
 def _check_invisible_chars(doc: dict[str, Any], result: ValidationResult) -> None:
     """Blocking error for zero-width/bidi-control characters anywhere in *doc*.
 
@@ -830,6 +875,7 @@ def validate_document(
             _check_out_of_scope_rationale(doc, result)
             _check_citations_v2(doc, result)
             _check_posture_floor_conflict_v2(doc, result)
+            _check_posture_interview_provenance_v2(doc, result)
             _check_dynamics_v2(doc, result)
             if opf_version == "0.3":
                 _check_digest_v3(doc, result)

@@ -495,9 +495,25 @@ def test_validator_clean_posture_raises_no_warning() -> None:
     # issue #127: a structurally-attributed copy of _LIABILITY_INVARIANT, so
     # this test's "clean posture -> zero warnings" premise isn't tripped by
     # the (orthogonal) floor-attribution SHOULD-warn added for that ticket.
+    # issue #133: system_prompt carries a generation.interview record, so
+    # this premise also isn't tripped by the (orthogonal) posture-provenance
+    # SHOULD-warn added for that ticket.
     attributed_invariant = {**_LIABILITY_INVARIANT, "x_signed_by": "Test Legal Owner"}
     doc = _minimal_v02_doc(
-        posture={"system_prompt": "Hold firm on the liability cap; see Floor."},
+        posture={
+            "system_prompt": "Hold firm on the liability cap; see Floor.",
+            "generation": {
+                "generated_by": "playbook-engine v0.1.0",
+                "generated_at": "2026-01-01T00:00:00Z",
+                "interview": [
+                    {
+                        "q": "sacred_clauses",
+                        "question": "Which clauses are non-negotiable?",
+                        "answer": "Liability cap.",
+                    }
+                ],
+            },
+        },
         floor={"invariants": [attributed_invariant]},
     )
     result = validate_document(doc)
