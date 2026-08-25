@@ -277,6 +277,26 @@ def test_view_apply_invocations_include_feedback_file_argument() -> None:
         )
 
 
+def test_skill_body_documents_q5_auto_rejection() -> None:
+    """SKILL.md must disclose that Q5 (flexible_clauses) pre-marks candidates.
+
+    Regression test for issue #134 (skill QA audit finding #86):
+    ``flexible_clauses`` is described as "binds nothing" in Step 7a's
+    question-ordering table, but a Q5 answer auto-marks matching REVERSAL
+    candidates ``decision: rejected`` in floor.candidates.json (issue #105,
+    ``floor_candidates._Q5_REJECTION_COMMENT``), and ``playbook.review.html``
+    renders those as "Recommended reject" (``viewer.py``) with no explanation
+    from the interview walkthrough itself. Step 7b must tell the reader this
+    happens so a reviewer isn't surprised by pre-rejected rows attributed to
+    their own answer.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    assert "recommended reject" in body.lower(), (
+        "SKILL.md must mention the 'Recommended reject' rendering that Q5 "
+        "(flexible_clauses) triggers on matching Floor candidates (issue #134)"
+    )
+
+
 def test_feedback_reentry_block_regenerates_view_artifacts() -> None:
     """Feedback re-entry must end by regenerating review HTML, bundle, digest.
 
