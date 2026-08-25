@@ -3415,6 +3415,16 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
     help="The invariant, verbatim — recorded exactly as given, never templated.",
 )
 @click.option(
+    "--signed-by",
+    "signed_by",
+    required=True,
+    help=(
+        "Name of the human legal owner signing this hard line. Required — "
+        "recorded as a structural attribution field, not just free-form "
+        "rationale text, so a later review can tell who actually signed it."
+    ),
+)
+@click.option(
     "--id",
     "invariant_id",
     default=None,
@@ -3444,6 +3454,7 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
 def floor_sign_cmd(
     out_dir: Path,
     statement: str,
+    signed_by: str,
     invariant_id: str | None,
     taxonomy_id: str | None,
     rationale: str | None,
@@ -3459,10 +3470,17 @@ def floor_sign_cmd(
     the counterparty's favor") that either of those templates would
     otherwise garble.
 
+    --signed-by is required: the human legal owner's name, recorded as a
+    structural attribution field alongside the statement, not folded into
+    free-form --rationale text where nothing would distinguish a genuine
+    sign-off from an agent-typed one.
+
     Idempotent: signing the same statement under the same id twice is a
-    no-op. Signing an id that already carries a DIFFERENT statement is
-    refused — this command never overwrites an existing invariant; edit or
-    remove the conflicting one first, or choose a different --id.
+    no-op (the ORIGINAL --signed-by / --rationale / --clause are kept —
+    a rerun's values, if different, are ignored, not merged in). Signing an
+    id that already carries a DIFFERENT statement is refused — this command
+    never overwrites an existing invariant; edit or remove the conflicting
+    one first, or choose a different --id.
 
     OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
     followed by 'playbook project').
@@ -3507,14 +3525,19 @@ def floor_sign_cmd(
                 click.echo(f"  {vid}", err=True)
             raise SystemExit(1)
 
+    import datetime  # noqa: PLC0415
+
     doc = load_opf_file(opf_path)
     existing_invariants = (doc.get("floor") or {}).get("invariants") or []
+    signed_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     try:
         invariants = sign_floor_invariant(
             statement,
             invariant_id=invariant_id,
             taxonomy_id=taxonomy_id,
             rationale=rationale,
+            signed_by=signed_by,
+            signed_at=signed_at,
             existing_invariants=existing_invariants,
         )
     except FloorCandidateError as exc:

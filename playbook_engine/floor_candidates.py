@@ -104,6 +104,7 @@ This module implements:
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -1409,6 +1410,8 @@ def sign_floor_invariant(
     invariant_id: str | None = None,
     taxonomy_id: str | None = None,
     rationale: str | None = None,
+    signed_by: str | None = None,
+    signed_at: str | None = None,
     existing_invariants: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Record ONE verbatim, hand-authored Floor invariant (issue #103).
@@ -1457,6 +1460,20 @@ def sign_floor_invariant(
                               :data:`_SIGN_DEFAULT_RATIONALE` when
                               ``None``/blank — callers can attribute a
                               specific person via an explicit ``--rationale``.
+        signed_by:            Name of the human legal owner signing this
+                              statement — REQUIRED, not optional (issue
+                              #127): unlike *rationale*, which is free-form
+                              text an agent could type to merely resemble a
+                              genuine sign-off, this is the structural
+                              attribution ``validate`` checks for. Stored
+                              verbatim as ``x_signed_by`` (see the
+                              module-level comment above this function for
+                              why ``x_``-prefixed, not a bare property).
+        signed_at:            ISO-8601 timestamp this statement was signed.
+                              ``None``/blank defaults to now (UTC) — callers
+                              that need a fixed value (tests, replaying a
+                              past sign-off) pass one explicitly. Stored
+                              verbatim as ``x_signed_at``.
         existing_invariants:  The playbook's current ``floor.invariants``
                               list, or ``None``/``[]`` for a first-ever sign.
 
@@ -1466,12 +1483,18 @@ def sign_floor_invariant(
         nothing appended, for the no-op case above).
 
     Raises:
-        FloorCandidateError: *statement* is blank, or *invariant_id* (or its
-            derived slug) collides with an existing entry carrying a
-            different statement.
+        FloorCandidateError: *statement* is blank, *signed_by* is blank, or
+            *invariant_id* (or its derived slug) collides with an existing
+            entry carrying a different statement.
     """
     if not isinstance(statement, str) or not statement.strip():
         raise FloorCandidateError("floor sign: --statement must be a non-empty string")
+    if not isinstance(signed_by, str) or not signed_by.strip():
+        raise FloorCandidateError(
+            "floor sign: --signed-by must name the human legal owner signing this "
+            "hard line — a Floor invariant must carry a structural record of who "
+            "signed it, not just free-form rationale text."
+        )
 
     inv_id = sign_invariant_id(statement, invariant_id)
     rationale_text = rationale if rationale and rationale.strip() else _SIGN_DEFAULT_RATIONALE
@@ -1499,11 +1522,68 @@ def sign_floor_invariant(
             "invariant first if it should be replaced."
         )
 
-    entry: dict[str, Any] = {"id": inv_id, "statement": statement, "rationale": rationale_text}
+    signed_at_text = (
+        signed_at.strip()
+        if isinstance(signed_at, str) and signed_at.strip()
+        else datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    )
+    entry: dict[str, Any] = {
+        "id": inv_id,
+        "statement": statement,
+        "rationale": rationale_text,
+        "x_signed_by": signed_by.strip(),
+        "x_signed_at": signed_at_text,
+    }
     if taxonomy_id and taxonomy_id.strip():
         entry["x_taxonomy_id"] = taxonomy_id
     merged.append(entry)
     return merged
+
+
+def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
+    """WHO structurally attributes *entry* (one ``floor.invariants[]``
+    item) — or ``None`` if nothing does (issue #127).
+
+    Three producers write into ``floor.invariants``, each leaving a
+    distinct, mechanically-checkable trace:
+
+      - ``playbook floor sign`` (:func:`sign_floor_invariant`) stamps
+        ``x_signed_by`` with the human name the CLI now REQUIRES at sign
+        time — returns ``"signed"``.
+      - the Posture interview's Q4 answer
+        (:func:`promote_interview_q4_invariants`) stamps a ``rationale``
+        matching :data:`_Q4_ATTRIBUTION_RE` — returns ``"posture_interview"``.
+      - an accepted ``floor.candidates.json`` proposal
+        (:func:`promote_floor_candidate`, via a human's reviewed
+        ``feedback.json``) stamps a ``rationale`` matching
+        :data:`_CANDIDATE_ATTRIBUTION_RE` — returns ``"review_feedback"``.
+
+    Returns ``None`` when none of the three markers is present — an
+    invariant that never travelled through any of this engine's own
+    attribution paths, which ``validate`` (:mod:`playbook_engine.validator`)
+    surfaces as a non-blocking warning so a human review can look at it.
+
+    Deliberately NOT a security boundary on its own for the interview/
+    candidate cases: those two ``rationale`` markers are lexical, and text
+    that merely resembles one could in principle be typed by hand. The path
+    this genuinely closes is ``floor sign``, which no longer accepts a
+    human sign-off as free-form ``rationale`` text — it now REQUIRES the
+    structural ``x_signed_by`` field, refusing to run without it (see
+    :func:`sign_floor_invariant`).
+    """
+    if not isinstance(entry, dict):
+        return None
+    signed_by = entry.get("x_signed_by")
+    if isinstance(signed_by, str) and signed_by.strip():
+        return "signed"
+    rationale = entry.get("rationale")
+    if not isinstance(rationale, str):
+        return None
+    if _Q4_ATTRIBUTION_RE.match(rationale):
+        return "posture_interview"
+    if _CANDIDATE_ATTRIBUTION_RE.search(rationale):
+        return "review_feedback"
+    return None
 
 
 # ---------------------------------------------------------------------------

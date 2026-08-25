@@ -61,6 +61,7 @@ playbook floor sign   "$OUT" \
   --id limitation-of-liability-confidentiality-carveout \
   --rationale "A \$50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy." \
   --clause limitation_of_liability \
+  --signed-by "Legal Owner" \
   --config examples/nda/config.smoke.yaml
 playbook validate     "$OUT/playbook.opf.json"
 ```

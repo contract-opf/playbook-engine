@@ -480,9 +480,13 @@ def test_validator_surfaces_posture_floor_conflict_as_non_blocking_warning() -> 
 
 
 def test_validator_clean_posture_raises_no_warning() -> None:
+    # issue #127: a structurally-attributed copy of _LIABILITY_INVARIANT, so
+    # this test's "clean posture -> zero warnings" premise isn't tripped by
+    # the (orthogonal) floor-attribution SHOULD-warn added for that ticket.
+    attributed_invariant = {**_LIABILITY_INVARIANT, "x_signed_by": "Test Legal Owner"}
     doc = _minimal_v02_doc(
         posture={"system_prompt": "Hold firm on the liability cap; see Floor."},
-        floor={"invariants": [_LIABILITY_INVARIANT]},
+        floor={"invariants": [attributed_invariant]},
     )
     result = validate_document(doc)
     assert result.ok

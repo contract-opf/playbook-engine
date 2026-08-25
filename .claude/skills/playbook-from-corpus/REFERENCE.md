@@ -392,8 +392,11 @@ appends to `verdicts.jsonl`; the prior record stays as an audit trail.
    human authored it); compiler-derived candidates require an explicit accept
    round-tripped through `playbook view apply`. A conditional hard line either
    of those templates would garble ("X, if present, must not be Y") goes
-   through `playbook floor sign --statement "..."` instead, verbatim — never
-   by hand-editing `floor.invariants`.
+   through `playbook floor sign --statement "..." --signed-by "<name>"`
+   instead, verbatim — never by hand-editing `floor.invariants`. `--signed-by`
+   is required: it names the human legal owner signing off, recorded as a
+   structural `x_signed_by` field the command refuses to omit — get an
+   explicit in-chat confirmation of the exact statement before running it.
 
 ---
 
