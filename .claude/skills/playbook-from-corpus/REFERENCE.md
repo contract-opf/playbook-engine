@@ -288,10 +288,14 @@ isolated to that one clause rather than quarantining the whole batch).
 
 ### SegNode (agent segmentation — `segment` / `segment-apply`, issue #191)
 
-Each `segment/pending.jsonl` item gives a document's `canonical_text`, its
-`blocks` (`{block_id, page, char_span, text}`), and the allowed `taxonomy_ids`.
+Each `segment/pending.jsonl` item is one *version* of one document (a
+5-version document queues 5 items; `document_id`/`version` identify which),
+and gives that version's `canonical_text`, its `blocks`
+(`{block_id, page, char_span, text}`), and the allowed `taxonomy_ids`.
 Partition the blocks into contiguous clause ranges — one `SegNode` per clause —
-and write one verdict line per document to the verdicts JSONL:
+and write one verdict line per pending item to the verdicts JSONL (identical
+version texts across documents dedup by content hash, so you only need one
+line per distinct `canonical_text`):
 
 ```json
 {
