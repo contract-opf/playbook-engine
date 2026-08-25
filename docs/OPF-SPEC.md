@@ -624,7 +624,7 @@ After compiling Evidence, the producer runs a short structured interview (the an
 3. **Risk appetite** — "When a counterparty change is non-material, do you default to accept-to-close, or hold the line?"
 4. **Sacred clauses** — "Which clause types are non-negotiable regardless of deal value?" *(seeds Floor candidates — confirmed/signed by the author, never auto-promoted.)*
 5. **Flexible clauses** — "Which clause types are you happy to concede to move a deal?"
-6. **Deal-size sensitivity & audience** — "Does your posture change above a deal-value threshold? Who reads the output — a GC who wants terse rationale, or a junior reviewer who needs it explained?"
+6. **Output audience & deal-size sensitivity** — "Who will read the output, and does anything change above a deal-value threshold? (GC audience, terse rationale, no change by deal size / GC audience, terse rationale, but tightens above a threshold — say what threshold / junior-reviewer audience, needs it explained, no change by deal size / junior-reviewer audience, needs it explained, and tightens above a threshold — say what threshold)"
 
 The mapping is explicit: **Q4** seeds Floor candidates; **Q1–3, 5–6** shape the Posture prose. The producer MUST record every question/answer in `posture.generation.interview` (§3.6).
 

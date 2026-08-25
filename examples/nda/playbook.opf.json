@@ -7459,7 +7459,7 @@
     ]
   },
   "posture": {
-    "system_prompt": "Rounds before escalating: Typically two rounds of redlines before we escalate to outside counsel or walk; our own history shows most deals settle by the second or third version. Default leverage posture: Collaborative — four of our six negotiated NDAs closed on our own paper and most changes were accepted without escalation; we lead from our standard form but do not force it through unchanged. Non-material counterparty change: We accept non-material redlines (venue, governing law, notice mechanics, minor wording) to keep a deal moving, but hold firm on the two clause types named above and never accept a limitation-of-liability clause that reaches a confidentiality breach. Hard lines named in interview (see Floor): Exclusions from Confidential Information; Survival of Confidentiality Obligations. Flexible to close a deal: Governing law, dispute resolution venue, and standard of care — our history shows these move to a counterparty's preferred jurisdiction or phrasing without us treating it as a loss. Deal-size sensitivity / output audience: Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader.",
+    "system_prompt": "Rounds before escalating: Typically two rounds of redlines before we escalate to outside counsel or walk; our own history shows most deals settle by the second or third version. Default leverage posture: Collaborative — four of our six negotiated NDAs closed on our own paper and most changes were accepted without escalation; we lead from our standard form but do not force it through unchanged. Non-material counterparty change: We accept non-material redlines (venue, governing law, notice mechanics, minor wording) to keep a deal moving, but hold firm on the two clause types named above and never accept a limitation-of-liability clause that reaches a confidentiality breach. Hard lines named in interview (see Floor): Exclusions from Confidential Information; Survival of Confidentiality Obligations. Flexible to close a deal: Governing law, dispute resolution venue, and standard of care — our history shows these move to a counterparty's preferred jurisdiction or phrasing without us treating it as a loss. Output audience and deal-size sensitivity: Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader.",
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
@@ -7492,7 +7492,7 @@
         },
         {
           "q": "audience",
-          "question": "Does your posture change above a deal-value threshold? Who reads the output — a GC who wants terse rationale, or a junior reviewer who needs it explained?",
+          "question": "Who will read the output, and does anything change above a deal-value threshold? (GC audience, terse rationale, no change by deal size / GC audience, terse rationale, but tightens above a threshold — say what threshold / junior-reviewer audience, needs it explained, no change by deal size / junior-reviewer audience, needs it explained, and tightens above a threshold — say what threshold)",
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
@@ -9819,10 +9819,10 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:cb4ad00e52997403589c1403a7d6c96998dbebcf0e8f47d67c961de14a467ba5",
+    "content_hash": "sha256:c928be27304aff7674fbeae16e40f97c439adae5e23fa65fed3b24c136873fff",
     "section_digests": {
       "evidence": "sha256:bb93885426295be61389c462c3f073b74bd694d4c0d088c5b291662353edc2ba",
-      "posture": "sha256:6e6404e47ed57eaee9e071bdb4a9818b3226d43817f4045b1dec12dee20badfb",
+      "posture": "sha256:d5e5958b41793b3a08185fdd33bd0b701d3533a41e8a77eb8997d6ba51bbe9e9",
       "floor": "sha256:dd07922d9ec8e4912eb4d3bc6104a911f377db9a52b8ffa9d69c0270842a4eca",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }

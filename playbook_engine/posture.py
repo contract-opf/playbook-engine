@@ -123,9 +123,13 @@ INTERVIEW_QUESTIONS: tuple[InterviewQuestion, ...] = (
     ),
     InterviewQuestion(
         "audience",
-        "Does your posture change above a deal-value threshold? Who reads "
-        "the output — a GC who wants terse rationale, or a junior reviewer "
-        "who needs it explained?",
+        "Who will read the output, and does anything change above a "
+        "deal-value threshold? (GC audience, terse rationale, no change by "
+        "deal size / GC audience, terse rationale, but tightens above a "
+        "threshold — say what threshold / junior-reviewer audience, needs "
+        "it explained, no change by deal size / junior-reviewer audience, "
+        "needs it explained, and tightens above a threshold — say what "
+        "threshold)",
     ),
 )
 
@@ -161,7 +165,7 @@ _PROSE_TEMPLATES: dict[str, str] = {
     "risk_appetite": "Non-material counterparty change: {answer}",
     "sacred_clauses": "Hard lines named in interview (see Floor): {answer}",
     "flexible_clauses": "Flexible to close a deal: {answer}",
-    "audience": "Deal-size sensitivity / output audience: {answer}",
+    "audience": "Output audience and deal-size sensitivity: {answer}",
 }
 
 
