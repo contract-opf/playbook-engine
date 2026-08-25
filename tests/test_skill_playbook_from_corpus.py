@@ -575,6 +575,47 @@ def test_reference_md_verdict_format_documented() -> None:
     assert '"key"' in content or "verdict" in content.lower()
 
 
+def test_reference_md_classify_threshold_matches_ambiguity_threshold() -> None:
+    """REFERENCE.md's classify needs_review threshold must match the engine's
+    real behavioral cutoff (issue #163).
+
+    ``ClauseClassification.is_ambiguous`` — the only engine mechanism a
+    stored classify confidence actually trips — fires below
+    ``clause_classifier.AMBIGUITY_THRESHOLD``. REFERENCE.md used to instruct
+    the judge to flag ``needs_review`` below 0.6, a number that corresponds
+    to no engine constant at all; a verdict scored at 0.62 would look "fine"
+    per the doc while the engine's own is_ambiguous check already disagreed.
+    """
+    from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
+
+    assert AMBIGUITY_THRESHOLD == 0.70, (
+        "AMBIGUITY_THRESHOLD moved — update REFERENCE.md's classify rule to match "
+        f"the new value ({AMBIGUITY_THRESHOLD}) before touching this test"
+    )
+    content = REFERENCE_MD.read_text(encoding="utf-8")
+    assert "Confidence < 0.70: set `needs_review: true`" in content, (
+        "REFERENCE.md's classify rule must cite AMBIGUITY_THRESHOLD (0.70), not an unrelated number"
+    )
+    assert "Confidence < 0.6:" not in content, (
+        "REFERENCE.md still quotes the stale classify threshold (0.6) that matches "
+        "no engine constant (clause_classifier.AMBIGUITY_THRESHOLD is 0.70)"
+    )
+
+
+def test_reference_md_flags_deviation_threshold_as_advisory() -> None:
+    """REFERENCE.md must not let the deviation confidence threshold read as
+    enforced when no engine constant backs it (issue #163).
+
+    Unlike classify (AMBIGUITY_THRESHOLD) and provenance (also
+    AMBIGUITY_THRESHOLD, applied at mine time), deviation confidence is
+    never persisted to observations and nothing downstream gates on it —
+    so the doc must say so explicitly rather than implying parity with the
+    two thresholds that are real engine behavior.
+    """
+    content = REFERENCE_MD.read_text(encoding="utf-8")
+    assert "Confidence < 0.65: set `needs_review: true`. **This is advisory only" in content
+
+
 # ---------------------------------------------------------------------------
 # README.md — Installation section documents both install paths (issue #149)
 # ---------------------------------------------------------------------------
