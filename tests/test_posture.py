@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from playbook_engine.canonicalize import content_hash, section_digest
+from playbook_engine.canonicalize import compute_section_digests, content_hash, section_digest
 from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.posture import (
@@ -83,17 +83,19 @@ def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
             "run_id": "run-abc",
             "generated_at": "2026-01-01T00:00:00Z",
         },
-        "identity": {
-            "content_hash": "sha256:" + "0" * 64,
-            "section_digests": {
-                "evidence": _EVIDENCE_DIGEST,
-                "posture": "sha256:" + "2" * 64,
-                "floor": "sha256:" + "3" * 64,
-                "curation": "sha256:" + "4" * 64,
-            },
-        },
     }
     doc.update(overrides)
+    # Self-consistent identity (issue #178: validate_document now recomputes
+    # and checks content_hash/section_digests) — a real "freshly stamped"
+    # document, computed AFTER overrides so it actually matches the doc's
+    # final content, not fixed placeholder digits from before overrides
+    # existed. `evidence` is never overridden by a caller, so this still
+    # equals `_EVIDENCE_DIGEST` (see grounded_in assertions below).
+    if "identity" not in overrides:
+        doc["identity"] = {
+            "content_hash": content_hash(doc),
+            "section_digests": compute_section_digests(doc),
+        }
     return doc
 
 
