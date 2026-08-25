@@ -136,6 +136,16 @@ class DeviationResult:
                 f"DeviationResult.basis must be one of {sorted(_BASIS_VALUES)!r}; "
                 f"got {self.basis!r}"
             )
+        if self.confidence is not None:
+            if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+                raise ValueError(
+                    "DeviationResult.confidence must be a number in [0, 1] or None; "
+                    f"got {self.confidence!r}"
+                )
+            if not 0.0 <= self.confidence <= 1.0:
+                raise ValueError(
+                    f"DeviationResult.confidence must be in [0, 1] or None; got {self.confidence!r}"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {

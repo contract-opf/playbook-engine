@@ -1254,3 +1254,111 @@ class TestValidateVerdictBasisWhitelist:
             "classify",
             {"taxonomy_id": None, "confidence": 0.0, "basis": "unclassified"},
         )
+
+
+class TestValidateVerdictConfidenceType:
+    """Issue #161: a stringified confidence (a common LLM-producer mistake)
+    must raise an actionable ``ValueError`` naming the field, not a bare
+    ``TypeError`` from the dataclass's ``0.0 <= confidence <= 1.0`` comparison
+    — and a deviation verdict's confidence, which skipped validation
+    entirely, must now be type/range-checked too.
+    """
+
+    def test_classify_string_confidence_raises_value_error_not_type_error(self) -> None:
+        with pytest.raises(ValueError, match="confidence"):
+            validate_verdict(
+                "classify",
+                {"taxonomy_id": "indemnification", "confidence": "0.8", "basis": "judge"},
+            )
+
+    def test_scope_string_confidence_raises_value_error_not_type_error(self) -> None:
+        with pytest.raises(ValueError, match="scope_confidence"):
+            validate_verdict(
+                "scope",
+                {
+                    "in_scope": True,
+                    "scope_rationale": "synthetic rationale",
+                    "scope_confidence": "high",
+                },
+            )
+
+    def test_provenance_string_confidence_raises_value_error_not_type_error(self) -> None:
+        with pytest.raises(ValueError, match="confidence"):
+            validate_verdict(
+                "provenance",
+                {"provenance": "counterparty_paper", "confidence": "0.9", "basis": "llm"},
+            )
+
+    def test_deviation_string_confidence_is_now_rejected(self) -> None:
+        """Previously accepted silently — DeviationResult skipped confidence
+        validation entirely."""
+        with pytest.raises(ValueError, match="confidence"):
+            validate_verdict(
+                "deviation",
+                {
+                    "deviation": "substantive",
+                    "risk_delta": {"direction": "worse", "magnitude": "minor"},
+                    "basis": "judge",
+                    "confidence": "0.7",
+                },
+            )
+
+    def test_deviation_out_of_range_confidence_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="confidence"):
+            validate_verdict(
+                "deviation",
+                {
+                    "deviation": "substantive",
+                    "risk_delta": {"direction": "worse", "magnitude": "minor"},
+                    "basis": "judge",
+                    "confidence": 1.5,
+                },
+            )
+
+    def test_deviation_null_confidence_is_accepted(self) -> None:
+        """None is the documented sentinel for deterministic paths."""
+        validate_verdict(
+            "deviation",
+            {
+                "deviation": "none",
+                "risk_delta": {"direction": "neutral", "magnitude": "none"},
+                "basis": "judge",
+                "confidence": None,
+            },
+        )
+
+    def test_deviation_valid_numeric_confidence_is_accepted(self) -> None:
+        validate_verdict(
+            "deviation",
+            {
+                "deviation": "substantive",
+                "risk_delta": {"direction": "worse", "magnitude": "material"},
+                "basis": "judge",
+                "confidence": 0.7,
+            },
+        )
+
+    def test_deviation_result_rejects_out_of_range_confidence_directly(self) -> None:
+        """The dataclass itself must range-check confidence (issue #161),
+        not only the validate_verdict apply-time gate — a direct construction
+        elsewhere in the codebase must not be able to bank a bad value."""
+        from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+
+        with pytest.raises(ValueError, match="confidence"):
+            DeviationResult(
+                deviation="substantive",
+                risk_delta=RiskDelta(direction="worse", magnitude="minor"),
+                basis="judge",
+                confidence=1.5,
+            )
+
+    def test_deviation_result_rejects_string_confidence_directly(self) -> None:
+        from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+
+        with pytest.raises(ValueError, match="confidence"):
+            DeviationResult(
+                deviation="substantive",
+                risk_delta=RiskDelta(direction="worse", magnitude="minor"),
+                basis="judge",
+                confidence="0.7",
+            )

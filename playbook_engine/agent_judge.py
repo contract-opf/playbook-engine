@@ -390,12 +390,47 @@ _DEVIATION_REPLAYABLE_BASES = frozenset({"judge"})
 _CLASSIFY_REPLAYABLE_BASES = frozenset({"judge", "unclassified"})
 
 
+def _validate_confidence_field(
+    verdict: dict[str, Any], field: str, *, allow_none: bool = False
+) -> None:
+    """Raise ``ValueError`` if ``verdict[field]`` is not a valid confidence.
+
+    Runs *before* the corresponding dataclass is constructed so a
+    producer-supplied stringified number (e.g. ``"0.8"``) never reaches the
+    dataclass's ``0.0 <= confidence <= 1.0`` comparison and raises a bare,
+    line-number-free ``TypeError`` instead of an actionable ``ValueError``
+    (issue #161). Absent fields are left to the caller's ``dict.get(...,
+    default)`` fallback and are not validated here.
+
+    Args:
+        verdict:    The verdict dict from the producer's JSONL line.
+        field:      Field name to check (e.g. ``"confidence"``,
+                    ``"scope_confidence"``).
+        allow_none: Whether an explicit ``null`` is acceptable (deviation
+                    verdicts use ``None`` for deterministic paths).
+    """
+    if field not in verdict:
+        return
+    value = verdict[field]
+    if value is None:
+        if allow_none:
+            return
+        raise ValueError(f"'{field}' must not be null")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"'{field}' must be a number in [0, 1], got {value!r}")
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"'{field}' must be in [0, 1], got {value!r}")
+
+
 def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     """Validate a producer-supplied *verdict* for *kind* at apply time.
 
     Reconstructs the exact dataclass the store-backed judge would build on
     replay, so any verdict accepted here is guaranteed to replay instead of
-    silently re-queueing (the issue #182 malformed-verdict loop). Raises
+    silently re-queueing (the issue #182 malformed-verdict loop). Confidence
+    fields are type/range-checked up front (issue #161) so a stringified or
+    out-of-range confidence raises an actionable ``ValueError`` here instead
+    of a bare ``TypeError`` from dataclass construction. Raises
     ``ValueError`` with an actionable message on the first problem.
 
     Args:
@@ -419,6 +454,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
                 f"{sorted(_CLASSIFY_REPLAYABLE_BASES)!r} (clause_classifier.classify_tree "
                 "rejects anything else on replay)"
             )
+        _validate_confidence_field(verdict, "confidence")
         ClauseClassification(
             taxonomy_id=verdict.get("taxonomy_id"),
             confidence=verdict.get("confidence", 0.0),
@@ -445,6 +481,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
                 f"{sorted(_DEVIATION_REPLAYABLE_BASES)!r} "
                 "(deviation_classifier.assess_deviations rejects anything else on replay)"
             )
+        _validate_confidence_field(verdict, "confidence", allow_none=True)
         risk_raw = verdict["risk_delta"]
         DeviationResult(
             deviation=verdict.get("deviation", ""),
@@ -459,6 +496,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     elif kind == "provenance":
         if "provenance" not in verdict:
             raise ValueError("missing 'provenance' field")
+        _validate_confidence_field(verdict, "confidence")
         ProvenanceResult(
             provenance=verdict["provenance"],
             confidence=verdict.get("confidence", 0.0),
@@ -467,6 +505,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     elif kind == "scope":
         if not isinstance(verdict.get("in_scope"), bool):
             raise ValueError("'in_scope' must be a JSON boolean")
+        _validate_confidence_field(verdict, "scope_confidence")
         ScopeDecision(
             in_scope=verdict["in_scope"],
             scope_rationale=verdict.get("scope_rationale") or "Replayed from stored verdict.",

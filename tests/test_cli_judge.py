@@ -1019,6 +1019,55 @@ def test_judge_apply_rejects_neutral_with_nonzero_magnitude(tmp_path: Path) -> N
     assert code != 0
 
 
+def test_judge_apply_rejects_string_confidence_with_actionable_error(tmp_path: Path) -> None:
+    """Issue #161: a stringified confidence (a common LLM-producer mistake)
+    must fail with a line-numbered, field-named error, not a bare traceback."""
+    bad_file = tmp_path / "verdicts.jsonl"
+    bad_file.write_text(
+        json.dumps(
+            {
+                "key": "a" * 64,
+                "verdict": {
+                    "taxonomy_id": "indemnification",
+                    "confidence": "0.8",
+                    "basis": "judge",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
+    assert code != 0
+    assert "line 1" in output
+    assert "confidence" in output
+    assert "Traceback" not in output
+
+
+def test_judge_apply_rejects_deviation_string_confidence(tmp_path: Path) -> None:
+    """Issue #161: deviation verdicts previously skipped confidence validation
+    entirely and banked a malformed value silently."""
+    bad_file = tmp_path / "verdicts.jsonl"
+    bad_file.write_text(
+        json.dumps(
+            {
+                "key": "a" * 64,
+                "verdict": {
+                    "deviation": "substantive",
+                    "risk_delta": {"direction": "worse", "magnitude": "minor"},
+                    "basis": "judge",
+                    "confidence": "0.7",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
+    assert code != 0
+    assert "confidence" in output
+
+
 def test_judge_apply_accepts_valid_verdicts_of_each_kind(tmp_path: Path) -> None:
     good_file = tmp_path / "verdicts.jsonl"
     lines = [
