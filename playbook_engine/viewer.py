@@ -850,6 +850,7 @@ def _render_triage_header(
     *,
     signed_count: int,
     pending_count: int,
+    floor_section_html: str,
     posture_version: int | None,
     total_clauses: int,
     thin_count: int,
@@ -863,7 +864,16 @@ def _render_triage_header(
     Every count is computed by the caller from the loaded
     ``playbook.opf.json`` + ``floor.candidates.json`` — see
     ``render_review_html`` — never re-derived here, so this function is a
-    pure template.
+    pure template. ``floor_section_html`` is the caller's already-rendered
+    output of :func:`_render_floor_candidates_section` — passed through
+    (never re-rendered) purely so this function can key its "sign proposed
+    hard lines" action line off whether that section actually renders
+    anything, rather than off ``pending_count`` alone. The two diverge in a
+    real, reachable state: candidates that are all decided (signed/rejected)
+    but zero pending still produce non-empty checklist rows (decided
+    candidates are not pruned from floor.candidates.json — see
+    ``apply_feedback``), so ``pending_count == 0`` does not imply the
+    section is absent (issue #186 fix-round-1).
     """
     posture_label = f"v{posture_version}" if isinstance(posture_version, int) else "not authored"
     status_line = (
@@ -871,13 +881,27 @@ def _render_triage_header(
         f"sign-off | Posture: {html_lib.escape(posture_label)} | "
         f"Evidence: {total_clauses} clauses, {thin_count} thin"
     )
+    # The "Proposed hard lines" checklist section only renders when there is
+    # at least one candidate row, regardless of status (issue #90 — no empty
+    # shell; decided candidates are not pruned, so N-candidates-all-decided
+    # also renders a non-empty section). Key off whether that section
+    # actually rendered, not off pending_count == 0, which is also true in
+    # that all-decided state and would wrongly claim there is no "below" to
+    # point at (issue #186 fix-round-1).
+    if not floor_section_html:
+        sign_action = (
+            "sign proposed hard lines: none proposed right now — run "
+            "<code>playbook floor propose</code> after the next recompile"
+        )
+    else:
+        sign_action = "sign proposed hard lines: checklist below"
     return (
         '<div id="triage-header">'
         f'<div class="triage-status">{status_line}</div>'
         '<ul class="triage-actions">'
         "<li><b>~10 min</b> — author intent: run the posture interview "
         "(<code>playbook posture interview</code>)</li>"
-        "<li><b>~minutes</b> — sign proposed hard lines: checklist below</li>"
+        f"<li><b>~minutes</b> — {sign_action}</li>"
         "<li><b>optional, open-ended</b> — audit the evidence record: "
         "sections below</li>"
         "</ul>"
@@ -1265,6 +1289,7 @@ def render_review_html(
     triage_header_html = _render_triage_header(
         signed_count=signed_floor_count,
         pending_count=pending_floor_count,
+        floor_section_html=floor_section_html,
         posture_version=posture_version if isinstance(posture_version, int) else None,
         total_clauses=total_clauses,
         thin_count=thin_clause_count,

@@ -2870,6 +2870,61 @@ def test_render_html_triage_header_present_with_zero_state(tmp_path: Path) -> No
     assert 'id="floor-candidates"' not in html
 
 
+def test_render_html_triage_header_zero_pending_does_not_point_at_absent_checklist(
+    tmp_path: Path,
+) -> None:
+    """With 0 proposed hard lines, the "Proposed hard lines" section does
+    not render at all (issue #90's "no empty shell" rule) — so the triage
+    header's action line must not claim a "checklist below" that isn't on
+    the page (issue #186)."""
+    _make_opf(tmp_path)
+    html = render_review_html(tmp_path / "out")
+    assert 'id="floor-candidates"' not in html
+    assert "checklist below" not in html
+    assert "none proposed right now" in html
+    assert "playbook floor propose" in html
+
+
+def test_render_html_triage_header_zero_pending_but_decided_candidates_points_at_checklist(
+    tmp_path: Path,
+) -> None:
+    """Fix-round-1 regression (issue #186 review finding 1): 0 pending does
+    NOT imply the "Proposed hard lines" section is absent -- decided
+    candidates (signed/rejected) are never pruned from
+    floor.candidates.json (see apply_feedback) and keep rendering as inert
+    rows. With one already-signed and one already-rejected candidate (0
+    pending, matching test_render_html_floor_candidates_mixed_states'
+    shape), the checklist section DOES render, so the triage header must
+    point at it -- not claim "none proposed right now"."""
+    _make_opf(tmp_path)
+    signed = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
+    rejected = _floor_candidate(
+        id="cand-002",
+        statement="Never accept broad non-compete.",
+        citations=[],
+        decision="rejected",
+    )
+    _write_floor_candidates(tmp_path, [signed, rejected])
+    _set_floor_invariants(
+        tmp_path,
+        [
+            {
+                "id": "never-accept-uncapped-liability",
+                "statement": "Never accept uncapped liability.",
+                "rationale": "Accepted via review feedback (floor candidate cand-001).",
+            }
+        ],
+    )
+
+    html = render_review_html(tmp_path / "out")
+
+    assert 'id="floor-candidates"' in html
+    assert "Hard lines: 1 signed" in html
+    assert "0 proposed awaiting sign-off" in html
+    assert "checklist below" in html
+    assert "none proposed right now" not in html
+
+
 def test_render_html_triage_header_counts_match_floor_and_posture_state(
     tmp_path: Path,
 ) -> None:
@@ -2929,6 +2984,9 @@ def test_render_html_regions_render_header_then_decisions_then_audit(tmp_path: P
     idx_first_clause = html.index('<details class="clause"')
 
     assert idx_header < idx_decisions < idx_audit < idx_first_clause
+    # One pending candidate → the checklist section does render, so the
+    # header's "checklist below" pointer is accurate here (issue #186).
+    assert "checklist below" in html
 
 
 def test_render_html_clauses_collapsed_by_default(tmp_path: Path) -> None:
