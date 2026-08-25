@@ -478,17 +478,19 @@ def test_judge_writes_empty_pending_file_when_round_completes_clean(tmp_path: Pa
     out_dir = tmp_path / "out"
 
     # Round 1: queues pending items.
-    code, output = _invoke("judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir))
+    code, output = _invoke(
+        "judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir)
+    )
     assert code == 0, f"judge (round 1) failed:\n{output}"
 
     # Apply canned verdicts so round 2 has nothing left to queue.
-    code, output = _invoke(
-        "judge-apply", str(out_dir), "--verdicts", str(_CANNED_VERDICTS)
-    )
+    code, output = _invoke("judge-apply", str(out_dir), "--verdicts", str(_CANNED_VERDICTS))
     assert code == 0, f"judge-apply failed:\n{output}"
 
     # Round 2: a clean, fully-judged re-run — 0 new pending items.
-    code, output = _invoke("judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir))
+    code, output = _invoke(
+        "judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir)
+    )
     assert code == 0, f"judge (round 2) failed:\n{output}"
     assert "(0 pending items)" in output, f"Expected 0 pending items; got:\n{output}"
 
