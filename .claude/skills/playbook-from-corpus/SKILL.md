@@ -975,10 +975,18 @@ separate prompts.
 **Write options at medium depth.** Each option label is a short phrase; each
 `description` states what choosing it *commits the playbook to*, and cites the
 corpus number behind it. Not `"Collaborative"` — rather
-`"Collaborative — we usually want the placement"` with a description naming that
-94% of observations are on our own paper. The user should be able to choose
-without reading anything else, and should learn something from the options
-themselves.
+`"Collaborative — we usually want the placement"` with a description naming
+what share of *this run's own* observations are on our own paper — a past
+corpus measured 94% that way. **That 94% is this document's illustration, not
+a value to reuse.** Recompute the real figure from `$OUT/observations.jsonl`
+(the `provenance:` counts the analysis script above just printed) immediately
+before you write the sentence — not from memory, not from an earlier round of
+this same interview, and never by echoing this example. Say which population
+you measured: percent of *observations* and percent of *documents* answer
+different questions and can diverge by several points (a clause type can be
+near-universal by observation count while still missing from a meaningful
+share of documents) — name the one you're citing so a reader can tell which
+denominator produced the number.
 
 **Order options within a question by what the corpus supports**, most-supported
 first, so the likely answer is the first thing read. Never pad to four options
