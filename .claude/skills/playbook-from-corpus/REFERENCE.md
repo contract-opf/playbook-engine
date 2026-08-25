@@ -37,7 +37,16 @@ read it once and keep it at hand).
 > Respond with JSON: `{"taxonomy_id": "<id or null>", "confidence": 0.0–1.0, "rationale": "..."}`
 
 **Rules:**
-- Confidence < 0.6: set `needs_review: true` in the verdict.
+- Confidence < 0.70: set `needs_review: true` in the verdict. **This is
+  behavioral, not advisory:** 0.70 is `clause_classifier.AMBIGUITY_THRESHOLD`
+  — a stored classify confidence below it trips
+  `ClauseClassification.is_ambiguous` in the engine. A second, independent
+  cutoff also applies downstream regardless of what you set here: the AAR's
+  "needs attention" report separately flags any observation whose stored
+  `confidence` is < 0.5 (`aar.py`'s hardcoded low-confidence check). Both
+  read the same stored `confidence` field, so there is no reason to shade a
+  genuine judgment below its true value — score honestly and let the
+  thresholds do their job.
 - Never invent a `taxonomy_id` not in the provided list.
 - Prefer specificity: if multiple entries match, pick the most specific.
 
@@ -117,7 +126,14 @@ context: `taxonomy_id`, `clause_path`, `document_id`.
   no needs_review). Only judge the remaining hunks individually. On real
   corpora a third or more of deviation items are relocation echoes; judging
   them blind wastes effort and floods the report with needs_review flags.
-- Confidence < 0.65: set `needs_review: true`.
+- Confidence < 0.65: set `needs_review: true`. **This is advisory only, not
+  behavioral:** unlike the classify and provenance thresholds above, no
+  engine constant enforces a deviation confidence cutoff — deviation
+  confidence is never persisted to `observations.jsonl` and no downstream
+  reader (AAR, compiler, viewer) gates on it, so 0.65 is a calibration
+  target for your own judgment, not a value the pipeline will act on. Flag
+  genuine uncertainty anyway — a human reading the report benefits even
+  though the engine does not.
 - ALWAYS include `risk_delta` — for `none` / `reworded_equivalent` use
   `{"direction": "neutral", "magnitude": "none"}` (omitting it fails
   apply-time validation; the neutral direction requires magnitude `none`).
