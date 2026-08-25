@@ -545,7 +545,10 @@ signals that actually land there must not be silently suppressed. Per
 Guardrail 2 above, Needs Attention today only derives from: quarantined
 documents (`_load_quarantine`, see criterion 4 above), a compiled
 observation's **classification** confidence below 0.5 (`aar.py`), genuinely
-unresolved/unjudged pending items, and failed version ingests. Setting
+unresolved/unjudged pending items, failed version ingests, and a
+`corpus_manifest.json`-vs-`playbook.opf.json` corpus-count disagreement — the
+signature of an `out_dir` that mixes artifacts from two different runs, e.g.
+a non-atomic backup copy (`aar.py`'s manifest-vs-playbook check). Setting
 `needs_review: true` on a deviation or provenance verdict is **not** among
 these — it is not currently copied onto an observation, so it does not by
 itself reach the report; if such a call needs a human's eyes before this

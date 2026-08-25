@@ -639,6 +639,52 @@ def _build_needs_attention(
             }
         )
 
+    # Manifest-vs-playbook disagreement (issue #180): corpus_manifest.json
+    # on disk and playbook.opf.json's own corpus.documents snapshot are
+    # written from the SAME data in a healthy run — pipeline.py's project
+    # step reads corpus_manifest.json and passes it straight into
+    # playbook_assembler.assemble_playbook, which embeds it verbatim as
+    # playbook["corpus"]["documents"]. If the two disagree, this out_dir
+    # mixes artifacts from two different runs — e.g. a non-atomic backup
+    # copy pasted an aborted run's manifest (near-zero in-scope docs, most
+    # versions unmined) beside a complete production playbook. Anything that
+    # reads corpus_manifest.json alone to characterize the compiled
+    # playbook (a preflight, a status check) would otherwise draw exactly
+    # the wrong conclusion. Compared as aggregate counts, not a full diff,
+    # to stay robust to incidental field differences between the two files.
+    playbook_corpus_docs = (playbook or {}).get("corpus", {}).get("documents") or []
+    if manifest and playbook_corpus_docs:
+        manifest_in_scope = sum(1 for d in manifest.values() if d.get("in_scope"))
+        playbook_in_scope = sum(
+            1 for d in playbook_corpus_docs if isinstance(d, dict) and d.get("in_scope")
+        )
+        manifest_mined = sum(int(d.get("versions_mined") or 0) for d in manifest.values())
+        playbook_mined = sum(
+            int(d.get("versions_mined") or 0)
+            for d in playbook_corpus_docs
+            if isinstance(d, dict)
+        )
+        if manifest_in_scope != playbook_in_scope or manifest_mined != playbook_mined:
+            item_num += 1
+            items.append(
+                {
+                    "item_number": item_num,
+                    "document_id": "—",
+                    "version": "—",
+                    "taxonomy_id": None,
+                    "reasons": [
+                        "corpus_manifest.json disagrees with playbook.opf.json's own "
+                        f"corpus snapshot: manifest shows {manifest_in_scope} in-scope "
+                        f"document(s) / {manifest_mined} version(s) mined, but the "
+                        f"compiled playbook's corpus.documents shows {playbook_in_scope} "
+                        f"in-scope document(s) / {playbook_mined} version(s) mined — "
+                        "this out_dir likely mixes artifacts from two different runs "
+                        "(e.g. a non-atomic backup copy); do not trust "
+                        "corpus_manifest.json alone to characterize this playbook"
+                    ],
+                }
+            )
+
     # Degenerate judging: a prior real run recorded 1029/1029 deviation
     # verdicts "none" (a scripted rubber stamp) and no gate flagged it. When
     # one value covers more than _DEGENERATE_DEVIATION_SHARE of the
