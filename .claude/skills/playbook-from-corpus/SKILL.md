@@ -196,7 +196,7 @@ docker run --rm -i \
 "the input device is not a TTY". `make docker-run` already uses the
 non-TTY-safe form.)
 
-Two things this changes about the steps below:
+What this changes about the steps below:
 
 1. **Paths inside `ARGS=` are container paths** (`/work/corpus`, `/work/out`),
    not host paths — the `-v` mounts above do the translation. Config files
