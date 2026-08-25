@@ -319,7 +319,7 @@ The Posture is the "smart, system-prompt-style directions" layer: a prose block 
 ```jsonc
 "posture": {
   "system_prompt": "This is a generally low-risk agreement type; default toward ACCEPT. We typically go two negotiation rounds before escalating. Hold firm on the liability cap and on declining indemnification (see Floor). Term, notice periods, and renewal mechanics are flexible to close. Write rationale tersely for a GC audience…",
-  "version": 1,                            // governed counter (NEW, issue #156) — bumped each re-run of the interview
+  "version": 1,                            // governed counter (NEW, issue #156) — bumped when a re-run of the interview actually changes the content (issue #132: a byte-identical re-run is a no-op)
   "generation": {                          // provenance: how the prompt was produced
     "generated_by": "playbook-engine vX.Y.Z",
     "generated_at": "ISO-8601 (supplied by caller)",
@@ -334,7 +334,7 @@ The Posture is the "smart, system-prompt-style directions" layer: a prose block 
 ```
 
 **Normative rules:**
-1. `system_prompt` is **legal behavior**. The OPF carries the *initial, compiler-generated* version (the genesis record). A consumer that lets a human edit the Posture MUST treat each edit as a governed version bump (§8) — versioned, diffed, re-approved, rollback-able — never a free-text field that silently changes production behavior. The producer itself already versions its own genesis Posture: `version` starts at `1` and is incremented by 1 each time the compiler's interview (§7) is re-run against an existing Posture (issue #156) — this is the OPF-side half of "governed"; a consumer's edit-time versioning (§8) picks up from there.
+1. `system_prompt` is **legal behavior**. The OPF carries the *initial, compiler-generated* version (the genesis record). A consumer that lets a human edit the Posture MUST treat each edit as a governed version bump (§8) — versioned, diffed, re-approved, rollback-able — never a free-text field that silently changes production behavior. The producer itself already versions its own genesis Posture: `version` starts at `1` and is incremented by 1 each time the compiler's interview (§7) is re-run against an existing Posture **with different answers** (issue #156) — this is the OPF-side half of "governed"; a consumer's edit-time versioning (§8) picks up from there. A re-run whose answers are byte-identical to the existing Posture is a no-op: `version` is left untouched rather than bumped for a revision that never happened (issue #132) — a producer MUST NOT advance `version` on a re-run it can determine made no actual change.
 2. The `generation.interview` record is **provenance**: it lets an auditor see *why* the Posture says what it says. It MUST be retained.
 3. The Posture MUST NOT restate or contradict the Floor. The Floor is the authority on hard lines; the Posture may *reference* it ("hold firm on X, see Floor") but a Floor invariant binds regardless of Posture text (§5). Per issue #156's decided direction (2026-07-10): a Posture that appears to soften language around a Floor-protected concept is a **SHOULD-warn** (judgment-first, non-blocking) that a conformant validator surfaces for human review — not a hard validation error.
 4. The Posture is **soft** at runtime (§5): it shapes the model's judgment; it is not a gate and cannot, by itself, force or suppress a decision the way a Floor rule does.

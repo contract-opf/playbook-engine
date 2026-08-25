@@ -8,11 +8,14 @@ prose is templated/assembled from the interview answers, not model-written.
 
 This module is the *mechanism*: the canonical question set, the deterministic
 assembly of ``posture.system_prompt`` + ``posture.generation.interview`` from
-answers, a governed ``version`` counter that bumps every time the interview is
-re-run against an existing posture, and a deterministic (non-LLM) SHOULD-warn
-check for a Posture that softens language around a Floor-protected concept —
-per the issue's Direction, this is advisory (judgment-first), never a hard
-error; ``validator.py`` wires it in as a non-blocking ``ValidationError``.
+answers, a governed ``version`` counter that bumps when the interview is
+re-run against an existing posture WITH DIFFERENT ANSWERS (a byte-identical
+re-run is a no-op that leaves ``version`` untouched — issue #132; see
+``apply_posture_interview()``'s docstring), and a deterministic (non-LLM)
+SHOULD-warn check for a Posture that softens language around a
+Floor-protected concept — per the issue's Direction, this is advisory
+(judgment-first), never a hard error; ``validator.py`` wires it in as a
+non-blocking ``ValidationError``.
 
 The GC actually answering the interview is a runtime step; this module is
 exercised in tests with fixture answers (issue #156's Out of scope note).
@@ -461,11 +464,20 @@ def check_posture_floor_conflict(
 
 @dataclass(frozen=True)
 class PostureApplyResult:
-    """Result of writing a freshly generated Posture into ``playbook.opf.json``."""
+    """Result of applying a Posture interview run to ``playbook.opf.json``.
+
+    ``changed`` is ``False`` for a true no-op re-run (issue #132): the
+    freshly assembled ``system_prompt`` + recorded ``interview`` matched the
+    existing Posture byte-for-byte, so nothing was written and ``version``
+    is the PRIOR version, unchanged — never bumped for content that didn't
+    actually change. ``True`` covers every other case, including the first
+    ever interview run (``version`` starts at 1).
+    """
 
     version: int
     warnings: tuple[str, ...]
     path: Path
+    changed: bool
 
 
 def apply_posture_interview(
@@ -484,12 +496,34 @@ def apply_posture_interview(
     existing document, replaces sections, refreshes ``identity`` (since —
     unlike ``curation`` — both ``posture`` and ``floor`` ARE part of
     ``content_hash``; see ``canonicalize.py``), and writes back atomically
-    via ``playbook_assembler.write_playbook``. ``posture`` is always
-    replaced (its ``version`` always advances); ``floor`` is only replaced
-    when the Q4 promotion below actually changed ``floor.invariants`` — a
-    run that doesn't touch the Floor doesn't fabricate a
-    ``floor.invariants: []`` or otherwise perturb ``identity`` for no
-    reason (issue #89 review finding 6).
+    via ``playbook_assembler.write_playbook``. ``posture`` is replaced (its
+    ``version`` advances) UNLESS this run is a true no-op — see below;
+    ``floor`` is only replaced when the Q4 promotion below actually changed
+    ``floor.invariants`` — a run that doesn't touch the Floor doesn't
+    fabricate a ``floor.invariants: []`` or otherwise perturb ``identity``
+    for no reason (issue #89 review finding 6).
+
+    Issue #132: a byte-identical re-run — the freshly assembled
+    ``system_prompt`` + recorded ``interview`` match the existing Posture
+    exactly (same answers file re-applied unchanged) — leaves ``posture``,
+    and therefore ``version``, untouched instead of bumping the governed
+    counter for content that didn't actually change. A version bump is a
+    governance signal that a revision happened; bumping it on every
+    re-run — even a pure no-op — falsely tells an auditor diffing
+    ``posture.version`` across copies that the Posture changed. This
+    mirrors ``playbook floor sign``'s own no-op path (``cli.py``:
+    re-signing an already-signed, unchanged statement leaves the existing
+    entry — and the document — untouched rather than writing a
+    no-difference update). When BOTH ``posture`` and ``floor`` come out
+    unchanged this way, nothing is written at all and ``identity`` is left
+    alone, exactly like that no-op path — UNLESS the Evidence this Posture
+    is grounded in has itself moved since the last run (review finding 1):
+    a byte-identical answers file doesn't guarantee a byte-identical
+    grounding, so ``generation.grounded_in`` (and its ``generated_at`` /
+    ``generated_by`` provenance) is refreshed and written even on an
+    otherwise-no-op run — ``version`` still stays untouched, since no
+    textual revision happened, but an auditor reading ``grounded_in``
+    never sees a stale claim.
 
     The Floor promotion (issue #89) is not the auto-promotion OPF-SPEC.md
     §3.7 rule 4 forbids — see ``floor_candidates.promote_interview_q4_invariants``'s
@@ -533,11 +567,13 @@ def apply_posture_interview(
                        silently restarting at 1.
 
     Returns:
-        ``PostureApplyResult`` — the new version number, any SHOULD-warn
-        messages (one ``playbook floor sign`` warning per sentence-shaped
-        Q4 item, issue #104, followed by any messages from
-        ``check_posture_floor_conflict()`` checked against the Floor's
-        post-promotion state), and the path written.
+        ``PostureApplyResult`` — the resulting version number (unchanged
+        from the prior run when this call was a no-op, issue #132; the new,
+        bumped version otherwise), any SHOULD-warn messages (one ``playbook
+        floor sign`` warning per sentence-shaped Q4 item, issue #104,
+        followed by any messages from ``check_posture_floor_conflict()``
+        checked against the Floor's post-promotion state), the path
+        (written or not), and ``changed``.
 
     Raises:
         FileNotFoundError: no ``playbook.opf.json`` in *out_dir*.
@@ -571,6 +607,44 @@ def apply_posture_interview(
         base_version=base_version,
     )
 
+    # Issue #132: a no-op re-run — same answers, so the freshly assembled
+    # `system_prompt` + recorded `interview` are byte-identical to the
+    # existing Posture — keeps the EXISTING (already-versioned) Posture
+    # rather than the tentatively-bumped one just generated above. Only a
+    # non-empty existing Posture can be a no-op target (a first-ever
+    # interview, `existing_posture == {}`, is always a real change:
+    # `version` correctly starts at 1).
+    existing_prompt = existing_posture.get("system_prompt")
+    existing_interview = (existing_posture.get("generation") or {}).get("interview")
+    posture_is_noop = bool(existing_posture) and (
+        existing_prompt == posture["system_prompt"]
+        and existing_interview == posture["generation"]["interview"]
+    )
+    # Issue #132 review finding 1: a no-op on answers alone is not
+    # necessarily a no-op on grounding — the Evidence this Posture is
+    # grounded in can move (a re-mine) between two runs of the interview
+    # with the SAME answers file. Refresh `generation.grounded_in` (and
+    # `generated_at`/`generated_by`, its provenance) even on a no-op write
+    # so `grounded_in` never silently goes stale, but leave `version`
+    # untouched — the prose/interview didn't change, so this isn't a
+    # governed revision.
+    grounding_moved = False
+    if posture_is_noop:
+        existing_grounded_in = (existing_posture.get("generation") or {}).get("grounded_in")
+        new_grounded_in = posture["generation"].get("grounded_in")
+        grounding_moved = existing_grounded_in != new_grounded_in
+        if grounding_moved:
+            refreshed_generation = dict(existing_posture.get("generation") or {})
+            refreshed_generation["generated_at"] = generated_at
+            refreshed_generation["generated_by"] = generated_by
+            if new_grounded_in is not None:
+                refreshed_generation["grounded_in"] = new_grounded_in
+            else:
+                refreshed_generation.pop("grounded_in", None)
+            posture = {**existing_posture, "generation": refreshed_generation}
+        else:
+            posture = existing_posture
+
     existing_invariants = (doc.get("floor") or {}).get("invariants") or []
     try:
         floor_invariants = promote_interview_q4_invariants(
@@ -597,6 +671,19 @@ def apply_posture_interview(
         posture["system_prompt"], floor_invariants
     )
 
+    floor_changed = floor_invariants != existing_invariants
+    # True full no-op (issue #132): neither `posture` nor `floor` actually
+    # changed this run, and the Evidence grounding didn't move either
+    # (review finding 1) — mirrors `playbook floor sign`'s no-op path
+    # (cli.py: re-signing an unchanged statement leaves the document, and
+    # `identity`, completely untouched rather than writing a
+    # no-difference update). Nothing is written; `version` returned below
+    # is the prior, un-bumped version.
+    if posture_is_noop and not floor_changed and not grounding_moved:
+        return PostureApplyResult(
+            version=posture["version"], warnings=tuple(warnings), path=opf_path, changed=False
+        )
+
     doc["posture"] = posture
     # Only rewrite `floor` when promotion actually changed it — e.g. no
     # `sacred_clauses` answer this run, or a true no-op re-run — so a
@@ -605,7 +692,7 @@ def apply_posture_interview(
     # section_digests) for no reason. OPF-SPEC.md §3.7 rule 3 makes the
     # section optional; prompt_renderer.py already treats `[]` and absent
     # identically (issue #89 review finding 6).
-    if floor_invariants != existing_invariants:
+    if floor_changed:
         floor_section = dict(doc.get("floor") or {})
         floor_section["invariants"] = floor_invariants
         doc["floor"] = floor_section
@@ -615,4 +702,6 @@ def apply_posture_interview(
 
     write_playbook(doc, opf_path)
 
-    return PostureApplyResult(version=posture["version"], warnings=tuple(warnings), path=opf_path)
+    return PostureApplyResult(
+        version=posture["version"], warnings=tuple(warnings), path=opf_path, changed=True
+    )

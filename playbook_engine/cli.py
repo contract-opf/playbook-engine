@@ -3261,7 +3261,10 @@ def posture_interview_cmd(
     Asks the canonical 3-6 question set (OPF-SPEC.md §7), assembles
     the answers deterministically into ``posture.system_prompt``, and writes
     the result into OUT_DIR/playbook.opf.json as a governed, versioned block:
-    each re-run against an existing Posture bumps ``posture.version`` by 1.
+    a re-run against an existing Posture whose answers actually changed
+    bumps ``posture.version`` by 1. A byte-identical re-run (same answers as
+    the existing Posture) is a no-op — ``posture.version`` is left
+    untouched rather than bumped for a revision that never happened.
 
     A re-derivation into a wiped or freshly re-derived OUT_DIR has no prior
     Posture of its own to bump from — pass ``--base-version`` with the last
@@ -3315,7 +3318,14 @@ def posture_interview_cmd(
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
-    click.secho(f"OK  posture.version={result.version} written to {result.path}", fg="green")
+    if result.changed:
+        click.secho(f"OK  posture.version={result.version} written to {result.path}", fg="green")
+    else:
+        click.secho(
+            f"OK  posture.version={result.version} unchanged (no-op — answers matched "
+            f"the existing Posture) — {result.path}",
+            fg="green",
+        )
     for warning in result.warnings:
         click.secho(f"WARN  {warning}", fg="yellow")
 

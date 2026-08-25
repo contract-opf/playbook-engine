@@ -976,7 +976,11 @@ Rules that are easy to get wrong:
   treating the answer as signed.
 - **Re-running is safe.** The same statement always resolves to the same id and
   updates in place — never a duplicate (a repeated id is a blocking validator
-  error, §3.13). Offer to re-run whenever the user's answers change.
+  error, §3.13). Offer to re-run whenever the user's answers change. A
+  re-run with the SAME (unchanged) answers file is a true no-op end to
+  end: `posture.version` is left untouched too, not just `floor.invariants`
+  (issue #132) — nothing is written, so re-offering the interview "just to
+  be safe" never inflates the version.
 - **`posture.version` only carries forward on its own when OUT_DIR is
   recompiled in place** (Route C reuses the same out-dir, so `project`'s
   carry-forward keeps the version climbing automatically — nothing to do
