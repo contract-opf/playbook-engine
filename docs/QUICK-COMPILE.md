@@ -186,7 +186,7 @@ order:
   - v3-fully-executed.pdf
 ```
 
-Then re-run `playbook mine --no-cache` followed by `playbook project` to pick up the hints. Note: `--no-cache` also forces a full re-extraction (docling/pdfplumber/python-docx/pandoc) of the corpus, even if `extraction_cache.jsonl` is already warm — it is not a cheap flag to reach for routinely.
+Then re-run `playbook mine` (no flag needed) followed by `playbook project` to pick up the hints. The cache key for each document is derived in part from a hash of its `hints.yaml` content, so editing the file already invalidates that document's cached artifacts and forces it to be re-mined — reserve `--no-cache` for suspect extractions (it forces a full re-extraction — docling/pdfplumber/python-docx/pandoc — of the *entire* corpus, even if `extraction_cache.jsonl` is already warm, so it is not a cheap flag to reach for routinely).
 
 ---
 

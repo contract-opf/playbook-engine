@@ -140,6 +140,19 @@ def test_report_lists_document_counts(tmp_path: Path) -> None:
     assert "2 in scope / 2 total" in report
 
 
+def test_report_hints_banner_does_not_prescribe_no_cache(tmp_path: Path) -> None:
+    """Issue #197: hints.yaml is hashed into the per-document cache key (see
+    artifact_store.make_doc_key), so a plain `playbook mine` re-run already
+    picks up a hints.yaml edit for the affected document — the banner must
+    not send the reader to `--no-cache` (which forces a full corpus
+    re-extraction) for this case.
+    """
+    out_dir = _make_out_dir(tmp_path)
+    report = build_inspection_report(out_dir)
+    assert "re-run `playbook mine`" in report
+    assert "--no-cache" not in report
+
+
 def test_report_observation_count(tmp_path: Path) -> None:
     out_dir = _make_out_dir(tmp_path)
     report = build_inspection_report(out_dir)
