@@ -21,10 +21,16 @@ DOCX with tracked changes is the richest signal (it carries who proposed
 each change); PDF and RTF work; scans work on the Docker runtime (OCR).
 
 **Lay out the corpus.** The expected shape is one directory per deal
-([docs/CORPUS-LAYOUT.md](CORPUS-LAYOUT.md)). Exported from a CLM or DMS in
-some other shape? `playbook stage` proposes a `staging_plan.json` from the
-files' contents and metadata — you review the plan, then execute it.
-Nothing moves until you approve.
+([docs/CORPUS-LAYOUT.md](CORPUS-LAYOUT.md)). `playbook stage` recognizes a
+few common shapes — that one, a `manifest.jsonl`, or CLM-style nested
+folders — and stages a recognized shape directly (your source files are
+only ever read, never modified). Exported from a CLM or DMS in some other
+shape it can't recognize? `playbook stage` refuses and proposes a
+`staging_plan.json` from the files' contents and metadata instead — you
+review the plan, then `playbook stage <path-to-corpus> --from-plan
+staging_plan.json` to execute it. Nothing moves until you approve that
+plan. Want the same preview-then-approve step even on a shape `stage`
+would otherwise recognize? Pass `--plan-only` explicitly.
 
 **Write the config.** Four decisions, one YAML — save it inside your corpus
 folder, next to the agreement subfolders (e.g. `corpus/playbook.config.yaml`),
