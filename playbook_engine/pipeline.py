@@ -1213,15 +1213,62 @@ def _atomic_json_write(data: Any, path: Path) -> None:
     os.replace(tmp, path)
 
 
-def _alias_version_field(value: Any, known_entities: list[str], registry: EntityRegistry) -> Any:
+def _build_version_alias_map(version_ingest: Any) -> dict[str, str]:
+    """Exact raw-stem -> ordinal-label map for one document's versions (issue #143).
+
+    ``version_ingest`` is one entry per version FILE FOUND, in discovery
+    order (see ``_build_version_ingest_list``'s docstring), so entry *i*'s
+    stem is given the stable label ``f"v{i + 1}"`` — the same convention
+    ``publisher._strip_source_paths`` already uses for the published
+    artifact's ``version_ingest[].version``.
+
+    Unlike the whole-word ``known_entities`` substring match
+    ``_alias_version_field`` otherwise falls back to, this doesn't depend on
+    the counterparty's name being enumerated (correctly, completely, and in
+    a form that appears as whitespace-separated words in the filename) in
+    ``config.provenance.known_entities`` — it maps every stem this document
+    actually has, so an unlisted, abbreviated, or concatenated name embedded
+    in a filename is no longer a coverage gap (issue #143's evidence: a
+    version stem with no internal whitespace at all, so no known-entity
+    substring match could ever have caught it).
+    """
+    out: dict[str, str] = {}
+    if not isinstance(version_ingest, list):
+        return out
+    for i, vi in enumerate(version_ingest):
+        stem = vi.get("version") if isinstance(vi, dict) else None
+        if isinstance(stem, str):
+            out[stem] = f"v{i + 1}"
+    return out
+
+
+def _alias_version_field(
+    value: Any,
+    known_entities: list[str],
+    registry: EntityRegistry,
+    version_alias_map: dict[str, str] | None = None,
+) -> Any:
     """Alias a citation/manifest ``version``/``version_id`` field (issue #182).
 
     These are staged filename stems that embed the counterparty name (e.g.
     "01__… Oglethorpe University 6.14.23"), so run them through the whole-word
     text pseudonymizer. A plain ordinal (``int``) carries no name and is
     returned unchanged.
+
+    *version_alias_map* (issue #143), when given, is an EXACT raw-stem ->
+    ordinal-label map (see :func:`_build_version_alias_map`) for the SAME
+    document this value belongs to. It is tried FIRST and, on a hit, wins
+    outright — an exact lookup against the document's own known stems cannot
+    miss the way whole-word substring matching against ``known_entities``
+    can. Only when *value* isn't one of that document's known stems (or no
+    map was given) does this fall back to the substring pseudonymizer below,
+    as defense in depth for any residual name fragment reaching this
+    function some other way (e.g. a caller with no manifest-derived map to
+    give, like ``citation.version``/``citation.version_id``).
     """
     if isinstance(value, str):
+        if version_alias_map is not None and value in version_alias_map:
+            return version_alias_map[value]
         return pseudonymize_text(value, known_entities, registry)
     return value
 
@@ -1244,7 +1291,10 @@ def _pseudonymize_observation_id(
 
 
 def _pseudonymize_observations(
-    observations: list[Observation], known_entities: list[str], registry: EntityRegistry
+    observations: list[Observation],
+    known_entities: list[str],
+    registry: EntityRegistry,
+    version_alias_by_doc: dict[str, dict[str, str]] | None = None,
 ) -> list[Observation]:
     """Return *observations* with clause text and every document id aliased.
 
@@ -1264,17 +1314,36 @@ def _pseudonymize_observations(
     ``truncate_search_snippets``. Never reorder those two steps: truncating
     first can bisect a known-entity name mid-word and defeat this function's
     whole-word alias match, leaking the fragment.
+
+    *version_alias_by_doc* (issue #143): the ``{raw document_id: version_alias_map}``
+    dict returned by :func:`_pseudonymize_corpus_documents`, keyed by the
+    SAME raw ``citation.document_id`` this observation carries (looked up
+    BEFORE that field is aliased below). Passing the matching per-document
+    map into :func:`_alias_version_field` for ``citation.version``/
+    ``citation.version_id`` gives them the same exact-stem-match coverage
+    ``_pseudonymize_trail``/``_pseudonymize_corpus_documents`` already have,
+    instead of relying solely on the whole-word ``known_entities`` substring
+    fallback, which misses a squashed (no-whitespace) counterparty name.
     """
     out: list[Observation] = []
     for obs in observations:
+        version_alias_map = (
+            version_alias_by_doc.get(obs.citation.document_id)
+            if version_alias_by_doc is not None
+            else None
+        )
         new_citation = ObservationCitation(
             document_id=pseudonymize_document_id(
                 obs.citation.document_id, known_entities, registry
             ),
-            version=_alias_version_field(obs.citation.version, known_entities, registry),
+            version=_alias_version_field(
+                obs.citation.version, known_entities, registry, version_alias_map
+            ),
             clause_path=obs.citation.clause_path,
             char_span=obs.citation.char_span,
-            version_id=_alias_version_field(obs.citation.version_id, known_entities, registry),
+            version_id=_alias_version_field(
+                obs.citation.version_id, known_entities, registry, version_alias_map
+            ),
         )
         out.append(
             dataclasses.replace(
@@ -1292,7 +1361,10 @@ def _pseudonymize_observations(
 
 
 def _pseudonymize_trail(
-    trail: dict[str, Any], known_entities: list[str], registry: EntityRegistry
+    trail: dict[str, Any],
+    known_entities: list[str],
+    registry: EntityRegistry,
+    version_alias_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return a copy of *trail* with every raw counterparty name aliased (issue #182, #34).
 
@@ -1306,6 +1378,14 @@ def _pseudonymize_trail(
     version stems in ``version_inserted``/``version_removed`` plus raw clause
     text in ``proposed_text`` — both are aliased too, so no raw counterparty
     name survives anywhere in the trail body.
+
+    *version_alias_map* (issue #143): the SAME document's exact raw-stem ->
+    ordinal-label map (see :func:`_build_version_alias_map`), built by the
+    caller from this document's ``corpus_manifest.json`` ``version_ingest``
+    entry so the trail's version labels ("v1"/"v2"/…) match the manifest's —
+    a reader cross-referencing the two artifacts sees the same labels for
+    the same physical file. See ``_alias_version_field`` for the exact-map-
+    first, substring-fallback precedence.
     """
     if not trail.get("document_id"):
         return dict(trail)
@@ -1313,18 +1393,23 @@ def _pseudonymize_trail(
     new["document_id"] = pseudonymize_document_id(trail["document_id"], known_entities, registry)
     if isinstance(new.get("ordered_versions"), list):
         new["ordered_versions"] = [
-            _alias_version_field(v, known_entities, registry) for v in new["ordered_versions"]
+            _alias_version_field(v, known_entities, registry, version_alias_map)
+            for v in new["ordered_versions"]
         ]
     if isinstance(new.get("signed_version"), str):
         new["signed_version"] = _alias_version_field(
-            new["signed_version"], known_entities, registry
+            new["signed_version"], known_entities, registry, version_alias_map
         )
     if isinstance(new.get("pairwise_distances"), list):
         new["pairwise_distances"] = [
             {
                 **pd,
-                "from": _alias_version_field(pd.get("from"), known_entities, registry),
-                "to": _alias_version_field(pd.get("to"), known_entities, registry),
+                "from": _alias_version_field(
+                    pd.get("from"), known_entities, registry, version_alias_map
+                ),
+                "to": _alias_version_field(
+                    pd.get("to"), known_entities, registry, version_alias_map
+                ),
             }
             if isinstance(pd, dict)
             else pd
@@ -1335,10 +1420,10 @@ def _pseudonymize_trail(
             {
                 **r,
                 "version_inserted": _alias_version_field(
-                    r.get("version_inserted"), known_entities, registry
+                    r.get("version_inserted"), known_entities, registry, version_alias_map
                 ),
                 "version_removed": _alias_version_field(
-                    r.get("version_removed"), known_entities, registry
+                    r.get("version_removed"), known_entities, registry, version_alias_map
                 ),
                 "proposed_text": pseudonymize_text(r["proposed_text"], known_entities, registry)
                 if isinstance(r.get("proposed_text"), str)
@@ -1410,21 +1495,40 @@ def _entity_slug_in_document_id(document_id: str, entity_name: str) -> bool:
 
 
 def _pseudonymize_round_moves(
-    moves: list[RoundMove], known_entities: list[str], registry: EntityRegistry
+    moves: list[RoundMove],
+    known_entities: list[str],
+    registry: EntityRegistry,
+    version_alias_by_doc: dict[str, dict[str, str]] | None = None,
 ) -> list[RoundMove]:
     """Alias raw entity names out of round moves (issue #177) — same born-safe
     pass ``_pseudonymize_observations`` applies, covering ``document_id``,
-    the citation, and ``change_summary`` (which quotes clause text)."""
+    the citation, and ``change_summary`` (which quotes clause text).
+
+    *version_alias_by_doc* (issue #143): same ``{raw document_id: version_alias_map}``
+    dict ``_pseudonymize_observations`` accepts — looked up against the
+    citation's raw ``document_id`` before it is aliased, and threaded into
+    ``citation.version``/``citation.version_id`` for the same exact-stem
+    coverage described there.
+    """
     out: list[RoundMove] = []
     for move in moves:
+        version_alias_map = (
+            version_alias_by_doc.get(move.citation.document_id)
+            if version_alias_by_doc is not None
+            else None
+        )
         new_citation = ObservationCitation(
             document_id=pseudonymize_document_id(
                 move.citation.document_id, known_entities, registry
             ),
-            version=_alias_version_field(move.citation.version, known_entities, registry),
+            version=_alias_version_field(
+                move.citation.version, known_entities, registry, version_alias_map
+            ),
             clause_path=move.citation.clause_path,
             char_span=move.citation.char_span,
-            version_id=_alias_version_field(move.citation.version_id, known_entities, registry),
+            version_id=_alias_version_field(
+                move.citation.version_id, known_entities, registry, version_alias_map
+            ),
         )
         out.append(
             dataclasses.replace(
@@ -1439,7 +1543,7 @@ def _pseudonymize_round_moves(
 
 def _pseudonymize_corpus_documents(
     corpus_documents: list[dict[str, Any]], known_entities: list[str], registry: EntityRegistry
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, str]]]:
     """Return *corpus_documents* with each entry's ``document_id`` aliased (issue #153).
 
     ``corpus_documents`` (``corpus_manifest.json``) feeds directly into
@@ -1449,9 +1553,22 @@ def _pseudonymize_corpus_documents(
     carry the same alias as the matching observations'
     ``citation.document_id`` for the compiled OPF to be consistent, not just
     the observation store.
+
+    Also returns a ``{raw document_id: version_alias_map}`` dict (issue
+    #143) — one exact raw-stem -> ordinal-label map per document (see
+    :func:`_build_version_alias_map`), keyed by the document's RAW,
+    pre-alias id (matching ``all_trails``' key) so the caller can pass the
+    SAME per-document map into :func:`_pseudonymize_trail`, keeping the
+    trail's version labels consistent with the manifest's.
     """
     out = []
+    version_alias_by_doc: dict[str, dict[str, str]] = {}
     for doc in corpus_documents:
+        raw_doc_id = doc.get("document_id")
+        version_alias_map = _build_version_alias_map(doc.get("version_ingest"))
+        if isinstance(raw_doc_id, str):
+            version_alias_by_doc[raw_doc_id] = version_alias_map
+
         new_doc = dict(doc)
         if "document_id" in new_doc:
             new_doc["document_id"] = pseudonymize_document_id(
@@ -1459,20 +1576,28 @@ def _pseudonymize_corpus_documents(
             )
         # version_ingest / signed_version embed the staged filename stem, which
         # carries the counterparty name (issue #182) — alias those too so the
-        # manifest embedded in playbook.opf.json holds no raw names.
+        # manifest embedded in playbook.opf.json holds no raw names. Issue
+        # #143: pass the exact per-document version_alias_map so this no
+        # longer depends on the name appearing, whole-word, in
+        # known_entities — see _alias_version_field.
         if isinstance(new_doc.get("version_ingest"), list):
             new_doc["version_ingest"] = [
-                {**vi, "version": _alias_version_field(vi.get("version"), known_entities, registry)}
+                {
+                    **vi,
+                    "version": _alias_version_field(
+                        vi.get("version"), known_entities, registry, version_alias_map
+                    ),
+                }
                 if isinstance(vi, dict)
                 else vi
                 for vi in new_doc["version_ingest"]
             ]
         if isinstance(new_doc.get("signed_version"), str):
             new_doc["signed_version"] = _alias_version_field(
-                new_doc["signed_version"], known_entities, registry
+                new_doc["signed_version"], known_entities, registry, version_alias_map
             )
         out.append(new_doc)
-    return out
+    return out, version_alias_by_doc
 
 
 def _our_aliases_match_any_tree(trees: Iterable[ClauseTree], aliases: list[str]) -> bool:
@@ -3126,6 +3251,12 @@ def mine_corpus(
         if known_entities
         else None
     )
+    # Per-document {raw stem: ordinal label} maps (issue #143), populated
+    # below when pseudonymization runs — read back by the trail-writing loop
+    # further down so trail.json's version labels match corpus_manifest.json's
+    # for the same document. Empty (never consulted) when known_entities
+    # isn't configured, same as every other pseudonymization artifact here.
+    version_alias_by_doc: dict[str, dict[str, str]] = {}
     if known_entities and entity_registry is not None:
         # counterparty_ref (issue #177) needs the RAW names to match a deal
         # to its known entity, so it runs BEFORE the erasing pass below and
@@ -3133,15 +3264,24 @@ def mine_corpus(
         all_observations = _attach_counterparty_refs(
             all_observations, known_entities, entity_registry
         )
-        all_observations = _pseudonymize_observations(
-            all_observations, known_entities, entity_registry
-        )
-        t_observations = _pseudonymize_observations(t_observations, known_entities, entity_registry)
-        all_round_moves = _pseudonymize_round_moves(
-            all_round_moves, known_entities, entity_registry
-        )
-        corpus_documents = _pseudonymize_corpus_documents(
+        # #143: computed BEFORE the observations/round_moves passes below so
+        # their citation.version/citation.version_id get the same exact
+        # raw-stem -> ordinal-label coverage corpus_documents/trail already
+        # have, instead of relying solely on the whole-word known_entities
+        # substring fallback (which misses a squashed, no-whitespace name).
+        # Looked up by RAW document_id, matching this dict's keys — see
+        # _pseudonymize_corpus_documents's docstring.
+        corpus_documents, version_alias_by_doc = _pseudonymize_corpus_documents(
             corpus_documents, known_entities, entity_registry
+        )
+        all_observations = _pseudonymize_observations(
+            all_observations, known_entities, entity_registry, version_alias_by_doc
+        )
+        t_observations = _pseudonymize_observations(
+            t_observations, known_entities, entity_registry, version_alias_by_doc
+        )
+        all_round_moves = _pseudonymize_round_moves(
+            all_round_moves, known_entities, entity_registry, version_alias_by_doc
         )
         # Scope log keys on document_id too (issue #182): alias it so scope.json
         # joins the pseudonymized trail/observation ids in `inspect` instead of
@@ -3216,7 +3356,12 @@ def mine_corpus(
         stale_trail.unlink()
     for raw_doc_id, trail in all_trails:
         if entity_registry is not None:
-            trail = _pseudonymize_trail(trail, known_entities, entity_registry)
+            trail = _pseudonymize_trail(
+                trail,
+                known_entities,
+                entity_registry,
+                version_alias_by_doc.get(raw_doc_id),
+            )
         out_doc_id = trail.get("document_id") or raw_doc_id
         _atomic_json_write(trail, trail_dir / f"{out_doc_id}.json")
 

@@ -1022,3 +1022,173 @@ def test_pseudonymize_trail_end_to_end_no_raw_name_survives_mining(tmp_path: Pat
         "fixture must actually produce a reversal (planted insert-then-revert) "
         "for this test to exercise the reversals-pseudonymization path"
     )
+
+
+# ---------------------------------------------------------------------------
+# Version labels are never pseudonymized (issue #143)
+#
+# _alias_version_field's whole-word substring match against known_entities
+# misses a version filename stem that embeds a counterparty name in a form
+# that doesn't tokenize the same way the configured known_entities spelling
+# does (e.g. no internal whitespace between the words at all — a common
+# filename-squashing pattern) — even though document_id (built from the
+# corpus folder name, tokenized differently) got aliased correctly. The fix
+# maps each document's version stems to an exact ordinal label ("v1", "v2",
+# …) instead of relying on that substring match at all.
+# ---------------------------------------------------------------------------
+
+# Synthetic, fictional counterparty name — not any real institution.
+_SQUASHED_ENTITY = "Northgate Affiliates"
+
+
+def test_build_version_alias_map_assigns_ordinals_in_discovery_order() -> None:
+    from playbook_engine.pipeline import _build_version_alias_map
+
+    version_ingest = [
+        {"version": "01__stem-a", "status": "ok"},
+        {"version": "02__stem-b", "status": "failed"},
+        {"version": "03__stem-c", "status": "ok"},
+    ]
+    assert _build_version_alias_map(version_ingest) == {
+        "01__stem-a": "v1",
+        "02__stem-b": "v2",
+        "03__stem-c": "v3",
+    }
+    # Non-list / missing input is a no-op empty map, never raises.
+    assert _build_version_alias_map(None) == {}
+    assert _build_version_alias_map("not-a-list") == {}
+
+
+def test_alias_version_field_exact_map_catches_what_substring_match_misses(
+    tmp_path: Path,
+) -> None:
+    """A version stem with the counterparty name squashed (no whitespace)
+    defeats the whole-word substring matcher entirely, even with the name
+    correctly configured in known_entities — the exact version_alias_map
+    must catch it anyway (issue #143)."""
+    from playbook_engine.pipeline import _alias_version_field, _build_version_alias_map
+
+    reg = EntityRegistry.load(tmp_path / "reg.json")
+    known = [_SQUASHED_ENTITY]
+    raw_stem = "02__NorthgateAffiliates-2024-01-23"  # no space between the words
+
+    # Without a version_alias_map, the pre-existing substring pass misses it
+    # (documents the actual gap the ticket reports).
+    substring_only = _alias_version_field(raw_stem, known, reg)
+    assert "Northgate" in substring_only, (
+        "this fixture is only meaningful if the substring matcher actually misses it"
+    )
+
+    version_ingest = [{"version": raw_stem, "status": "ok"}]
+    vmap = _build_version_alias_map(version_ingest)
+    out = _alias_version_field(raw_stem, known, reg, vmap)
+    assert out == "v1"
+    assert "northgate" not in out.lower()
+    assert "affiliates" not in out.lower()
+
+
+def test_mine_corpus_never_leaks_version_filename_with_squashed_name(tmp_path: Path) -> None:
+    """End-to-end (issue #143): a version filename stem whose counterparty
+    name has no internal whitespace must not survive into
+    corpus_manifest.json, trail.json, observations.jsonl, or
+    round_moves.jsonl — and every artifact must carry the SAME ordinal label
+    for the same physical file.
+
+    Regression guard for fix round 1: ``_pseudonymize_observations`` and
+    ``_pseudonymize_round_moves`` used to call ``_alias_version_field`` for
+    ``citation.version``/``citation.version_id`` with NO ``version_alias_map``,
+    so those two artifacts kept leaking the raw squashed stem even after
+    corpus_manifest.json/trail.json were fixed.
+    """
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+
+    v1_name = "01__NorthgateAffiliates-2024-01-01.rtf"
+    v2_name = "02__NorthgateAffiliates-2024-01-15.rtf"
+    _write_rtf(deal_dir / v1_name, _BODY_DEAL_1)
+    _write_rtf(deal_dir / v2_name, _BODY_DEAL_2)
+    (deal_dir / "hints.yaml").write_text(yaml.dump({"signed_version": v2_name}), encoding="utf-8")
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {
+            "our_party_aliases": ["Alpha Corp"],
+            "known_entities": [_SQUASHED_ENTITY],
+        },
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    manifest_text = json.dumps(manifest).lower()
+    assert "northgate" not in manifest_text, (
+        f"raw counterparty name leaked into corpus_manifest.json: {manifest_text}"
+    )
+    doc = manifest[0]
+    versions = [vi["version"] for vi in doc["version_ingest"]]
+    assert versions == ["v1", "v2"], f"expected ordinal version labels, got {versions}"
+    # corpus_manifest.json's own signed_version is already a numeric ordinal
+    # (set at corpus_doc construction, distinct from trail.json's raw-stem
+    # signed_version below) — was never the leak surface, so it's untouched.
+    assert doc["signed_version"] == 2
+
+    trail_dir = out_dir / "trail"
+    trail_files = list(trail_dir.glob("*.json"))
+    assert trail_files, "mine_corpus must have written at least one trail file"
+    trail = json.loads(trail_files[0].read_text(encoding="utf-8"))
+    trail_text = json.dumps(trail).lower()
+    assert "northgate" not in trail_text, f"raw counterparty name leaked into trail: {trail_text}"
+    # Same ordinal labels as the manifest for the same physical files.
+    assert trail["signed_version"] == "v2"
+    assert set(trail["ordered_versions"]) == {"v1", "v2"}
+
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    assert obs_lines, "mine_corpus must have written at least one observation"
+    obs_version_ids: set[str] = set()
+    for line in obs_lines:
+        assert "northgate" not in line.lower(), (
+            f"raw counterparty name leaked into observations.jsonl: {line}"
+        )
+        row = json.loads(line)
+        vid = row["citation"]["version_id"]
+        if vid is not None:
+            obs_version_ids.add(vid)
+    assert obs_version_ids and obs_version_ids <= {"v1", "v2"}, (
+        f"observations.jsonl citation.version_id must be an ordinal label, got {obs_version_ids}"
+    )
+
+    round_moves_lines = (out_dir / "round_moves.jsonl").read_text(encoding="utf-8").splitlines()
+    assert round_moves_lines, (
+        "fixture must actually produce round moves (v1/v2 clause changes) "
+        "for this test to exercise the round_moves pseudonymization path"
+    )
+    move_version_ids: set[str] = set()
+    for line in round_moves_lines:
+        assert "northgate" not in line.lower(), (
+            f"raw counterparty name leaked into round_moves.jsonl: {line}"
+        )
+        row = json.loads(line)
+        vid = row["citation"]["version_id"]
+        if vid is not None:
+            move_version_ids.add(vid)
+    assert move_version_ids and move_version_ids <= {"v1", "v2"}, (
+        f"round_moves.jsonl citation.version_id must be an ordinal label, got {move_version_ids}"
+    )
