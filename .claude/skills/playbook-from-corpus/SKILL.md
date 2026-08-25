@@ -143,8 +143,12 @@ populate the config yourself:**
      across deals (legal entities + defined terms — e.g. `Acme Holdings II,
      LLC`, `Acme Holdings, Inc.`, `Acme`, `Facility`).
    - `provenance.known_entities`: each counterparty's full legal name **plus its
-     obvious abbreviation/acronym** — pseudonymization matches whole tokens
-     exactly, so add each counterparty's short form (e.g. `BSU` for "Beta
+     obvious abbreviation/acronym**, each spelled out **verbatim exactly as
+     the recital/preamble text renders it** — pseudonymization matches a
+     contiguous word sequence exactly (issue #136: a shortened or
+     stopword-stripped form, e.g. `Beta State` for a recital that actually
+     reads "Beta State University", never matches and silently fails to
+     redact). Add each counterparty's short form too (e.g. `BSU` for "Beta
      State University") alongside the full name, or the short form leaks into
      ids/filenames unpseudonymized.
 3. Only ask the human about names you genuinely cannot resolve from the text
@@ -152,8 +156,12 @@ populate the config yourself:**
    a single confirm, then proceed.
 
 `mine` warns if none of `our_party_aliases` match any document text — that means
-"us" is still wrong; fix it before trusting provenance. These lists drive
-provenance judgment (step 7), born-safe pseudonymization, and the report.
+"us" is still wrong; fix it before trusting provenance. `mine` also warns
+per-entry if a configured `known_entities` name matches **no** document text
+(issue #136) — that name will not be pseudonymized anywhere; fix the spelling
+(or remove the entry) before trusting the pseudonymized output. These lists
+drive provenance judgment (step 7), born-safe pseudonymization, and the
+report.
 
 ---
 
@@ -1268,15 +1276,24 @@ host — the container has no browser), plus the digest sidecar:
 - `$OUT/playbook.review.html` — the **internal annotation surface**: numbered
   items, comment boxes, Export-feedback button. Share with reviewers doing the
   correction pass. This is the only view that accepts `--alias-map`.
-- `$OUT/playbook.opf.html` — **THE shareable/uploadable playbook** (OPF 0.3),
-  and the only artifact to hand a stakeholder or a consuming review
-  application. One file containing: the full readable document (stance chips,
+- `$OUT/playbook.opf.html` — the **packaged internal/stakeholder playbook**
+  (OPF 0.3). One file containing: the full readable document (stance chips,
   preferred variations, acceptable concessions, unacceptable asks, exemplar
   forms; empty Posture/Floor labelled pending), a digest summary, and the
   CANONICAL OPF JSON plus digest embedded verbatim in
   `<script type="application/json">` blocks (ids `opf-canonical`/`opf-digest`).
-  Takes no `--alias-map` by design — it embeds the canonical, pseudonymized
-  JSON, so resolving real names would leak them and break hash verification.
+  Takes no `--alias-map` by design — it embeds the canonical JSON, so
+  resolving real names would break hash verification. **This is NOT a
+  guarantee of pseudonymization.** `known_entities` matching is best-effort
+  (whole-word, contiguous-sequence — see the verbatim-spelling requirement
+  above); a misconfigured or incomplete `known_entities` list leaves real
+  counterparty names in this file (skill-QA finding #57, 2026-08-24: hundreds
+  of real-name occurrences reached `playbook.opf.json`/`.html` this way). Run
+  the **mandatory residue check** below before calling this file shareable —
+  it is not the "hand it to anyone" artifact that description used to claim;
+  for a genuinely external release, born-safe pseudonymization is not enough
+  on its own — use Step 11 (`publish`), which adds a hard, list-independent
+  backstop.
 - `$OUT/playbook.digest.json` — the **model-facing digest** standalone
   (`playbook digest`): per-clause stances, preferred variations verbatim,
   concession/unacceptable summaries, frequency-banded deduplicated exemplar
@@ -1293,6 +1310,59 @@ longer emitted as a separate artifact. `view bundle` takes no `--alias-map`
 — only `view render --alias-map /work/out/alias_map.json` resolves real
 names, for an internal-eyes-only copy; without it every rendering stays
 alias-only.
+
+**Mandatory residue check (issue #136) — run before calling anything from
+this step shareable.** `$OUT/alias_map.json` (written by `mine
+--entity-registry`, see "Born-safe sidecar" above) holds every real name the
+registry actually registered. A plain substring search for those values is
+NOT enough: `pseudonymize_text` registers whatever spelling
+`provenance.known_entities` configured even when that spelling never
+actually matched the corpus (the exact-spelling trap above) — so a
+misconfigured entry's `alias_map` value is the WRONG spelling, and grepping
+canonical output for the wrong spelling finds nothing even when the
+right-spelled real name is sitting there unredacted (confirmed: this is
+precisely how skill-QA finding #57 slipped past an earlier, naive version of
+this check). `find_residue` (`playbook_engine/entity_registry.py`) instead
+matches on each registered name's *distinctive word tokens* individually
+(case-insensitive, whole-word, stopword/short-word filtered) rather than the
+full phrase in registered word order — so a stopword-stripped or
+reordered registration still catches the real spelling wherever it shares a
+distinctive token (e.g. registering `"Example Institute Fictional City"`
+still flags `"Example Institute of Fictional City"` in the output, because
+`"Fictional"`/`"City"` are common to both):
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" python3 -c "
+import json, pathlib
+from playbook_engine.entity_registry import find_residue
+
+alias_map = json.loads(pathlib.Path('$OUT/alias_map.json').read_text())
+texts = {
+    p: pathlib.Path(p).read_text()
+    for p in ('$OUT/playbook.opf.json', '$OUT/playbook.opf.html', '$OUT/playbook.digest.json')
+}
+hits = find_residue(alias_map, texts)
+if hits:
+    print('RESIDUE FOUND — do not share:')
+    for path, name, token in hits:
+        print(f'  {path}: {name!r} (matched distinctive token {token!r})')
+else:
+    print('no residue — no distinctive token of a registered name appears in the canonical output.')
+"
+```
+
+A hit means a real name likely survived pseudonymization; fix
+`known_entities` (verbatim spelling — see above), re-run `mine`, and
+re-check before treating `playbook.opf.html` as shareable. Two honest
+limits, not overclaimed: (1) a hit can be a coincidental match of a
+short/common word that slipped the stopword filter — read the flagged token
+in context before assuming a leak; (2) an empty result confirms only that no
+distinctive token of a name `known_entities` was told about survived — it is
+not exhaustive over every name-shaped string the way Step 11's LLM residue
+sweep is, and a name with no token distinctive enough to survive the filter
+(e.g. registered only as `"State University"`) cannot be checked this way at
+all. For a genuinely external release, this check is not a substitute for
+Step 11 (`publish`)'s independent, list-independent backstop.
 
 ### Step 10 — Report and inspect
 

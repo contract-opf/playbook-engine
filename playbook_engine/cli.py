@@ -3211,8 +3211,10 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
     blocks (ids: opf-canonical, opf-digest). The bare playbook.opf.json
     remains the canonical artifact; the bundle contains it, never replaces
     it — a consumer extracts the JSON block and verifies
-    identity.content_hash. Takes no --alias-map by design: the bundle is the
-    shareable artifact and stays alias-only.
+    identity.content_hash. Takes no --alias-map by design: the bundle stays
+    alias-only. This is NOT a guarantee of pseudonymization — known_entities
+    matching is best-effort, so run the mandatory residue check (see the
+    playbook-from-corpus skill) before treating the bundle as shareable.
     """
     from playbook_engine.document_renderer import render_bundle_html  # noqa: PLC0415
 

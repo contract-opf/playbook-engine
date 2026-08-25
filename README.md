@@ -105,12 +105,15 @@ Some things adopters tend to care about, built in from the start:
   ask→landing trail — so a reviewer can tell deal-breakers from trading
   chips.
 - **Confidentiality is architectural, not aspirational.** Known
-  counterparty names are pseudonymized at ingest (*born-safe* — raw names
-  never reach a stored artifact); `playbook publish` produces a
-  party-anonymous export with a deterministic no-known-entity backstop and
-  a semantic-residue report over every free-text surface — reviewed by an
-  LLM/agent (the `playbook-from-corpus` skill, or a wired judge) rather
-  than by `publish` itself. See [SECURITY.md](SECURITY.md).
+  counterparty names are pseudonymized at ingest (*born-safe*), but
+  `known_entities` matching is best-effort (whole-word, contiguous-sequence)
+  — a misconfigured or incomplete list can still leave real names in a
+  stored artifact, so this is not a guarantee of pseudonymization on its
+  own. `playbook publish` is what actually guarantees it: a deterministic
+  no-known-entity backstop plus a semantic-residue report over every
+  free-text surface — reviewed by an LLM/agent (the `playbook-from-corpus`
+  skill, or a wired judge) rather than by `publish` itself. See
+  [SECURITY.md](SECURITY.md).
 - **Extensible without forking.** The schema reserves an `x_*` vendor
   namespace at the sanctioned levels; extensions travel with the document
   and participate in its content hash.
