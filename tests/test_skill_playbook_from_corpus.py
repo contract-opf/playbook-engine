@@ -277,6 +277,31 @@ def test_view_apply_invocations_include_feedback_file_argument() -> None:
         )
 
 
+def test_step_11_publish_documents_config_and_redact_terms_flags() -> None:
+    """Step 11's publish guidance must cite both --redact-terms and --config.
+
+    Regression test for issue #142 (skill QA audit finding #37): the residue
+    procedure named ``re-mine`` as the only remediation and never mentioned
+    ``publish --redact-terms`` (the GC-residue-review fix that needs no
+    re-mine) or ``publish --config`` (restores a domain-flavored corpus's
+    prior scan leniency, e.g. for the affiliation-agreement corpus this
+    skill is actually run against). Both flags are real ``publish`` options
+    (see ``playbook publish --help``); Step 11 must tell the agent to reach
+    for them.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    step_11 = body.split("## Step 11", 1)[1].split("## Feedback re-entry", 1)[0]
+    assert "--redact-terms" in step_11, "Step 11 must cite --redact-terms as sanctioned residue fix"
+    assert "--config" in step_11, "Step 11 must cite --config for domain-corpus scan leniency"
+    fenced_blocks = re.findall(r"```bash\n(.*?)```", step_11, re.DOTALL)
+    publish_blocks = [block for block in fenced_blocks if 'ARGS="publish' in block]
+    assert publish_blocks, "expected at least one 'publish' ARGS command block in Step 11"
+    assert any("--config" in block for block in publish_blocks), (
+        "Step 11's publish command example should demonstrate --config, "
+        "not just mention it in prose"
+    )
+
+
 def test_skill_body_documents_q5_auto_rejection() -> None:
     """SKILL.md must disclose that Q5 (flexible_clauses) pre-marks candidates.
 
