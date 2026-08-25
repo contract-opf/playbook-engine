@@ -828,15 +828,35 @@ analysis you already did for them.
 ```bash
 # reversal candidates (seeds Q1/sacred), outcome + provenance mix (Q2/Q3),
 # and rounds-to-settle per document (Q4)
-python3 - <<'PY'
+PATH="$PWD/.venv/bin:$PATH" python3 - <<'PY'
 import json, collections, statistics
+from pathlib import Path
+from playbook_engine.config import load_config
+from playbook_engine.taxonomy import load_taxonomy
+
 D = "OUT_DIR_HERE"
+CONFIG = "CONFIG_PATH_HERE"  # the same playbook.config.yaml passed to `mine`/`project`
 obs = [json.loads(l) for l in open(f"{D}/observations.jsonl") if l.strip()]
 pb  = json.load(open(f"{D}/playbook.opf.json"))
 titles = {c.get("taxonomy_id") or c.get("id"): c.get("title")
           for c in (pb["evidence"].get("clauses") or [])}
-rev = collections.Counter(o.get("taxonomy_id") for o in obs
-                          if o.get("outcome") == "proposed_then_reversed")
+
+# Same exclusions `playbook floor propose` applies (issue #106/#129) — an
+# UNCLASSIFIED reversal (taxonomy_id None) is segmentation debris, and a
+# STRUCTURAL one (taxonomy_id curated `structural: true`, e.g. Parties &
+# Recitals) is administrative framing, not a negotiating position. Leaving
+# either in makes them look like the corpus's biggest fights when they are
+# not real candidates at all.
+structural_ids = frozenset(
+    e.id for e in load_taxonomy(load_config(Path(CONFIG)).taxonomy_path).entries
+    if e.structural
+)
+rev = collections.Counter(
+    o.get("taxonomy_id") for o in obs
+    if o.get("outcome") == "proposed_then_reversed"
+    and o.get("taxonomy_id")
+    and o.get("taxonomy_id") not in structural_ids
+)
 print("most REVERSED:", [(titles.get(k, k), v) for k, v in rev.most_common(8)])
 
 # Rank the SECOND axis too — see the warning below. A clause that is usually
