@@ -670,6 +670,80 @@ def test_no_quarantine_file_no_quarantine_items(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Manifest-vs-playbook disagreement (issue #180): corpus_manifest.json on
+# disk and playbook.opf.json's own corpus.documents snapshot are written
+# from the SAME data in a healthy run (pipeline.py's project step reads
+# corpus_manifest.json and passes it straight into the assembler) — so if
+# they disagree, the out-dir mixes artifacts from two different runs (e.g. a
+# non-atomic backup copy pasted an aborted run's manifest beside a complete
+# production playbook).
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_playbook_disagreement_flagged(tmp_path: Path) -> None:
+    """A manifest claiming almost nothing is in scope beside a playbook whose
+    own corpus.documents snapshot shows a fully-mined corpus must be flagged
+    — this is the exact 'aborted-run manifest beside the production
+    playbook' shape a non-atomic backup copy produces."""
+    out_dir = _make_out_dir(tmp_path)
+    # On-disk manifest: an aborted run — only one document ever made it
+    # in-scope, most versions never mined.
+    _write_manifest(
+        out_dir,
+        [
+            {"document_id": "deal-alice", "in_scope": True, "versions_mined": 3},
+            {"document_id": "deal-bob", "in_scope": False, "versions_mined": 0},
+            {"document_id": "deal-carol", "in_scope": False, "versions_mined": 0},
+        ],
+    )
+    # Playbook's OWN corpus snapshot: the real production state — all three
+    # documents mined and in scope.
+    playbook = _make_minimal_playbook()
+    playbook["corpus"]["documents"] = [
+        {"document_id": "deal-alice", "in_scope": True, "versions_mined": 3},
+        {"document_id": "deal-bob", "in_scope": True, "versions_mined": 2},
+        {"document_id": "deal-carol", "in_scope": True, "versions_mined": 1},
+    ]
+    _write_playbook(out_dir, playbook)
+
+    data = build_after_action_data(out_dir)
+    mismatch = [
+        i
+        for i in data["needs_attention"]
+        if any("disagrees with playbook" in r for r in i["reasons"])
+    ]
+    assert len(mismatch) == 1
+    reason = mismatch[0]["reasons"][0]
+    assert "1 in-scope" in reason
+    assert "3 in-scope" in reason
+    report = build_after_action_report(out_dir)
+    assert "disagrees with playbook" in report
+
+
+def test_manifest_playbook_agreement_not_flagged(tmp_path: Path) -> None:
+    """When the on-disk manifest and the playbook's own corpus.documents
+    snapshot agree (the normal, single-run case), nothing is flagged."""
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [{"document_id": "deal-alice", "in_scope": True, "versions_mined": 2}],
+    )
+    playbook = _make_minimal_playbook()
+    playbook["corpus"]["documents"] = [
+        {"document_id": "deal-alice", "in_scope": True, "versions_mined": 2},
+    ]
+    _write_playbook(out_dir, playbook)
+
+    data = build_after_action_data(out_dir)
+    mismatch = [
+        i
+        for i in data["needs_attention"]
+        if any("disagrees with playbook" in r for r in i["reasons"])
+    ]
+    assert mismatch == []
+
+
+# ---------------------------------------------------------------------------
 # Degenerate deviation distribution (silent-degradation gap: a prior real run
 # had 1029/1029 deviation verdicts "none" — a rubber-stamp judge — and no
 # gate flagged it).
