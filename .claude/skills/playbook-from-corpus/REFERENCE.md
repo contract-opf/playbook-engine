@@ -470,11 +470,20 @@ playbook judge-migrate ./out --config ./corpus/playbook.config.yaml \
 
 The derivation is **done** when all three conditions hold:
 
-1. **`out/judge/pending.jsonl` is empty** (or absent).
+1. **`out/judge/pending.jsonl` exists and is empty.**
+
+   Absence does **not** count as done — `playbook judge` unlinks
+   `pending.jsonl` at the start of every round and only writes it lazily as
+   items are queued, so a round killed mid-`mine` (e.g. an overnight run that
+   died) also leaves the file absent. A completed round with 0 new pending
+   items always writes an explicit empty file, so `-f` (must exist) is what
+   distinguishes "finished, nothing pending" from "interrupted before
+   finishing" (issue #170).
 
    ```bash
-   # Confirm: exit 0 with empty output, or file absent
-   [ ! -f ./out/judge/pending.jsonl ] || [ ! -s ./out/judge/pending.jsonl ]
+   # Confirm: file exists AND is empty
+   [ -f ./out/judge/pending.jsonl ] && [ ! -s ./out/judge/pending.jsonl ]
+   echo "Exit: $?"   # must be 0
    ```
 
 2. **`playbook validate` exits 0.**

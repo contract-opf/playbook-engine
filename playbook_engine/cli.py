@@ -2164,6 +2164,21 @@ def judge_cmd(
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
         _echo_rubric_report(rubric_policy, click.echo)
 
+    # This round ran mine_corpus to completion (the except PipelineError
+    # branch above exits before here). pending_path is unlinked at the top
+    # of this function and PendingQueue only creates the file lazily via
+    # add(), so a round that queues 0 new items leaves no file on disk —
+    # indistinguishable from a round killed mid-mine, which also leaves the
+    # file absent. Write an explicit empty file so ABSENCE unambiguously
+    # means "interrupted", never "finished with nothing pending" (issue
+    # #170). REFERENCE.md's done-criteria requires the file to exist and be
+    # empty; it no longer accepts absence as done.
+    if not pending_path.exists():
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_pending = pending_path.with_name(pending_path.name + ".tmp")
+        tmp_pending.write_text("", encoding="utf-8")
+        os.replace(tmp_pending, pending_path)
+
 
 @cli.command(name="judge-apply")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
