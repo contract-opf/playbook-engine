@@ -35,9 +35,9 @@ You need:
    per agreement, all negotiation versions inside).
 2. A `playbook.config.yaml` referencing your taxonomy YAML and, if available,
    a baseline template.
-3. A designation of which party is "us" (needed for provenance judgment) and
-   the agreement display name (used in the report header). Collect these with
-   one interactive prompt before beginning.
+3. A designation of which party is "us" — derived automatically from recitals
+   (see "Derive party names automatically"); only the display name and
+   optional baseline template are asked interactively.
 
 If the corpus has a nested layout (e.g. CLM export with `Versions/` subfolders),
 run `playbook stage` first — it flattens the tree and writes `hints.yaml` files
