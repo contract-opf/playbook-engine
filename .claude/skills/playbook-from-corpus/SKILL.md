@@ -865,7 +865,7 @@ questions 1–6, but only one of them creates hard-binding content. Lead with it
 
 | Order | id | Why it ranks here |
 |---|---|---|
-| 1 | `sacred_clauses` | **The only answer that becomes hard-binding.** Writes straight into signed `floor.invariants`; forces the outcome on every future review. |
+| 1 | `sacred_clauses` | **The only answer that can become hard-binding.** A bare clause-type name writes straight into signed `floor.invariants`, forcing the outcome on every future review — but a sentence-shaped item does NOT self-promote (see the rules below). |
 | 2 | `risk_appetite` | Governs the default disposition on every non-material change — the most-exercised sentence in the Posture. |
 | 3 | `leverage` | Frames whether the model argues from strength or accommodation. |
 | 4 | `rounds` | Sets when to escalate rather than keep trading. |
@@ -926,19 +926,32 @@ playbook posture interview $OUT --answers-file $OUT/posture-answers.json
 # Docker form: make docker-run OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
 ```
 
-Three rules that are easy to get wrong:
+Rules that are easy to get wrong:
 
 - **Three answers is enough.** Each answered question becomes one sentence of
   `posture.system_prompt`. Skipping questions is legitimate; inventing answers
   is not.
-- **Q4 is different in kind, and signs itself.** Naming what is non-negotiable
-  is a human authoring a hard line in natural language, so that answer is
-  written **directly into signed `floor.invariants`**, attributed to the
-  interview. This is *not* the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids —
-  that rule bars promoting a **compiler-derived** candidate without an explicit
-  accept. A human-authored statement's sign-off is the act of writing it. Do not
-  ask the user to "confirm" Q4 a second time in Step 7b; it will render there as
-  an inert already-signed row.
+- **Q4 is different in kind, and signs itself — for name-shaped items.** Naming
+  what is non-negotiable is a human authoring a hard line in natural language,
+  so a bare clause-type name ("Uncapped liability") is written **directly into
+  signed `floor.invariants`**, attributed to the interview. This is *not* the
+  auto-promotion OPF-SPEC.md §3.7 rule 4 forbids — that rule bars promoting a
+  **compiler-derived** candidate without an explicit accept. A human-authored
+  statement's sign-off is the act of writing it. Do not ask the user to
+  "confirm" Q4 a second time in Step 7b; it will render there as an inert
+  already-signed row.
+- **A sentence-shaped Q4 item does NOT self-promote.** The rule above only
+  covers a short clause-type name. An item longer than 7 words, or containing
+  "if"/"unless"/"must"/"shall"/"provided", is skipped from promotion instead
+  (issue #104) — the templated "Do not concede on {item}." would garble a
+  conditional statement into a fail-closed invariant that doesn't say what the
+  human meant. `posture interview` prints a `playbook floor sign ...` WARN
+  naming the exact command instead of writing anything. This is not a rare
+  edge case: the absence-shaped wording this very step recommends below
+  ("limitation of liability must always be present") IS sentence-shaped and
+  hits this path. Always run the printed command and confirm the invariant
+  landed — `jq '.floor.invariants[].id' $OUT/playbook.opf.json` — before
+  treating the answer as signed.
 - **Re-running is safe.** The same statement always resolves to the same id and
   updates in place — never a duplicate (a repeated id is a blocking validator
   error, §3.13). Offer to re-run whenever the user's answers change.

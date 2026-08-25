@@ -389,10 +389,14 @@ appends to `verdicts.jsonl`; the prior record stays as an audit trail.
    without them, list both as pending human input in the report and say that an
    evidence-only playbook is a complete document (Rung 0), not an unfinished one.
    Q4 `sacred_clauses` is written straight into signed `floor.invariants` (the
-   human authored it); compiler-derived candidates require an explicit accept
-   round-tripped through `playbook view apply`. A conditional hard line either
-   of those templates would garble ("X, if present, must not be Y") goes
-   through `playbook floor sign --statement "..." --signed-by "<name>"`
+   human authored it) **only when the item is a bare clause-type name**;
+   compiler-derived candidates require an explicit accept round-tripped
+   through `playbook view apply`. A sentence-shaped or conditional item
+   either of those templates would garble ("X, if present, must not be Y";
+   more than 7 words; or containing "if"/"unless"/"must"/"shall"/"provided",
+   issue #104) is skipped from promotion — the interview prints a WARN
+   instead of writing it — and goes through
+   `playbook floor sign --statement "..." --signed-by "<name>"`
    instead, verbatim — never by hand-editing `floor.invariants`. `--signed-by`
    is required: it names the human legal owner signing off, recorded as a
    structural `x_signed_by` field the command refuses to omit — get an

@@ -130,16 +130,21 @@ deal, or your risk tolerance, calls for.
   `posture.system_prompt`: soft-binding intent that shapes judgment but,
   by itself, never gates a decision (§5). The sacred-clauses question is
   different in kind: naming what's non-negotiable regardless of deal
-  value is a human authoring a hard line in natural language, so that
-  answer is written directly into signed `floor.invariants`, with
-  attribution back to the interview. This is not the auto-promotion
-  OPF-SPEC.md §3.7 rule 4 forbids — that rule bars promoting a
-  *compiler-derived* candidate (a machine inference read off the
-  Evidence) without an explicit accept; a human-authored statement's
-  sign-off is the act of writing it. Re-run the interview as often as you
-  like: the same statement always resolves to the same id and updates in
-  place, never a duplicate (a repeated id is a blocking validator error,
-  §3.13).
+  value is a human authoring a hard line in natural language, so a
+  bare clause-type name is written directly into signed
+  `floor.invariants`, with attribution back to the interview. This is
+  not the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids — that rule
+  bars promoting a *compiler-derived* candidate (a machine inference
+  read off the Evidence) without an explicit accept; a human-authored
+  statement's sign-off is the act of writing it. This self-promotion
+  only fires for a short, name-shaped item, though: one that reads as a
+  full sentence or conditional clause (over 7 words, or containing
+  "if"/"unless"/"must"/"shall"/"provided") is skipped instead (issue
+  #104) — the interview prints the exact `playbook floor sign` command
+  to run by hand, and nothing is written until you run it. Re-run the
+  interview as often as you like: the same statement always resolves to
+  the same id and updates in place, never a duplicate (a repeated id is
+  a blocking validator error, §3.13).
 
 - **Rung 2 — sign the corpus's proposals (~minutes).** Every ask your
   history reversed before signing is a *candidate* hard line — a pattern
