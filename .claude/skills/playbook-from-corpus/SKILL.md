@@ -1357,8 +1357,8 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
 - **Unknown entity aliases** (party names not on the known-alias list) must be
   listed for human review — do not silently assume they are "us".
 - **Real corpus stays out of git.** Stage under the user-owned cache dir
-  (`playbook stage` defaults to `~/.cache/playbook-engine/staging`, not the
-  world-readable `/tmp`) and keep local scratch files out of the repo (add
+  (`playbook stage` defaults to `~/.cache/playbook-engine/staging/<corpus-name>`,
+  not the world-readable `/tmp`) and keep local scratch files out of the repo (add
   any local scratch dir to `.gitignore`). Never commit corpus files or
   derivation outputs.
 - **Token efficiency.** Deduplicate clauses by content hash before judging;
