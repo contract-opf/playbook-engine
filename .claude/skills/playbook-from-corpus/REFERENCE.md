@@ -451,9 +451,12 @@ playbook judge-migrate ./out --config ./corpus/playbook.config.yaml \
 6. **Corpus confidentiality.** Real agreement text is private. Do not log,
    echo, or store clause text outside the local `out/` directory.
 
-7. **Posture / Floor fields.** The `historical_stance` (Posture section) and the
-   walk-away floor (Floor section) require the GC interview (OPF-SPEC.md §7) and
-   cannot be derived from the corpus — never invent them. With the human
+7. **Posture / Floor fields.** `posture.system_prompt` (Posture section) and the
+   walk-away floor (`floor.invariants`, Floor section) require the GC interview
+   (OPF-SPEC.md §7) and cannot be derived from the corpus — never invent them.
+   (`historical_stance` is different: it lives in the Evidence section, is
+   purely descriptive — OPF-SPEC.md §2.2 — and is exactly what compiles
+   straight from the corpus; do not treat it as interview-gated.) With the human
    present, run SKILL.md Step 7a (interview) and Step 7b (floor propose → sign);
    without them, list both as pending human input in the report and say that an
    evidence-only playbook is a complete document (Rung 0), not an unfinished one.
