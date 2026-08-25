@@ -124,8 +124,9 @@ context: `taxonomy_id`, `clause_path`, `document_id`.
   each confirmed relocation as `none` / neutral / none with rationale
   "alignment artifact — clause relocated, text unchanged" (confidence 0.8+,
   no needs_review). Only judge the remaining hunks individually. On real
-  corpora a third or more of deviation items are relocation echoes; judging
-  them blind wastes effort and floods the report with needs_review flags.
+  corpora one-third to as much as ~90% of deviation items can be relocation
+  echoes (a real 44-agreement run saw 143/163, ~88%); judging them blind
+  wastes effort and floods the report with needs_review flags.
   As of issue #167, `mine`'s deviation-classifier stage runs exactly this
   containment check itself before an added/removed hunk ever reaches
   `pending.jsonl` — `basis: "alignment"` in `observations.jsonl` marks a
