@@ -204,14 +204,19 @@ before the #182 hardening — and even then `playbook judge` surfaces the
 re-queue loudly, as a `WARNING`, rather than silently. Use exactly the value
 shown for each kind below:
 - Classification (`ClauseClassification.basis`, `clause_classifier.py`) — use
-  `"judge"` for an agent-produced verdict (also accepts `exact_match` /
-  `heading_similarity` / `judge_error` / `needs_review` / `unclassified` /
-  `llm_segmenter`, but those are set by the engine itself, not by you).
+  `"judge"` for an agent-produced verdict that found a taxonomy fit, or
+  `"unclassified"` (with `taxonomy_id: null`) for a producer-supplied
+  no-fit verdict — both are replayable (`_CLASSIFY_REPLAYABLE_BASES`).
+  `exact_match` / `heading_similarity` / `judge_error` / `needs_review` /
+  `llm_segmenter` are set by the engine itself, not by you, and are rejected.
 - Deviation (`DeviationResult.basis`, `deviation_classifier.py`) — use
   `"judge"` for an agent-produced verdict (also accepts `deterministic` /
   `reworded_equivalent` / `judge_error` / `needs_review`, set by the engine).
 - Provenance (`ProvenanceResult.basis`, `provenance_detector.py`) — use
-  `"llm"` — this is the one kind where `"llm"` is correct.
+  `"llm"` — this is the one kind where `"llm"` is correct; `validate_verdict`
+  rejects any other basis from a producer-supplied verdict (deterministic
+  bases like `template_similarity` / `alias_first_party` / `hint` are set by
+  the engine itself, not by you).
 - Scope — no `basis` field; it is forced to `"judge"` on replay.
 
 **Classification verdict:**

@@ -389,6 +389,15 @@ _DEVIATION_REPLAYABLE_BASES = frozenset({"judge"})
 #: minus the two engine-internal bases already rejected above.
 _CLASSIFY_REPLAYABLE_BASES = frozenset({"judge", "unclassified"})
 
+#: The only basis value a *producer-supplied* provenance verdict may carry.
+#: ``provenance_detector.ProvenanceResult`` accepts a wide ``_BASIS_VALUES``
+#: set (``template_similarity``, ``alias_first_party``, ``hint``, ...) because
+#: the engine's own deterministic detectors construct it with those bases —
+#: but a producer verdict file only ever represents LLM judgment, so only
+#: ``"llm"`` is replayable here (REFERENCE.md: "this is the one kind where
+#: 'llm' is correct").
+_PROVENANCE_REPLAYABLE_BASES = frozenset({"llm"})
+
 
 def _validate_confidence_field(
     verdict: dict[str, Any], field: str, *, allow_none: bool = False
@@ -496,11 +505,20 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     elif kind == "provenance":
         if "provenance" not in verdict:
             raise ValueError("missing 'provenance' field")
+        provenance_basis = verdict.get("basis", "llm")
+        if provenance_basis not in _PROVENANCE_REPLAYABLE_BASES:
+            raise ValueError(
+                f"basis {provenance_basis!r} is not replayable for a provenance verdict; "
+                f"a supplied verdict must carry basis in "
+                f"{sorted(_PROVENANCE_REPLAYABLE_BASES)!r} (a producer verdict file only "
+                "ever represents LLM judgment; deterministic bases are set by the engine "
+                "itself, not by you)"
+            )
         _validate_confidence_field(verdict, "confidence")
         ProvenanceResult(
             provenance=verdict["provenance"],
             confidence=verdict.get("confidence", 0.0),
-            basis=verdict.get("basis", "llm"),
+            basis=provenance_basis,
         )
     elif kind == "scope":
         if not isinstance(verdict.get("in_scope"), bool):

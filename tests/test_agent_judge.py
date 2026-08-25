@@ -1255,6 +1255,32 @@ class TestValidateVerdictBasisWhitelist:
             {"taxonomy_id": None, "confidence": 0.0, "basis": "unclassified"},
         )
 
+    def test_provenance_rejects_template_similarity_basis(self) -> None:
+        """Issue #162: "template_similarity" is a valid ProvenanceResult
+        _BASIS_VALUES member (the engine's own deterministic detector uses it)
+        but a producer-supplied verdict only ever represents LLM judgment —
+        REFERENCE.md documents "llm" as the one correct provenance basis, so
+        anything else must be rejected here rather than silently accepted."""
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "provenance",
+                {"provenance": "our_paper", "confidence": 0.9, "basis": "template_similarity"},
+            )
+
+    def test_provenance_rejects_hint_basis(self) -> None:
+        with pytest.raises(ValueError, match="basis"):
+            validate_verdict(
+                "provenance",
+                {"provenance": "counterparty_paper", "confidence": 0.8, "basis": "hint"},
+            )
+
+    def test_provenance_accepts_llm_basis(self) -> None:
+        """The one basis a producer-supplied provenance verdict may carry."""
+        validate_verdict(
+            "provenance",
+            {"provenance": "our_paper", "confidence": 0.82, "basis": "llm"},
+        )
+
 
 class TestValidateVerdictConfidenceType:
     """Issue #161: a stringified confidence (a common LLM-producer mistake)
