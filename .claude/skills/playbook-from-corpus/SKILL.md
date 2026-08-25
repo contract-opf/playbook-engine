@@ -1196,7 +1196,8 @@ coarsened, source paths stripped, and a **residue report** for sign-off.
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
   ARGS="publish /work/out/playbook.opf.json --out /work/out/playbook.public.opf.json \
-        --entity-registry /work/out/entity_registry.json"
+        --entity-registry /work/out/entity_registry.json \
+        --config /work/corpus/playbook.config.yaml"
 ```
 
 `--entity-registry` here MUST point at the run's own sidecar
@@ -1208,6 +1209,21 @@ skip the check. **Never reach for `--allow-empty-registry` to make that
 failure go away** — for a corpus-derived playbook it does not relax the
 check, it disables the entire hard backstop (safe only for a no-corpus /
 template-mode playbook with no real entities to catch in the first place).
+
+Pass `--config $CORPUS/playbook.config.yaml` whenever the playbook was mined
+from a domain-flavored corpus (e.g. an affiliation agreement corpus like
+`examples/affiliation-config/`) — same as every other step that took
+`--config`. Without it, both the step-5.5 institution-identity gate and the
+advisory proper-noun sweep fall back to the engine's agreement-type-neutral
+defaults, which is stricter than what the corpus was actually mined with and
+tends to over-flag benign institutional boilerplate (role words, generic
+qualifiers) as residue. `--config`'s `scan_role_words_extra` merges into the
+step-5.5 gate and `scan_stopwords_extra` into the proper-noun sweep, on top
+of those defaults, to restore the corpus's own scan leniency — note step-5.5
+is itself a deterministic, fail-closed gate like the step-4 hard backstop
+(no flag suppresses either one; a real survivor is still blocked, just
+correctly *not* flagged when it's benign domain boilerplate the config
+declares safe).
 
 Two safety layers run automatically:
 
