@@ -963,7 +963,9 @@ playbook posture questions
 
 # Write $OUT/posture-answers.json as you go, then:
 playbook posture interview $OUT --answers-file $OUT/posture-answers.json
-# Docker form: make docker-run OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
+# Docker form (CORPUS=./out is the harmless Route B placeholder from the
+# mechanical caveat under Step 0 — posture interview never reads /work/corpus):
+# make docker-run CORPUS=./out OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
 ```
 
 Rules that are easy to get wrong:
@@ -1123,8 +1125,14 @@ a later recompile by design — this is what Route C's table above means by
 
 ### Step 8 — Validate (must exit 0)
 
+None of Steps 8-10 read `/work/corpus` — `CORPUS=./out` below is the harmless
+Route B placeholder from the mechanical caveat under Step 0 (`make docker-run`
+always mounts `CORPUS`, so a Route B user with no corpus directory needs a
+real path to point it at; `./out` already exists). Route A/C users may
+substitute their real corpus path instead — it makes no difference here.
+
 ```bash
-make docker-run CORPUS=./corpus OUT=./out ARGS="validate /work/out/playbook.opf.json"
+make docker-run CORPUS=./out OUT=./out ARGS="validate /work/out/playbook.opf.json"
 ```
 
 A non-zero exit here means the pipeline is not done. Common causes:
@@ -1137,8 +1145,8 @@ Do not paper over validation failures. Fix the root cause.
 ### Step 9 — Report and inspect
 
 ```bash
-make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out/report.md"
-make docker-run CORPUS=./corpus OUT=./out ARGS="inspect /work/out --out /work/out/inspection.md"
+make docker-run CORPUS=./out OUT=./out ARGS="report /work/out --out /work/out/report.md"
+make docker-run CORPUS=./out OUT=./out ARGS="inspect /work/out --out /work/out/inspection.md"
 ```
 
 Review both outputs. The report surfaces:
@@ -1157,9 +1165,9 @@ Review both outputs. The report surfaces:
 ### Step 10 — View (render + bundle) and digest
 
 ```bash
-make docker-run CORPUS=./corpus OUT=./out ARGS="view render /work/out"
-make docker-run CORPUS=./corpus OUT=./out ARGS="view bundle /work/out"
-make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
+make docker-run CORPUS=./out OUT=./out ARGS="view render /work/out"
+make docker-run CORPUS=./out OUT=./out ARGS="view bundle /work/out"
+make docker-run CORPUS=./out OUT=./out ARGS="digest /work/out"
 ```
 
 Writes exactly **two** HTML artifacts, both self-contained (open from the
