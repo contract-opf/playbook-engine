@@ -493,11 +493,22 @@ The derivation is **done** when all four conditions hold:
    echo "Exit: $?"   # must be 0
    ```
 
-3. **Report and viewer are generated** (`report.md`, `report.json`,
-   `playbook.review.html` exist in `out/`).
+3. **Report, viewer, and the two shareable artifacts are generated**
+   (`report.md`, `report.json`, `playbook.review.html`, `playbook.opf.html`,
+   `playbook.digest.json` exist in `out/`).
+
+   SKILL.md Step 9 names `playbook.opf.html` as *the* shareable/uploadable
+   playbook and `playbook.digest.json` as the model-facing digest — both are
+   produced before Step 10's report runs, on every route (A, B, and C all
+   reach Steps 9 and 10). A run that stops after `report`/`inspect` without
+   `view bundle`/`digest` is not done: the GC has the internal annotation
+   surface (`playbook.review.html`) but not the artifact meant to leave the
+   room.
 
    ```bash
-   test -f ./out/report.md && test -f ./out/report.json && test -f ./out/playbook.review.html
+   test -f ./out/report.md && test -f ./out/report.json \
+     && test -f ./out/playbook.review.html && test -f ./out/playbook.opf.html \
+     && test -f ./out/playbook.digest.json
    echo "Exit: $?"   # must be 0
    ```
 

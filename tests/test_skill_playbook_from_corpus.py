@@ -557,6 +557,32 @@ def test_reference_md_done_criteria_mentions_empty_pending() -> None:
     assert "pending.jsonl" in content and "empty" in content.lower()
 
 
+def test_reference_md_done_criterion_3_checks_bundle_and_digest() -> None:
+    """Criterion 3's file-existence check must include the bundle and digest.
+
+    SKILL.md Step 9 declares `playbook.opf.html` "THE shareable/uploadable
+    playbook" and `playbook.digest.json` a required sidecar — a run that
+    stops after report.md/report.json/playbook.review.html is not actually
+    done. Regression for issue #176: assert the criterion-3 code block's own
+    `test -f` chain names both artifacts, not just that the strings appear
+    somewhere in the file.
+    """
+    content = REFERENCE_MD.read_text(encoding="utf-8")
+    match = re.search(
+        r"3\. \*\*Report.*?```bash\n(.*?)\n\s*```",
+        content,
+        re.DOTALL,
+    )
+    assert match, "could not locate criterion 3's code block in REFERENCE.md"
+    criterion_3_block = match.group(1)
+    assert "playbook.opf.html" in criterion_3_block, (
+        "criterion 3's test command must check for playbook.opf.html"
+    )
+    assert "playbook.digest.json" in criterion_3_block, (
+        "criterion 3's test command must check for playbook.digest.json"
+    )
+
+
 def test_reference_md_guardrails_flag_unknown_aliases() -> None:
     """REFERENCE.md guardrails must address unknown entity aliases."""
     content = REFERENCE_MD.read_text(encoding="utf-8")
