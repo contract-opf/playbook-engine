@@ -90,6 +90,7 @@ exclude = [
     ".claude/settings.local.json",
     ".claude/checkpoints",
     ".claude/mailbox",
+    ".claude/scheduled_tasks.lock",
 ]
 
 [tool.ruff]
