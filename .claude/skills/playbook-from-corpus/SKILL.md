@@ -87,7 +87,7 @@ print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
 |---|---|
 | **A** — full derivation | 1 → 11 (everything below, in order) |
 | **B** — author Posture/Floor | **7a → 7b → 8 → 9 → 10** only |
-| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
+| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 9 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
 
 Route B needs no corpus — every command in Steps 7a/7b reads and writes the
 single out-dir; do not ask the user to produce a corpus they do not need. A
