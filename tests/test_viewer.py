@@ -1202,9 +1202,7 @@ def test_apply_feedback_hints_reverses_pseudonymized_document_id(tmp_path: Path)
     Counterparty-1-2023.
     """
     doc = _make_opf(tmp_path)
-    doc["clauses"][0]["observed_positions"][0]["example_ref"]["document_id"] = (
-        "counterparty-1-2023"
-    )
+    doc["clauses"][0]["observed_positions"][0]["example_ref"]["document_id"] = "counterparty-1-2023"
     out_dir = tmp_path / "out"
     (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
     (out_dir / "alias_map.json").write_text(
