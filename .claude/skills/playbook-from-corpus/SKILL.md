@@ -921,8 +921,8 @@ analysis you already did for them.
 `$OUT/round_moves.jsonl` and turn them into concrete choices:
 
 ```bash
-# reversal candidates (seeds Q1/sacred), outcome + provenance mix (Q2/Q3),
-# and rounds-to-settle per document (Q4)
+# reversal candidates (seeds `sacred_clauses`), outcome + provenance mix
+# (`risk_appetite`/`leverage`), and rounds-to-settle per document (`rounds`)
 PATH="$PWD/.venv/bin:$PATH" python3 - <<'PY'
 import json, collections, statistics
 from pathlib import Path
