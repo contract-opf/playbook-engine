@@ -973,6 +973,57 @@ def test_report_missing_out_dir_raises(tmp_path: Path) -> None:
         build_after_action_report(tmp_path / "nonexistent")
 
 
+def test_partial_out_dir_missing_trail_raises(tmp_path: Path) -> None:
+    """observations.jsonl present but trail/ absent -> refuse, don't render plausible zeros.
+
+    Regression test for issue #177: a partial or out-of-order copy of an out/
+    directory (e.g. observations.jsonl copied without trail/) used to render
+    a full report with every document at "Versions: 0" and exit 0.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # Deliberately no _write_trail(...) call -- no trail/ directory at all.
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    _write_observations(out_dir, [_make_obs("deal-alice", "v1", "A clause.")])
+
+    with pytest.raises(FileNotFoundError, match="trail/"):
+        build_after_action_data(out_dir)
+
+    with pytest.raises(FileNotFoundError, match="trail/"):
+        build_after_action_report(out_dir)
+
+
+def test_partial_out_dir_cli_exits_nonzero(tmp_path: Path) -> None:
+    """`playbook report` on a partial out-dir (no trail/) exits non-zero with an error."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    _write_observations(out_dir, [_make_obs("deal-alice", "v1", "A clause.")])
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["report", str(out_dir)])
+    assert result.exit_code != 0
+    assert "trail/" in result.output
+
+
+def test_missing_judge_dir_alone_still_renders(tmp_path: Path) -> None:
+    """observations.jsonl + trail/ present but no judge/ is a normal state, not an error.
+
+    Unlike trail/, judge/ is written by a later, optional pipeline step
+    ('playbook judge'), so "mine ran, judge hasn't yet" must still render
+    (with its existing stub-judge-mode banner), not raise.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
+    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
+    _write_observations(out_dir, [_make_obs("deal-alice", "v1", "A clause.")])
+
+    report = build_after_action_report(out_dir)
+    assert "## Corpus Coverage" in report
+    assert "stub-judge mode" in report
+
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
