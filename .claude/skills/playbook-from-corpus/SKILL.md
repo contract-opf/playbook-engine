@@ -1165,12 +1165,23 @@ After a reviewer has annotated the HTML surface and exported `feedback.json`:
 
 ```bash
 # feedback.json must be placed at $OUT/feedback.json (the writable mount) —
-# see "Running commands" above.
-make docker-run CORPUS=./corpus OUT=./out ARGS="view apply /work/out /work/out/feedback.json"
+# see "Running commands" above. --corpus-dir points view apply at the right
+# document directory for a hints.yaml correction (see below) even when the
+# cited document_id is a pseudonymized alias.
+make docker-run CORPUS=./corpus OUT=./out \
+  ARGS="view apply /work/out /work/out/feedback.json --corpus-dir /work/corpus"
 ```
 
-This writes corrected `hints.yaml` files and VerdictStore entries. Then
-re-judge and re-project:
+This writes VerdictStore entries, `viewer_notes.md` notes, `curation` pins,
+and `floor.invariants` promotions — all under the writable `$OUT` mount, so
+they land for real. **`hints.yaml` corrections are the documented
+exception** (see "Running commands" above): `/work/corpus` is mounted
+read-only, so even with `--corpus-dir /work/corpus` locating the right
+document, the write is refused and reported as "not applied" in the
+command's output, not silently claimed as success. The correction is parked
+at `$OUT/hints/<doc_id>.yaml` for recovery — no engine code reads that file
+back — so copy it onto `$CORPUS/<doc_id>/hints.yaml` yourself with the
+agent's own file tools before continuing. Then re-judge and re-project:
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \

@@ -1130,7 +1130,10 @@ def test_apply_feedback_merges_with_existing_hints(tmp_path: Path) -> None:
 
 
 def test_apply_feedback_hints_fallback_to_out_dir_hints(tmp_path: Path) -> None:
-    """When no corpus doc dir exists, hints go to out_dir/hints/<doc_id>.yaml.
+    """When no corpus doc dir can be found, the correction is parked at
+    out_dir/hints/<doc_id>.yaml and reported as SKIPPED, not a success
+    (issue #169) — a dead file no engine code reads back must never be
+    counted in hints_written, which the CLI treats as "applied".
 
     C2.1 = first obs of indemnification → state-university-2023.
     """
@@ -1142,11 +1145,112 @@ def test_apply_feedback_hints_fallback_to_out_dir_hints(tmp_path: Path) -> None:
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
 
-    assert "state-university-2023" in result.hints_written
+    # Not a success: the doc_id must NOT appear in hints_written.
+    assert "state-university-2023" not in result.hints_written
+    # It IS reported as not-applied, with a message a human can act on.
+    assert "hints:state-university-2023" in result.skipped
+    message = " ".join(result.skipped["hints:state-university-2023"])
+    assert "state-university-2023" in message
+    assert "not read by any pipeline stage" in message.lower()
+
+    # The best-effort fallback copy still exists, for manual recovery.
     fallback_path = out_dir / "hints" / "state-university-2023.yaml"
     assert fallback_path.exists()
     data = yaml.safe_load(fallback_path.read_text(encoding="utf-8"))
     assert data["provenance"] == "our_paper"
+
+
+def test_apply_feedback_hints_uses_explicit_corpus_dir(tmp_path: Path) -> None:
+    """corpus_dir, when given, is searched even when it is not out_dir's
+    parent/grandparent — the documented Docker layout, where the corpus is
+    mounted as a SIBLING of out_dir (/work/corpus vs. /work/out), not its
+    parent (issue #169).
+
+    C2.1 = first obs of indemnification → state-university-2023.
+    """
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "work" / "out"
+    out_dir.mkdir(parents=True)
+    corpus_dir = tmp_path / "work" / "corpus"
+    doc_dir = corpus_dir / "state-university-2023"
+    doc_dir.mkdir(parents=True)
+
+    # Re-point the OPF we just wrote at the new out_dir location.
+    opf_src = tmp_path / "out" / "playbook.opf.json"
+    (out_dir / "playbook.opf.json").write_text(
+        opf_src.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp, corpus_dir=corpus_dir)
+
+    assert "state-university-2023" in result.hints_written
+    assert result.skipped == {}
+    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
+    assert data["provenance"] == "counterparty_paper"
+
+
+def test_apply_feedback_hints_reverses_pseudonymized_document_id(tmp_path: Path) -> None:
+    """When the cited document_id is a pseudonymized alias (issue #153), the
+    held-out out_dir/alias_map.json sidecar is used to reverse it back to the
+    real corpus folder name before searching (issue #169) — without this,
+    the alias matches no raw-named corpus folder anywhere and the correction
+    silently no-ops into the dead out_dir/hints/ fallback.
+
+    C2.1 = first obs of indemnification → state-university-2023, aliased to
+    Counterparty-1-2023.
+    """
+    doc = _make_opf(tmp_path)
+    doc["clauses"][0]["observed_positions"][0]["example_ref"]["document_id"] = (
+        "counterparty-1-2023"
+    )
+    out_dir = tmp_path / "out"
+    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+    (out_dir / "alias_map.json").write_text(
+        json.dumps({"Counterparty-1": "State University"}), encoding="utf-8"
+    )
+
+    # Raw-named corpus folder, exactly as a human would find it on disk.
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+
+    feedback = {"C2.1": {"provenance": "our_paper"}}
+    fp = _write_feedback(tmp_path, feedback)
+    result = apply_feedback(out_dir, fp)
+
+    assert "counterparty-1-2023" in result.hints_written
+    assert result.skipped == {}
+    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
+    assert data["provenance"] == "our_paper"
+
+
+def test_apply_feedback_hints_unwritable_corpus_dir_reported_as_skipped(
+    tmp_path: Path,
+) -> None:
+    """A corpus document directory that exists but cannot be written (the
+    Docker corpus mount is read-only) must be reported as skipped, not
+    counted as a success — issue #169's other failure mode, distinct from
+    "directory not found".
+
+    C2.1 = first obs of indemnification → state-university-2023.
+    """
+    _make_opf(tmp_path)
+    out_dir = tmp_path / "out"
+    doc_dir = tmp_path / "state-university-2023"
+    doc_dir.mkdir()
+    doc_dir.chmod(0o500)  # read + execute, no write — simulates a ro mount
+    try:
+        feedback = {"C2.1": {"provenance": "our_paper"}}
+        fp = _write_feedback(tmp_path, feedback)
+        result = apply_feedback(out_dir, fp)
+
+        assert "state-university-2023" not in result.hints_written
+        assert "hints:state-university-2023" in result.skipped
+        fallback_path = out_dir / "hints" / "state-university-2023.yaml"
+        assert fallback_path.exists()
+    finally:
+        doc_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
 
 
 # ---------------------------------------------------------------------------

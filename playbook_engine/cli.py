@@ -3122,7 +3122,18 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
 @view_group.command(name="apply")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
 @click.argument("feedback_file", type=click.Path(exists=True, path_type=Path))
-def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
+@click.option(
+    "--corpus-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Corpus root to search first when locating a cited document's "
+        "hints.yaml (e.g. /work/corpus under the Docker flow, where the "
+        "corpus is a sibling of OUT_DIR rather than its parent). Without "
+        "it, only OUT_DIR's parent/grandparent are searched."
+    ),
+)
+def view_apply_cmd(out_dir: Path, feedback_file: Path, corpus_dir: Path | None) -> None:
     """Apply FEEDBACK_FILE corrections to OUT_DIR.
 
     Translates provenance/signed/order corrections into per-document
@@ -3137,6 +3148,12 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
     it cannot honor is reported as not applied rather than counted toward a
     false "OK".
 
+    A hints.yaml correction whose corpus document directory cannot be found
+    or written (e.g. the Docker corpus mount is read-only) is reported as
+    NOT applied rather than counted as a success — see "not applied" lines
+    in the output — even though a copy is parked under OUT_DIR/hints/ for
+    manual recovery.
+
     OUT_DIR is the output directory produced by ``playbook mine`` followed
     by ``playbook project``.
     FEEDBACK_FILE is the feedback.json produced by the HTML viewer.
@@ -3144,9 +3161,10 @@ def view_apply_cmd(out_dir: Path, feedback_file: Path) -> None:
     from playbook_engine.viewer import apply_feedback  # noqa: PLC0415
 
     resolved = out_dir.resolve()
+    corpus_resolved = corpus_dir.resolve() if corpus_dir is not None else None
 
     try:
-        result = apply_feedback(resolved, feedback_file.resolve())
+        result = apply_feedback(resolved, feedback_file.resolve(), corpus_dir=corpus_resolved)
     except (FileNotFoundError, ValueError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
