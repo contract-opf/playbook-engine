@@ -727,9 +727,15 @@ def test_llm_segmentation_low_confidence_surfaces_in_after_action_review(tmp_pat
     downstream confidence-based review gate in this repo (aar._build_needs_attention,
     fed by classification_confidences -> build_observations -> Observation.confidence).
 
-    Before the fix, confidence=1.0 meant these clauses could never trip this
-    gate; the LLM misclassifying an indemnification clause would present as a
-    certainty in the observation store.
+    Before the #86 fix, confidence=1.0 meant these clauses could never trip
+    this gate; the LLM misclassifying an indemnification clause would present
+    as a certainty in the observation store.
+
+    Since #181, this flat by-design confidence (pipeline._LLM_SEGMENTER_CONFIDENCE)
+    is rolled into a single aggregate "spot-check" row rather than one
+    per-observation "low confidence" row — asserting individual "low
+    confidence" text here would defeat that aggregation, so this checks for
+    the aggregate row instead.
     """
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
@@ -755,8 +761,14 @@ def test_llm_segmentation_low_confidence_surfaces_in_after_action_review(tmp_pat
 
     data = build_after_action_data(out_dir)
     needs_attention = data["needs_attention"]
-    assert any("low confidence" in "".join(item.get("reasons", [])) for item in needs_attention), (
-        f"expected a low-confidence needs_attention item; got {needs_attention}"
+    assert any("spot-check" in "".join(item.get("reasons", [])) for item in needs_attention), (
+        f"expected the aggregate spot-check needs_attention item; got {needs_attention}"
+    )
+    assert not any(
+        "low confidence" in "".join(item.get("reasons", [])) for item in needs_attention
+    ), (
+        "flat by-design LLM-segmenter confidence must NOT also produce "
+        f"individual low-confidence rows; got {needs_attention}"
     )
 
 

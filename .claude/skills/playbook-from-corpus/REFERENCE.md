@@ -46,7 +46,13 @@ read it once and keep it at hand).
   `confidence` is < 0.5 (`aar.py`'s hardcoded low-confidence check). Both
   read the same stored `confidence` field, so there is no reason to shade a
   genuine judgment below its true value — score honestly and let the
-  thresholds do their job.
+  thresholds do their job. (This `kind: classify` prompt is the drain-loop
+  judge path. Step 2a's agent-segmentation classification is a separate
+  path — no dedicated judge verdict — and always stamps a flat
+  `confidence: 0.45` regardless of your actual certainty; the AAR aggregates
+  that whole flat-confidence cohort into one spot-check line rather than
+  flagging each individually, so it does not flood the "needs attention"
+  table the way a genuine per-clause low score would — see issue #181.)
 - Never invent a `taxonomy_id` not in the provided list.
 - Prefer specificity: if multiple entries match, pick the most specific.
 

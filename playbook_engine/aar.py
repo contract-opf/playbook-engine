@@ -45,6 +45,7 @@ from playbook_engine.opf_accessors import (
     playbook_clause_library,
     playbook_clauses,
 )
+from playbook_engine.pipeline import _LLM_SEGMENTER_CONFIDENCE
 
 _log = logging.getLogger(__name__)
 
@@ -563,6 +564,20 @@ def _build_needs_attention(
     degenerate deviation distributions, corpus-level provenance ambiguity
     flips, failed version ingests, low-confidence, needs_review, judge_error
     items.
+
+    Observations carrying exactly ``pipeline._LLM_SEGMENTER_CONFIDENCE``
+    (0.45) are a special case (issue #181): that value is a deliberate,
+    by-design sentinel stamped on every taxonomy assignment made during agent
+    segmentation — not a genuine per-clause confidence signal — so on a fully
+    agent-segmented corpus EVERY classified clause would otherwise earn its
+    own individual row here, drowning real problems (ingest failures, a
+    truly ambiguous 0.0 classification) in hundreds or thousands of by-design
+    flags. That cohort is rolled into a single aggregate row instead; only
+    genuinely distinct low-confidence values (e.g. the 0.0 unclassified
+    sentinel, or a real judge's own low confidence) still get individual
+    rows. An observation in the 0.45 cohort that ALSO carries another reason
+    (``needs_review``, ``judge_error``) still gets its own row for that other
+    reason — only the low-confidence reason itself is aggregated away.
     """
     items: list[dict[str, Any]] = []
     item_num = 0
@@ -767,6 +782,32 @@ def _build_needs_attention(
                 }
             )
 
+    # Agent-segmentation flat-confidence cohort (issue #181): counted up
+    # front (before the per-observation loop below skips emitting individual
+    # rows for it) so the aggregate row sits with the other corpus-level
+    # summary rows rather than trailing after every per-observation item.
+    llm_segmenter_flat_confidence_count = sum(
+        1
+        for obs in all_obs
+        if isinstance(obs, dict) and obs.get("confidence") == _LLM_SEGMENTER_CONFIDENCE
+    )
+    if llm_segmenter_flat_confidence_count:
+        item_num += 1
+        items.append(
+            {
+                "item_number": item_num,
+                "document_id": "—",
+                "version": "—",
+                "taxonomy_id": None,
+                "reasons": [
+                    f"{llm_segmenter_flat_confidence_count} clause(s) classified "
+                    f"during agent segmentation at the by-design flat confidence "
+                    f"({_LLM_SEGMENTER_CONFIDENCE:.2f}) — spot-check a sample "
+                    "rather than reviewing each individually"
+                ],
+            }
+        )
+
     for obs in all_obs:
         if not isinstance(obs, dict):
             continue
@@ -786,9 +827,17 @@ def _build_needs_attention(
         if obs.get("taxonomy_id") == "needs_review":
             reasons.append("needs_review taxonomy_id")
 
-        # Low confidence (when stored as a field)
+        # Low confidence (when stored as a field). The flat agent-segmenter
+        # sentinel (_LLM_SEGMENTER_CONFIDENCE) is excluded here — it was
+        # already counted into the single aggregate row above (issue #181);
+        # emitting it again per-observation would defeat that aggregation.
         conf = obs.get("confidence")
-        if conf is not None and isinstance(conf, (int, float)) and conf < 0.5:
+        if (
+            conf is not None
+            and isinstance(conf, (int, float))
+            and conf < 0.5
+            and conf != _LLM_SEGMENTER_CONFIDENCE
+        ):
             reasons.append(f"low confidence ({conf:.2f})")
 
         # Ambiguous provenance via trail context — check basis field
