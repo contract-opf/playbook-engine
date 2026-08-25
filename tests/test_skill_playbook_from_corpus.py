@@ -56,6 +56,8 @@ REQUIRED_SUBCOMMANDS = [
     "mine",
     "judge",
     "judge-apply",
+    # SKILL.md's Route B and Step 6 (issue #158) cite judge-migrate --dry-run.
+    "judge-migrate",
     "project",
     "validate",
     "report",

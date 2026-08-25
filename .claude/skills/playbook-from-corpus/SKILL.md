@@ -104,6 +104,15 @@ will hit a mount error. On Route B either use the venv form directly —
 `playbook posture interview $OUT ...` — or pass the out-dir as a harmless
 placeholder: `make docker-run CORPUS=$OUT OUT=$OUT ARGS="..."`.
 
+**First time back at this `$OUT` after an engine upgrade:** the Evidence
+you're about to author Posture/Floor against was produced by an earlier
+`judge` run, and its verdict store may predate the engine's rubric-versioning
+support — those verdicts carry no rubric stamp at all. Run `playbook
+judge-migrate $OUT --config $CORPUS/playbook.config.yaml --dry-run`; if it
+reports only legacy items and the rubric hasn't changed since they were
+banked, adopt them with `judge-migrate` (drop `--dry-run`) before trusting
+Evidence — never re-judge a legacy bank. See REFERENCE.md § "Rubric versions".
+
 ## Interactive setup (Route A and C only — skip for Route B)
 
 Before starting, ask the human only what you cannot derive yourself:
@@ -748,6 +757,15 @@ Read `out/judge/pending.jsonl`. Apply verdicts for the sample items, confirm
 the format is correct, then proceed to the full drain.
 
 ### Step 6 — Unattended judge-drain loop
+
+**First run against this `$OUT` after an engine upgrade:** before starting the
+loop below, run `playbook judge-migrate $OUT --config
+$CORPUS/playbook.config.yaml --dry-run`. If it reports only legacy items (no
+stamp — banked before rubric-versioning shipped) and the rubric hasn't
+changed since they were banked, adopt them with `judge-migrate` (drop
+`--dry-run`) before draining — never re-judge a legacy bank from scratch. See
+REFERENCE.md § "Rubric versions" for what "legacy" vs. "stale" means and when
+adoption is and isn't safe.
 
 **Loop invariant:** repeat until `out/judge/pending.jsonl` is empty.
 
