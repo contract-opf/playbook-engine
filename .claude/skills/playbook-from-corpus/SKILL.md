@@ -281,6 +281,11 @@ to finish faster, or OCR the scans separately? Only start extraction once they
 confirm. (Time constants are calibrated from a real 44-agreement / 161-version
 run; they are estimates — present the range, not a promise.)
 
+Once you have a corpus staged and an `$OUT` chosen, run this again as Step 2b
+in the Ordered pipeline below — that version also checks the extraction
+cache so a repeat run against the same `$OUT` reports the real remaining
+cost, not the full corpus every time.
+
 ---
 
 ## Check the environment before anything expensive
@@ -514,6 +519,11 @@ corpus can go bad between rounds (staged tree moved, symlinks now dangling).
 
 ### Step 2a — Agent segmentation (key-free, optional)
 
+**Taking this path? Run Step 2b's extraction pre-flight below first.** The
+`segment` command here pays for extraction/OCR immediately, on first call —
+the same cost `mine` pays at Step 3 — so confirm the ETA before running it,
+not after.
+
 Without an `ANTHROPIC_API_KEY`, `mine` falls back to the **deterministic**
 segmenter, whose clause boundaries are hit-or-miss on real agreements (fine on
 clean born-digital DOCX, coarse on irregular/table-heavy layouts). With
@@ -574,6 +584,77 @@ extraction (a document that extracts to a few giant blocks stays coarse);
 character-exact within-block splitting remains the live-LLM segmenter's edge.
 Skip this step and let `mine` use the deterministic segmenter when that's good
 enough for the corpus.
+
+### Step 2b — Extraction pre-flight (reuse the cache, confirm the ETA)
+
+**Do this before Step 3's `mine` (or before Step 2a's `segment`, if you're on
+that path) — both are what actually pay for extraction/OCR.** The standalone
+"Pre-flight: estimate and confirm" section above already told you to check
+before *any* expensive step; this is that same check, run for real now that
+you have a corpus staged and an `$OUT` chosen, and it also covers the
+cache-reuse mechanics the earlier check doesn't.
+
+**Pre-flight — reuse a warm extraction cache; never re-OCR what's done.**
+Extraction/OCR is the multi-hour step, and it is cached at
+`$OUT/extraction_cache.jsonl` keyed by **file content hash plus the current
+extractor environment** (docling on PATH or not) — so any run pointed at an
+`$OUT` a prior or parallel run already used skips extraction for every
+unchanged version extracted under the SAME environment, and goes straight to
+segmentation/judging. **Always point `$OUT` at the same output directory
+across runs** (that is the whole mechanism — a fresh `$OUT` throws the cache
+away and re-OCRs from scratch). Installing or removing `docling` between runs
+against the same `$OUT` deliberately does NOT replay the cache for affected
+versions — each is re-extracted once under the new environment rather than
+staying frozen at a possibly-worse legacy-only extraction (issue #77).
+
+**You do not have to police this by hand.** A successful `mine`/`judge`/
+`segment` stamps `$OUT/run_manifest.json` with the environment that produced
+the output directory (engine version and build, resolved extractor, cache
+format versions, config hash), and the *next* `mine`/`judge`/`segment`
+against that `$OUT` checks itself against it before doing any work —
+including the key-free agent path's `segment`, the first stage on that path
+that pays for extraction, so a drifted environment is caught there rather
+than surfacing later as segmentation verdicts keyed to the wrong
+`canonical_text`. When everything matches it says nothing at all. When it
+doesn't — docling gone from the venv, a stale
+container image running an older engine, a changed clause splitter — it
+stops before touching anything and prints a plain-English explanation of
+what would be redone, how to fix it, and a copy-pasteable block of
+environment facts (no corpus content) to send to the maintainers. Re-run
+with `--accept-environment-change` if the change was deliberate and the
+rework is acceptable (issue #121).
+
+Run the pre-flight estimator (host venv, seconds, no docling needed). It
+checks the cache for **both** the `docling` and `legacy` key variants of
+each file, regardless of whether docling is installed on the host running
+the script — so it correctly *detects* a warm cache hit even when the corpus
+was actually extracted inside the docker container (which has docling; the
+host venv typically does not). Pass the **same `$OUT`** so it reports
+what's already cached:
+
+```bash
+.venv/bin/python .claude/skills/playbook-from-corpus/estimate_runtime.py ./corpus ./out
+```
+
+Only a hit under the **target environment** — the one the upcoming
+`mine`/`segment`/`judge` run will actually extract under — counts as 0
+wall-clock. This defaults to `docling`, since the documented pipeline always
+extracts inside the container (`make docker-run ... mine/judge`, Dockerfile
+has docling). A file cached under `legacy` only is reported separately (`N
+version(s) cached under legacy only — will be re-extracted under docling`)
+rather than folded into the "already extracted" count — it will genuinely
+re-run. If you are intentionally extracting on the host instead of the
+container (no docling there), set
+`PLAYBOOK_ESTIMATE_TARGET_ENV=legacy` before running the estimator so
+host-cached entries are credited correctly instead of being reported as a
+needless re-OCR.
+
+If it reports `~0m — corpus already extracted (cache hit)`, the expensive step
+is done: proceed directly to `mine`/`segment`/`judge` (they replay the cache
+automatically — no flag needed). If it reports uncached versions (including
+any reported as cached under the non-target environment only), that count
+is the real remaining OCR cost; surface the ETA to the human before
+committing.
 
 ### Step 3 — Mine the backbone
 
@@ -659,67 +740,10 @@ bullet under `deviation`.
 
 ### Step 5 — Estimate and trial
 
-**Pre-flight — reuse a warm extraction cache; never re-OCR what's done.**
-Extraction/OCR is the multi-hour step, and it is cached at
-`$OUT/extraction_cache.jsonl` keyed by **file content hash plus the current
-extractor environment** (docling on PATH or not) — so any run pointed at an
-`$OUT` a prior or parallel run already used skips extraction for every
-unchanged version extracted under the SAME environment, and goes straight to
-segmentation/judging. **Always point `$OUT` at the same output directory
-across runs** (that is the whole mechanism — a fresh `$OUT` throws the cache
-away and re-OCRs from scratch). Installing or removing `docling` between runs
-against the same `$OUT` deliberately does NOT replay the cache for affected
-versions — each is re-extracted once under the new environment rather than
-staying frozen at a possibly-worse legacy-only extraction (issue #77).
-
-**You do not have to police this by hand.** A successful `mine`/`judge`/
-`segment` stamps `$OUT/run_manifest.json` with the environment that produced
-the output directory (engine version and build, resolved extractor, cache
-format versions, config hash), and the *next* `mine`/`judge`/`segment`
-against that `$OUT` checks itself against it before doing any work —
-including the key-free agent path's `segment`, the first stage on that path
-that pays for extraction, so a drifted environment is caught there rather
-than surfacing later as segmentation verdicts keyed to the wrong
-`canonical_text`. When everything matches it says nothing at all. When it
-doesn't — docling gone from the venv, a stale
-container image running an older engine, a changed clause splitter — it
-stops before touching anything and prints a plain-English explanation of
-what would be redone, how to fix it, and a copy-pasteable block of
-environment facts (no corpus content) to send to the maintainers. Re-run
-with `--accept-environment-change` if the change was deliberate and the
-rework is acceptable (issue #121).
-
-Run the pre-flight estimator (host venv, seconds, no docling needed). It
-checks the cache for **both** the `docling` and `legacy` key variants of
-each file, regardless of whether docling is installed on the host running
-the script — so it correctly *detects* a warm cache hit even when the corpus
-was actually extracted inside the docker container (which has docling; the
-host venv typically does not). Pass the **same `$OUT`** so it reports
-what's already cached:
-
-```bash
-.venv/bin/python .claude/skills/playbook-from-corpus/estimate_runtime.py ./corpus ./out
-```
-
-Only a hit under the **target environment** — the one the upcoming
-`judge`/`mine` run will actually extract under — counts as 0 wall-clock.
-This defaults to `docling`, since the documented pipeline always extracts
-inside the container (`make docker-run ... mine/judge`, Dockerfile has
-docling). A file cached under `legacy` only is reported separately (`N
-version(s) cached under legacy only — will be re-extracted under docling`)
-rather than folded into the "already extracted" count — it will genuinely
-re-run. If you are intentionally extracting on the host instead of the
-container (no docling there), set
-`PLAYBOOK_ESTIMATE_TARGET_ENV=legacy` before running the estimator so
-host-cached entries are credited correctly instead of being reported as a
-needless re-OCR.
-
-If it reports `~0m — corpus already extracted (cache hit)`, the expensive step
-is done: proceed directly to `judge`/`mine` (they replay the cache
-automatically — no flag needed). If it reports uncached versions (including
-any reported as cached under the non-target environment only), that count
-is the real remaining OCR cost; surface the ETA to the human before
-committing.
+The extraction-cache pre-flight and ETA estimator now live at Step 2b, above
+— run before Step 3's `mine` (or Step 2a's `segment`), not here. If you
+skipped straight to this step, go back and run that check first: it is what
+confirms the multi-hour extraction/OCR cost before it's paid.
 
 **Plan:** count pending items and estimate judgment token cost.
 
