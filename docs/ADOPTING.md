@@ -67,14 +67,14 @@ Two of these matter more than they look:
   a guarantee of pseudonymization. Configure the list before the first
   real run, and always run the mandatory residue check (see the skill's
   Step 9) before treating any artifact as shareable. Aliasing does **not**
-  cover every artifact under `$OUT`: `judge/pending.jsonl` and
-  `my-verdicts.jsonl` are written from the raw, pre-pseudonymization
+  cover every artifact under `$OUT`: `judge/pending.jsonl` and every
+  `my-verdicts-*.jsonl` file are written from the raw, pre-pseudonymization
   source — they exist for a human to review and answer *before* the
   pseudonymization pass ever runs, so there is no aliased form to fall
-  back to — treat those two as sensitive too (see the skill's
+  back to — treat those as sensitive too (see the skill's
   entity-registry guardrail). `normalized/<document_id>/` is stale-cleared
   and rewritten under the ALIASED document_id/version after the
-  pseudonymization pass (mirroring `trail/`), so — unlike the two files
+  pseudonymization pass (mirroring `trail/`), so — unlike the files
   above — it is safe to share alongside the compiled playbook. The reverse
   map is written to a restricted sidecar that never enters the playbook. If
   you skip `known_entities` entirely, real names flow into every artifact,
