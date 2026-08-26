@@ -11,7 +11,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from playbook_engine.canonicalize import content_hash
+from playbook_engine.canonicalize import canonicalize, content_hash
 from playbook_engine.cli import cli
 from playbook_engine.digest import (
     DIGEST_VERSION,
@@ -329,6 +329,29 @@ def test_digest_cmd_writes_sidecar(tmp_path: Path) -> None:
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
     assert sidecar == pb["digest"]
     assert "tokens" in result.output
+
+
+def test_digest_cmd_sidecar_matches_canonical_size(tmp_path: Path) -> None:
+    """The on-disk sidecar must not exceed the canonical-chars/4 estimate it reports.
+
+    Regression for issue #211: the sidecar used to be pretty-printed
+    (indent=1), so a consumer measuring the actual file on disk saw ~20%+
+    more bytes than the reported "~N tokens" estimate — the ~40K-token
+    budget promise silently depended on the consumer re-canonicalizing
+    rather than reading the artifact as shipped.
+    """
+    out_dir = _compiled_out_dir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["digest", str(out_dir)])
+    assert result.exit_code == 0, result.output
+
+    raw = (out_dir / "playbook.digest.json").read_text(encoding="utf-8")
+    sidecar = json.loads(raw)
+    expected = canonicalize(sidecar)
+    # Exactly the canonical form plus a single trailing newline for the
+    # on-disk file — no extra whitespace from pretty-printing.
+    assert raw == expected + "\n"
+    assert len(raw.rstrip("\n")) == len(expected)
 
 
 def test_digest_cmd_truncated_opf_reports_error_no_traceback(tmp_path: Path) -> None:

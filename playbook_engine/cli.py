@@ -3097,6 +3097,7 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
     """
     import json as _json  # noqa: PLC0415
 
+    from playbook_engine.canonicalize import canonicalize  # noqa: PLC0415
     from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
 
     resolved = out_dir.resolve()
@@ -3114,7 +3115,11 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
     dest = digest_path.resolve() if digest_path else resolved / "playbook.digest.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".tmp")
-    tmp.write_text(_json.dumps(digest, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Written in the same canonical form (sorted keys, no insignificant
+    # whitespace) the ~40K-token budget is measured against — a pretty-
+    # printed sidecar would be ~20%+ larger on disk than the estimate a
+    # consumer sees, silently breaking the budget promise (issue #211).
+    tmp.write_text(canonicalize(digest) + "\n", encoding="utf-8")
     tmp.replace(dest)
 
     token_est = digest_token_estimate(digest)
