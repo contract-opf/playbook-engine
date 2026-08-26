@@ -67,8 +67,7 @@ Artifacts DELIBERATELY excluded from the leak sweep, not overlooked:
                                 Checked SEPARATELY below (must contain the
                                 raw name, and must be 0600).
   - extraction_cache.jsonl,
-    out_dir/.cache/,
-    out_dir/normalized/*.json: raw, PRE-pseudonymization working caches.
+    out_dir/.cache/:            raw, PRE-pseudonymization working caches.
                                 pseudonymize_* is a single corpus-level pass
                                 mine_corpus runs AFTER the whole per-document
                                 ingest loop (see pipeline.mine_corpus's "Born-
@@ -82,12 +81,19 @@ Artifacts DELIBERATELY excluded from the leak sweep, not overlooked:
                                 test_extraction_cache_is_a_pre_boundary_cache_not_a_residue_leak
                                 at the bottom of this file: it asserts
                                 ENTITY_NAME IS present there). out_dir/.cache/
-                                and out_dir/normalized/*.json rest on the
-                                SAME design-boundary reasoning above but are
-                                NOT separately pinned by any assertion here —
-                                nothing in this module would notice if either
-                                of those two moved inside the born-safe
-                                boundary.
+                                rests on the SAME design-boundary reasoning
+                                above but is NOT separately pinned by any
+                                assertion here — nothing in this module would
+                                notice if it moved inside the born-safe
+                                boundary. out_dir/normalized/*.json is NO
+                                LONGER on this list (issue #139): it used to
+                                be written raw, mid-loop, under the doc_id,
+                                which was a genuine residue leak, not a
+                                design boundary — pipeline.mine_corpus now
+                                stale-clears and rewrites it under the
+                                ALIASED document_id AFTER the pseudonymization
+                                pass, exactly like trail/ below, so it is now
+                                swept in the loop with everything else.
   - viewer_notes.md:           only produced by chat_curate.apply_curate_commands
                                 from a human-typed note string plus an
                                 ALREADY-pseudonymized clause title -- not
@@ -495,6 +501,15 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
         f"scope.json document_id must be ALIASED, not the raw slug: {scope_entries}"
     )
 
+    # normalized/ subdirectory names must ALSO be aliased, not the raw slug
+    # (issue #139 — this is the directory-name half of the leak the ticket
+    # reports; the content half is covered by the sweep loop below).
+    normalized_doc_dirs = sorted(d.name for d in (out_dir / "normalized").iterdir() if d.is_dir())
+    assert normalized_doc_dirs, "expected at least one normalized/<doc>/ subdirectory"
+    assert not any(name.startswith(ENTITY_SLUG) for name in normalized_doc_dirs), (
+        f"normalized/ subdirectory names must be ALIASED, not the raw slug: {normalized_doc_dirs}"
+    )
+
     # ---- Run the rest of the pipeline end-to-end ------------------------
     playbook = project_playbook(out_dir, config, taxonomy)
     write_playbook(playbook, out_dir / "playbook.opf.json")  # already written by project_playbook;
@@ -547,6 +562,12 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
     ]
     for trail_file in sorted((out_dir / "trail").glob("*.json")):
         artifacts.append((f"trail/{trail_file.name}", trail_file))
+    # normalized/ (issue #139): now materialised AFTER the pseudonymization
+    # pass, mirroring trail/ immediately above — swept the same way, not
+    # excluded as a pre-boundary cache anymore (see the module docstring).
+    for tree_file in sorted((out_dir / "normalized").rglob("*.clauses.json")):
+        rel = tree_file.relative_to(out_dir / "normalized")
+        artifacts.append((f"normalized/{rel}", tree_file))
 
     for label, path in artifacts:
         assert path.exists(), f"expected artifact missing: {label} ({path})"

@@ -34,8 +34,16 @@ If you find anything like that, in any artifact of this repository:
 
 The engine's own safeguards (the born-safe entity registry, the
 pseudonymization pass, the export profile's residue judging) exist to make
-this class of incident impossible; a report that one of them failed is
-treated as a high-severity engineering bug in addition to the takedown.
+this class of incident impossible for the compiled playbook and its
+`playbook publish` export — the artifacts meant to leave the org. They do
+not cover every raw-source working file under `$OUT` (e.g. the judge
+queues, `pending.jsonl` and `my-verdicts.jsonl`): see
+[README.md](README.md#what-a-playbook-knows) and
+[ADOPTING.md](docs/ADOPTING.md) for exactly which files that is and why. A
+report that one of the safeguards themselves failed — a raw name reaching
+the compiled playbook, the export, or any other artifact this project
+documents as pseudonymized — is treated as a high-severity engineering bug
+in addition to the takedown.
 
 ## Supported versions
 

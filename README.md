@@ -112,8 +112,11 @@ Some things adopters tend to care about, built in from the start:
   own. `playbook publish` is what actually guarantees it: a deterministic
   no-known-entity backstop plus a semantic-residue report over every
   free-text surface — reviewed by an LLM/agent (the `playbook-from-corpus`
-  skill, or a wired judge) rather than by `publish` itself. See
-  [SECURITY.md](SECURITY.md).
+  skill, or a wired judge) rather than by `publish` itself. A few raw-source
+  working files under `$OUT` (the judge queues — content a human reviews
+  and answers *before* the pseudonymization pass ever runs) are not
+  pseudonymized and must be handled as sensitive — see
+  [ADOPTING.md](docs/ADOPTING.md) and [SECURITY.md](SECURITY.md).
 - **Extensible without forking.** The schema reserves an `x_*` vendor
   namespace at the sanctioned levels; extensions travel with the document
   and participate in its content hash.
