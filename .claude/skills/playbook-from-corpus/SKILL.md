@@ -262,8 +262,21 @@ still loads/writes the machine-global default, and an operator alternating
 `mine`/`judge` calls that disagree on the registry path can end up with the
 SAME entity aliased differently between rounds. Under Docker the in-container
 `~/.cache` copy is ephemeral anyway, so consistently passing `--entity-registry`
-keeps `$OUT/alias_map.json` + `$OUT/entity_registry.json` as the only durable
-sensitive artifacts — no post-run "purge the global registry?" step needed.
+means no post-run "purge the global registry?" step is needed for those two
+files — but **`$OUT/alias_map.json` and `$OUT/entity_registry.json` are not
+the only durable sensitive artifacts under `$OUT`**: `$OUT/judge/pending.jsonl`
+and `$OUT/my-verdicts.jsonl` carry raw, pre-pseudonymization clause text (they
+exist for a human to read and answer *before* the born-safe pass ever runs, so
+there is no aliased form to fall back to). Never hand an out-dir to anyone
+outside the org on the assumption that removing `alias_map.json`/
+`entity_registry.json` alone makes it safe — treat `pending.jsonl` and
+`my-verdicts.jsonl` as sensitive too. `$OUT/normalized/<document_id>/` is
+*not* on this list (issue #139 fixed the gap that used to put it there): `mine`
+now stale-clears and rewrites the whole directory — tree content, the
+directory name, AND the per-version filename — under the ALIASED
+document_id/version after the born-safe pseudonymization pass, mirroring
+`trail/`'s treatment, so it is safe to share alongside the compiled playbook
+once those two files are removed.
 
 ---
 
@@ -681,7 +694,7 @@ Writes `scope.json`, `trail/`, `observations.jsonl`, `corpus_manifest.json`,
 prints a WARNING — treat it as a signal that "us" is misconfigured (see "Derive
 party names").
 
-`normalized/<document_id>/NN__*.clauses.json` is more than a mine
+`normalized/<document_id>/v<N>.clauses.json` is more than a mine
 by-product — it is the relocation-triage resource at Step 6's judge stage:
 each file holds one document version's full clause tree (`clause_path`,
 `heading`, `text` per node), which is where a relocation's *unchanged*
@@ -744,7 +757,7 @@ relevant corpus subfolders (see the "Step 4 — Review the intermediates" sectio
 survive a re-run of Step 1 (see the warning there) — keep a copy outside the
 staged tree before re-staging.
 
-This is also the point to note where `normalized/<document_id>/NN__*.clauses.json`
+This is also the point to note where `normalized/<document_id>/v<N>.clauses.json`
 landed — at Step 6's judge stage, relocation triage reads those per-version
 clause trees directly (a relocation's unchanged counterpart clause never
 shows up in `pending.jsonl`); see REFERENCE.md's "Relocation triage FIRST"
@@ -1569,7 +1582,7 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
   triage FIRST" bullet under `deviation`) before judging item-by-item — a
   relocation's unchanged counterpart never appears in `pending.jsonl`, so
   finding it means reading the per-version clause trees at
-  `$OUT/normalized/<document_id>/NN__*.clauses.json`, not pair-scanning the
+  `$OUT/normalized/<document_id>/v<N>.clauses.json`, not pair-scanning the
   pending set.
 - **Posture and Floor are never derived, and never invented.** They are
   forward-looking intent; no corpus contains them. When the human is available,

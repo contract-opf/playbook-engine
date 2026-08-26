@@ -64,10 +64,22 @@ Two of these matter more than they look:
   listed there are replaced with stable aliases *at ingest*. Matching is
   best-effort (whole-word, contiguous-sequence), so a misconfigured or
   incomplete list can still leave real names in the output — this is not
-  a guarantee of pseudonymization. The reverse map is written to a
-  restricted sidecar that never enters the playbook. Configure the list
-  before the first real run, and always run the mandatory residue check
-  (see the skill's Step 9) before treating any artifact as shareable.
+  a guarantee of pseudonymization. Configure the list before the first
+  real run, and always run the mandatory residue check (see the skill's
+  Step 9) before treating any artifact as shareable. Aliasing does **not**
+  cover every artifact under `$OUT`: `judge/pending.jsonl` and
+  `my-verdicts.jsonl` are written from the raw, pre-pseudonymization
+  source — they exist for a human to review and answer *before* the
+  pseudonymization pass ever runs, so there is no aliased form to fall
+  back to — treat those two as sensitive too (see the skill's
+  entity-registry guardrail). `normalized/<document_id>/` is stale-cleared
+  and rewritten under the ALIASED document_id/version after the
+  pseudonymization pass (mirroring `trail/`), so — unlike the two files
+  above — it is safe to share alongside the compiled playbook. The reverse
+  map is written to a restricted sidecar that never enters the playbook. If
+  you skip `known_entities` entirely, real names flow into every artifact,
+  including the compiled playbook — configure it before the first real
+  run.
 
 **Taxonomy:** start with `builtin:cuad-base.yaml` (the genuine CUAD v1
 41 categories) plus `builtin:general-commercial.yaml`, prune what doesn't

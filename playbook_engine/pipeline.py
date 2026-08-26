@@ -15,6 +15,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -224,6 +225,23 @@ _DEVIATION_VS_TEMPLATE_VERSION = 7
 # warm out/.cache entry from before this fix would keep replaying
 # corpus-wide all-"unknown" attribution as if it were still current.
 _VERSION_INGEST_REASON_VERSION = 2
+
+# Bump whenever the SHAPE of what _compute_doc_result records into
+# version_trees changes in a way that must invalidate a warm L1-L4 stage
+# cache (out/.cache) — same convention as _VERSION_INGEST_REASON_VERSION
+# above.
+#
+# v1 (issue #139): the per-doc result gained "version_trees" (each mined
+# version's ClauseTree serialised via to_dict()), so normalized/ can be
+# stale-cleared and rewritten under the aliased document_id AFTER the
+# born-safe pseudonymization pass — mirroring trail/'s treatment — instead
+# of being written raw, mid-loop, under doc_id (see mine_corpus's
+# "Materialise normalized/ clause trees now" comment). A warm cache entry
+# from before this fix has no "version_trees" key at all
+# (``result.get("version_trees", {})`` degrades to empty), so replaying it
+# would silently skip writing that document's trees on this run — bump so
+# every existing entry recomputes once and the trees are captured.
+_NORMALIZED_TREES_CACHE_VERSION = 1
 
 # version_ingest[].reason values that represent a real DEGRADATION — the
 # legacy adapter ran because docling was unavailable or crashed on this
@@ -1466,6 +1484,76 @@ def _pseudonymize_trail(
     return new
 
 
+def _pseudonymize_clause_node(
+    node: dict[str, Any], known_entities: list[str], registry: EntityRegistry
+) -> dict[str, Any]:
+    """Return a copy of one ``ClauseNode.to_dict()`` with ``heading``/``text`` aliased.
+
+    Recurses into ``children`` — see ``_pseudonymize_clause_tree`` below.
+    """
+    new = dict(node)
+    if isinstance(new.get("heading"), str):
+        new["heading"] = pseudonymize_text(new["heading"], known_entities, registry)
+    if isinstance(new.get("text"), str):
+        new["text"] = pseudonymize_text(new["text"], known_entities, registry)
+    new["children"] = [
+        _pseudonymize_clause_node(c, known_entities, registry) for c in new.get("children", [])
+    ]
+    return new
+
+
+def _pseudonymize_clause_tree(
+    tree_dict: dict[str, Any],
+    known_entities: list[str],
+    registry: EntityRegistry,
+    version_alias_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a copy of one ``ClauseTree.to_dict()`` with every raw counterparty name aliased.
+
+    Mirrors ``_pseudonymize_trail`` (issue #139): ``document_id`` is aliased
+    the same way trail/corpus_manifest entries are — so the aliased id this
+    returns matches ``viewer.py``'s ``out_dir / "normalized" / cdoc`` lookup,
+    which already joins on the aliased document_id from the compiled
+    playbook — and every node's ``heading``/``text`` (headings AND clause
+    bodies) is aliased too, so no raw counterparty name survives in
+    normalized/ the way it doesn't in observations.jsonl or trail/.
+
+    ``version`` and ``source_file`` (issue #139 review round 3) are BOTH raw
+    staged-filename material too — ``version`` is the exact stem
+    (``ClauseTree.version = vid``, see ``_compute_doc_result``'s per-version
+    loop) and ``source_file`` is that stem's full filename with extension
+    (``path.name``) — and the codebase's own ``_alias_version_field``
+    docstring documents that a staged version filename routinely embeds the
+    raw counterparty name (e.g. "01__… Oglethorpe University 6.14.23"). Both
+    are aliased the same way ``citation.version``/``citation.version_id``
+    already are: an exact match against *version_alias_map* (issue #143's
+    ``{raw stem: ordinal label}`` map for this document, built by
+    ``_build_version_alias_map``) wins outright; ``source_file`` never hits
+    that map exactly (it carries an extension the map's stems don't), so it
+    falls through to the same whole-word ``known_entities`` substring
+    pseudonymization ``_alias_version_field`` already provides as defense in
+    depth for exactly this case. The caller then uses this aliased
+    ``version`` (not the raw ``vid`` dict key) to build the output filename,
+    so the on-disk name never carries the raw stem either.
+    """
+    if not tree_dict.get("document_id"):
+        return dict(tree_dict)
+    new = dict(tree_dict)
+    new["document_id"] = pseudonymize_document_id(
+        tree_dict["document_id"], known_entities, registry
+    )
+    new["version"] = _alias_version_field(
+        tree_dict.get("version"), known_entities, registry, version_alias_map
+    )
+    new["source_file"] = _alias_version_field(
+        tree_dict.get("source_file"), known_entities, registry, version_alias_map
+    )
+    new["nodes"] = [
+        _pseudonymize_clause_node(n, known_entities, registry) for n in tree_dict.get("nodes", [])
+    ]
+    return new
+
+
 def _attach_counterparty_refs(
     observations: list[Observation], known_entities: list[str], registry: EntityRegistry
 ) -> list[Observation]:
@@ -1830,6 +1918,17 @@ def _compute_doc_result(
                            path (issue #129 — see ``extraction.detect_extractor``).
       - ``observations``:  list of serialised Observation dicts.
       - ``trail``:         trail dict, or None for out-of-scope documents.
+      - ``version_trees``: ``{version_id: ClauseTree.to_dict()}`` for every
+                           mined version (issue #139) — raw, pre-
+                           pseudonymization, exactly like ``observations``
+                           and ``trail`` above. ``mine_corpus`` collects this
+                           across every document and materialises
+                           ``normalized/`` from it AFTER the born-safe
+                           pseudonymization pass (stale-cleared and written
+                           under the aliased document_id, mirroring trail/'s
+                           treatment) instead of this function writing raw
+                           doc_id-named trees to disk directly — so a stage-
+                           cache hit still yields a tree write on this run.
       - ``scope_decision``: scope decision fields (for replaying into ScopeLog).
 
     Returns ``None`` if the document has no processable versions.
@@ -1901,6 +2000,10 @@ def _compute_doc_result(
     """
     # L1: Ingest + segment each version
     version_trees: dict[str, ClauseTree] = {}
+    # Serialised trees for the cacheable result (issue #139) — see this
+    # function's docstring's "version_trees" key and mine_corpus's
+    # "Materialise normalized/ clause trees now" comment.
+    version_tree_dicts: dict[str, dict[str, Any]] = {}
     llm_taxonomy_by_path: dict[str, dict[str, str | None]] = {}
     # Populated on every branch below — the deterministic DOCX path gets it
     # "for free" from _ingest_file_tracked, and both LLM-segmentation
@@ -2011,7 +2114,16 @@ def _compute_doc_result(
                     "source file — treating as an extraction failure"
                 )
 
-            tree.write(out_dir / "normalized" / doc_id / f"{vid}.clauses.json")
+            # issue #139: do NOT write to normalized/ here — that used to
+            # write raw, pre-pseudonymization content under the RAW doc_id,
+            # mid-loop, so a run with known_entities configured left the raw
+            # counterparty name in both the directory name and every node's
+            # text forever (never stale-cleared, never rewritten on a
+            # stage-cache hit — see the born-safe pseudonymization pass
+            # below and mine_corpus's "Materialise normalized/ clause trees
+            # now" comment, which mirrors trail/'s treatment). Only the
+            # serialised dict is captured here, into the cacheable result.
+            version_tree_dicts[vid] = tree.to_dict()
             version_trees[vid] = tree
             if extractor_label is not None:
                 extractor = extractor_label.extractor
@@ -2196,6 +2308,10 @@ def _compute_doc_result(
             "corpus_doc": corpus_doc,
             "observations": [],
             "trail": None,
+            # Out-of-scope documents still get their trees materialised
+            # (issue #139) — the pre-fix code wrote them unconditionally,
+            # before this scope check even ran.
+            "version_trees": version_tree_dicts,
             "scope_decision": scope_decision_dict,
             "our_alias_matched": our_alias_matched,
         }
@@ -2464,6 +2580,10 @@ def _compute_doc_result(
         "corpus_doc": corpus_doc,
         "observations": obs_dicts,
         "trail": trail,
+        # Serialised trees (issue #139); .get()-read by mine_corpus so
+        # cached results from before this feature simply contribute none
+        # (see _NORMALIZED_TREES_CACHE_VERSION, which busts those entries).
+        "version_trees": version_tree_dicts,
         # Serialized RoundMoves (issue #177); .get()-read by mine_corpus so
         # cached results from before this feature simply contribute none.
         "round_moves": [rm.to_dict() for rm in round_moves],
@@ -2924,6 +3044,12 @@ def mine_corpus(
             # WRONG "docling" label), making max_fallback/the review flags/
             # the CLI reason breakdown all silently blind.
             "version_ingest_reason_version": _VERSION_INGEST_REASON_VERSION,
+            # The per-doc result gained "version_trees" (issue #139) — see
+            # _NORMALIZED_TREES_CACHE_VERSION above. Without this, a warm
+            # per-doc stage-cache entry from before the fix has no
+            # "version_trees" key, so mine_corpus's normalized/ rewrite pass
+            # would silently skip that document's trees on this run.
+            "normalized_trees_cache_version": _NORMALIZED_TREES_CACHE_VERSION,
         }
     )
 
@@ -2939,6 +3065,12 @@ def mine_corpus(
     # not the raw counterparty name — keeping them consistent with the
     # pseudonymized observation ids that `inspect` joins on.
     all_trails: list[tuple[str, dict[str, Any]]] = []
+    # Serialised clause trees, same deferred-materialisation pattern as
+    # all_trails above (issue #139) — see "Materialise normalized/ clause
+    # trees now" below. Unlike all_trails, every document contributes here
+    # regardless of scope (normalized/ has always covered out-of-scope docs
+    # too — see _compute_doc_result's out-of-scope return).
+    all_version_trees: list[tuple[str, dict[str, dict[str, Any]]]] = []
 
     scope_log = ScopeLog(agreement_type_id=config.agreement_type.id)
     # Match corpus_linter.lint_corpus and cli.segment_cmd: dot-directories
@@ -3213,6 +3345,15 @@ def mine_corpus(
         if result["trail"] is not None:
             all_trails.append((doc_id, result["trail"]))
 
+        # Collect this document's serialised clause trees the same way
+        # (issue #139) — .get(): a cached result from before this fix has no
+        # "version_trees" key and contributes none (see
+        # _NORMALIZED_TREES_CACHE_VERSION, which busts those entries so this
+        # is a one-time gap, not a permanent one). Unconditional (unlike the
+        # trail above): normalized/ has always covered out-of-scope
+        # documents too.
+        all_version_trees.append((doc_id, result.get("version_trees", {})))
+
         # Reconstruct Observation objects from cached dicts.
         doc_obs = _restore_observations(result["observations"])
         all_observations.extend(doc_obs)
@@ -3439,6 +3580,43 @@ def mine_corpus(
             )
         out_doc_id = trail.get("document_id") or raw_doc_id
         _atomic_json_write(trail, trail_dir / f"{out_doc_id}.json")
+
+    # Materialise normalized/ clause trees now (issue #139): after the
+    # pseudonymization pass, mirroring trail/'s treatment immediately above —
+    # stale-clear the whole directory, then rewrite every version's tree
+    # under the ALIASED document_id (never the raw doc_id/counterparty
+    # name), from all_version_trees (every document's contribution, cached
+    # or freshly computed this run — see _NORMALIZED_TREES_CACHE_VERSION).
+    # Previously this was written raw, mid-loop, under doc_id — never
+    # stale-cleared and never rewritten on a stage-cache hit (audit finding
+    # #48 / issue #139). rmtree (not a glob-unlink loop like trail/ above)
+    # because normalized/ nests a subdirectory per document.
+    normalized_dir = out_dir / "normalized"
+    if normalized_dir.exists():
+        shutil.rmtree(normalized_dir)
+    for raw_doc_id, doc_version_trees in all_version_trees:
+        for vid, tree_dict in doc_version_trees.items():
+            if entity_registry is not None:
+                tree_dict = _pseudonymize_clause_tree(
+                    tree_dict,
+                    known_entities,
+                    entity_registry,
+                    version_alias_by_doc.get(raw_doc_id),
+                )
+            out_doc_id = tree_dict.get("document_id") or raw_doc_id
+            # Use the (possibly aliased) "version" field for the filename,
+            # never the raw `vid` dict key directly (issue #139 review round
+            # 3): ClauseTree.version is set to vid at ingest time
+            # (_compute_doc_result), so before pseudonymization the two are
+            # identical and this is a no-op; after it, tree_dict["version"]
+            # is the ordinal-labeled alias while `vid` is still the raw,
+            # counterparty-name-bearing staged filename stem — building the
+            # path from `vid` would leak that name into the output filename
+            # even though the directory (out_doc_id) was correctly aliased.
+            out_version = tree_dict.get("version") or vid
+            ClauseTree.from_dict(tree_dict).write(
+                normalized_dir / out_doc_id / f"{out_version}.clauses.json"
+            )
 
     # Write intermediates
     #

@@ -431,6 +431,43 @@ def test_skill_body_references_no_gitignored_path() -> None:
         )
 
 
+def test_skill_body_does_not_understate_sensitive_artifacts() -> None:
+    """SKILL.md must not claim alias_map.json/entity_registry.json are the
+    *only* durable sensitive artifacts under $OUT (issue #139, audit finding
+    #48).
+
+    ``judge/pending.jsonl`` and ``my-verdicts.jsonl`` are written from the
+    RAW, pre-pseudonymization source — they exist for a human to review and
+    answer BEFORE the born-safe pseudonymization pass ever runs, so there is
+    no aliased form to fall back to — and carry raw counterparty names
+    indefinitely; the skill must call those two out as sensitive.
+    ``normalized/<document_id>/`` is deliberately NOT on that list: issue
+    #139's code fix made pipeline.py stale-clear and rewrite it under the
+    ALIASED document_id after the pseudonymization pass (mirroring
+    trail/'s treatment), so — unlike the two files above — it is safe.
+    """
+    _, body = _parse_frontmatter(SKILL_MD)
+    assert "are the only durable sensitive artifacts" not in body, (
+        "SKILL.md must not claim alias_map.json/entity_registry.json are the "
+        "*only* durable sensitive artifacts under $OUT — the judge "
+        "pending/my-verdicts files carry raw counterparty names too "
+        "(issue #139)"
+    )
+    assert "pending.jsonl" in body and "my-verdicts.jsonl" in body, (
+        "SKILL.md's born-safe sidecar note must call out judge/pending.jsonl "
+        "and my-verdicts.jsonl as sensitive artifacts (issue #139)"
+    )
+    # Whitespace-normalized: the prose wraps at ~100 cols, so a multi-word
+    # phrase can straddle a hard newline in the raw markdown.
+    flat_body = " ".join(body.split())
+    assert "not on this list" in flat_body or "is safe to share" in flat_body, (
+        "SKILL.md must affirmatively state that normalized/ is no longer "
+        "one of the sensitive artifacts, now that issue #139's code fix "
+        "aliases it (otherwise a reader has no way to tell the omission "
+        "from an oversight)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # CLI — subcommand presence
 # ---------------------------------------------------------------------------

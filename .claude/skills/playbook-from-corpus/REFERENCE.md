@@ -123,7 +123,7 @@ context: `taxonomy_id`, `clause_path`, `document_id`.
   deviation items by `document_id`; (2) for each item whose hunk shows a
   clause disappearing or appearing, use its `version_from`/`version_to`
   fields to open the adjacent per-version clause trees at
-  `$OUT/normalized/<document_id>/NN__*.clauses.json` (each node carries
+  `$OUT/normalized/<document_id>/v<N>.clauses.json` (each node carries
   `clause_path`/`heading`/`text`) and search the other version's node texts
   for the clause body, after normalizing whitespace/quotes/numbering;
   presence in both versions ⇒ alignment artifact. Auto-verdict BOTH sides of
