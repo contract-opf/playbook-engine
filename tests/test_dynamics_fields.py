@@ -240,7 +240,7 @@ def _obs(
     return Observation(
         observation_id=obs_id,
         taxonomy_id="indemnification",
-        text_summary=f"Observation {obs_id}.",
+        text_summary=f"Observation text for clause {obs_id}.",
         citation=ObservationCitation(
             document_id=f"deal-{obs_id}", version=2, clause_path="1", char_span=(0, 10)
         ),

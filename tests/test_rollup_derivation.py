@@ -29,7 +29,7 @@ def _obs(
     outcome: str = "signed",
     deviation: str = "none",
     risk_delta: RiskDelta = _NEUTRAL,
-    text: str = "Standard clause text.",
+    text: str = "Standard clause text, our paper form.",
     doc_id: str = "deal_001",
     version: str = "v2",
     clause_path: str = "8",
@@ -264,7 +264,7 @@ def test_fallbacks_ordered_minor_before_material() -> None:
             deviation="substantive",
             risk_delta=_WORSE_MINOR,
             outcome="signed",
-            text="Minor-risk concession.",
+            text="Minor-risk concession accepted.",
             doc_id="deal_002",
             version="v1",
         ),
@@ -302,7 +302,7 @@ def test_fallbacks_only_our_paper_worse_risk_signed() -> None:
             deviation="substantive",
             risk_delta=_WORSE_MINOR,
             outcome="signed",
-            text="CP worse signed.",
+            text="CP worse signed language.",
         ),
         _obs(
             "ind",
@@ -310,7 +310,7 @@ def test_fallbacks_only_our_paper_worse_risk_signed() -> None:
             deviation="substantive",
             risk_delta=_WORSE_MINOR,
             outcome="signed",
-            text="Our worse signed.",
+            text="Our worse signed language.",
             doc_id="deal_002",
             version="v1",
         ),
@@ -319,7 +319,7 @@ def test_fallbacks_only_our_paper_worse_risk_signed() -> None:
     fallbacks = positions[0].rollup.fallbacks
     # Only our-paper worse-risk appears in fallbacks.
     assert len(fallbacks) == 1
-    assert fallbacks[0].text_summary == "Our worse signed."
+    assert fallbacks[0].text_summary == "Our worse signed language."
 
 
 def test_fallbacks_reversed_obs_excluded() -> None:
@@ -330,7 +330,7 @@ def test_fallbacks_reversed_obs_excluded() -> None:
             deviation="substantive",
             risk_delta=_WORSE_MINOR,
             outcome="proposed_then_reversed",
-            text="Rejected ask.",
+            text="Rejected ask, not adopted.",
         ),
     ]
     positions = _positions(obs)
@@ -455,12 +455,12 @@ def test_better_risk_signed_appears_in_observed_positions() -> None:
             deviation="substantive",
             risk_delta=_BETTER,
             outcome="signed",
-            text="Better outcome achieved.",
+            text="Better outcome achieved here.",
         ),
     ]
     positions = _positions(obs)
     op_texts = [op.text_summary for op in positions[0].observed_positions]
-    assert "Better outcome achieved." in op_texts
+    assert "Better outcome achieved here." in op_texts
 
 
 # ---------------------------------------------------------------------------
@@ -609,21 +609,21 @@ def test_precedent_count_distinct_texts_not_merged() -> None:
     """Distinct clause texts each keep their own precedent_count=1 — dedup is
     by normalized text, not a blanket count of the whole group."""
     obs = [
-        _obs("ind", text="Variant A.", doc_id="deal_001"),
-        _obs("ind", text="Variant B.", doc_id="deal_002", version="v1"),
+        _obs("ind", text="Variant A, first form of clause.", doc_id="deal_001"),
+        _obs("ind", text="Variant B, second form of clause.", doc_id="deal_002", version="v1"),
     ]
     positions = _positions(obs)
     counts = {op.text_summary: op.precedent_count for op in positions[0].observed_positions}
-    assert counts["Variant A."] == 1
-    assert counts["Variant B."] == 1
+    assert counts["Variant A, first form of clause."] == 1
+    assert counts["Variant B, second form of clause."] == 1
 
 
 def test_precedent_count_ignores_whitespace_and_case_differences() -> None:
     """Normalization collapses whitespace/case so line-wrap artifacts from
     extraction don't fragment an otherwise-identical precedent."""
     obs = [
-        _obs("ind", text="Mutual   Indemnification.", doc_id="deal_001"),
-        _obs("ind", text="mutual indemnification.", doc_id="deal_002", version="v1"),
+        _obs("ind", text="Mutual   Indemnification Clause.", doc_id="deal_001"),
+        _obs("ind", text="mutual indemnification clause.", doc_id="deal_002", version="v1"),
     ]
     positions = _positions(obs)
     for op in positions[0].observed_positions:

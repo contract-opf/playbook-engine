@@ -23,6 +23,13 @@ Design invariants:
     position cap (not the score) is what protects against sparse-evidence
     over-confidence.
   - Every asserted text carries a citation (``source_ref`` or ``example_ref``).
+  - Minimum-viable-observation floor (issue #210): an observation whose
+    ``full_text`` is under ``MIN_OBSERVATION_TEXT_LEN`` characters after
+    stripping leading/trailing whitespace (a segmentation fragment — a
+    page-number artifact, a bare heading) is excluded from
+    ``observed_positions``, ``precedent_count``, and rollup derivation for
+    its taxonomy_id — never silently: it is counted and surfaced as a
+    ``CoherenceFlag`` (severity ``"warn"``).
   - Observations with ``taxonomy_id=None`` (unclassified clauses) cannot be
     anchored to a template clause, so they are excluded from the ``clauses``
     array — but they are never silently dropped (issue #113): every call
@@ -73,6 +80,29 @@ COHERENCE_MIN_CITATIONS: int = 3
 # constant as its own default so the two stay aligned on one rule absent an
 # explicit override.
 MIN_EVIDENCE_N: int = 2
+
+# Minimum length (issue #210), after stripping leading/trailing whitespace,
+# for an observation's `full_text` to be admitted into `observed_positions`.
+# Segmentation occasionally emits
+# sub-sentence fragments as their own clause node — page-number artifacts
+# ("1 6"), a bare section heading with no body ("indemnification") — which
+# then ride into the compiled playbook as if they were real observed clause
+# language. Below this floor there is no clause language to show a GC
+# drilling into "the exact language we signed", and letting the fragment
+# through inflates precedent_count / n_our_paper for a taxonomy_id on text
+# nobody could act on. This is a hard exclusion from `observed_positions`,
+# `precedent_counts`, and rollup derivation alike — never a display-only
+# truncation like `_TEXT_SUMMARY_MAX` — but it is never silent: every
+# quarantined observation is counted per taxonomy_id and surfaced as a
+# ``CoherenceFlag`` (severity "warn") in `coherence_flags.json`, mirroring
+# how `compute_unclassified_coverage` above surfaces taxonomy_id=None
+# observations instead of just dropping them.
+MIN_OBSERVATION_TEXT_LEN: int = 25
+
+
+def _is_degenerate_observation_text(text: str) -> bool:
+    """True when *text* is too short to be a usable observed clause (#210)."""
+    return len(text.strip()) < MIN_OBSERVATION_TEXT_LEN
 
 
 @dataclass(frozen=True)
@@ -616,10 +646,19 @@ def compile_clause_positions(
     # than fabricate/relabel it to fit the schema. It remains visible in
     # observations.jsonl and the inspection report for human review.
     groups: dict[str, list[Observation]] = {}
+    # Sub-sentence fragments (issue #210) are quarantined here — before they
+    # ever reach `groups` — so they cannot inflate precedent_count or
+    # n_our_paper for the taxonomy_id they'd otherwise land under. Counted
+    # per taxonomy_id so the loop below can surface a CoherenceFlag per
+    # affected clause rather than dropping them silently.
+    quarantined_by_tid: dict[str, int] = {}
     for obs in observations:
         if obs.taxonomy_id is None:
             continue
         if obs.outcome not in _OPF_OUTCOMES:
+            continue
+        if _is_degenerate_observation_text(obs.full_text):
+            quarantined_by_tid[obs.taxonomy_id] = quarantined_by_tid.get(obs.taxonomy_id, 0) + 1
             continue
         groups.setdefault(obs.taxonomy_id, []).append(obs)
 
@@ -646,6 +685,28 @@ def compile_clause_positions(
 
     positions: list[ClausePosition] = []
     coherence_flags: list[CoherenceFlag] = []
+
+    # Surface every quarantined-fragment taxonomy_id (issue #210) as a "warn"
+    # CoherenceFlag, unconditionally — this never depends on a CoherenceJudge
+    # being configured, same as unclassified_coverage above. Iterated ahead
+    # of `all_tids` on purpose: a taxonomy_id whose observations were ALL
+    # fragments has nothing left in `groups` and may not appear in
+    # `all_tids` at all (no ClausePosition is emitted for it), so this is
+    # the only place such a clause is visible.
+    for tid, count in sorted(quarantined_by_tid.items()):
+        coherence_flags.append(
+            CoherenceFlag(
+                clause_id=f"clause.{tid}",
+                reason=(
+                    f"{count} observation(s) excluded from observed_positions: "
+                    f"full_text shorter than {MIN_OBSERVATION_TEXT_LEN} "
+                    "character(s) — a segmentation fragment "
+                    "(e.g. a page-number artifact or bare heading), not usable "
+                    "clause language"
+                ),
+                severity="warn",
+            )
+        )
 
     for tid in all_tids:
         group = groups.get(tid, [])
