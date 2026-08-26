@@ -16,6 +16,7 @@ from playbook_engine.clause_position_compiler import (
     ClauseRollup,
     CoherenceFlag,
     CoherenceJudge,
+    ObservedPosition,
     OPFCitation,
     UnclassifiedCoverage,
     compile_clause_positions,
@@ -39,7 +40,7 @@ def _obs(
     outcome: str = "signed",
     deviation: str = "none",
     risk_delta: RiskDelta = _NEUTRAL,
-    text: str = "Mutual indemnification.",
+    text: str = "Mutual indemnification clause language.",
     doc_id: str = "deal_001",
     version: str = "v2",
     clause_path: str = "8",
@@ -552,7 +553,7 @@ def test_to_dict_observed_positions_include_x_search_snippet_when_present() -> N
     obs = Observation(
         observation_id="deal_001/v2/8",
         taxonomy_id="indemnification",
-        text_summary="Mutual indemnification.",
+        text_summary="Mutual indemnification obligations survive termination.",
         search_snippet="a short searchable phrase",
         citation=ObservationCitation(
             document_id="deal_001", version="v2", clause_path="8", char_span=None
@@ -571,22 +572,23 @@ def test_to_dict_observed_positions_omit_x_search_snippet_when_no_clause_text() 
     """No text_summary/full_text/search_snippet at all → the OPF dict omits
     x_search_snippet entirely (never a null/"" placeholder) — schema
     validation stays green with no schema edit precisely because this is an
-    optional x_-prefixed key, not a required one."""
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
+    optional x_-prefixed key, not a required one.
+
+    Exercises ``ObservedPosition.to_dict()`` directly rather than through
+    ``compile_clause_positions`` — an Observation with no clause text at all
+    is exactly the degenerate case the issue #210 guard quarantines out of
+    ``observed_positions`` before it ever reaches this shape, so routing it
+    through the full compiler would test the guard, not the omit-key
+    behavior this test is about."""
+    op = ObservedPosition(
         text_summary="",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
+        example_ref=OPFCitation(document_id="deal_001", version="v2", clause_path="8"),
         deviation="none",
         risk_delta=_NEUTRAL.to_dict(),
         provenance="our_paper",
         outcome="signed",
     )
-    positions = _compile([obs], [])
-    op_dict = positions[0].to_dict()["observed_positions"][0]
-    assert "x_search_snippet" not in op_dict
+    assert "x_search_snippet" not in op.to_dict()
 
 
 def test_rollup_fallback_carries_search_snippet() -> None:
@@ -1282,3 +1284,68 @@ def test_unclassified_coverage_to_dict_shape() -> None:
     assert d["by_document"] == {"deal_001": 1}
     assert len(d["example_citations"]) == 1
     assert d["example_citations"][0]["document_id"] == "deal_001"
+
+
+# ---------------------------------------------------------------------------
+# Minimum-viable-observation guard (issue #210)
+# ---------------------------------------------------------------------------
+
+
+def test_degenerate_fragment_excluded_from_observed_positions() -> None:
+    """A sub-25-char full_text (segmentation fragment) never reaches
+    observed_positions, but a real-length observation for the same clause
+    does."""
+    real = _obs("indemnification", text="Mutual indemnification for third-party claims.")
+    fragment = _obs(
+        "indemnification", text="1 6", doc_id="deal_002", version="v1", clause_path="3"
+    )
+    positions, flags, _ = compile_clause_positions([real, fragment], [])
+    assert len(positions) == 1
+    pos = positions[0]
+    assert len(pos.observed_positions) == 1
+    assert pos.observed_positions[0].full_text == "Mutual indemnification for third-party claims."
+    # Surfaced, not silently dropped.
+    assert any(
+        f.clause_id == "clause.indemnification" and f.severity == "warn" for f in flags
+    )
+
+
+def test_degenerate_fragment_does_not_inflate_precedent_count() -> None:
+    """Two identical fragments must not count toward precedent_count for a
+    real observation of different text in the same clause group."""
+    real = _obs("indemnification", text="Mutual indemnification for third-party claims.")
+    frag1 = _obs(
+        "indemnification", text="indemnification", doc_id="deal_002", version="v1", clause_path="3"
+    )
+    frag2 = _obs(
+        "indemnification", text="indemnification", doc_id="deal_003", version="v1", clause_path="3"
+    )
+    positions, _flags, _ = compile_clause_positions([real, frag1, frag2], [])
+    assert len(positions) == 1
+    assert len(positions[0].observed_positions) == 1
+    assert positions[0].observed_positions[0].precedent_count == 1
+
+
+def test_taxonomy_id_with_only_fragments_has_no_position_but_is_flagged() -> None:
+    """A taxonomy_id whose ONLY observations are fragments (no template
+    either) never appears in `positions`, but is still surfaced via a
+    CoherenceFlag — never silently dropped."""
+    fragment = _obs("amendments", text="1 7")
+    positions, flags, _ = compile_clause_positions([fragment], [])
+    assert all(p.taxonomy_id != "amendments" for p in positions)
+    matching = [f for f in flags if f.clause_id == "clause.amendments"]
+    assert len(matching) == 1
+    assert matching[0].severity == "warn"
+    assert "1" in matching[0].reason  # count of quarantined observations
+
+
+def test_exactly_min_length_text_is_not_degenerate() -> None:
+    """A full_text exactly MIN_OBSERVATION_TEXT_LEN chars long is admitted —
+    the floor excludes strictly-shorter text only."""
+    from playbook_engine.clause_position_compiler import MIN_OBSERVATION_TEXT_LEN
+
+    text = "x" * MIN_OBSERVATION_TEXT_LEN
+    obs = _obs("governing_law", text=text)
+    positions, flags, _ = compile_clause_positions([obs], [])
+    assert len(positions[0].observed_positions) == 1
+    assert flags == []
