@@ -3586,7 +3586,12 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
 @click.option(
     "--rationale",
     default=None,
-    help="Attribution/justification (default: 'Hand-authored via `playbook floor sign`.').",
+    help=(
+        "Legal justification only — never the signer's name or a sign-off "
+        "date; --signed-by already records that structurally, and rationale "
+        "ships verbatim into every consumer's model-facing review prompt. "
+        "(default: 'Hand-authored via `playbook floor sign`.')."
+    ),
 )
 @click.option(
     "--config",

@@ -2339,6 +2339,59 @@ def test_sign_floor_invariant_rejects_blank_signed_by() -> None:
         )
 
 
+def test_sign_floor_invariant_rejects_rationale_that_names_the_signer() -> None:
+    """issue #209 (2026-08-24 skill QA audit, finding #92): rationale ships
+    verbatim into every consumer's model-facing review prompt while
+    x_signed_by/x_signed_at never do — a rationale that repeats the signer's
+    name duplicates structural attribution into the one field this engine
+    cannot keep confidential. Reproduces the real-world failure mode: a
+    hand-authored rationale reading 'Hand-authored and signed by the legal
+    owner (<name>), <date>.' instead of a legal-justification-only sentence."""
+    with pytest.raises(FloorCandidateError, match=_TEST_SIGNED_BY):
+        sign_floor_invariant(
+            "Never accept uncapped liability.",
+            signed_by=_TEST_SIGNED_BY,
+            rationale=f"Hand-authored and signed by the legal owner ({_TEST_SIGNED_BY}), "
+            "2026-08-21.",
+            existing_invariants=[],
+        )
+
+
+def test_sign_floor_invariant_rejects_rationale_naming_signer_case_insensitively() -> None:
+    with pytest.raises(FloorCandidateError):
+        sign_floor_invariant(
+            "Never accept uncapped liability.",
+            signed_by=_TEST_SIGNED_BY,
+            rationale=f"Signed by {_TEST_SIGNED_BY.upper()} on 2026-08-21.",
+            existing_invariants=[],
+        )
+
+
+def test_sign_floor_invariant_rerun_with_bad_rationale_stays_idempotent_noop() -> None:
+    """The name-in-rationale guard must never break the documented
+    idempotent-no-op contract: an EXACT rerun (same id, same statement) of a
+    call that would now be rejected if it were new must still short-circuit
+    to the existing entry, never re-validate and raise."""
+    already_bad = [
+        {
+            "id": "never-accept-uncapped-liability",
+            "statement": "Never accept uncapped liability.",
+            "rationale": f"Hand-authored and signed by the legal owner ({_TEST_SIGNED_BY}), "
+            "2026-08-21.",
+            "x_signed_by": _TEST_SIGNED_BY,
+            "x_signed_at": "2026-08-21T00:00:00+00:00",
+        }
+    ]
+    result = sign_floor_invariant(
+        "Never accept uncapped liability.",
+        signed_by=_TEST_SIGNED_BY,
+        rationale=f"Hand-authored and signed by the legal owner ({_TEST_SIGNED_BY}), 2026-08-21.",
+        existing_invariants=already_bad,
+    )
+    assert result == already_bad
+    assert result[0] is already_bad[0]
+
+
 def test_sign_floor_invariant_appends_after_existing_entries() -> None:
     existing = [{"id": "existing-one", "statement": "Existing.", "rationale": "r"}]
     result = sign_floor_invariant(
