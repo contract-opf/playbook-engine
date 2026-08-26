@@ -124,8 +124,8 @@ adding warnings after the fact.
   `docling` is absent, and that declaring `extractor: docling` turns that into a
   refusal to start.
 - **A run now records the environment that produced its output directory,
-  and the next run checks itself against it** (issue #121). `mine`/`judge`
-  write `<out>/run_manifest.json` — engine version and git build, the
+  and the next run checks itself against it** (issue #121). `mine`/`judge`/
+  `segment` write `<out>/run_manifest.json` — engine version and git build, the
   resolved extractor environment, the extraction/stage cache format
   versions, the segmentation model/prompt/schema identity, and an opaque
   config+taxonomy hash — and preflight the next run against it before any
