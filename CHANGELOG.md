@@ -102,10 +102,10 @@ adding warnings after the fact.
   (warning), and suppresses the misleading `NO_SUPPORTED_FILES` /
   `DOC_NO_SUPPORTED_FILES` errors when broken symlinks are the actual cause.
   The message names the read-only container mount and the fix.
-- **The preflight is now a precondition, not a suggestion.** `playbook mine`
-  and `playbook segment` run the `lint-corpus` checks before doing any work and
-  refuse to start on errors, so an ad-hoc invocation can no longer skip them.
-  `--skip-preflight` opts out.
+- **The preflight is now a precondition, not a suggestion.** `playbook mine`,
+  `playbook segment`, and `playbook judge` run the `lint-corpus` checks before
+  doing any work and refuse to start on errors, so an ad-hoc invocation can no
+  longer skip them (#172). `--skip-preflight` opts out.
 - **`playbook doctor`** — a new corpus-free, config-free command reporting the
   engine version, the container image stamp, and every external tool the
   pipeline can shell out to, with what each absent one silently costs. Backed
