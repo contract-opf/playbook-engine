@@ -1456,10 +1456,13 @@ def sign_floor_invariant(
                               comment above this function for why not a bare
                               ``taxonomy_id``), omitted entirely when
                               ``None``/blank.
-        rationale:            Attribution/justification text. Defaults to
-                              :data:`_SIGN_DEFAULT_RATIONALE` when
-                              ``None``/blank — callers can attribute a
-                              specific person via an explicit ``--rationale``.
+        rationale:            Legal justification text ONLY — never the
+                              signer's name or a sign-off date; *signed_by*/
+                              *signed_at* already record that structurally,
+                              and rationale ships verbatim into every
+                              consumer's model-facing review prompt (issue
+                              #209). Defaults to :data:`_SIGN_DEFAULT_RATIONALE`
+                              when ``None``/blank.
         signed_by:            Name of the human legal owner signing this
                               statement — REQUIRED, not optional (issue
                               #127): unlike *rationale*, which is free-form
@@ -1483,9 +1486,12 @@ def sign_floor_invariant(
         nothing appended, for the no-op case above).
 
     Raises:
-        FloorCandidateError: *statement* is blank, *signed_by* is blank, or
+        FloorCandidateError: *statement* is blank, *signed_by* is blank,
             *invariant_id* (or its derived slug) collides with an existing
-            entry carrying a different statement.
+            entry carrying a different statement, or *rationale* names the
+            signer (issue #209) for a NEW entry (never raised on the
+            idempotent-no-op path above, so an exact rerun of a prior,
+            already-recorded call never fails on this check).
     """
     if not isinstance(statement, str) or not statement.strip():
         raise FloorCandidateError("floor sign: --statement must be a non-empty string")
@@ -1520,6 +1526,25 @@ def sign_floor_invariant(
             f"match the statement being signed ({statement!r}) — refusing to "
             "overwrite. Pass a different --id, or edit/remove the conflicting "
             "invariant first if it should be replaced."
+        )
+
+    # issue #209 (2026-08-24 skill QA audit, finding #92): --signed-by is the
+    # ONE structural home for sign-off attribution — rationale is legal
+    # justification only. rationale ships verbatim into every consumer's
+    # model-facing review prompt (see prompt_renderer.py's Floor section,
+    # which renders it as "{statement} ({rationale})"), while x_signed_by/
+    # x_signed_at are never sent to a model. A rationale that repeats the
+    # signer's name (e.g. "Hand-authored and signed by the legal owner
+    # (Jane Doe, GC), 2026-08-21.") duplicates that attribution into the
+    # one field this engine cannot keep confidential — refuse it instead of
+    # writing it, rather than relying on every consumer to notice.
+    if signed_by.strip().casefold() in rationale_text.casefold():
+        raise FloorCandidateError(
+            f"floor sign: --rationale must not name who signed this invariant "
+            f"— it contains {signed_by.strip()!r}, which --signed-by already "
+            "records structurally (as x_signed_by/x_signed_at, never rendered "
+            "into a review prompt). Rewrite --rationale to state the legal "
+            "justification only, with no name or sign-off date."
         )
 
     signed_at_text = (

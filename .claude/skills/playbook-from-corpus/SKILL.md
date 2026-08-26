@@ -1201,14 +1201,18 @@ confirmed it (required — the command refuses to run without it):
 
 ```bash
 playbook floor sign $OUT --statement "Limitation of liability, if present, must not be unilateral in the counterparty's favor." --signed-by "<the human's name>"
-# Optional: --id a-slug, --rationale "attribution", and --clause TAXONOMY_ID
+# Optional: --id a-slug, --rationale "legal justification only", and --clause TAXONOMY_ID
 # (validated against --config's taxonomy — pass --config when you use --clause)
 ```
 
 `--signed-by` is recorded as a structural `x_signed_by` field, not folded into
 `--rationale` — `playbook validate` warns on any `floor.invariants` entry that
 carries neither this nor a Posture-interview/candidate-acceptance attribution
-marker, so never type a placeholder name; use the human's own.
+marker, so never type a placeholder name; use the human's own. `--rationale` is
+legal justification ONLY, never the signer's name or a sign-off date: it ships
+verbatim into every consumer's model-facing review prompt, while `x_signed_by`/
+`x_signed_at` never do. `floor sign` refuses a `--rationale` that repeats the
+`--signed-by` name (issue #209) rather than let attribution leak into it.
 
 Re-running with the identical `--statement` under the same id is a no-op;
 re-running with a different `--statement` under an id that already carries one
