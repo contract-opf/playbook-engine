@@ -1296,18 +1296,14 @@ def test_degenerate_fragment_excluded_from_observed_positions() -> None:
     observed_positions, but a real-length observation for the same clause
     does."""
     real = _obs("indemnification", text="Mutual indemnification for third-party claims.")
-    fragment = _obs(
-        "indemnification", text="1 6", doc_id="deal_002", version="v1", clause_path="3"
-    )
+    fragment = _obs("indemnification", text="1 6", doc_id="deal_002", version="v1", clause_path="3")
     positions, flags, _ = compile_clause_positions([real, fragment], [])
     assert len(positions) == 1
     pos = positions[0]
     assert len(pos.observed_positions) == 1
     assert pos.observed_positions[0].full_text == "Mutual indemnification for third-party claims."
     # Surfaced, not silently dropped.
-    assert any(
-        f.clause_id == "clause.indemnification" and f.severity == "warn" for f in flags
-    )
+    assert any(f.clause_id == "clause.indemnification" and f.severity == "warn" for f in flags)
 
 
 def test_degenerate_fragment_does_not_inflate_precedent_count() -> None:
