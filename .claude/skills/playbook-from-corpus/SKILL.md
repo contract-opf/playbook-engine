@@ -154,6 +154,24 @@ populate the config yourself:**
 3. Only ask the human about names you genuinely cannot resolve from the text
    (an unrecognizable counterparty, an ambiguous "us"). Show the final lists for
    a single confirm, then proceed.
+4. While you're in `playbook.config.yaml`, also populate the `perspective:`
+   block (issue #212) so the assembled playbook actually carries whose "us"
+   it's reviewed as — a downstream consumer that renders a "from OUR
+   perspective" affordance has nothing to key off of otherwise. `party` alone
+   is not enough: `spec/playbook.schema-0.2.json` requires `party` AND
+   `counterparty_type` together or the whole `perspective` object is dropped
+   (see `playbook_engine/config.py`'s `PerspectiveConfig`).
+   - `perspective.party`: your own name — normally the same value as
+     `our_party_aliases[0]` above (the engine defaults to it if you omit
+     `party`, but set it explicitly here so the config stays
+     self-documenting).
+   - `perspective.counterparty_type`: a short category for the counterparty
+     (e.g. `"Educational Institution"`, `"Vendor"`, `"Landlord"`) — this one
+     is **never** defaulted or fabricated. Derive it from the recitals (they
+     usually name the counterparty's role) if you can; ask the human only if
+     it's genuinely ambiguous. Leaving it unset means no playbook this skill
+     produces ever carries a `perspective` block, even though `party` alone
+     looked configured.
 
 `mine` warns if none of `our_party_aliases` match any document text — that means
 "us" is still wrong; fix it before trusting provenance. `mine` also warns

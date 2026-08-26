@@ -19,6 +19,20 @@ baseline:
 # being copied anywhere (next to a corpus, into a container mount, etc.).
 taxonomy: builtin:affiliation-agreement.yaml
 
+# Optional, but populate it for any playbook that will be consumed
+# downstream (issue #212) — without BOTH fields the assembled playbook
+# carries no top-level `perspective` key at all (the schema requires the
+# whole object or neither field), so a downstream reader has no way to
+# tell whose perspective risk_delta direction reflects.
+#   party:             defaults from provenance.our_party_aliases[0] below
+#                       if omitted — set it explicitly anyway so this file
+#                       stays self-documenting.
+#   counterparty_type: never defaulted (never fabricated) — must be set
+#                       explicitly or the whole block is dropped.
+perspective:
+  party: "FixtureCorp"
+  counterparty_type: "Educational Institution"
+
 provenance:
   our_party_aliases:
     - "FixtureCorp"

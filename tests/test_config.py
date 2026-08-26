@@ -87,6 +87,17 @@ def test_affiliation_config_party_aliases() -> None:
     assert len(aliases) >= 1
 
 
+def test_affiliation_config_perspective() -> None:
+    """Issue #212: the shipped config template must populate BOTH
+    perspective fields, or the assembled playbook never carries a
+    top-level `perspective` key at all (schema requires the whole object
+    or neither field) — leaving a downstream consumer's "from OUR
+    perspective" rendering permanently dead on real-world derivations."""
+    cfg = load_config(AFFILIATION_CONFIG)
+    assert cfg.perspective.party == "FixtureCorp"
+    assert cfg.perspective.counterparty_type == "Educational Institution"
+
+
 def test_affiliation_config_our_authors_defaults_to_empty() -> None:
     """Issue #119: the shipped affiliation config has no our_authors — must
     default to [], not fabricate anything."""
