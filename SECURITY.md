@@ -37,7 +37,7 @@ pseudonymization pass, the export profile's residue judging) exist to make
 this class of incident impossible for the compiled playbook and its
 `playbook publish` export — the artifacts meant to leave the org. They do
 not cover every raw-source working file under `$OUT` (e.g. the judge
-queues, `pending.jsonl` and `my-verdicts.jsonl`): see
+queues, `pending.jsonl` and every `my-verdicts-*.jsonl` file): see
 [README.md](README.md#what-a-playbook-knows) and
 [ADOPTING.md](docs/ADOPTING.md) for exactly which files that is and why. A
 report that one of the safeguards themselves failed — a raw name reaching

@@ -265,18 +265,19 @@ SAME entity aliased differently between rounds. Under Docker the in-container
 means no post-run "purge the global registry?" step is needed for those two
 files — but **`$OUT/alias_map.json` and `$OUT/entity_registry.json` are not
 the only durable sensitive artifacts under `$OUT`**: `$OUT/judge/pending.jsonl`
-and `$OUT/my-verdicts.jsonl` carry raw, pre-pseudonymization clause text (they
-exist for a human to read and answer *before* the born-safe pass ever runs, so
-there is no aliased form to fall back to). Never hand an out-dir to anyone
-outside the org on the assumption that removing `alias_map.json`/
-`entity_registry.json` alone makes it safe — treat `pending.jsonl` and
-`my-verdicts.jsonl` as sensitive too. `$OUT/normalized/<document_id>/` is
+and every `$OUT/my-verdicts-*.jsonl` file carry raw, pre-pseudonymization
+clause text (they exist for a human to read and answer *before* the born-safe
+pass ever runs, so there is no aliased form to fall back to). Never hand an
+out-dir to anyone outside the org on the assumption that removing
+`alias_map.json`/`entity_registry.json` alone makes it safe — treat
+`pending.jsonl` and every `my-verdicts-*.jsonl` file as sensitive too.
+`$OUT/normalized/<document_id>/` is
 *not* on this list (issue #139 fixed the gap that used to put it there): `mine`
 now stale-clears and rewrites the whole directory — tree content, the
 directory name, AND the per-version filename — under the ALIASED
 document_id/version after the born-safe pseudonymization pass, mirroring
 `trail/`'s treatment, so it is safe to share alongside the compiled playbook
-once those two files are removed.
+once those files are removed.
 
 ---
 
