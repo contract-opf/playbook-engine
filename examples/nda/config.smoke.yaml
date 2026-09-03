@@ -19,6 +19,18 @@ agreement_type:
     Mutual NDA exchanged when evaluating a potential commercial relationship.
     Six fictional negotiations: four on our paper, two on counterparty paper.
 
+# perspective: whose "us" this playbook is reviewed as (OPF-SPEC §3.1).
+# Populated even though this is a MUTUAL agreement, deliberately. A mutual
+# document routinely contains a one-sided clause -- an indemnity favoring one
+# provider, a survival period that runs longer against one side -- and that
+# asymmetric minority is exactly where a reviewer must know which side it acts
+# for to get the direction of the edit right. The reciprocal provisions really
+# are side-invariant, which is what makes "it's mutual, skip it" tempting; the
+# clauses that are not reciprocal are where omitting it does the most damage.
+perspective:
+  party: "AlphaCorp Holdings, Inc."
+  counterparty_type: "Prospective Commercial Counterparty"
+
 baseline:
   # Template mode -- path is relative to this file. `playbook mine` must
   # print a non-zero "template standards: N clause(s) classified"; a zero

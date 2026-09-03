@@ -589,6 +589,42 @@ def _check_posture_interview_provenance_v2(doc: dict[str, Any], result: Validati
     )
 
 
+def _check_perspective_present_v2(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Non-blocking SHOULD-warn: no top-level ``perspective`` (issue #212).
+
+    OPF-SPEC.md §3.1 marks the field OPTIONAL but states in the same breath
+    that "an open-standard OPF instance must say who 'us' is — negotiation
+    knowledge is meaningless without it", and the schema repeats that
+    sentence as the field's own ``description``. The schema cannot enforce
+    it: ``perspective`` is absent from the top-level ``required`` list, and
+    the 1.0 stability policy (spec/CHANGELOG.md, issue #113) forbids adding
+    a new REQUIRED field in a 1.x release. So the prose MUST has no
+    mechanical backing and a perspective-less playbook validates clean.
+
+    That gap is not cosmetic. A consumer that cannot tell which side it
+    acts for applies symmetric judgment to a one-sided clause — the
+    reported failure is a reviewer redlining a one-sided IP grant *against*
+    its own principal, fluently and in the wrong direction. Warning here is
+    the additive-only way to make the omission loud, same convention as
+    every other SHOULD finding in this validator (see
+    :func:`_check_posture_interview_provenance_v2`).
+
+    A *partial* perspective needs no warning: the schema requires ``party``
+    and ``counterparty_type`` together with ``additionalProperties: false``,
+    so an incomplete block is already a blocking schema error above.
+    """
+    if "perspective" not in doc:
+        result.add(
+            "top-level perspective is absent -- an OPF instance MUST say who "
+            "'us' is (OPF-SPEC.md §3.1). A consumer cannot tell which party "
+            "this playbook reviews as, and will judge one-sided clauses "
+            "symmetrically. Set perspective.party and "
+            "perspective.counterparty_type in the producing config.",
+            path="perspective",
+            blocking=False,
+        )
+
+
 def _check_invisible_chars(doc: dict[str, Any], result: ValidationResult) -> None:
     """Blocking error for zero-width/bidi-control characters anywhere in *doc*.
 
@@ -939,6 +975,7 @@ def validate_document(
             _check_citations_v2(doc, result)
             _check_posture_floor_conflict_v2(doc, result)
             _check_posture_interview_provenance_v2(doc, result)
+            _check_perspective_present_v2(doc, result)
             _check_dynamics_v2(doc, result)
             _check_identity_hash_v2(doc, result)
             if opf_version == "0.3":
