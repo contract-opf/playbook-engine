@@ -718,6 +718,59 @@ class TestScaffoldConfig:
 
         assert re.match(r"^[a-z0-9-]+$", slug), f"id not a valid slug: {slug!r}"
 
+    def test_derived_agreement_type_is_flagged_as_inferred(self, tmp_path: Path) -> None:
+        """The id is slugged from the folder name, and that is how a real
+        playbook got silently re-branded: a corpus re-staged from a renamed
+        directory produced a new `agreement_type.id`, fail-closing every
+        consumer bound to the old one. The scaffolder may still infer it --
+        it must not present the guess as a settled decision."""
+        src = tmp_path / "Educational Institution Affiliation"
+        src.mkdir()
+        out = tmp_path / "out"
+        scaffold_config(src, out)
+        text = (out / "playbook.config.yaml").read_text(encoding="utf-8")
+
+        # Split on the real mapping key (column 0), not the string --
+        # the guidance comment above it says "agreement_type:" too.
+        header = text.split("\nagreement_type:", 1)[0]
+        assert "INFERRED from the source directory name" in header
+        # Name the downstream blast radius, not just "check this".
+        assert "cross-tool key" in header
+        assert "registry" in header
+
+    def test_description_and_aliases_have_a_commented_channel(self, tmp_path: Path) -> None:
+        """A hand-written config carried `description` and `aliases: [<key>]`;
+        regenerating it through `stage` dropped both, because the scaffolder
+        had no way to express them. Offer them as comments -- fabricating
+        values would be worse, staying silent is how they got lost."""
+        src = tmp_path / "my-agreement"
+        src.mkdir()
+        out = tmp_path / "out"
+        skeleton = scaffold_config(src, out)
+        text = (out / "playbook.config.yaml").read_text(encoding="utf-8")
+
+        assert "# description: >" in text
+        assert "# aliases:" in text
+        # Comments only: neither is derivable, so neither may be emitted as
+        # an active (and therefore fabricated) value.
+        assert "description" not in skeleton["agreement_type"]
+        assert "aliases" not in skeleton["agreement_type"]
+
+    def test_scaffolded_yaml_still_parses_to_the_skeleton(self, tmp_path: Path) -> None:
+        """Guard for the comment injection above: the guidance is spliced
+        into dumped text, so a malformed splice would produce a file that
+        reads well and no longer loads."""
+        import yaml  # noqa: PLC0415
+
+        src = tmp_path / "Educational Institution Affiliation"
+        src.mkdir()
+        out = tmp_path / "out"
+        skeleton = scaffold_config(src, out)
+        parsed = yaml.safe_load((out / "playbook.config.yaml").read_text(encoding="utf-8"))
+
+        assert parsed == skeleton
+        assert parsed["agreement_type"]["id"] == "educational-institution-affiliation"
+
     def test_template_detected_when_present(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         src.mkdir()
