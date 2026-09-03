@@ -72,6 +72,11 @@ def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
         "opf_version": "0.2",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
+        # issue #212: carries a perspective so the "clean doc -> zero
+        # warnings" premise below isn't tripped by the (orthogonal)
+        # missing-perspective SHOULD-warn, same reason this helper's callers
+        # already pin x_signed_by (#127) and a generation.interview (#133).
+        "perspective": {"party": "TestCorp", "counterparty_type": "Customer"},
         "taxonomy": {"source": "custom", "entries": []},
         "evidence": dict(_EMPTY_EVIDENCE_SECTION),
         "posture": {},
