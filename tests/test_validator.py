@@ -602,6 +602,60 @@ def test_empty_posture_does_not_trigger_interview_provenance_warning() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _check_perspective_present_v2 — issue #212
+# ---------------------------------------------------------------------------
+
+
+def test_missing_perspective_gets_should_warn() -> None:
+    """The reported production failure: a playbook with no top-level
+    `perspective` validates clean, so a consumer never learns which side it
+    acts for and applies its floors symmetrically to a one-sided clause.
+    OPF-SPEC §3.1 says an instance MUST say who "us" is, but the field is
+    absent from the schema's `required` list and the 1.0 stability policy
+    forbids adding one in a 1.x release -- so a warn is the enforcement."""
+    doc = _load("valid_v0_2_minimal.json")
+    del doc["perspective"]
+    # Re-stamp identity: dropping a top-level key changes the content hash,
+    # and an unrelated blocking hash error would muddy the assertions below.
+    digests = compute_section_digests(doc)
+    doc["identity"] = {"content_hash": content_hash(doc), "section_digests": digests}
+    result = validate_document(doc)
+
+    offending = [e for e in result.errors if e.path == "perspective"]
+    assert offending, [str(e) for e in result.errors]
+    assert "§3.1" in offending[0].message
+    # Advisory only -- a perspective-less playbook is still structurally
+    # valid, which is exactly why nothing caught this in production.
+    assert all(not e.blocking for e in offending)
+    assert result.ok, [str(e) for e in result.errors]
+
+
+def test_perspective_present_suppresses_the_warning() -> None:
+    doc = _load("valid_v0_2_minimal.json")
+    assert doc["perspective"] == {
+        "party": "FixtureCorp",
+        "counterparty_type": "Educational Institution",
+    }
+    result = validate_document(doc)
+
+    assert not any(e.path == "perspective" for e in result.errors)
+
+
+def test_partial_perspective_is_a_blocking_schema_error_not_a_warn() -> None:
+    """`party` and `counterparty_type` are required together by the schema,
+    so an incomplete block must fail hard rather than draw the advisory --
+    the warn exists only for the whole-key-absent case."""
+    doc = _load("valid_v0_2_minimal.json")
+    del doc["perspective"]["counterparty_type"]
+    result = validate_document(doc)
+
+    assert not result.ok
+    assert not any(
+        e.path == "perspective" and not e.blocking and "§3.1" in e.message for e in result.errors
+    )
+
+
+# ---------------------------------------------------------------------------
 # YAML input
 # ---------------------------------------------------------------------------
 
