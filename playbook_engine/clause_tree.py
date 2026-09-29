@@ -10,6 +10,19 @@ Terminology (matches docs/ARCHITECTURE.md L1 description):
   text         — body text of this node (not including children)
   char_span    — (start, end) character indices in the document's full
                  normalized text (exclusive end, like Python slice notation)
+                 covering the WHOLE clause: from the start of its heading
+                 line through the end of its own body text (children
+                 excluded — each child carries its own span). This is the
+                 span an OPF citation's ``char_span`` resolves to (OPF-SPEC
+                 §4), so a consumer lands on the clause language, not just
+                 its heading (issue #217).
+  heading_span — (start, end) of the heading line alone, or None when the
+                 node has no separate heading line (the synthetic pre-heading
+                 ``clause_path="0"`` node, sub-clauses the segmenter promotes
+                 out of body text, and LLM/agent-grounded nodes, whose
+                 heading sits inside ``text``). Optional; when present,
+                 ``heading_span[0] == char_span[0]`` and
+                 ``heading_span[1] <= char_span[1]``.
   page         — 1-based source page the clause begins on, or None when
                  unpaginated/unknown (optional; today only the legacy PDF
                  extractor path supplies real values — see
@@ -40,12 +53,13 @@ class ClauseNode:
     char_span: tuple[int, int]
     page: int | None = None
     children: list[ClauseNode] = field(default_factory=list)
+    heading_span: tuple[int, int] | None = None
 
     def is_leaf(self) -> bool:
         return len(self.children) == 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "clause_path": self.clause_path,
             "heading": self.heading,
             "text": self.text,
@@ -53,6 +67,12 @@ class ClauseNode:
             "page": self.page,
             "children": [c.to_dict() for c in self.children],
         }
+        # Emitted only when present, so a node with no separate heading line
+        # (synthetic "0" node, promoted sub-clauses, grounded LLM nodes)
+        # serializes exactly as it did before heading_span existed.
+        if self.heading_span is not None:
+            d["heading_span"] = list(self.heading_span)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ClauseNode:
@@ -86,6 +106,7 @@ class ClauseNode:
                 f"clause_path {data.get('clause_path')!r}: 'page' must be a positive integer"
                 f" or null, got {page!r}"
             )
+        heading_span = _parse_optional_span(data, "heading_span")
         children_raw = data.get("children", [])
         if not isinstance(children_raw, list):
             raise ClauseTreeError(
@@ -103,6 +124,7 @@ class ClauseNode:
             char_span=(start, end),
             page=page,
             children=[ClauseNode.from_dict(c) for c in children_raw],
+            heading_span=heading_span,
         )
 
 
@@ -169,6 +191,11 @@ class ClauseTree:
            than or equal to its parent's span start.
         5. ``clause_path`` prefix consistency: every child node's path must
            begin with ``parent.clause_path + "."``.
+        6. Heading-within-clause: when a node carries ``heading_span``, it
+           starts where ``char_span`` starts and ends at or before
+           ``char_span``'s end — ``char_span`` covers the whole clause
+           (heading through own body text), ``heading_span`` only its
+           heading line (issue #217).
         """
         seen: set[str] = set()
         # Duplicate check (invariant 1) — visit every node.
@@ -198,7 +225,7 @@ class ClauseTree:
         parent: ClauseNode | None,
         text_len: int | None,
     ) -> None:
-        """Recursive structural validator (invariants 2–5)."""
+        """Recursive structural validator (invariants 2–6)."""
         prev: ClauseNode | None = None
         for node in nodes:
             start, end = node.char_span
@@ -233,6 +260,16 @@ class ClauseTree:
                         f"clause_path {node.clause_path!r} is a child of"
                         f" {parent.clause_path!r} but does not begin with"
                         f" {expected_prefix!r}"
+                    )
+
+            # Invariant 6: heading_span sits at the head of char_span.
+            if node.heading_span is not None:
+                h_start, h_end = node.heading_span
+                if h_start != start or h_end > end:
+                    raise ClauseTreeError(
+                        f"clause_path {node.clause_path!r}: heading_span [{h_start}, {h_end}]"
+                        f" must start at char_span start {start} and end at or before"
+                        f" char_span end {end}"
                     )
 
             prev = node
@@ -309,6 +346,29 @@ class ClauseTreeError(ValueError):
 def _require_field(data: dict[str, Any], key: str) -> None:
     if key not in data:
         raise ClauseTreeError(f"Required field '{key}' is missing")
+
+
+def _parse_optional_span(data: dict[str, Any], key: str) -> tuple[int, int] | None:
+    """Parse an optional ``[start, end]`` span field (absent/null → None)."""
+    raw = data.get(key)
+    if raw is None:
+        return None
+    if (
+        not isinstance(raw, list)
+        or len(raw) != 2
+        or not all(isinstance(v, int) and not isinstance(v, bool) for v in raw)
+    ):
+        raise ClauseTreeError(
+            f"clause_path {data.get('clause_path')!r}: "
+            f"'{key}' must be a 2-element integer list or null, got {raw!r}"
+        )
+    start, end = raw
+    if start < 0 or end < start:
+        raise ClauseTreeError(
+            f"clause_path {data.get('clause_path')!r}: "
+            f"'{key}' [{start}, {end}] is invalid (must have 0 ≤ start ≤ end)"
+        )
+    return (start, end)
 
 
 def _iter_leaves(nodes: list[ClauseNode]) -> Iterator[ClauseNode]:

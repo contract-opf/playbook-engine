@@ -344,22 +344,95 @@ def test_char_span_non_negative(tmp_path: Path) -> None:
         assert node.char_span[1] >= node.char_span[0]
 
 
-def test_char_span_resolves_to_heading_line(tmp_path: Path) -> None:
-    """char_span should identify the heading line in the virtual normalized text."""
-    path = _write_rtf(_rtf(r"1. Definitions\par Body text here.\par "), tmp_path)
-    result = ingest_rtf(path, "doc", "v1")
+def _normalized_text(path: Path) -> str:
     from striprtf.striprtf import rtf_to_text
 
     raw = path.read_text(encoding="utf-8", errors="replace")
     raw_text = rtf_to_text(raw, encoding="utf-8", errors="replace")
-    normalized = "\n".join(_split_lines(raw_text))
+    return "\n".join(_split_lines(raw_text))
+
+
+def test_char_span_covers_whole_clause(tmp_path: Path) -> None:
+    """Issue #217: char_span covers the WHOLE clause — heading line through
+    the end of its own body text — so a citation lands on the clause
+    language, not just its heading; heading_span keeps the heading alone."""
+    from playbook_engine.clause_tree import ClauseTree
+
+    path = _write_rtf(
+        _rtf(
+            r"1. Definitions\par Body text here.\par Second body line.\par 2. Term\par Two years.\par "
+        ),
+        tmp_path,
+    )
+    result = ingest_rtf(path, "doc", "v1")
+    normalized = _normalized_text(path)
 
     node = result.tree.resolve_path("1")
     assert node is not None
+    assert (
+        ClauseTree.resolve_span(normalized, node.char_span)
+        == "1. Definitions\nBody text here.\nSecond body line."
+    )
+    assert node.heading_span is not None
+    assert ClauseTree.resolve_span(normalized, node.heading_span) == "1. Definitions"
+    # The span ends exactly where the node's own text ends.
+    assert normalized[: node.char_span[1]].endswith(node.text)
+
+    last = result.tree.resolve_path("2")
+    assert last is not None
+    assert ClauseTree.resolve_span(normalized, last.char_span) == "2. Term\nTwo years."
+    result.tree.validate(full_text=normalized)
+
+
+def test_char_span_excludes_children(tmp_path: Path) -> None:
+    """A parent's char_span covers its heading and its OWN body only; each
+    child carries its own span (issue #217)."""
     from playbook_engine.clause_tree import ClauseTree
 
-    heading_line = ClauseTree.resolve_span(normalized, node.char_span)
-    assert "Definitions" in heading_line or "1." in heading_line
+    path = _nested_rtf(tmp_path)
+    result = ingest_rtf(path, "doc", "v1")
+    normalized = _normalized_text(path)
+
+    parent = result.tree.resolve_path("1")
+    assert parent is not None
+    assert (
+        ClauseTree.resolve_span(normalized, parent.char_span)
+        == "1. General Terms\nThese terms govern the agreement."
+    )
+    child = result.tree.resolve_path("1.1")
+    assert child is not None
+    assert (
+        ClauseTree.resolve_span(normalized, child.char_span)
+        == "1.1. Definitions\nDefined terms appear herein."
+    )
+    assert child.char_span[0] > parent.char_span[1]
+    result.tree.validate(full_text=normalized)
+
+
+def test_heading_only_clause_span_equals_heading_span(tmp_path: Path) -> None:
+    """A clause with no body text: char_span == heading_span."""
+    path = _write_rtf(_rtf(r"1. Definitions\par 2. Term\par Two years.\par "), tmp_path)
+    node = ingest_rtf(path, "doc", "v1").tree.resolve_path("1")
+    assert node is not None
+    assert node.char_span == node.heading_span
+
+
+def test_preamble_node_has_no_heading_span(tmp_path: Path) -> None:
+    """The synthetic pre-heading "0" node has no heading line: heading_span is
+    None and char_span covers all of its body text."""
+    from playbook_engine.clause_tree import ClauseTree
+
+    path = _write_rtf(
+        _rtf(r"First preamble line.\par Second preamble line.\par 1. Definitions\par Terms.\par "),
+        tmp_path,
+    )
+    result = ingest_rtf(path, "doc", "v1")
+    normalized = _normalized_text(path)
+    node = result.tree.resolve_path("0")
+    assert node is not None
+    assert node.heading_span is None
+    assert ClauseTree.resolve_span(normalized, node.char_span) == node.text
+    assert "heading_span" not in node.to_dict()
 
 
 # ---------------------------------------------------------------------------

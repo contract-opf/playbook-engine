@@ -16,6 +16,7 @@ from playbook_engine.observation_builder import (
     ObservationCitation,
     build_observations,
     read_observations_jsonl,
+    summarize_clause_text,
     truncate_search_snippets,
     write_observations_jsonl,
 )
@@ -183,11 +184,112 @@ def test_build_observations_text_summary_uses_before_for_removed() -> None:
     assert obs[0].text_summary == "Removed clause text."
 
 
-def test_build_observations_text_summary_truncated_at_200() -> None:
-    long_text = "A" * 300
+def test_build_observations_text_summary_hard_cut_only_for_unbroken_token() -> None:
+    """A single token longer than the 300-char cap has no sentence or word
+    boundary to cut at — the one case still hard-cut (issue #217)."""
+    long_text = "A" * 400
     diffs = [(_cd("ind", text_after=long_text), _dr())]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [])
-    assert len(obs[0].text_summary) == 200
+    assert obs[0].text_summary == "A" * 300
+
+
+def test_build_observations_text_summary_ends_on_sentence_boundary() -> None:
+    """Issue #217: text_summary is the longest ≤ 300-char prefix ending on a
+    sentence boundary — never a mid-word 200-char cut."""
+    first = ("The Receiving Party shall hold all Confidential Information in strict " * 3).strip()
+    first += "."
+    second = ("It shall not disclose any of it to a third party without consent " * 4).strip()
+    long_text = f"{first} {second}."
+    assert 60 <= len(first) <= 300 < len(long_text)
+    diffs = [(_cd("conf", text_after=long_text), _dr())]
+    obs = build_observations("doc1", "v2", "our_paper", diffs, [])
+    assert obs[0].text_summary == first
+    assert obs[0].full_text == long_text
+
+
+def test_build_observations_reversal_text_summary_ends_on_sentence_boundary() -> None:
+    """The proposed_then_reversed observation's text_summary (built from the
+    reversal's proposed_text, not a ClauseDiff) follows the same rule."""
+    first = ("Recipient shall indemnify Discloser for any losses of any kind " * 3).strip() + "."
+    proposed = f"{first} " + ("And for all costs and fees without limit " * 6).strip() + "."
+    # Producer invariants (detect_reversals): version_inserted is a middle
+    # draft (v2 of v1..v3), version_removed the signed terminal (v3), and a
+    # whole-clause reversal has no net-diff row of its own.
+    reversal = ReversalRecord(
+        taxonomy_id="ind",
+        clause_path="5",
+        version_inserted="v2",
+        version_removed="v3",
+        proposed_text=proposed,
+    )
+    diffs = [(_cd("conf", text_after="Short clause."), _dr())]
+    obs = build_observations("doc1", "v3", "our_paper", diffs, [reversal])
+    rev = [o for o in obs if o.outcome == "proposed_then_reversed"]
+    assert len(rev) == 1
+    assert rev[0].text_summary == first
+    assert rev[0].full_text == proposed
+
+
+# ---------------------------------------------------------------------------
+# summarize_clause_text (issue #217)
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_short_text_returned_whole() -> None:
+    assert summarize_clause_text("  Short clause, no full stop  ") == "Short clause, no full stop"
+
+
+def test_summarize_cuts_after_last_sentence_in_window() -> None:
+    s1 = ("Alpha " * 30).strip()  # 179 chars
+    s2 = ("Beta " * 10).strip()  # 49 chars
+    text = f"{s1}. {s2}. " + "Gamma " * 40
+    out = summarize_clause_text(text)
+    assert out == f"{s1}. {s2}."
+    assert len(out) <= 300
+
+
+def test_summarize_keeps_a_real_first_sentence_even_when_short() -> None:
+    """Any sentence of real clause language (≥ 60 chars) is a valid cut, even
+    when it leaves most of the window unused."""
+    s1 = "Recipient shall keep all Confidential Information strictly secret."
+    text = f"{s1} " + "and furthermore " * 30
+    assert summarize_clause_text(text) == s1
+
+
+def test_summarize_sentence_end_needs_following_whitespace() -> None:
+    """A dotted number ("2.1") is not a sentence end."""
+    text = ("See Section 2.1 of this Agreement for the terms " * 10).strip()
+    out = summarize_clause_text(text)
+    assert len(out) <= 300
+    assert text.startswith(out)
+    assert not out.endswith(".")
+    assert text[len(out)] == " "
+
+
+def test_summarize_short_first_sentence_falls_back_to_word_boundary() -> None:
+    """A heading-like first sentence ("Confidentiality.") would make the
+    summary merely restate the clause name — fall back to a word boundary
+    that keeps real clause language."""
+    text = "Confidentiality. " + ("The recipient shall protect all disclosed material " * 10)
+    out = summarize_clause_text(text)
+    assert out != "Confidentiality."
+    assert 250 < len(out) <= 300
+    assert text.startswith(out)
+    assert text[len(out)] == " "  # ended on a word boundary, not mid-word
+
+
+def test_summarize_window_edge_word_boundary() -> None:
+    """When the char right after the window is whitespace the whole window is
+    a clean word-boundary cut."""
+    text = "x" * 299 + "y " + "z" * 50
+    assert summarize_clause_text(text) == "x" * 299 + "y"
+
+
+def test_summarize_sentence_end_exactly_at_window_edge() -> None:
+    text = "w " * 149 + "." + " more text follows here"
+    assert len("w " * 149 + ".") == 299
+    out = summarize_clause_text(text)
+    assert out == ("w " * 149 + ".")
 
 
 def test_build_observations_full_text_not_truncated() -> None:
@@ -917,7 +1019,10 @@ def test_fallback_backing_observation_carries_verbatim_pseudonymized_precedent_t
 
     # Verbatim precedent text, alongside the existing summary + citation.
     assert obs.full_text == long_text
-    assert obs.text_summary == long_text[:200]
+    # Issue #217: a word-boundary prefix, never a mid-word cut.
+    assert obs.text_summary == summarize_clause_text(long_text)
+    assert long_text.startswith(obs.text_summary)
+    assert long_text[len(obs.text_summary)] == " "
     assert obs.citation.document_id == "doc1"
 
     # Born-safe: pseudonymizing the carried full_text replaces the raw entity
@@ -954,7 +1059,10 @@ def test_acceptable_if_backing_observation_carries_verbatim_pseudonymized_preced
 
     # Verbatim precedent text, alongside the existing summary + citation.
     assert obs.full_text == long_text
-    assert obs.text_summary == long_text[:200]
+    # Issue #217: a word-boundary prefix, never a mid-word cut.
+    assert obs.text_summary == summarize_clause_text(long_text)
+    assert long_text.startswith(obs.text_summary)
+    assert long_text[len(obs.text_summary)] == " "
     assert obs.citation.document_id == "doc1"
 
     # Born-safe: pseudonymizing the carried full_text replaces the raw entity

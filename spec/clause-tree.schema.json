@@ -49,7 +49,14 @@
         },
         "char_span": {
           "type": "array",
-          "description": "Exclusive-end character span [start, end] in the document's full normalized text.",
+          "description": "Exclusive-end character span [start, end] in the document's full normalized text, covering the whole clause: from the start of its heading line through the end of its own body text (children excluded). OPF citations' char_span use this span.",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "heading_span": {
+          "type": ["array", "null"],
+          "description": "Exclusive-end character span [start, end] of the heading line alone, in the same coordinate system as char_span. Absent or null when the node has no separate heading line (the synthetic pre-heading '0' node, sub-clauses promoted from body text, LLM/agent-grounded nodes). When present, heading_span[0] == char_span[0] and heading_span[1] <= char_span[1].",
           "items": { "type": "integer", "minimum": 0 },
           "minItems": 2,
           "maxItems": 2

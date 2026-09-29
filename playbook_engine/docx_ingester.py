@@ -29,6 +29,12 @@ char_span contract:
   paragraph.  Deleted text is absent from the normalized text, so
   TrackedChange.char_span is None for deletions.
 
+  A clause node's ``char_span`` covers the **whole clause** — from the start
+  of its heading paragraph through the end of its own body text (children
+  excluded) — and ``ClauseNode.heading_span`` covers the heading paragraph
+  alone (issue #217).  The synthetic pre-heading ``clause_path="0"`` node has
+  ``heading_span=None``.
+
 Tracked changes (side-channel — consumed by the tracked-changes overlay stage):
   - ``w:ins``: inserted text recorded with author, date, and char_span in the
     document's normalized text.
@@ -573,7 +579,16 @@ class _ClauseBuilder:
         heading: str | None,
         char_span: tuple[int, int],
     ) -> None:
-        node = ClauseNode(clause_path=clause_path, heading=heading, text="", char_span=char_span)
+        # char_span starts as the heading line and grows over the node's own
+        # body text in add_body() (issue #217); heading_span keeps the
+        # heading line alone.
+        node = ClauseNode(
+            clause_path=clause_path,
+            heading=heading,
+            text="",
+            char_span=char_span,
+            heading_span=char_span,
+        )
         # Pop items at same or deeper level so the new node becomes a sibling
         # (not a child) of any open clause at this level.
         while self._stack and self._stack[-1][0] >= level:
@@ -595,12 +610,11 @@ class _ClauseBuilder:
         conditions are **necessary but not sufficient** to identify the
         synthetic node on their own — callers must not drop them, but must
         also layer an additional disambiguator on top. That disambiguator is
-        structural: this synthetic node's ``char_span`` is set below to cover
-        exactly its own first line of body text, whereas a genuine heading
-        node's ``char_span`` covers only its heading line — a caller can
-        narrow further, on top of ``clause_path == "0"`` and
-        ``heading is None``, by checking whether
-        ``char_span[1] - char_span[0] == len(text.split("\n", 1)[0])``.
+        structural: this synthetic node has ``heading_span=None`` (it has no
+        heading line), whereas every genuine heading node — including a bare
+        "0." one — carries a ``heading_span`` (issue #217). Each body line
+        extends the current node's ``char_span`` to the end of that line, so
+        ``char_span`` covers heading start → end of own body text.
         """
         if not self._stack:
             node = ClauseNode(
@@ -614,6 +628,11 @@ class _ClauseBuilder:
             return
         current = self._stack[-1][1]
         current.text = (current.text + "\n" + text) if current.text else text
+        # Extend the clause's span over this body line: char_span covers
+        # heading start → end of the node's own body text (issue #217).
+        # Body only ever attaches to the stack top, so a node's body is
+        # contiguous and never overlaps its children's spans.
+        current.char_span = (current.char_span[0], doc_offset + len(text))
 
     def build(self) -> list[ClauseNode]:
         return self._root

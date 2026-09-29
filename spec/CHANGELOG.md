@@ -33,6 +33,25 @@ Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
 
+### 2026-09-25 — clause-tree `ClauseNode` gains optional `heading_span`; `char_span` covers the whole clause (issue #217)
+
+`spec/clause-tree.schema.json`'s `$defs.ClauseNode` gained an optional
+`heading_span` property (a 2-integer array, or `null`) recording the
+heading line alone, and its `char_span` description now states what the
+engine emits: the whole clause, from the start of its heading line through
+the end of its own body text (children excluded) — the span OPF citations'
+`char_span` resolve to (OPF-SPEC §4, whose wording already said so; the
+ingesters previously emitted heading-only spans). `heading_span` is absent
+when a node has no separate heading line (the synthetic pre-heading `"0"`
+node, sub-clauses promoted from body text, LLM/agent-grounded nodes);
+when present, `heading_span[0] == char_span[0]` and
+`heading_span[1] <= char_span[1]` (`ClauseTree.validate` invariant 6).
+Additive/optional — older serialized clause-tree files with no
+`heading_span` key still validate and load unchanged. Like the `page`
+entry below, this is the intermediate clause-tree artifact, not
+`playbook.schema-0.3.json`: no `opf_version`/`digest_version` bump, and the
+file stays outside the **Current pins** table.
+
 ### 2026-08-22 — Conformance vectors for canonicalization + digest (issue #115)
 
 Added `spec/conformance/` (`manifest.json` + `vectors/*.json`): the

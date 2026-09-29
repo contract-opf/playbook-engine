@@ -24,25 +24,31 @@ Segmentation rules (applied in order to each node's body text):
      parent node as its preamble text.
 
 char_span for promoted nodes:
-  The parent node's ``char_span`` covers its heading line.  Body text
-  immediately follows in the virtual normalized text (heading_end + 1
-  accounts for the ``"\\n"`` separator).  Each promoted child inherits
-  a char_span computed as:
-  ``(heading_end + 1 + start_offset_in_body, heading_end + 1 + end_offset)``
-  where offsets are byte offsets within the parent's ``.text`` field.
-  Exception: the synthetic ``clause_path="0"`` node (pre-heading body text)
-  has no heading line of its own — its ``char_span`` covers its body text
-  directly, so its children's offsets are computed from ``char_span[0]``
-  instead of ``char_span[1] + 1``. ``clause_path == "0"`` and
-  ``heading is None`` are **necessary but not sufficient** to identify this
-  synthetic node: a genuine "0."-numbered clause with empty heading text
-  (e.g. a paragraph that is exactly "0." or "0)") also has clause_path "0"
-  and heading None. The additional disambiguator layered on top of those two
-  conditions — not a replacement for them — is structural: the synthetic
-  node's ``char_span`` covers exactly the first line of its own ``.text``
-  (i.e. ``char_span[1] - char_span[0] == len(text.split("\n", 1)[0])``),
-  whereas a genuine heading node's ``char_span`` covers its heading line,
-  which is separate from its body text.
+  A node's body text immediately follows its heading line in the virtual
+  normalized text (heading_end + 1 accounts for the ``"\\n"`` separator),
+  where heading_end is ``heading_span[1]`` (issue #217: the ingesters
+  record the heading line in ``heading_span`` and make ``char_span`` cover
+  the whole clause, heading through own body text).  Each promoted child
+  inherits a char_span computed as:
+  ``(body_start + start_offset_in_body, body_start + end_offset)``
+  where offsets are character offsets within the parent's ``.text`` field.
+  After promotion the parent keeps only its preamble as ``.text``, so its
+  ``char_span`` shrinks to heading start → end of that preamble (the
+  children's text is theirs, not the parent's).
+
+  The synthetic ``clause_path="0"`` node (pre-heading body text) has no
+  heading line of its own — ``heading_span`` is ``None`` and its
+  ``char_span`` covers its body text directly, so its children's offsets
+  are computed from ``char_span[0]``.
+
+  Legacy trees (serialized before ``heading_span`` existed, or hand-built)
+  carry heading-only ``char_span`` values and no ``heading_span``; for those
+  the body starts at ``char_span[1] + 1`` and the parent's span is left
+  unchanged, exactly as before. ``clause_path == "0"`` and ``heading is
+  None`` are **necessary but not sufficient** to identify a legacy
+  synthetic node — a genuine "0."-numbered clause with empty heading text
+  also has both — so the structural check (span covers exactly the first
+  line, or all, of its own ``.text``) is layered on top of them.
 
 clause_path for promoted nodes:
   Parent path ``"3.2"`` → lettered children ``"3.2.a"``, ``"3.2.b"`` …
@@ -101,6 +107,38 @@ def segment(tree: ClauseTree) -> ClauseTree:
 # ---------------------------------------------------------------------------
 
 
+def _is_synthetic_preheading(node: ClauseNode) -> bool:
+    """True for the ingesters' synthetic pre-heading ``clause_path="0"`` node.
+
+    Current ingesters mark it structurally: it is the only ingester node with
+    no ``heading_span`` (issue #217). ``clause_path == "0"`` and ``heading is
+    None`` stay as NECESSARY conjuncts — a genuine "0."-numbered clause with
+    no heading text has both too — and the span-length check is layered on
+    top of them: the synthetic node's ``char_span`` covers either all of its
+    own ``.text`` (current ingesters) or exactly its first line (legacy trees
+    serialized before issue #217). Keeping clause_path == "0" strictly
+    narrows the predicate: without it, a legacy non-"0" heading whose line
+    happens to be exactly as long as its first body line would misfire (e.g.
+    DOCX paragraphs "10.1." / "(a) A" / "(b) B" — both 5 characters).
+    """
+    if node.heading_span is not None or node.clause_path != "0" or node.heading is not None:
+        return False
+    span_len = node.char_span[1] - node.char_span[0]
+    return span_len in (len(node.text.split("\n", 1)[0]), len(node.text))
+
+
+def _rebuilt(node: ClauseNode, children: list[ClauseNode]) -> ClauseNode:
+    """Fresh copy of *node* (same text/spans) with *children*."""
+    return ClauseNode(
+        clause_path=node.clause_path,
+        heading=node.heading,
+        text=node.text,
+        char_span=node.char_span,
+        children=children,
+        heading_span=node.heading_span,
+    )
+
+
 def _segment_node(node: ClauseNode) -> ClauseNode:
     """Return a new ClauseNode with inline sub-clauses promoted to children."""
     # Recurse into existing children first.
@@ -108,55 +146,29 @@ def _segment_node(node: ClauseNode) -> ClauseNode:
 
     # Only look for inline items when there is body text.
     if not node.text.strip():
-        return ClauseNode(
-            clause_path=node.clause_path,
-            heading=node.heading,
-            text=node.text,
-            char_span=node.char_span,
-            children=segmented_children,
-        )
+        return _rebuilt(node, segmented_children)
 
-    # The body text starts at heading_end + 1 in the virtual normalized text —
-    # except for the synthetic pre-heading node (pre-heading body text,
-    # produced by the DOCX/PDF/RTF ingesters), which has no separate heading
-    # line: its char_span covers the body text itself, so the text already
-    # starts at char_span[0]. The synthetic node always has clause_path "0"
-    # (it is created only by _ClauseBuilder.add_body), but that condition is
-    # NECESSARY, NOT SUFFICIENT: a genuine "0."-numbered clause with no
-    # heading text (e.g. a paragraph that is exactly "0." or "0)") also has
-    # clause_path "0" and heading is None, yet — like every other genuine
-    # heading node — its char_span covers only its own heading line, not its
-    # body text. So clause_path == "0" and heading is None are kept as
-    # necessary conjuncts, and the structural length check is layered on top
-    # as an additional disambiguator (not a replacement for them): the
-    # synthetic node's char_span spans exactly its own first line of body
-    # text (the length recorded when add_body() first created it), i.e.
-    # ``char_span[1] - char_span[0] == len(node.text.split("\n", 1)[0])``.
-    # Keeping clause_path == "0" costs nothing (the synthetic node always
-    # satisfies it) and strictly narrows the predicate: without it, a
-    # non-"0" heading whose line happens to be exactly as long as its first
-    # body line would misfire (e.g. DOCX paragraphs "10.1." / "(a) A" /
-    # "(b) B" — both the heading and the first body line are 5 characters).
-    body_start = (
-        node.char_span[0]
-        if node.clause_path == "0"
-        and node.heading is None
-        and node.char_span[1] - node.char_span[0] == len(node.text.split("\n", 1)[0])
-        else node.char_span[1] + 1
-    )
+    # Where the node's body text starts in the virtual normalized text:
+    #   - a heading node (heading_span present, issue #217): right after its
+    #     heading line (+1 for the "\n" separator);
+    #   - the synthetic pre-heading node: at char_span[0] — it has no heading
+    #     line, its span covers the body text itself;
+    #   - a legacy tree's heading node (no heading_span, heading-only
+    #     char_span): right after char_span, exactly as before issue #217.
+    synthetic = _is_synthetic_preheading(node)
+    if node.heading_span is not None:
+        body_start = node.heading_span[1] + 1
+    elif synthetic:
+        body_start = node.char_span[0]
+    else:
+        body_start = node.char_span[1] + 1
 
     # Split on lettered items.
     lettered = _split_lettered(node.text)
 
     if len(lettered) <= 1:
         # No lettered items found — return node unchanged (except re-created).
-        return ClauseNode(
-            clause_path=node.clause_path,
-            heading=node.heading,
-            text=node.text,
-            char_span=node.char_span,
-            children=segmented_children,
-        )
+        return _rebuilt(node, segmented_children)
 
     # lettered[0] = (None, preamble_text, start_offset_in_body)
     # lettered[1:] = (letter, text, start_offset_in_body)
@@ -196,9 +208,9 @@ def _segment_node(node: ClauseNode) -> ClauseNode:
                         char_span=(roman_start, roman_end),
                     )
                 )
-            # B2 fix: lettered parent span covers its preamble only, not all
-            # sub-items.  This is consistent with the heading convention used
-            # by the DOCX/PDF ingesters (heading span ≠ full clause extent).
+            # B2 fix: lettered parent span covers its own preamble only, not
+            # its sub-items — the same "own text, children excluded" rule
+            # every node's char_span follows (issue #217).
             preamble_end = item_start + len(roman_preamble_text)
             promoted.append(
                 ClauseNode(
@@ -219,12 +231,24 @@ def _segment_node(node: ClauseNode) -> ClauseNode:
                 )
             )
 
+    # The parent keeps only its preamble as text, so its whole-clause span
+    # (issue #217) shrinks to heading start → end of that preamble — the
+    # promoted children own the rest. A legacy heading-only span (no
+    # heading_span, not synthetic) is left exactly as it was.
+    char_span = node.char_span
+    if node.heading_span is not None:
+        own_end = body_start + len(preamble_text) if preamble_text else node.heading_span[1]
+        char_span = (node.char_span[0], own_end)
+    elif synthetic:
+        char_span = (node.char_span[0], node.char_span[0] + len(preamble_text))
+
     return ClauseNode(
         clause_path=node.clause_path,
         heading=node.heading,
         text=preamble_text,
-        char_span=node.char_span,
+        char_span=char_span,
         children=segmented_children + promoted,
+        heading_span=node.heading_span,
     )
 
 

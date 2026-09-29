@@ -409,6 +409,78 @@ def test_canary_warm_replay_does_no_extraction(
     assert measure(out_dir) == expected
 
 
+# ---------------------------------------------------------------------------
+# Signature blocks on the agent path (issue #217)
+# ---------------------------------------------------------------------------
+
+
+_SIG_BLOCK_RESIDUE = ("IN WITNESS WHEREOF", "By: /s/")
+
+
+@pytest.mark.smoke
+def test_canary_signature_blocks_never_enter_clause_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent path strips the executed versions' signature blocks.
+
+    The canary is the one keyless CI run on the LLM/agent segmentation path
+    (grounded trees: no ``heading_span``). Each negotiation's executed v2
+    ends in an ``IN WITNESS WHEREOF`` / ``By: /s/`` page that the committed
+    partition segments as its own node. None of it may reach
+    observations.jsonl, normalized/ or the compiled evidence. Each executed
+    version's ``version_ingest`` row must record where the block sat, and no
+    normalized clause's ``char_span`` may still cover it.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    out_dir = tmp_path / "out"
+    run_cold(out_dir)
+
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    surfaces = {
+        "observations.jsonl": (out_dir / "observations.jsonl").read_text(encoding="utf-8"),
+        "playbook evidence": json.dumps(playbook["evidence"]),
+    }
+    for tree_file in sorted((out_dir / "normalized").rglob("*.json")):
+        surfaces[str(tree_file.relative_to(out_dir))] = tree_file.read_text(encoding="utf-8")
+    for name, content in surfaces.items():
+        for residue in _SIG_BLOCK_RESIDUE:
+            assert residue not in content, f"signature-block residue {residue!r} in {name}"
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    executed = 0
+    for doc in manifest:
+        for row in doc["version_ingest"]:
+            assert row["status"] == "ok"
+            source = _CORPUS_DIR / doc["document_id"] / f"{row['version']}.docx"
+            canonical, _blocks, _label = extraction_mod.extract_blocks(source, extractor="legacy")
+            span = row["signature_block_span"]
+            if "IN WITNESS WHEREOF" not in canonical:
+                assert span is None, f"{source.name}: no signature page, yet span {span}"
+                continue
+            executed += 1
+            assert isinstance(span, list), f"{doc['document_id']}/{row['version']}: no span"
+            start, end = span
+            removed = canonical[start:end]
+            assert removed.startswith("IN WITNESS WHEREOF"), removed
+            assert removed.splitlines()[-1].startswith("By: /s/"), removed
+            assert end == len(canonical)
+            tree = json.loads(
+                (
+                    out_dir / "normalized" / doc["document_id"] / f"{row['version']}.clauses.json"
+                ).read_text(encoding="utf-8")
+            )
+            stack = list(tree["nodes"])
+            while stack:
+                node = stack.pop()
+                stack.extend(node["children"])
+                node_start, node_end = node["char_span"]
+                assert node_end <= start or node_start >= end, (
+                    f"clause {node['clause_path']} span {node['char_span']} still "
+                    f"covers the stripped block {span}"
+                )
+    assert executed == 2, f"expected both negotiations' executed v2, found {executed}"
+
+
 @pytest.mark.smoke
 def test_warm_replay_check_bites_when_the_extraction_cache_is_lost(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

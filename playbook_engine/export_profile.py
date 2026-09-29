@@ -67,7 +67,7 @@ _BASIS_VALUES = frozenset({"judge", "stub", "judge_error"})
 
 # Free-text fields on each ``observed_positions[]`` entry that may carry
 # semantic residue. ``full_text`` (issue #105) is the untruncated clause
-# text; ``text_summary`` is the ≤200-char display truncation; ``x_search_snippet``
+# text; ``text_summary`` is the ≤300-char display truncation; ``x_search_snippet``
 # (issue #95) is a short verbatim excerpt near the citation's location —
 # deterministically pseudonymized/truncated at mine time same as the other
 # two, but sampled here independently since a rewrite of one must not

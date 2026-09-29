@@ -99,6 +99,7 @@ from playbook_engine.observation_builder import (
     read_observations_jsonl,
     read_round_moves_jsonl,
     round_move_from_dict,
+    summarize_clause_text,
     truncate_move_summaries,
     truncate_search_snippets,
     write_observations_jsonl,
@@ -118,7 +119,12 @@ from playbook_engine.scope_gate import (
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.segmentation_qa import SegmentationQAError, run_gates
 from playbook_engine.segmenter import segment
-from playbook_engine.signed_detector import SignedJudge, SignedStatus, detect_signed
+from playbook_engine.signed_detector import (
+    SignedJudge,
+    SignedStatus,
+    detect_signed,
+    strip_signature_block,
+)
 from playbook_engine.taxonomy import Taxonomy
 from playbook_engine.tracked_changes_overlay import (
     HunkEnrichment,
@@ -133,7 +139,6 @@ from playbook_engine.version_orderer import (
     order_versions,
 )
 
-_TEXT_SUMMARY_MAX = 200
 _SUPPORTED_EXTENSIONS = frozenset({".docx", ".pdf", ".rtf"})
 
 # Media types for version_files content addresses (issue #185, OPF §4).
@@ -224,7 +229,12 @@ _DEVIATION_VS_TEMPLATE_VERSION = 7
 # version_ingest itself) changes for identical source content and config: a
 # warm out/.cache entry from before this fix would keep replaying
 # corpus-wide all-"unknown" attribution as if it were still current.
-_VERSION_INGEST_REASON_VERSION = 2
+#
+# v3 (issue #217): "ok" version_ingest entries gained
+# "signature_block_span" — and the per-doc result's trees/observations now
+# have the signature block cut out of the last clause's text. A warm entry
+# from before this carries neither.
+_VERSION_INGEST_REASON_VERSION = 3
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_trees changes in a way that must invalidate a warm L1-L4 stage
@@ -241,7 +251,13 @@ _VERSION_INGEST_REASON_VERSION = 2
 # (``result.get("version_trees", {})`` degrades to empty), so replaying it
 # would silently skip writing that document's trees on this run — bump so
 # every existing entry recomputes once and the trees are captured.
-_NORMALIZED_TREES_CACHE_VERSION = 1
+#
+# v2 (issue #217): every ingester node's char_span now covers the whole
+# clause (heading start → end of own body text) with the heading line in a
+# new heading_span, and the signature block is cut out of the last clause's
+# text — a warm entry from before this would replay heading-only spans and
+# signature-block text into normalized/ and every citation.
+_NORMALIZED_TREES_CACHE_VERSION = 2
 
 # version_ingest[].reason values that represent a real DEGRADATION — the
 # legacy adapter ran because docling was unavailable or crashed on this
@@ -912,7 +928,7 @@ def _template_observations_from_classified(
             Observation(
                 observation_id=f"template/template/{clause_path}",
                 taxonomy_id=cc.classification.taxonomy_id,
-                text_summary=(cc.node.text or "")[:_TEXT_SUMMARY_MAX],
+                text_summary=summarize_clause_text(cc.node.text or ""),
                 full_text=cc.node.text or "",
                 citation=ObservationCitation(
                     document_id="template",
@@ -2004,6 +2020,13 @@ def _compute_doc_result(
     # function's docstring's "version_trees" key and mine_corpus's
     # "Materialise normalized/ clause trees now" comment.
     version_tree_dicts: dict[str, dict[str, Any]] = {}
+    # Each version's tree BEFORE signature-block stripping (issue #217).
+    # version_trees (and everything that reads node text as clause language
+    # — classification, diffs, observations, normalized/) get the stripped
+    # tree; the signature block is exactly the evidence signed-copy
+    # detection reads and a place party names live, so detect_signed, the
+    # our-party alias scan and provenance detection read these instead.
+    unstripped_trees: dict[str, ClauseTree] = {}
     llm_taxonomy_by_path: dict[str, dict[str, str | None]] = {}
     # Populated on every branch below — the deterministic DOCX path gets it
     # "for free" from _ingest_file_tracked, and both LLM-segmentation
@@ -2114,6 +2137,14 @@ def _compute_doc_result(
                     "source file — treating as an extraction failure"
                 )
 
+            # issue #217: cut the signature block (IN WITNESS WHEREOF,
+            # By:/Name:/Title:, signatory names) out of the last clause's
+            # text — it is not clause language, and signatories' names are a
+            # pseudonymization residue path. The unstripped tree is kept for
+            # the L2 detectors that need the block (see unstripped_trees).
+            unstripped_trees[vid] = tree
+            tree, signature_block = strip_signature_block(tree)
+
             # issue #139: do NOT write to normalized/ here — that used to
             # write raw, pre-pseudonymization content under the RAW doc_id,
             # mid-loop, so a run with known_entities configured left the raw
@@ -2135,6 +2166,20 @@ def _compute_doc_result(
                 # whenever docling ran clean with no degradation — see
                 # ExtractorLabel.reason (issue #81).
                 "reason": extractor_label.reason if extractor_label is not None else None,
+                # issue #217: where the stripped signature block sat in this
+                # version's normalized text ([start, end) — same coordinates
+                # as ClauseNode.char_span), or None when no block was found
+                # (or its offsets could not be related to the tree). Engine-
+                # internal: corpus_manifest.json carries it; the frozen
+                # OPF 0.3 schema's version_ingest (additionalProperties:
+                # false) does not, so playbook_assembler's
+                # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
+                # playbook.
+                "signature_block_span": (
+                    list(signature_block.char_span)
+                    if signature_block is not None and signature_block.char_span is not None
+                    else None
+                ),
             }
         except SegmentationQAError as exc:
             # Fail loud, by design: a QA-gate failure on the LLM path must
@@ -2241,7 +2286,7 @@ def _compute_doc_result(
     # cache config fingerprint already includes provenance_aliases, so an
     # alias change re-runs this.
     our_alias_matched = _our_aliases_match_any_tree(
-        version_trees.values(), config.provenance.our_party_aliases
+        unstripped_trees.values(), config.provenance.our_party_aliases
     )
 
     # L1c: Cross-version taxonomy normalization (opt-in, LLM-segmented only).
@@ -2255,7 +2300,8 @@ def _compute_doc_result(
         llm_taxonomy_by_path = normalized.taxonomy_by_version
 
     # L1b: Scope gate (first ingested version) — result stored in cache, NOT in scope_log.
-    first_tree = next(iter(version_trees.values()))
+    first_vid = next(iter(version_trees))
+    first_tree = version_trees[first_vid]
     decision = scope_gate(first_tree, config.agreement_type, _scope_judge)
 
     scope_decision_dict: dict[str, Any] = {
@@ -2320,7 +2366,9 @@ def _compute_doc_result(
     signed_status_by_vid: dict[str, Any] = {}
     version_inputs = []
     for vid, tree in version_trees.items():
-        ss = detect_signed(tree, signed_judge=signed_judge)
+        # The unstripped tree (issue #217): the signature block this reads
+        # was cut from version_trees' clause text.
+        ss = detect_signed(unstripped_trees[vid], signed_judge=signed_judge)
         signed_status_by_vid[vid] = ss
         version_inputs.append(VersionInput(version_id=vid, tree=tree, signed=ss))
     # hints.yaml is optional (Hints.load returns empty Hints for a missing
@@ -2365,7 +2413,11 @@ def _compute_doc_result(
     version_order = order_versions(version_inputs, hints, trail_judge=trail_judge)
 
     earliest_vid = version_order.ordered_ids[0] if version_order.ordered_ids else None
-    prov_tree = version_trees[earliest_vid] if earliest_vid else first_tree
+    # Unstripped (issue #217), like the template_tree mine_corpus passes in:
+    # the alias-presence signal reads party names wherever they appear,
+    # signature blocks included, and the template-similarity signal must
+    # compare like with like.
+    prov_tree = unstripped_trees[earliest_vid] if earliest_vid else unstripped_trees[first_vid]
     prov_result = detect_provenance(
         prov_tree,
         config.provenance,
@@ -2874,7 +2926,7 @@ def mine_corpus(
                     extractor=config.extraction.extractor,
                 )
                 template_classified = _classified_from_taxonomy_by_path(
-                    template_tree, t_tax_by_path
+                    strip_signature_block(template_tree)[0], t_tax_by_path
                 )
             else:
                 raw_tree = _ingest_file(config.baseline.template_path, "template", "template")
@@ -2894,11 +2946,16 @@ def mine_corpus(
         except Exception as exc:  # noqa: BLE001
             progress(f"  WARNING: could not ingest template: {exc}")
 
+    # Our standards come from the template's clause language only — its
+    # signature block is cut out exactly as for corpus versions (issue #217).
+    # template_tree itself stays unstripped: _compute_doc_result hands it to
+    # detect_provenance, whose template-similarity signal compares it with
+    # each document's unstripped tree.
     if template_classified is not None:
         t_observations = _template_observations_from_classified(template_classified)
     elif template_tree:
         t_observations = _build_template_observations(
-            template_tree,
+            strip_signature_block(template_tree)[0],
             taxonomy,
             _cls_judge,
             ambiguity_threshold=config.classification.ambiguity_threshold,
@@ -2916,7 +2973,7 @@ def mine_corpus(
     # our_standard fed to every deviation judge (including the agent-as-judge
     # path — agent_judge.StoreBackedDeviationJudge.assess_batch, whose
     # docstring already claims "NOT truncated") must be the full clause text,
-    # not the 200-char text_summary — a 200-char fragment of a real
+    # not the ≤ 300-char text_summary — a ≤ 300-char fragment of a real
     # indemnification/insurance clause is not a usable standard to diff
     # against (issue #105).
     template_std_by_tid: dict[str, str] = {}

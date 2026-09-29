@@ -570,7 +570,7 @@ Every asserted clause text MUST be traceable.
 ```
 - `document_id`, `version`, and `clause_path` are REQUIRED; `char_span` is optional.
 - `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page.
-- `char_span`, when present, indexes into the document's full normalized text (document-relative — same coordinate system as `ClauseNode.char_span` in the clause-tree artifact), not the clause's own text.
+- `char_span`, when present, indexes into the document's full normalized text (document-relative — same coordinate system as `ClauseNode.char_span` in the clause-tree artifact), not the clause's own text. It spans the whole cited clause — from the start of its heading line through the end of its own body text (sub-clauses excluded; each carries its own span) — so a consumer resolving it lands on the clause language, not only its heading. (The reference engine also cuts an execution/signature block out of the clause that precedes it, so that block is not part of the clause text or its span.)
 - `version` is the inferred ordinal (1-based); `"template"` is reserved for the baseline. Every citation's `(document_id, version)` MUST resolve against `corpus.documents` — dangling citations are non-conformant. When the cited document publishes `version_files` (§3.8), the cited version MUST have an entry there — a citation naming bytes no consumer can verify is likewise non-conformant.
 
 ### 4.1 Resolution algorithm (NEW)

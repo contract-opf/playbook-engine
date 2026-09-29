@@ -4,8 +4,9 @@ Assembles one inspectable row per clause observation, writing them to
 ``observations.jsonl`` (one JSON object per line).
 
 Each observation captures:
-  - What was observed: taxonomy_id, text_summary (≤ 200 chars of clause text,
-    display-only — see full_text for the untruncated clause text used by
+  - What was observed: taxonomy_id, text_summary (a ≤ 300-char prefix of the
+    clause text ending on a sentence boundary — see summarize_clause_text —
+    display-only; full_text carries the untruncated clause text used by
     downstream judges/standards, issue #105)
   - Citation: document_id, version, version_id, clause_path, char_span (see
     ObservationCitation for why version alone is not file-resolvable — issue #108)
@@ -28,6 +29,7 @@ import dataclasses
 import datetime
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,59 @@ from playbook_engine.tracked_changes_overlay import (
     round_level_fallback_attribution,
 )
 
-_TEXT_SUMMARY_MAX = 200
+# Cap for RoundMove.change_summary (see truncate_move_summaries) — the
+# born-safe store's what-moved line, a separate field from text_summary.
+_CHANGE_SUMMARY_MAX = 200
+
+# Cap for Observation.text_summary (issue #217) — see summarize_clause_text.
+_TEXT_SUMMARY_MAX = 300
+
+# A sentence cut shorter than this is a heading-like fragment
+# ("Confidentiality.", "5.") that would make the summary merely restate the
+# clause name, so summarize_clause_text falls back to a word boundary.
+_TEXT_SUMMARY_MIN_SENTENCE = 60
+
+# A sentence end: terminal punctuation, optionally followed by closing
+# quotes/brackets, then whitespace or end of text. "2.1" (no whitespace
+# after the dot) is not a sentence end; "Inc. " is — an accepted heuristic
+# cost, since a cut there is still a clean word boundary.
+_SENTENCE_END = re.compile(r"[.!?][\"'\u201d\u2019)\]]*(?=\s|$)")
+
+
+def summarize_clause_text(text: str, limit: int = _TEXT_SUMMARY_MAX) -> str:
+    """Display summary of a clause's text: its first ≤ *limit* chars, ending
+    on a sentence boundary (issue #217).
+
+    Replaces the old hard ``text[:200]`` cut, which ended mid-word. The
+    result is always a verbatim prefix of the stripped text:
+
+    1. Text that fits within *limit* is returned whole.
+    2. Otherwise, cut after the LAST sentence end inside the first *limit*
+       chars — unless that keeps fewer than ``_TEXT_SUMMARY_MIN_SENTENCE``
+       chars (a heading-like fragment such as "Confidentiality."), in which
+       case, as when the window holds no sentence end at all:
+    3. fall back to the last word boundary inside the window;
+    4. only a single unbroken token longer than *limit* is hard-cut.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    sentence_cut = 0
+    # Search one char past the window so a sentence end AT the window edge
+    # is recognised by the lookahead against the real following char.
+    for m in _SENTENCE_END.finditer(text, 0, limit + 1):
+        if m.end() <= limit:
+            sentence_cut = m.end()
+    if sentence_cut >= min(_TEXT_SUMMARY_MIN_SENTENCE, limit):
+        return text[:sentence_cut]
+    window = text[:limit]
+    if text[limit].isspace():
+        return window.rstrip()
+    word_cut = max(window.rfind(" "), window.rfind("\n"), window.rfind("\t"))
+    if word_cut > 0:
+        return window[:word_cut].rstrip()
+    return window
+
 
 # Target cap for Observation.search_snippet (issue #95) — "a phrase," not a
 # paragraph: ~40-100 chars / roughly 5-15 words is enough for a reviewer to
@@ -167,7 +221,9 @@ class Observation:
     Attributes:
         observation_id:  Unique string id for this observation (caller-supplied).
         taxonomy_id:     Taxonomy entry, or ``None`` for unclassified clauses.
-        text_summary:    First ≤ 200 chars of the clause text. Display-only —
+        text_summary:    A ≤ 300-char prefix of the clause text ending on a
+                         sentence boundary (``summarize_clause_text``,
+                         issue #217). Display-only —
                          a human-scanning summary. NOT the source for
                          our_standard.text, acceptable_if, fallback/rejected
                          language, or any judge payload; use full_text for
@@ -376,7 +432,7 @@ def _summarize_move(diff: ClauseDiff) -> str:
 
 
 def truncate_move_summaries(
-    moves: list[RoundMove], limit: int = _TEXT_SUMMARY_MAX
+    moves: list[RoundMove], limit: int = _CHANGE_SUMMARY_MAX
 ) -> list[RoundMove]:
     """Cap each move's ``change_summary`` at *limit* chars for the store.
 
@@ -745,7 +801,7 @@ def build_observations(
         # the untruncated clause text for our_standard / acceptable_if / fallback
         # resolution and judge payloads downstream.
         raw_text = clause_diff.text_after or clause_diff.text_before
-        text_summary = raw_text[:_TEXT_SUMMARY_MAX]
+        text_summary = summarize_clause_text(raw_text)
 
         outcome = (
             "proposed_then_reversed" if (tid, clause_path) in reversed_keys else default_outcome
@@ -845,7 +901,7 @@ def build_observations(
             Observation(
                 observation_id=obs_id,
                 taxonomy_id=r.taxonomy_id,
-                text_summary=r.proposed_text[:_TEXT_SUMMARY_MAX],
+                text_summary=summarize_clause_text(r.proposed_text),
                 full_text=r.proposed_text,
                 citation=ObservationCitation(
                     document_id=document_id,
