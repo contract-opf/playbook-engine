@@ -189,12 +189,12 @@ def enrich_clause_diff(
     #
     # Span overlap must also stay additive rather than replace the
     # clause-path filter even where the coordinate systems do match:
-    # ``ClauseNode.char_span`` for a docx-ingested heading node covers
-    # only its heading *line*, not the clause body (see
-    # ``docx_ingester._ClauseBuilder.add_body``'s docstring) — a real
-    # tracked change in the body of a same-namespace docx-to-docx diff
-    # will not overlap that narrow span even though the clause path
-    # matches exactly. Keeping clause-path matching alongside span overlap
+    # ``ClauseNode.char_span`` now covers the whole clause on every
+    # producer (issue #217 — a docx-ingested heading node used to cover
+    # only its heading *line*), but a tree serialized before that change,
+    # or a tracked change recorded against a clause_path whose span does not
+    # contain it (e.g. deletions, which carry no span at all), still needs
+    # the path match. Keeping clause-path matching alongside span overlap
     # preserves that same-namespace case; span overlap independently
     # recovers the mismatched-namespace case the old filter dropped
     # entirely (an agent-segmented clause's char_span spans its whole

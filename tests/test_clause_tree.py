@@ -766,3 +766,78 @@ def test_validate_clean_tree_all_invariants_pass() -> None:
     """_simple_tree() must pass validate() with all new invariants."""
     tree = _simple_tree()
     tree.validate()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# heading_span (issue #217)
+# ---------------------------------------------------------------------------
+
+
+def _headed_node(*, heading_span: tuple[int, int] | None) -> ClauseNode:
+    # "1. Term\nTwo years." — heading line [0, 7), whole clause [0, 18).
+    return ClauseNode(
+        clause_path="1",
+        heading="Term",
+        text="Two years.",
+        char_span=(0, 18),
+        heading_span=heading_span,
+    )
+
+
+def test_heading_span_round_trips() -> None:
+    tree = ClauseTree(
+        document_id="d", version="v1", source_file="f", nodes=[_headed_node(heading_span=(0, 7))]
+    )
+    restored = ClauseTree.from_json(tree.to_json())
+    assert restored.nodes[0].heading_span == (0, 7)
+    assert restored.nodes[0].char_span == (0, 18)
+    restored.validate(full_text="1. Term\nTwo years.")
+
+
+def test_heading_span_absent_is_omitted_from_serialization() -> None:
+    """A node with no separate heading line serializes exactly as before
+    heading_span existed (no key), and loads back as None."""
+    d = _headed_node(heading_span=None).to_dict()
+    assert "heading_span" not in d
+    assert ClauseNode.from_dict(d).heading_span is None
+    assert ClauseNode.from_dict({**d, "heading_span": None}).heading_span is None
+
+
+def test_heading_span_serialized_tree_validates_against_schema() -> None:
+    schema = json.loads(CLAUSE_TREE_SCHEMA_PATH.read_text(encoding="utf-8"))
+    tree = ClauseTree(
+        document_id="d", version="v1", source_file="f", nodes=[_headed_node(heading_span=(0, 7))]
+    )
+    jsonschema.validate(instance=tree.to_dict(), schema=schema)
+
+
+@pytest.mark.parametrize("bad", [[0], [0, 1, 2], ["0", "7"], [True, 7], [5, 2], [-1, 3], "0-7"])
+def test_heading_span_malformed_raises(bad: Any) -> None:
+    d = _headed_node(heading_span=None).to_dict()
+    d["heading_span"] = bad
+    with pytest.raises(ClauseTreeError, match="heading_span"):
+        ClauseNode.from_dict(d)
+
+
+@pytest.mark.parametrize("heading_span", [(1, 7), (0, 19)])
+def test_validate_raises_when_heading_span_not_at_head_of_char_span(
+    heading_span: tuple[int, int],
+) -> None:
+    """Invariant 6: heading_span starts where char_span starts and ends at or
+    before char_span's end."""
+    tree = ClauseTree(
+        document_id="d",
+        version="v1",
+        source_file="f",
+        nodes=[_headed_node(heading_span=heading_span)],
+    )
+    with pytest.raises(ClauseTreeError, match="heading_span"):
+        tree.validate()
+
+
+def test_validate_heading_span_equal_to_char_span_passes() -> None:
+    """A heading-only clause (no body text) has heading_span == char_span."""
+    node = ClauseNode(
+        clause_path="1", heading="Term", text="", char_span=(0, 7), heading_span=(0, 7)
+    )
+    ClauseTree(document_id="d", version="v1", source_file="f", nodes=[node]).validate()

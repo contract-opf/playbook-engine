@@ -115,6 +115,33 @@ def test_nda_smoke_full_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert playbook["posture"] == {}, "smoke run must not fabricate posture"
     assert playbook["floor"] == {}, "smoke run must not fabricate floor"
 
+    # Issue #217: signature blocks never enter clause text. Every NDA version
+    # ends in an "IN WITNESS WHEREOF" / By: /s/ execution trailer that the
+    # RTF ingester absorbs into the last clause; the pipeline cuts it out
+    # (after signed-copy detection has read it) and records where it was.
+    evidence_json = json.dumps(playbook["evidence"])
+    for residue in ("IN WITNESS WHEREOF", "By: /s/", "Name: ", "Title: "):
+        assert residue not in evidence_json, f"signature-block residue {residue!r} in evidence"
+    for artifact in ("observations.jsonl", "template_observations.jsonl"):
+        assert "IN WITNESS WHEREOF" not in (out_dir / artifact).read_text(encoding="utf-8")
+    for tree_file in (out_dir / "normalized").rglob("*.json"):
+        assert "IN WITNESS WHEREOF" not in tree_file.read_text(encoding="utf-8"), tree_file
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    ok_rows = [vi for d in manifest for vi in d["version_ingest"] if vi["status"] == "ok"]
+    assert ok_rows and all(isinstance(vi.get("signature_block_span"), list) for vi in ok_rows), (
+        "every NDA version's signature block should be located and recorded"
+    )
+    # Engine-internal only: the frozen OPF 0.3 version_ingest schema has no
+    # such key, so the published playbook must not carry it.
+    for doc in playbook["corpus"]["documents"]:
+        for vi in doc.get("version_ingest") or []:
+            assert "signature_block_span" not in vi
+    # No signed-detection claim here: every signed NDA version is detected by
+    # its DocuSign certificate, which reads the same with or without the
+    # block, so this corpus cannot tell whether detect_signed saw the
+    # unstripped tree. tests/test_signature_block_pipeline.py pins that on a
+    # fixture whose signed verdict depends on the block itself.
+
 
 # ---------------------------------------------------------------------------
 # Reviewer-gate mutation check: a bogus template must degrade to N=0,

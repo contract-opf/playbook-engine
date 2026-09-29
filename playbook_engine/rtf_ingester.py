@@ -19,9 +19,12 @@ char_span coordinate system:
   ``ClauseNode.char_span`` values are document-absolute offsets within the
   **virtual normalized text** — the non-empty stripped lines joined by
   ``"\\n"`` (i.e. ``"\\n".join(_split_lines(raw_text))``).  A clause node's
-  ``char_span`` covers only the **heading line**; body text accumulated in
-  ``.text`` does not extend the span.  This is the same convention as the
-  DOCX and PDF ingesters.
+  ``char_span`` covers the **whole clause** — from the start of its heading
+  line through the end of its own body text (children excluded) — and its
+  ``heading_span`` covers the heading line alone (issue #217).  The
+  synthetic pre-heading ``clause_path="0"`` node has no heading line, so its
+  ``heading_span`` is ``None`` and its ``char_span`` covers its body text.
+  This is the same convention as the DOCX and PDF ingesters.
 
 Limitations:
   - RTF tables are not preserved; their text content is extracted as a flat
@@ -204,7 +207,16 @@ class _ClauseBuilder:
         heading: str | None,
         char_span: tuple[int, int],
     ) -> None:
-        node = ClauseNode(clause_path=clause_path, heading=heading, text="", char_span=char_span)
+        # char_span starts as the heading line and grows over the node's own
+        # body text in add_body() (issue #217); heading_span keeps the
+        # heading line alone.
+        node = ClauseNode(
+            clause_path=clause_path,
+            heading=heading,
+            text="",
+            char_span=char_span,
+            heading_span=char_span,
+        )
         while self._stack and self._stack[-1][0] >= level:
             self._stack.pop()
         if self._stack:
@@ -226,6 +238,11 @@ class _ClauseBuilder:
             return
         current = self._stack[-1][1]
         current.text = (current.text + "\n" + text) if current.text else text
+        # Extend the clause's span over this body line: char_span covers
+        # heading start → end of the node's own body text (issue #217).
+        # Body only ever attaches to the stack top, so a node's body is
+        # contiguous and never overlaps its children's spans.
+        current.char_span = (current.char_span[0], doc_offset + len(text))
 
     def build(self) -> list[ClauseNode]:
         return self._root

@@ -406,3 +406,192 @@ def _count_by_lines(text: str) -> tuple[int, int]:
         else:
             filled += 1
     return filled, blank
+
+
+# ---------------------------------------------------------------------------
+# Signature-block stripping (issue #217)
+# ---------------------------------------------------------------------------
+#
+# The ingesters that start a clause only on a numbered/heading paragraph
+# (RTF, PDF, and DOCX without a heading-styled signature page) append the
+# execution trailer — "IN WITNESS WHEREOF", party captions, By:/Name:/Title:
+# lines, signatory names — to the body of whatever clause preceded it,
+# usually the last one (counterparts, entire agreement). That text is not
+# clause language: it is prompt noise for every judge that reads the clause,
+# it rides into our_standard / observed_positions / acceptable_if, and the
+# signatories' names are a pseudonymization residue path (people's names are
+# not in known_entities). ``strip_signature_block`` cuts it out of the clause
+# text deterministically and reports where it was, so the pipeline can
+# record the span in version_ingest.
+#
+# Signed-copy detection (``detect_signed`` above) and party-alias scans NEED
+# this text — a filled "By:" line is the signal — so the pipeline runs them
+# on the unstripped tree and uses the stripped one for everything that
+# treats node text as clause language.
+
+# An execution-trailer phrase ("IN WITNESS WHEREOF, the parties have
+# executed…") that OPENS the block: at the start of a line, or right after a
+# sentence end on the same line (a PDF text layer can run the trailer onto
+# the last clause sentence's line). A clause that merely mentions the phrase
+# mid-sentence is never cut.
+_SIG_BLOCK_TRAILER = re.compile(
+    rf"(?:^|(?<=[.!?]))[ \t]*(?P<trailer>{_TRAILER_ALTS})", re.IGNORECASE | re.MULTILINE
+)
+
+# A line that opens a signature field group when no trailer phrase exists.
+_SIG_BLOCK_START_LINE = re.compile(r"^[ \t]*(?:By[ \t]*:|/s/)", re.IGNORECASE)
+
+# Any signature-field line: By:/Name:/Title:/Its:/Date:/Signature: or /s/.
+_SIG_FIELD_LINE = re.compile(
+    r"^[ \t]*(?:(?:By|Name|Title|Its|Date|Signature)[ \t]*:|/s/)", re.IGNORECASE
+)
+
+# A field-group start only counts as a signature block when at least this
+# many signature-field lines follow from it (itself included) — one stray
+# "By:" line in ordinary prose is not a block.
+_MIN_SIG_FIELD_LINES = 2
+
+# Party-caption lines directly above a field group ("AlphaCorp Holdings,
+# Inc.", "[Counterparty]", "BETA INDUSTRIES LLC") belong to the block too.
+_CAPTION_MAX_WORDS = 8
+_CAPTION_MAX_LINES = 3
+_CORPORATE_SUFFIX = re.compile(
+    r"\b(?:inc|llc|l\.l\.c|ltd|limited|corp|corporation|company|co|lp|l\.p|llp|plc|gmbh|ag|s\.a|n\.v|b\.v)\.?$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class SignatureBlock:
+    """Where a version's signature block was cut from its clause text.
+
+    Attributes:
+        clause_path:  The clause whose ``text`` held the block (and was
+                      truncated at the block start).
+        char_span:    ``[start, end)`` of the removed block in the document's
+                      full normalized text (same coordinates as
+                      ``ClauseNode.char_span``), or ``None`` when the node's
+                      spans could not be related to its text (a legacy tree
+                      with heading-only spans) — the text is still cut.
+        basis:        ``"trailer"`` (an "IN WITNESS WHEREOF"/"executed as a
+                      deed" phrase opens the block) or ``"signature_fields"``
+                      (a By:/"/s/" field group in the last clause, plus the
+                      party-caption lines directly above it).
+    """
+
+    clause_path: str
+    char_span: tuple[int, int] | None
+    basis: Literal["trailer", "signature_fields"]
+
+
+def _lines_with_offsets(text: str) -> list[tuple[int, str]]:
+    out: list[tuple[int, str]] = []
+    offset = 0
+    for line in text.split("\n"):
+        out.append((offset, line))
+        offset += len(line) + 1
+    return out
+
+
+def _is_caption_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or len(stripped.split()) > _CAPTION_MAX_WORDS:
+        return False
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return True
+    if any(c.isalpha() for c in stripped) and stripped == stripped.upper():
+        return True
+    return bool(_CORPORATE_SUFFIX.search(stripped.rstrip(",:")))
+
+
+def _trailer_offset(text: str) -> int | None:
+    m = _SIG_BLOCK_TRAILER.search(text)
+    return m.start("trailer") if m is not None else None
+
+
+def _signature_fields_offset(text: str) -> int | None:
+    lines = _lines_with_offsets(text)
+    for i, (_offset, line) in enumerate(lines):
+        if not _SIG_BLOCK_START_LINE.match(line):
+            continue
+        n_fields = sum(1 for _, rest in lines[i:] if _SIG_FIELD_LINE.match(rest))
+        if n_fields < _MIN_SIG_FIELD_LINES:
+            return None
+        j = i
+        while j > 0 and i - j < _CAPTION_MAX_LINES and _is_caption_line(lines[j - 1][1]):
+            j -= 1
+        return lines[j][0]
+    return None
+
+
+def _locate_signature_block(
+    nodes: list[ClauseNode],
+) -> tuple[int, int, Literal["trailer", "signature_fields"]] | None:
+    """Return ``(node_index, offset_in_text, basis)`` or ``None``.
+
+    The LAST node carrying a trailer phrase wins (a signature page followed
+    by an exhibit keeps the exhibit) — in its body text, or as its whole
+    heading (an ingester that reads a short ALL-CAPS "IN WITNESS WHEREOF"
+    line as a heading puts the block in that node's body, all of which is
+    cut). Failing that, a By:/"/s/" field group is looked for only in the
+    last clause that has body text — the one place an unheaded execution
+    block lands.
+    """
+    for idx in range(len(nodes) - 1, -1, -1):
+        node = nodes[idx]
+        offset = _trailer_offset(node.text or "")
+        if offset is None and node.heading and _SIG_BLOCK_TRAILER.match(node.heading.strip()):
+            offset = 0 if (node.text or "").strip() else None
+        if offset is not None:
+            return idx, offset, "trailer"
+    for idx in range(len(nodes) - 1, -1, -1):
+        if (nodes[idx].text or "").strip():
+            offset = _signature_fields_offset(nodes[idx].text)
+            return (idx, offset, "signature_fields") if offset is not None else None
+    return None
+
+
+def strip_signature_block(tree: ClauseTree) -> tuple[ClauseTree, SignatureBlock | None]:
+    """Cut the signature block out of *tree*'s clause text (issue #217).
+
+    Returns ``(tree, None)`` unchanged when no block is found. Otherwise
+    returns a NEW tree (the input is never mutated) whose block-holding node
+    has its ``text`` truncated at the block start (trailing whitespace
+    dropped) and its ``char_span`` end pulled back to the end of the kept
+    text — or to the end of its heading line when nothing is kept — plus the
+    :class:`SignatureBlock` describing what was removed. Only that node's
+    own text is cut; nodes after it (an exhibit) are left alone.
+
+    Deterministic, no LLM. Callers run ``detect_signed`` on the UNSTRIPPED
+    tree — the block is exactly the evidence that detector reads.
+    """
+    located = _locate_signature_block(list(tree.all_nodes()))
+    if located is None:
+        return tree, None
+    node_index, offset, basis = located
+
+    stripped = ClauseTree.from_dict(tree.to_dict())
+    target = list(stripped.all_nodes())[node_index]
+    text = target.text
+    kept = text[:offset].rstrip()
+
+    # The node's own text ends at char_span[1] on every current producer
+    # (ingester whole-clause spans, segmenter-promoted sub-clauses, grounded
+    # LLM nodes), so its start is char_span[1] - len(text). A legacy tree's
+    # heading-only span fails this check — cut the text, report no span.
+    text_start = target.char_span[1] - len(text)
+    heading_end = target.heading_span[1] if target.heading_span is not None else None
+    block_span: tuple[int, int] | None = None
+    if text_start >= target.char_span[0] and (heading_end is None or text_start > heading_end):
+        block_span = (text_start + offset, target.char_span[1])
+        if kept:
+            new_end = text_start + len(kept)
+        elif heading_end is not None:
+            new_end = heading_end
+        else:
+            new_end = target.char_span[0]
+        target.char_span = (target.char_span[0], new_end)
+    target.text = kept
+    return stripped, SignatureBlock(
+        clause_path=target.clause_path, char_span=block_span, basis=basis
+    )

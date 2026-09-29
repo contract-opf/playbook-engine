@@ -576,10 +576,10 @@ def test_ingest_bare_page_number_does_not_fragment_clause(tmp_path: Path) -> Non
     assert "confidential and not disclose" in node.text.lower()
 
 
-def test_char_span_resolves_to_heading_text(tmp_path: Path) -> None:
-    """resolve_span on the virtual normalized text returns the heading line.
-
-    char_span covers only the heading line (same convention as DOCX ingester).
+def test_char_span_resolves_to_whole_clause(tmp_path: Path) -> None:
+    """resolve_span on the virtual normalized text returns the whole clause —
+    heading line through the end of its own body text — and heading_span the
+    heading line alone (issue #217; same convention as the DOCX ingester).
     """
     from playbook_engine.pdf_ingester import _split_paragraphs
 
@@ -599,5 +599,11 @@ def test_char_span_resolves_to_heading_text(tmp_path: Path) -> None:
     assert node is not None
     from playbook_engine.clause_tree import ClauseTree
 
-    heading_line = ClauseTree.resolve_span(normalized, node.char_span)
-    assert "Definitions" in heading_line or "1." in heading_line
+    clause_text = ClauseTree.resolve_span(normalized, node.char_span)
+    assert clause_text.startswith("1.")
+    assert "Definitions" in clause_text
+    assert clause_text.endswith("Body text follows.")
+    assert node.heading_span is not None
+    heading_line = ClauseTree.resolve_span(normalized, node.heading_span)
+    assert "Definitions" in heading_line
+    assert "Body text" not in heading_line

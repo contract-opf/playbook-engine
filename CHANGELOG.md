@@ -10,6 +10,34 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Citations span the whole clause; signature blocks leave clause text;
+  summaries end on a sentence boundary** (issue #217). Every ingester
+  (RTF/DOCX/PDF) now makes a clause node's `char_span` cover the whole
+  clause — heading line through the end of its own body text, children
+  excluded — instead of the heading line alone, so an OPF citation's
+  `char_span` resolves to the clause language as OPF-SPEC §4 describes; the
+  heading line moves to a new optional `ClauseNode.heading_span` (additive
+  clause-tree schema field, see `spec/CHANGELOG.md`). A deterministic
+  detector (`signed_detector.strip_signature_block`) cuts the execution
+  trailer — "IN WITNESS WHEREOF", party captions, `By:`/`Name:`/`Title:`
+  lines, signatory names — out of the clause it was absorbed into, after
+  signed-copy detection, the our-party alias scan and provenance detection
+  have read the unstripped tree; where it sat is recorded as
+  `signature_block_span` on `corpus_manifest.json`'s `version_ingest` rows
+  (engine-internal — the frozen OPF 0.3 `version_ingest` schema does not
+  carry it, so the published playbook never does). `text_summary` — and with
+  it `acceptable_if.if` and the digest's verbatim variant text — is now the
+  first ≤ 300 characters ending on a sentence boundary (word boundary when
+  the window holds no usable sentence end) instead of a mid-word 200-char
+  cut. The per-doc stage cache is invalidated once
+  (`_VERSION_INGEST_REASON_VERSION` 3, `_NORMALIZED_TREES_CACHE_VERSION` 2).
+  `examples/nda/playbook.opf.json` regenerated: its counterparts clause no
+  longer carries signature-block text (10 → 6 observations — the extra four
+  were signature-block edits between drafts), and six canned verdicts that
+  judged only signature-block differences were replaced by one for the
+  remaining genuine counterparts rewording. No `opf_version` or
+  `digest_version` change.
+
 - **Canary corpus + CI gate** (`examples/canary/`,
   `tests/test_canary_corpus.py`, `make smoke-canary`): a four-document
   synthetic DOCX corpus — two negotiations, both with a version pair, two of

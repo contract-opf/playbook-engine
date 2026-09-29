@@ -675,6 +675,26 @@ def test_run_inside_fld_simple_in_normalized_text(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #217: a clause's char_span covers the whole clause
+# ---------------------------------------------------------------------------
+
+
+def test_clause_char_span_covers_heading_and_own_body(tmp_path: Path) -> None:
+    """char_span runs from the heading paragraph through the end of the
+    clause's own body paragraphs; heading_span covers the heading alone."""
+    result = ingest_docx(_multi_para_clause_docx(tmp_path), "d", "v1")
+    normalized = "\n".join(u.text for u in result.units)
+    node = next(n for n in result.tree.all_nodes() if n.heading == "Obligations")
+    assert (
+        ClauseTree.resolve_span(normalized, node.char_span)
+        == "Obligations\nParty A shall perform services.\nCompensation is as follows."
+    )
+    assert node.heading_span is not None
+    assert ClauseTree.resolve_span(normalized, node.heading_span) == "Obligations"
+    result.tree.validate(full_text=normalized)
+
+
+# ---------------------------------------------------------------------------
 # BLOCKING-1: char_span is document-absolute (multi-paragraph clause)
 # ---------------------------------------------------------------------------
 

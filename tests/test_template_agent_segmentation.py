@@ -186,6 +186,72 @@ def test_template_segmented_via_llm_path(tmp_path: Path, monkeypatch) -> None:
     )
 
 
+def test_template_signature_block_stripped_on_llm_path(tmp_path: Path, monkeypatch) -> None:
+    """#217: on the agent/LLM segmentation path in template mode, the template's
+    execution block never reaches template_observations.jsonl or any
+    our_standard handed to the deviation judge (pipeline strips it before
+    classifying the template)."""
+    corpus_dir, config_path, out_dir, template_path = _make_corpus_with_template(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    signature = (
+        "\n\nIN WITNESS WHEREOF, the parties have executed this Agreement.\n"
+        "By: ______________________\nName:\nTitle:"
+    )
+
+    def fake_llm_segment_file(
+        path: Path,
+        document_id: str,
+        version: str,
+        taxonomy_ids: list[str],
+        segment_fn,
+        segmentation_cache=None,
+        model: str = "test-model",
+        extraction_cache=None,
+        refresh_extraction: bool = False,
+        extractor: str = "auto",
+    ):
+        flavor = "canonical" if document_id == "template" else "negotiated"
+        specs = [
+            ("1", "indemnification", f"The party shall indemnify the other ({flavor} form)."),
+            ("2", "governing_law", f"Governed by the laws of Delaware ({flavor} form)."),
+            ("3", "term", f"The term is one year with renewal on notice ({flavor} form)."),
+            ("4", "insurance", f"Liability insurance of one million ({flavor} form)."),
+        ]
+        if document_id == "template":
+            p_, h_, t_ = specs[-1]
+            specs[-1] = (p_, h_, t_ + signature)
+        nodes = [
+            ClauseNode(clause_path=p, heading=h, text=t, char_span=(0, len(t))) for p, h, t in specs
+        ]
+        tree = ClauseTree(
+            document_id=document_id,
+            version=version,
+            source_file=Path(path).name,
+            nodes=nodes,
+        )
+        return tree, {p: h for p, h, _ in specs}, ExtractorLabel("legacy")
+
+    monkeypatch.setattr(pipeline, "_llm_segment_file", fake_llm_segment_file)
+
+    judge = _RecordingDeviationJudge()
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        deviation_judge=judge,
+    )
+
+    template_obs = (out_dir / "template_observations.jsonl").read_text(encoding="utf-8")
+    assert "insurance" in template_obs, "the template's last clause must still be observed"
+    for marker in ("IN WITNESS WHEREOF", "By:"):
+        assert marker not in template_obs
+        assert all(marker not in s for s in judge.standards), judge.standards
+
+
 def test_template_deterministic_path_unchanged(tmp_path: Path, monkeypatch) -> None:
     """Without use_llm_segmentation the template stays on the deterministic
     segment+classify_tree path — _llm_segment_file is never called."""

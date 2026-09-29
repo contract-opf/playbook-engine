@@ -30,10 +30,12 @@ char_span coordinate system:
   ``"\\n"`` (i.e. ``"\\n".join(_split_paragraphs(raw_text))``).  This is
   analogous to the DOCX ingester, which uses paragraph texts joined by ``"\\n"``.
 
-  Important: a clause node's ``char_span`` covers only the **heading line**;
-  body text accumulated in ``.text`` via ``add_body()`` extends the text field
-  but does not extend the span.  This is the same convention as the DOCX
-  ingester.  To recover the text a span refers to, call:
+  A clause node's ``char_span`` covers the **whole clause** — from the start
+  of its heading line through the end of its own body text accumulated via
+  ``add_body()`` (children excluded) — and its ``heading_span`` covers the
+  heading line alone (issue #217).  The synthetic pre-heading
+  ``clause_path="0"`` node has ``heading_span=None``.  This is the same
+  convention as the DOCX ingester.  To recover the text a span refers to, call:
   ``ClauseTree.resolve_span("\\n".join(_split_paragraphs(raw_text)), span)``.
 
 Extraction metadata is recorded on ``PdfIngestResult``:
@@ -298,7 +300,16 @@ class _ClauseBuilder:
         heading: str | None,
         char_span: tuple[int, int],
     ) -> None:
-        node = ClauseNode(clause_path=clause_path, heading=heading, text="", char_span=char_span)
+        # char_span starts as the heading line and grows over the node's own
+        # body text in add_body() (issue #217); heading_span keeps the
+        # heading line alone.
+        node = ClauseNode(
+            clause_path=clause_path,
+            heading=heading,
+            text="",
+            char_span=char_span,
+            heading_span=char_span,
+        )
         while self._stack and self._stack[-1][0] >= level:
             self._stack.pop()
         if self._stack:
@@ -320,6 +331,11 @@ class _ClauseBuilder:
             return
         current = self._stack[-1][1]
         current.text = (current.text + "\n" + text) if current.text else text
+        # Extend the clause's span over this body line: char_span covers
+        # heading start → end of the node's own body text (issue #217).
+        # Body only ever attaches to the stack top, so a node's body is
+        # contiguous and never overlaps its children's spans.
+        current.char_span = (current.char_span[0], doc_offset + len(text))
 
     def build(self) -> list[ClauseNode]:
         return self._root

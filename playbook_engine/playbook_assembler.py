@@ -78,7 +78,8 @@ def _strip_invisible(value: Any) -> Any:
 # properties exactly, whose additionalProperties:false rejects anything
 # else. corpus_documents (as read from corpus_manifest.json) can carry
 # richer, engine-internal-only keys not in this set — e.g. "reason"
-# (extraction.ExtractorLabel.reason, issue #81), additive to
+# (extraction.ExtractorLabel.reason, issue #81) or "signature_block_span"
+# (issue #217), additive to
 # corpus_manifest.json/review.json but never part of the public OPF schema
 # — see _sanitize_corpus_documents_for_schema below, which strips down to
 # exactly this set before assembly. A test (test_playbook_assembler.py)

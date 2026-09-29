@@ -17,6 +17,7 @@ from docx import Document
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.docx_ingester import ingest_docx
+from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.segmenter import _split_lettered, _split_roman, segment
 
 SCHEMA_PATH = Path(__file__).parent.parent / "spec" / "clause-tree.schema.json"
@@ -567,18 +568,18 @@ def test_docx_blank_paragraph_after_heading_does_not_drift_child_spans(
         )
 
 
-def test_synthetic_zero_node_body_start_uses_char_span_start() -> None:
-    """The synthetic clause_path='0' node (pre-heading body text) has no
-    heading line of its own — its char_span covers the body text directly.
+def test_legacy_synthetic_zero_node_first_line_span_body_start() -> None:
+    """LEGACY SHAPE: a synthetic clause_path='0' node serialized before
+    issue #217, whose char_span covers only its first line of text.
 
-    Before the fix, body_start was computed as char_span[1] + 1 for every
-    node (including '0'), overshooting by len(first_paragraph) + 1.
-
-    Per the structural discriminator (segmenter.py), the synthetic node's
-    char_span covers exactly its own first line of text — mirroring what
-    ``_ClauseBuilder.add_body`` actually records — not the full multi-line
-    accumulated text, so the fixture's char_span is built from the first
-    line only.
+    No current ingester produces this shape — since issue #217
+    ``_ClauseBuilder.add_body`` extends the synthetic node's char_span over
+    every body line (that production path is covered by
+    ``test_rtf_synthetic_zero_node_multiline_preamble_spans`` below). This
+    hand-built fixture only pins the backward-compatible branch of
+    ``_is_synthetic_preheading`` (span length == first-line length), so a
+    tree stored before #217 still takes body_start = char_span[0] instead of
+    overshooting by len(first_line) + 1.
     """
     body_text = "(a) Alpha Corp shall deliver.\n(b) Beta Ltd shall pay."
     first_line = body_text.split("\n", 1)[0]
@@ -761,7 +762,11 @@ def test_docx_non_zero_heading_length_coincidence_does_not_shift_child_spans(
     # pre-segmentation node (post-segmentation text is just the preamble,
     # which is empty here since every body line is consumed as a lettered
     # item).
-    assert pre_segment_root.char_span[1] - pre_segment_root.char_span[0] == len(
+    # Since issue #217 the heading line is recorded in heading_span (char_span
+    # covers the whole clause), so the coincidence is between the heading
+    # line and the first body line.
+    assert pre_segment_root.heading_span is not None
+    assert pre_segment_root.heading_span[1] - pre_segment_root.heading_span[0] == len(
         pre_segment_root.text.split("\n", 1)[0]
     )
 
@@ -780,3 +785,125 @@ def test_docx_non_zero_heading_length_coincidence_does_not_shift_child_spans(
             f"{child.clause_path}: resolve_span returned {resolved!r} but "
             f"child.text is {child.text!r} (span {child.char_span})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #217: "own text, children excluded" spans through a REAL ingester.
+#
+# Since #217 the ingesters emit a whole-clause char_span (heading line + body)
+# plus a separate heading_span, and the synthetic "0" node's char_span covers
+# every body line. After promotion the segmenter must shrink the parent's
+# span to heading + preamble (the synthetic node's to its preamble only), and
+# the promoted children must resolve to their own text. These tests run
+# ingest_rtf -> segment() so the production shape is exercised, not a
+# hand-built one.
+# ---------------------------------------------------------------------------
+
+
+def _rtf_doc(body: str, tmp_path: Path) -> Path:
+    content = (
+        r"{\rtf1\ansi\deff0"
+        r"{\fonttbl{\f0\froman\fcharset0 Times New Roman;}}"
+        r"\f0\fs24 " + body + r"}"
+    )
+    path = tmp_path / "doc.rtf"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _assert_children_resolve(node: ClauseNode, virtual_text: str) -> None:
+    for child in node.children:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+
+
+def test_rtf_heading_with_preamble_span_excludes_promoted_children(tmp_path: Path) -> None:
+    path = _rtf_doc(
+        r"1. Obligations\par The parties agree:\par "
+        r"(a) Alpha shall deliver.\par (b) Beta shall pay.\par "
+        r"2. Term\par Two years.\par ",
+        tmp_path,
+    )
+    # RTF virtual normalized text: the non-empty stripped lines joined by "\n".
+    virtual_text = (
+        "1. Obligations\nThe parties agree:\n"
+        "(a) Alpha shall deliver.\n(b) Beta shall pay.\n"
+        "2. Term\nTwo years."
+    )
+    segmented = segment(ingest_rtf(path, "d", "v1").tree)
+
+    clause = segmented.resolve_path("1")
+    assert clause is not None
+    assert clause.heading_span is not None
+    assert ClauseTree.resolve_span(virtual_text, clause.char_span) == (
+        "1. Obligations\nThe parties agree:"
+    )
+    assert [c.clause_path for c in clause.children] == ["1.a", "1.b"]
+    _assert_children_resolve(clause, virtual_text)
+
+
+def test_rtf_heading_without_preamble_span_equals_heading_span(tmp_path: Path) -> None:
+    path = _rtf_doc(
+        r"1. Obligations\par "
+        r"(a) Alpha shall deliver.\par (b) Beta shall pay.\par "
+        r"2. Term\par Two years.\par ",
+        tmp_path,
+    )
+    virtual_text = (
+        "1. Obligations\n(a) Alpha shall deliver.\n(b) Beta shall pay.\n2. Term\nTwo years."
+    )
+    segmented = segment(ingest_rtf(path, "d", "v1").tree)
+
+    clause = segmented.resolve_path("1")
+    assert clause is not None
+    assert clause.heading_span is not None
+    assert clause.text == ""
+    assert clause.char_span == clause.heading_span
+    assert ClauseTree.resolve_span(virtual_text, clause.char_span) == "1. Obligations"
+    assert [c.clause_path for c in clause.children] == ["1.a", "1.b"]
+    _assert_children_resolve(clause, virtual_text)
+
+
+def test_rtf_synthetic_zero_node_multiline_preamble_spans(tmp_path: Path) -> None:
+    """The synthetic "0" node (current-ingester shape: no heading_span,
+    char_span over every body line) with a 2-line preamble and lettered
+    items: "0" resolves to its preamble only, and 0.a/0.b resolve to their
+    own text — not into the following clause.
+    """
+    path = _rtf_doc(
+        r"Recital line one.\par Recital line two.\par "
+        r"(a) Alpha shall deliver.\par (b) Beta shall pay.\par "
+        r"1. Obligations\par Gamma shall report.\par ",
+        tmp_path,
+    )
+    virtual_text = (
+        "Recital line one.\nRecital line two.\n"
+        "(a) Alpha shall deliver.\n(b) Beta shall pay.\n"
+        "1. Obligations\nGamma shall report."
+    )
+    ingested = ingest_rtf(path, "d", "v1").tree
+    raw_zero = ingested.resolve_path("0")
+    assert raw_zero is not None
+    assert raw_zero.heading_span is None
+    # Current-ingester shape: the span covers ALL of the node's body text.
+    assert ClauseTree.resolve_span(virtual_text, raw_zero.char_span) == raw_zero.text
+
+    segmented = segment(ingested)
+    zero = segmented.resolve_path("0")
+    assert zero is not None
+    assert ClauseTree.resolve_span(virtual_text, zero.char_span) == (
+        "Recital line one.\nRecital line two."
+    )
+    promoted = [c for c in zero.children if c.clause_path in ("0.a", "0.b")]
+    assert [c.clause_path for c in promoted] == ["0.a", "0.b"]
+    for child in promoted:
+        resolved = ClauseTree.resolve_span(virtual_text, child.char_span)
+        assert resolved == child.text, (
+            f"{child.clause_path}: resolve_span returned {resolved!r} but "
+            f"child.text is {child.text!r} (span {child.char_span})"
+        )
+    assert ClauseTree.resolve_span(virtual_text, promoted[0].char_span) == "Alpha shall deliver."
+    assert ClauseTree.resolve_span(virtual_text, promoted[1].char_span) == "Beta shall pay."

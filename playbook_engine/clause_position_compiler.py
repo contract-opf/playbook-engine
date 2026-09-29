@@ -227,7 +227,7 @@ class ObservedPosition:
     Mirrors the ``observation`` sub-schema defined in §3.4.
 
     ``full_text`` (issue #105) carries the untruncated clause text alongside
-    the 200-char ``text_summary`` — fallback/rejected language in particular
+    the ≤ 300-char ``text_summary`` — fallback/rejected language in particular
     is exactly the "acceptable alternative language" lawyers need verbatim,
     not a fragment. Optional in the OPF schema; defaults to ``text_summary``
     when not supplied.
@@ -724,7 +724,7 @@ def compile_clause_positions(
         our_standard: OurStandard | None = None
         if has_our_paper and t_obs is not None and t_obs.full_text.strip():
             our_standard = OurStandard(
-                # Full clause text (issue #105) — text_summary is a 200-char
+                # Full clause text (issue #105) — text_summary is a ≤ 300-char
                 # display fragment, useless as a drafting standard for any
                 # real indemnification/insurance clause.
                 text=t_obs.full_text,
@@ -968,7 +968,7 @@ def _derive_rollup(
         key=lambda o: 0 if o.provenance == "our_paper" else 1,
     )
     # Full clause text (issue #105) — acceptable_if.to is the "acceptable
-    # alternative language" lawyers act on directly; a 200-char text_summary
+    # alternative language" lawyers act on directly; a ≤ 300-char text_summary
     # fragment is not actually usable drafting language.
     #
     # issue #141: each entry is a {if,to,rationale} triple, not a bare

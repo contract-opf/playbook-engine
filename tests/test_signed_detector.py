@@ -11,10 +11,12 @@ Party names use fictional identifiers only ("Alice Corp", "Beta Ltd",
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.rtf_ingester import ingest_rtf
+from playbook_engine.segmentation_grounding import Block, SegNode, ground_segmentation
 from playbook_engine.signed_detector import (
     _SIG_HEADING,
     _SIG_TRAILER,
@@ -25,6 +27,7 @@ from playbook_engine.signed_detector import (
     _node_subtree_text,
     _signature_nodes,
     detect_signed,
+    strip_signature_block,
 )
 
 # ---------------------------------------------------------------------------
@@ -977,3 +980,422 @@ def test_localized_slash_s_keeps_higher_confidence_than_unlocalized() -> None:
 
     assert localized.basis == unlocalized.basis == "dual_signatures"
     assert unlocalized.confidence < localized.confidence
+
+
+# ---------------------------------------------------------------------------
+# strip_signature_block (issue #217)
+# ---------------------------------------------------------------------------
+#
+# Driven through the real RTF ingester (the producer that absorbs an
+# unnumbered execution trailer into the last clause), so the trees below have
+# exactly the shape the pipeline hands strip_signature_block.
+
+_COUNTERPARTS_BODY = "This Agreement may be executed in counterparts."
+
+_SIGNED_TRAILER = (
+    _WITNESS_LINE + r"Acme Widgets, Inc.\par "
+    r"By: /s/ Sam Signer\par "
+    r"Name: Sam Signer\par "
+    r"Title: Director\par "
+    r"Example Supplies LLC\par "
+    r"By: /s/ Robin Roe\par "
+    r"Name: Robin Roe\par "
+    r"Title: Manager\par "
+)
+
+
+def _rtf_normalized_text(path: Path) -> str:
+    from striprtf.striprtf import rtf_to_text
+
+    from playbook_engine.rtf_ingester import _split_lines
+
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    return "\n".join(_split_lines(rtf_to_text(raw, encoding="utf-8", errors="replace")))
+
+
+def test_strip_cuts_witness_trailer_from_last_clause(tmp_path: Path) -> None:
+    path = _trailer_rtf(tmp_path, _SIGNED_TRAILER)
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+    normalized = _rtf_normalized_text(path)
+
+    stripped, block = strip_signature_block(tree)
+
+    assert block is not None
+    assert block.basis == "trailer"
+    assert block.clause_path == "3"
+    last = stripped.resolve_path("3")
+    assert last is not None
+    assert last.text == _COUNTERPARTS_BODY
+    for residue in ("IN WITNESS WHEREOF", "By:", "Sam Signer", "Robin Roe", "Example Supplies"):
+        assert residue not in json.dumps(stripped.to_dict())
+    # The clause's span now ends with its kept text; the block's span resolves
+    # to exactly the removed trailer, through the end of the document.
+    assert ClauseTree.resolve_span(normalized, last.char_span) == (
+        "3. Counterparts\n" + _COUNTERPARTS_BODY
+    )
+    assert block.char_span is not None
+    removed = ClauseTree.resolve_span(normalized, block.char_span)
+    assert removed.startswith("IN WITNESS WHEREOF")
+    assert removed.endswith("Title: Manager")
+    assert block.char_span[1] == len(normalized)
+    stripped.validate(full_text=normalized)
+    # Earlier clauses are untouched.
+    assert stripped.resolve_path("1") == tree.resolve_path("1")
+
+
+def test_strip_never_mutates_input_and_detect_signed_still_reads_it(tmp_path: Path) -> None:
+    """The unstripped tree keeps the block — detect_signed's evidence."""
+    tree = ingest_rtf(_trailer_rtf(tmp_path, _SIGNED_TRAILER), "doc", "v1").tree
+    before = tree.to_dict()
+    stripped, _block = strip_signature_block(tree)
+    assert tree.to_dict() == before
+    assert detect_signed(tree).signed is True
+    assert "By:" not in (stripped.resolve_path("3") or _node("x")).text
+
+
+def test_strip_field_group_without_trailer_takes_party_captions(tmp_path: Path) -> None:
+    """No IN WITNESS WHEREOF: a By:/Name: field group in the last clause, plus
+    the party-caption lines directly above it, is the block."""
+    trailer = (
+        r"Acme Widgets, Inc.\par "
+        r"By: Sam Signer\par "
+        r"Name: Sam Signer\par "
+        r"[Counterparty]\par "
+        r"By: ______________\par "
+        r"Name: ______________\par "
+    )
+    path = _trailer_rtf(tmp_path, trailer)
+    tree = ingest_rtf(path, "doc", "v1").tree
+    stripped, block = strip_signature_block(tree)
+    assert block is not None
+    assert block.basis == "signature_fields"
+    last = stripped.resolve_path("3")
+    assert last is not None
+    assert last.text == _COUNTERPARTS_BODY
+    assert block.char_span is not None
+    removed = ClauseTree.resolve_span(_rtf_normalized_text(path), block.char_span)
+    assert removed.startswith("Acme Widgets, Inc.")
+
+
+def test_strip_trailer_run_onto_last_sentence_line(tmp_path: Path) -> None:
+    """A text layer can run the trailer onto the clause's last line: the cut
+    happens right after the sentence end, keeping the clause sentence."""
+    body = (
+        r"1. Counterparts\par "
+        r"This Agreement may be executed in counterparts. IN WITNESS WHEREOF, the "
+        r"parties have executed this Agreement.\par "
+        r"By: /s/ Sam Signer\par "
+        r"Name: Sam Signer\par "
+    )
+    path = tmp_path / "runon.rtf"
+    path.write_text(
+        r"{\rtf1\ansi\deff0{\fonttbl{\f0\froman\fcharset0 Times New Roman;}}\f0\fs24 " + body + "}",
+        encoding="utf-8",
+    )
+    stripped, block = strip_signature_block(ingest_rtf(path, "doc", "v1").tree)
+    assert block is not None and block.basis == "trailer"
+    node = stripped.resolve_path("1")
+    assert node is not None
+    assert node.text == "This Agreement may be executed in counterparts."
+
+
+def test_strip_leaves_mid_sentence_mention_alone() -> None:
+    """A clause that merely MENTIONS execution boilerplate mid-sentence, with
+    no field group, is not a signature block."""
+    text = "The parties agree that the phrase in witness whereof has no special effect here."
+    tree = _tree(
+        ClauseNode(clause_path="1", heading="Misc", text=text, char_span=(0, 5 + len(text)))
+    )
+    stripped, block = strip_signature_block(tree)
+    assert block is None
+    assert stripped is tree
+
+
+def test_strip_single_by_line_is_not_a_block() -> None:
+    """One stray "By:" line in prose is not a signature block."""
+    text = "Notices may be sent as follows.\nBy: registered mail to the address above."
+    tree = _tree(ClauseNode(clause_path="1", heading="Notices", text=text, char_span=(0, 90)))
+    assert strip_signature_block(tree) == (tree, None)
+
+
+def test_strip_keeps_exhibit_after_signature_page(tmp_path: Path) -> None:
+    """Only the block-holding clause is cut; an exhibit after it is kept.
+    Driven through the DOCX ingester (heading-styled signature page)."""
+    from docx import Document
+
+    from playbook_engine.docx_ingester import ingest_docx
+
+    doc = Document()
+    doc.add_heading("Law", level=1)
+    doc.add_paragraph("Governed by the law of the forum.")
+    doc.add_heading("Signatures", level=1)
+    doc.add_paragraph("IN WITNESS WHEREOF, the parties sign.")
+    doc.add_paragraph("By: /s/ Sam Signer")
+    doc.add_paragraph("Name: Sam Signer")
+    doc.add_heading("Exhibit A", level=1)
+    doc.add_paragraph("Exhibit A lists the Confidential Information categories.")
+    path = tmp_path / "exhibit.docx"
+    doc.save(str(path))
+    result = ingest_docx(path, "doc", "v1")
+    normalized = "\n".join(u.text for u in result.units)
+
+    stripped, block = strip_signature_block(result.tree)
+
+    assert block is not None and block.basis == "trailer"
+    sig = next(n for n in stripped.all_nodes() if n.heading == "Signatures")
+    assert block.clause_path == sig.clause_path
+    assert sig.text == ""
+    # Nothing kept: the span shrinks back to the heading line.
+    assert sig.char_span == sig.heading_span
+    assert block.char_span is not None
+    assert ClauseTree.resolve_span(normalized, block.char_span) == (
+        "IN WITNESS WHEREOF, the parties sign.\nBy: /s/ Sam Signer\nName: Sam Signer"
+    )
+    exhibit = next(n for n in stripped.all_nodes() if n.heading == "Exhibit A")
+    assert exhibit.text == "Exhibit A lists the Confidential Information categories."
+    stripped.validate(full_text=normalized)
+
+
+def test_strip_trailer_heading_node_empties_its_body(tmp_path: Path) -> None:
+    """The RTF ingester reads a short ALL-CAPS "IN WITNESS WHEREOF" line as a
+    heading, putting the block in that node's body — all of it is cut."""
+    path = _trailer_rtf(
+        tmp_path,
+        r"IN WITNESS WHEREOF\par "
+        r"Acme Widgets, Inc.\par "
+        r"By: /s/ Sam Signer\par "
+        r"Name: Sam Signer\par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    trailer_node = next(n for n in tree.all_nodes() if n.heading == "IN WITNESS WHEREOF")
+    assert "Sam Signer" in trailer_node.text  # fixture premise
+
+    stripped, block = strip_signature_block(tree)
+
+    assert block is not None and block.basis == "trailer"
+    assert block.clause_path == trailer_node.clause_path
+    # Looked up by heading, not clause_path: the RTF ingester numbers an
+    # unnumbered ALL-CAPS heading from its own counter, so its path can
+    # collide with an earlier numbered clause's.
+    cut = next(n for n in stripped.all_nodes() if n.heading == "IN WITNESS WHEREOF")
+    assert cut.text == ""
+    assert cut.char_span == cut.heading_span
+    assert block.char_span is not None
+    removed = ClauseTree.resolve_span(_rtf_normalized_text(path), block.char_span)
+    assert removed == "Acme Widgets, Inc.\nBy: /s/ Sam Signer\nName: Sam Signer"
+    last = stripped.resolve_path("3")
+    assert last is not None and last.text == _COUNTERPARTS_BODY
+
+
+def test_strip_guard_span_not_covering_own_text_cuts_text_reports_no_span() -> None:
+    """Defensive guard only (strip_signature_block's ``text_start`` check):
+    a node whose char_span cannot end at its own text (here a heading-only
+    span with no heading_span) cannot relate its text to offsets, so the text
+    is still cut and the block's span is reported None.
+
+    No production caller passes such a node: strip_signature_block only sees
+    freshly ingested or grounded trees (whole-clause spans since issue #217),
+    and stored normalized/ trees never reach it. This hand-built fixture
+    pins the guard's behaviour, not a pipeline input shape.
+    """
+    text = "Counterparts are fine.\nIN WITNESS WHEREOF, signed.\nBy: /s/ Sam Signer"
+    node = ClauseNode("3", "Counterparts", text, (100, 115))
+    stripped, block = strip_signature_block(_tree(node))
+    assert block is not None and block.char_span is None
+    kept = stripped.resolve_path("3")
+    assert kept is not None
+    assert kept.text == "Counterparts are fine."
+    assert kept.char_span == (100, 115)
+
+
+# ---------------------------------------------------------------------------
+# strip_signature_block on heading-less nodes real producers emit (issue #217)
+# ---------------------------------------------------------------------------
+#
+# The LLM/agent segmentation path (segmentation.llm / segmentation.agent —
+# the canary corpus and real corpora) builds its trees with
+# segmentation_grounding.ground_segmentation: no heading_span, and a
+# char_span that is exactly the span of the node's full text (heading line
+# included). The ingesters' synthetic pre-heading "0" node has the same
+# shape. These trees come from those real producers, not from hand-built
+# nodes, so a regression that skips such nodes turns red here.
+
+_GROUNDED_PARAS = (
+    "1. Purpose",
+    "The parties wish to exchange confidential information.",
+    "2. Counterparts",
+    _COUNTERPARTS_BODY,
+    "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+    "Acme Widgets, Inc.",
+    "By: /s/ Sam Signer",
+    "Name: Sam Signer",
+    "Example Supplies LLC",
+    "By: /s/ Robin Roe",
+    "Name: Robin Roe",
+)
+_GROUNDED_BLOCK_FIRST = 4  # index of the IN WITNESS WHEREOF paragraph / block
+_SIG_RESIDUE = ("IN WITNESS WHEREOF", "By:", "Sam Signer", "Robin Roe", "Example Supplies")
+
+
+def _grounding_fixture(tmp_path: Path) -> tuple[str, list[Block]]:
+    """Canonical text + block stream from the real legacy DOCX extractor —
+    the same (canonical_text, blocks) pair the agent path grounds against."""
+    from docx import Document
+
+    from playbook_engine.extraction import extract_blocks
+
+    doc = Document()
+    for para in _GROUNDED_PARAS:
+        doc.add_paragraph(para)
+    path = tmp_path / "grounded.docx"
+    doc.save(str(path))
+    canonical_text, blocks, _label = extract_blocks(path, extractor="legacy")
+    assert [b.text for b in blocks] == list(_GROUNDED_PARAS)  # fixture premise
+    return canonical_text, blocks
+
+
+def _ground(
+    canonical_text: str, blocks: list[Block], ranges: list[tuple[str, int, int]]
+) -> ClauseTree:
+    """Ground one top-level SegNode per ``(heading, first_block, last_block)``."""
+    seg_nodes = [
+        SegNode(
+            node_id=f"c{i}",
+            parent_id=None,
+            order=i,
+            heading=heading,
+            taxonomy_id=None,
+            start_block_id=blocks[first].block_id,
+            end_block_id=blocks[last].block_id,
+            start_quote=blocks[first].text[:40],
+            end_quote=blocks[last].text[-40:],
+        )
+        for i, (heading, first, last) in enumerate(ranges, start=1)
+    ]
+    return ground_segmentation(
+        document_id="doc",
+        version="v1",
+        source_file="grounded.docx",
+        canonical_text=canonical_text,
+        blocks=blocks,
+        seg_nodes=seg_nodes,
+    ).tree
+
+
+def test_strip_grounded_tree_block_inside_last_node(tmp_path: Path) -> None:
+    """Agent path, execution block segmented INTO the last clause: the text is
+    cut, char_span shrinks to the kept text, and the block's span is exactly
+    the removed block."""
+    canonical, blocks = _grounding_fixture(tmp_path)
+    last_block = len(blocks) - 1
+    tree = _ground(canonical, blocks, [("1. Purpose", 0, 1), ("2. Counterparts", 2, last_block)])
+    grounded = tree.resolve_path("2")
+    assert grounded is not None
+    # Producer-shape premise: no heading_span; char_span is the full text's span.
+    assert grounded.heading_span is None
+    assert grounded.char_span == (blocks[2].char_span[0], len(canonical))
+    assert ClauseTree.resolve_span(canonical, grounded.char_span) == grounded.text
+    assert "By: /s/ Robin Roe" in grounded.text
+
+    stripped, block = strip_signature_block(tree)
+
+    assert block is not None
+    assert block.basis == "trailer"
+    assert block.clause_path == "2"
+    cut = stripped.resolve_path("2")
+    assert cut is not None
+    # Grounded text starts at the heading block, so what is kept is the
+    # heading line plus the clause's own sentence.
+    assert cut.text == "2. Counterparts\n" + _COUNTERPARTS_BODY
+    assert cut.char_span == (grounded.char_span[0], blocks[3].char_span[1])
+    assert ClauseTree.resolve_span(canonical, cut.char_span) == cut.text
+    assert block.char_span == (blocks[_GROUNDED_BLOCK_FIRST].char_span[0], len(canonical))
+    assert ClauseTree.resolve_span(canonical, block.char_span) == "\n".join(
+        _GROUNDED_PARAS[_GROUNDED_BLOCK_FIRST:]
+    )
+    stripped.validate(full_text=canonical)
+    assert stripped.resolve_path("1") == tree.resolve_path("1")
+    for residue in _SIG_RESIDUE:
+        assert residue not in json.dumps(stripped.to_dict())
+
+
+def test_strip_grounded_tree_block_as_own_node(tmp_path: Path) -> None:
+    """Agent path, execution block segmented as its OWN node (the canary's
+    shape): its text becomes empty and its char_span zero-length at the
+    block start; the block's span is the node's whole former span."""
+    canonical, blocks = _grounding_fixture(tmp_path)
+    last_block = len(blocks) - 1
+    tree = _ground(
+        canonical,
+        blocks,
+        [
+            ("1. Purpose", 0, 1),
+            ("2. Counterparts", 2, 3),
+            ("Execution", _GROUNDED_BLOCK_FIRST, last_block),
+        ],
+    )
+    execution = tree.resolve_path("3")
+    assert execution is not None
+    assert execution.heading_span is None  # producer-shape premise
+    block_start = blocks[_GROUNDED_BLOCK_FIRST].char_span[0]
+    assert execution.char_span == (block_start, len(canonical))
+
+    stripped, block = strip_signature_block(tree)
+
+    assert block is not None
+    assert block.basis == "trailer"
+    assert block.clause_path == "3"
+    cut = stripped.resolve_path("3")
+    assert cut is not None
+    assert cut.text == ""
+    assert cut.char_span == (block_start, block_start)
+    assert block.char_span == execution.char_span
+    assert ClauseTree.resolve_span(canonical, block.char_span) == "\n".join(
+        _GROUNDED_PARAS[_GROUNDED_BLOCK_FIRST:]
+    )
+    stripped.validate(full_text=canonical)
+    assert stripped.resolve_path("1") == tree.resolve_path("1")
+    assert stripped.resolve_path("2") == tree.resolve_path("2")
+    for residue in _SIG_RESIDUE:
+        assert residue not in json.dumps(stripped.to_dict())
+
+
+def test_strip_synthetic_zero_node_of_heading_less_document(tmp_path: Path) -> None:
+    """A heading-less document (a letter agreement) is one synthetic "0" node
+    from the real RTF ingester — no heading_span, char_span = its text's span.
+    The block at its end is cut and located exactly."""
+    sentence = "This letter agreement confirms that each party will keep the other party's secrets."
+    path = tmp_path / "letter.rtf"
+    path.write_text(
+        r"{\rtf1\ansi\deff0{\fonttbl{\f0\froman\fcharset0 Times New Roman;}}\f0\fs24 "
+        + sentence
+        + r"\par "
+        + _SIGNED_TRAILER
+        + "}",
+        encoding="utf-8",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    normalized = _rtf_normalized_text(path)
+    (zero,) = tree.nodes
+    # Producer-shape premise: the synthetic pre-heading node holds everything.
+    assert (zero.clause_path, zero.heading, zero.heading_span) == ("0", None, None)
+    assert zero.char_span == (0, len(normalized))
+    assert "By: /s/ Robin Roe" in zero.text
+
+    stripped, block = strip_signature_block(tree)
+
+    assert block is not None
+    assert block.basis == "trailer"
+    assert block.clause_path == "0"
+    (cut,) = stripped.nodes
+    assert cut.text == sentence
+    assert cut.char_span == (0, len(sentence))
+    assert block.char_span is not None
+    removed = ClauseTree.resolve_span(normalized, block.char_span)
+    assert removed.startswith("IN WITNESS WHEREOF")
+    assert removed.endswith("Title: Manager")
+    assert block.char_span[1] == len(normalized)
+    stripped.validate(full_text=normalized)
+    for residue in _SIG_RESIDUE:
+        assert residue not in json.dumps(stripped.to_dict())
