@@ -543,6 +543,36 @@ def test_corpus_stats_versions_total() -> None:
     assert pb["corpus"]["stats"]["versions_total"] == 8
 
 
+def test_corpus_stats_sum_dropped_observations_and_strip_internal_key() -> None:
+    """Issue #216: pipeline._compute_doc_result records each document's
+    dropped net-diff rows by reason (text with no signed slot that survives
+    in the signed version; text removed before signing whose origin cannot
+    be determined) as ``dropped_observations``; the assembler sums them into
+    corpus.stats and
+    never ships the engine-internal key inside corpus.documents[] (whose
+    schema is additionalProperties:false)."""
+    d1 = _corpus_doc("deal_001")
+    d1["dropped_observations"] = {"survives_in_terminal": 2}
+    d2 = _corpus_doc("deal_002")
+    d2["dropped_observations"] = {}
+    d3 = _corpus_doc("deal_003")
+    d3["dropped_observations"] = {"survives_in_terminal": 1, "removed_origin_undetermined": 1}
+    pb = _minimal_playbook(corpus_docs=[d1, d2, d3])
+    assert pb["corpus"]["stats"]["dropped_observations"] == {
+        "count": 4,
+        "by_reason": {"removed_origin_undetermined": 1, "survives_in_terminal": 3},
+        "by_document": {"deal_001": 2, "deal_003": 2},
+    }
+    assert all("dropped_observations" not in d for d in pb["corpus"]["documents"])
+
+
+def test_corpus_stats_omit_dropped_observations_when_nothing_dropped() -> None:
+    d1 = _corpus_doc("deal_001")
+    d1["dropped_observations"] = {}
+    pb = _minimal_playbook(corpus_docs=[d1, _corpus_doc("deal_002")])
+    assert "dropped_observations" not in pb["corpus"]["stats"]
+
+
 def test_out_of_scope_docs_retained_in_corpus() -> None:
     """§3.6: out-of-scope docs MUST appear in corpus with scope_rationale."""
     docs = [

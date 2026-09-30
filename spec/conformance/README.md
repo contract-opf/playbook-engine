@@ -42,6 +42,11 @@ format-version bump (a new `opf_version` or a new `DIGEST_VERSION`) gets a
 **new, separately-stamped** vector set alongside the old one, not an
 overwrite — exactly like a schema file itself.
 
+**One recorded exception:** on 2026-09-25 the owner authorized digest v2's
+`n` to change in place to count distinct deals (issue #216). The affected
+`expected.digest` values and vector 013's input were regenerated under the
+same `digest_version` 2 stamp. See `spec/CHANGELOG.md` for the full entry.
+
 ## File layout
 
 - `manifest.json` — the format-version stamp, the canonicalization/hash/
@@ -98,7 +103,7 @@ rule broke, not just "something changed":
 | 008 | Float/int formatting | `canonical` pins exact renderings: a whole-number float keeps its `.0`, plus float-precision, negative, zero, large-int, and exponential-notation cases |
 | 009, 010 | Empty vs. absent field | `content_hash` **differs** (`floor: {}` vs. no `floor` key at all) but `section_digests.floor` is **equal** between the two |
 | 011, 012 | Excluded run/curation metadata | `canonical`/`content_hash` **equal** despite unrecognizably different `identity`, `curation`, and `compiler.generated_at`/`run_id`; `section_digests.curation` still **differs** (curation is excluded from `content_hash` but keeps its own lineage digest, §3.11) |
-| 013 | Digest dedupe/rank/cap + frequency bands | One clause's `observed_positions`/`acceptable_if`/`fallbacks`/`rejected` each carry more than `EXEMPLAR_TOP_N` (5) entries — `expected.digest` pins the deduped/ranked/capped output of `_dedupe_rank`/`_preferred_variations` (a normalize-collision pair merging into one entry, a `risk_delta`-material entry surviving the cap despite ranking outside the top-5, and a non-material entry actually dropped by the cap) plus the exact `n=10`→"often" and `n=9`/`n=2`→"sometimes" band-boundary values |
+| 013 | Digest dedupe/rank/cap + frequency bands | One clause's `observed_positions`/`acceptable_if`/`fallbacks`/`rejected` each carry more than `EXEMPLAR_TOP_N` (5) entries — `expected.digest` pins the deduped/ranked/capped output of `_dedupe_rank`/`_preferred_variations` (a normalize-collision pair merging into one entry, a `risk_delta`-material entry surviving the cap despite ranking outside the top-5, and a non-material entry actually dropped by the cap) plus the exact `n=10`→"often" and `n=9`/`n=2`→"sometimes" band-boundary values, where every `n` counts distinct `example_ref.document_id`s (one deal carrying two merged spellings counts once) |
 
 ## Regenerating
 

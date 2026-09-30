@@ -29,7 +29,6 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import __version__ as ENGINE_VERSION
 from playbook_engine.canonicalize import (
     canonicalize_playbook,
     compute_section_digests,
@@ -42,6 +41,15 @@ CONFORMANCE_DIR = ROOT / "spec" / "conformance"
 VECTORS_DIR = CONFORMANCE_DIR / "vectors"
 
 OPF_VERSION = "0.3"
+
+#: The reference ``engine_version`` this vector set is stamped with (and the
+#: fixture ``compiler.version`` every input carries). Pinned rather than read
+#: from ``playbook_engine.__version__`` so re-running this script reproduces
+#: the committed vectors byte-for-byte: the set was generated against 1.0.0
+#: (issue #115), and its one in-place amendment — digest v2 ``n`` counting
+#: distinct deals (issue #216, 2026-09-25, owner-authorized exception to
+#: OPF-SPEC §11) — is recorded in spec/CHANGELOG.md, not in this stamp.
+ENGINE_VERSION = "1.0.0"
 
 
 def _base(*, clauses: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -477,12 +485,13 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
         n: int = 1,
         magnitude: str = "none",
         direction: str = "neutral",
+        document_id: str = "doc-1",
     ) -> dict[str, Any]:
         return {
             "text_summary": text,
             "full_text": text,
             "example_ref": {
-                "document_id": "doc-1",
+                "document_id": document_id,
                 "version": 1,
                 "clause_path": clause_path,
                 "char_span": [0, len(text)],
@@ -499,7 +508,8 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
         `rejected`: five rare (n=1) fillers (one dropped by the cap — proves
         the cap actually removes entries), a material entry ranked outside
         the top-N that must survive anyway, and a pair colliding only after
-        `_normalize_text`."""
+        `_normalize_text`, cited to two distinct deals (n=2 — issue #216:
+        `n` counts distinct `document_id`s)."""
         entries = [
             _digest_probe_observation(
                 f"{prefix} filler variant {i}.", f"unresolvable-{prefix}-{i}", n=1
@@ -527,26 +537,45 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
                 f"{prefix}   collision variant,, duplicate spelling",
                 f"unresolvable-{prefix}-collision-b",
                 n=1,
+                document_id="doc-2",
             )
         )
         return entries
 
-    # observed_positions: 11 entries / 10 dedupe groups. Ranked by (-n,
-    # first_seen): often(n=10) > sometimes-hi(n=9) > sometimes-lo(n=2,
-    # fs earlier) > collision(n=2, fs later) > filler-5 [top-5 cutoff here]
-    # > filler-6..9 (dropped) > material (n=1, ranked outside top-5 — kept
-    # only via the material union).
-    observed_often = _digest_probe_observation(
-        "Standard delivery clause, often-signed form.", "pos-often", n=10
+    # observed_positions: 30 rows / 10 dedupe groups (issue #216): every
+    # row of a text stamped with that text's distinct-deal precedent_count,
+    # and `n` = the group's DISTINCT document_ids — never a sum of
+    # precedent_count. Every row except the collision group's third is in
+    # the shape the compiler emits: one signed row per (deal, clause), each
+    # on its own document_id.
+    # Ranked by (-n, first_seen): often(n=10) > sometimes-hi(n=9) >
+    # sometimes-lo(n=2, fs earlier) > collision(n=2, fs later) > filler-5
+    # [top-5 cutoff here] > filler-6..9 (dropped) > material (n=1, ranked
+    # outside top-5 — kept only via the material union).
+    def _digest_probe_deals(
+        text: str, clause_path: str, k: int, deal_prefix: str
+    ) -> list[dict[str, Any]]:
+        return [
+            _digest_probe_observation(text, clause_path, n=k, document_id=f"{deal_prefix}-{j}")
+            for j in range(1, k + 1)
+        ]
+
+    observed_often = _digest_probe_deals(
+        "Standard delivery clause, often-signed form.", "pos-often", 10, "doc-often"
     )
-    observed_sometimes_hi = _digest_probe_observation(
-        "Standard fallback clause, just-below-often form.", "pos-sometimes-hi", n=9
+    observed_sometimes_hi = _digest_probe_deals(
+        "Standard fallback clause, just-below-often form.", "pos-sometimes-hi", 9, "doc-hi"
     )
-    observed_sometimes_lo = _digest_probe_observation(
-        "Minimum sometimes-band clause form.", "pos-sometimes-lo", n=2
+    observed_sometimes_lo = _digest_probe_deals(
+        "Minimum sometimes-band clause form.", "pos-sometimes-lo", 2, "doc-lo"
     )
     observed_filler = [
-        _digest_probe_observation(f"Rare filler clause form {i}.", f"pos-filler-{i}", n=1)
+        _digest_probe_observation(
+            f"Rare filler clause form {i}.",
+            f"pos-filler-{i}",
+            n=1,
+            document_id=f"doc-filler-{i}",
+        )
         for i in range(5, 10)
     ]
     observed_material = _digest_probe_observation(
@@ -555,27 +584,61 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
         n=1,
         magnitude="material",
         direction="worse",
+        document_id="doc-material",
     )
+    # The collision pair spans two deals; the third row repeats spelling a in
+    # the SAME deal as spelling b — one deal carrying two texts the digest
+    # merges counts once, so the merged group's n is 2, not 3. That second
+    # signed row for one (deal, clause) is NOT a shape the compiler emits
+    # (it emits exactly one signed row per deal and taxonomy_id): it models
+    # a hand-curated or legacy-store observed_positions input, which the
+    # digest must still count by distinct deal.
     observed_collision_a = _digest_probe_observation(
-        "Collision clause FORM — duplicate spelling.", "pos-collision-a", n=1
+        "Collision clause FORM — duplicate spelling.",
+        "pos-collision-a",
+        n=1,
+        document_id="doc-collision-1",
     )
     observed_collision_b = _digest_probe_observation(
-        "collision   clause form,, duplicate spelling", "pos-collision-b", n=1
+        "collision   clause form,, duplicate spelling",
+        "pos-collision-b",
+        n=1,
+        document_id="doc-collision-2",
+    )
+    observed_collision_b_again = _digest_probe_observation(
+        "Collision clause form -- duplicate spelling",
+        "pos-collision-c",
+        n=1,
+        document_id="doc-collision-2",
     )
     dedupe_cap_observed_positions = (
-        [observed_often, observed_sometimes_hi, observed_sometimes_lo]
+        observed_often
+        + observed_sometimes_hi
+        + observed_sometimes_lo
         + observed_filler
         + [observed_material, observed_collision_a, observed_collision_b]
+        + [observed_collision_b_again]
     )
-    assert len(dedupe_cap_observed_positions) == 11  # >= _BAND_OFTEN_MIN (10)
+    assert len(dedupe_cap_observed_positions) == 30
+    # confidence.n_our_paper counts distinct our-paper DEALS (issue #216).
+    dedupe_cap_n_our_paper = len(
+        {
+            row["example_ref"]["document_id"]
+            for row in dedupe_cap_observed_positions
+            if row["provenance"] == "our_paper"
+        }
+    )
+    assert dedupe_cap_n_our_paper == 29
 
-    def _digest_probe_acceptable_if(label: str, clause_path: str | None) -> dict[str, Any]:
+    def _digest_probe_acceptable_if(
+        label: str, clause_path: str | None, document_id: str = "doc-1"
+    ) -> dict[str, Any]:
         return {
             "if": f"If the counterparty proposes {label}.",
             "to": f"Accepted alternative for {label}.",
             "rationale": f"Conformance probe entry — {label}.",
             "observation_ref": {
-                "document_id": "doc-1",
+                "document_id": document_id,
                 "version": 1,
                 "clause_path": clause_path or f"unresolvable-{label}",
             },
@@ -587,7 +650,9 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
     # observed_material's exact (document_id, version, clause_path) triple
     # rather than carrying its own risk_delta.
     accept_filler = [_digest_probe_acceptable_if(f"filler variant {i}", None) for i in range(5)]
-    accept_material = _digest_probe_acceptable_if("the material risk form", "pos-material")
+    accept_material = _digest_probe_acceptable_if(
+        "the material risk form", "pos-material", document_id="doc-material"
+    )
     accept_collision_a = {
         "if": "If the Counterparty Deletes Data upon termination.",
         "to": "Deletion occurs within 30 days of termination.",
@@ -603,10 +668,11 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
         "to": "deletion occurs within 30 days of termination",
         "rationale": (
             "Conformance probe entry — collision variant b (differs from "
-            "variant a only in case/punctuation/whitespace)."
+            "variant a only in case/punctuation/whitespace; cited to a second "
+            "deal, so the merged entry's n is 2 distinct deals)."
         ),
         "observation_ref": {
-            "document_id": "doc-1",
+            "document_id": "doc-2",
             "version": 1,
             "clause_path": "unresolvable-collision",
         },
@@ -636,7 +702,7 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
             "confidence": {
                 "score": 0.5,
                 "basis": "precedent_count+provenance_mix",
-                "n_our_paper": 11,
+                "n_our_paper": dedupe_cap_n_our_paper,
                 "n_counterparty_paper": 0,
             },
         },
@@ -664,8 +730,11 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
     collision_forms = [
         f for f in entry_013["exemplar_forms"] if "collision" in f["text_summary"].lower()
     ]
-    assert len(collision_forms) == 1  # the pair merged into one group
-    assert collision_forms[0]["n"] == 2
+    assert len(collision_forms) == 1  # the three rows merged into one group
+    assert collision_forms[0]["n"] == 2  # 2 distinct deals, not 3 rows
+    assert exemplar_by_text["Standard delivery clause, often-signed form."]["n"] == 10
+    assert exemplar_by_text["Standard fallback clause, just-below-often form."]["n"] == 9
+    assert exemplar_by_text["Minimum sometimes-band clause form."]["n"] == 2
     assert collision_forms[0]["band"] == "sometimes"
     filler_forms = [
         f
@@ -685,19 +754,21 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
         if "counterparty deletes data" in a["if"].lower()
     ]
     assert len(collision_accept) == 1  # the pair merged into one group
-    assert collision_accept[0]["n"] == 2
+    assert collision_accept[0]["n"] == 2  # doc-1 + doc-2
 
     assert len(entry_013["concessions"]) == 6  # top-5 + the 1 material; 1 dropped
     assert len(entry_013["unacceptable"]) == 6  # top-5 + the 1 material; 1 dropped
     assert next(c for c in entry_013["concessions"] if "material" in c["text_summary"])["n"] == 1
     assert next(u for u in entry_013["unacceptable"] if "material" in u["text_summary"])["n"] == 1
+    for listed in (entry_013["concessions"], entry_013["unacceptable"]):
+        assert next(e for e in listed if "collision" in e["text_summary"].lower())["n"] == 2
 
     vectors.append(
         (
             "013-digest-dedupe-rank-and-bands",
             _vector(
                 "digest-dedupe-rank-and-bands",
-                "One clause whose observed_positions (11 entries), "
+                "One clause whose observed_positions (30 rows), "
                 "acceptable_if (8), fallbacks (8), and rejected (8) each "
                 "exceed EXEMPLAR_TOP_N (5), pinning digest.py's dedupe/rank/"
                 "top-N-plus-material cap (_dedupe_rank / "
@@ -710,7 +781,15 @@ def build_vectors() -> list[tuple[str, dict[str, Any]]]:
                 "outside the top-5 by frequency that MUST survive the cap "
                 "anyway; observed_positions additionally pins n=10 -> "
                 "'often', and n=9 / n=2 -> 'sometimes' (the boundary just "
-                "below 'often' and the minimum for 'sometimes').",
+                "below 'often' and the minimum for 'sometimes'). Every n is "
+                "the number of DISTINCT example_ref.document_id values in its "
+                "group, never a sum of precedent_count (issue #216, amended "
+                "in place 2026-09-25): observed_positions carries one row per "
+                "(deal, text) stamped with that text's deal count, and its "
+                "collision group includes one deal carrying two of the merged "
+                "spellings, which counts once (a hand-curated or legacy-store "
+                "input shape the compiler itself never emits; the digest must "
+                "still count it by distinct deal).",
                 doc_013,
             ),
         )

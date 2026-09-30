@@ -89,6 +89,52 @@ def _strip_invisible(value: Any) -> Any:
 # otherwise fail silently.
 _VERSION_INGEST_SCHEMA_KEYS = frozenset({"version", "status", "error", "extractor"})
 
+# Engine-internal corpus document keys that never reach the published
+# ``corpus.documents[]`` (additionalProperties:false). "dropped_observations"
+# (issue #216) is the per-document count of net-diff rows that produced no
+# observation, by reason — assemble_playbook sums it into
+# ``corpus.stats.dropped_observations`` instead.
+_CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset({"dropped_observations"})
+
+
+def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Sum each document's ``dropped_observations`` into one stats block.
+
+    Returns ``None`` when nothing was dropped anywhere, so a corpus with no
+    dropped rows carries no empty placeholder. The reasons are
+    ``observation_builder.DROPPED_SURVIVES_IN_TERMINAL`` (a clause with no
+    signed slot whose normalized text still occurs verbatim in the signed
+    version, fill-in blanks aside, e.g. a relocation the aligner left
+    unpaired — not removed at all; text narrowed or replaced before signing
+    never counts here),
+    ``DROPPED_ORIGIN_UNDETERMINED`` (a clause removed before signing whose
+    origin — our standard or their ask — cannot be determined because there
+    is no standard text for it) and ``DROPPED_STANDARD_REMOVED_UNSIGNED``
+    (our standard language removed in a deal with no detected executed
+    copy — never counted as a concession, issue #83).
+    """
+    by_reason: dict[str, int] = {}
+    by_document: dict[str, int] = {}
+    for doc in corpus_documents:
+        dropped = doc.get("dropped_observations")
+        if not isinstance(dropped, dict):
+            continue
+        doc_total = 0
+        for reason, n in dropped.items():
+            if isinstance(n, int) and n > 0:
+                by_reason[reason] = by_reason.get(reason, 0) + n
+                doc_total += n
+        if doc_total:
+            doc_id = str(doc.get("document_id"))
+            by_document[doc_id] = by_document.get(doc_id, 0) + doc_total
+    if not by_reason:
+        return None
+    return {
+        "count": sum(by_reason.values()),
+        "by_reason": dict(sorted(by_reason.items())),
+        "by_document": dict(sorted(by_document.items())),
+    }
+
 
 def _sanitize_corpus_documents_for_schema(
     corpus_documents: list[dict[str, Any]],
@@ -96,14 +142,17 @@ def _sanitize_corpus_documents_for_schema(
     """Return *corpus_documents* with each ``version_ingest`` entry stripped to
     :data:`_VERSION_INGEST_SCHEMA_KEYS` — see the constant's docstring.
 
-    Every other field on each document dict (and every other key on each
-    ``version_ingest`` entry within ``_VERSION_INGEST_SCHEMA_KEYS``) passes
-    through unchanged — only ``version_ingest`` entries are rebuilt, and only
-    to drop keys outside the whitelist; nothing else this function's caller
-    relies on is touched.
+    Also drops the engine-internal ``_CORPUS_DOCUMENT_INTERNAL_KEYS`` (issue
+    #216). Every other field on each document dict (and every other key on
+    each ``version_ingest`` entry within ``_VERSION_INGEST_SCHEMA_KEYS``)
+    passes through unchanged — only ``version_ingest`` entries are rebuilt,
+    and only to drop keys outside the whitelist; nothing else this
+    function's caller relies on is touched.
     """
     sanitized: list[dict[str, Any]] = []
     for doc in corpus_documents:
+        if _CORPUS_DOCUMENT_INTERNAL_KEYS & doc.keys():
+            doc = {k: v for k, v in doc.items() if k not in _CORPUS_DOCUMENT_INTERNAL_KEYS}
         version_ingest = doc.get("version_ingest")
         if not isinstance(version_ingest, list):
             sanitized.append(doc)
@@ -302,6 +351,7 @@ def assemble_playbook(
     # the local name means every use below (stats, the embedded
     # corpus.documents, corpus.snapshot's manifest_triples) sees the
     # sanitized shape automatically.
+    dropped_stats = _dropped_observation_stats(corpus_documents)
     corpus_documents = _sanitize_corpus_documents_for_schema(corpus_documents)
 
     # --- corpus stats (auto-computed) ---
@@ -317,6 +367,14 @@ def assemble_playbook(
         # Issue #113: surface unclassified (taxonomy_id=None) observation
         # coverage in the playbook itself, not just the AAR.
         stats["unclassified"] = unclassified_coverage.to_dict()
+    if dropped_stats is not None:
+        # Issue #216: net-diff rows that produced no observation — text with
+        # no signed slot that survives in the signed version, text removed
+        # before signing whose origin cannot be determined, or our standard
+        # removed from a deal with no detected signed copy
+        # (removed_standard_no_signed_copy) — are counted, never dropped
+        # silently.
+        stats["dropped_observations"] = dropped_stats
 
     # --- compiler metadata ---
     # Watermark (issue #101): True when at least one observation feeding this

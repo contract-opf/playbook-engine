@@ -167,13 +167,25 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
 def test_nda_example_confidence_counts_consistent() -> None:
     """Same guard as `test_v02_example_confidence_counts_consistent`, for
     the NDA example: `confidence.n_our_paper` / `n_counterparty_paper` must
-    equal the actual provenance counts of `observed_positions`."""
+    equal the number of distinct deals of each provenance in
+    `observed_positions` (issue #216: the deal is the unit of precedent, so a
+    deal's signed row and its reversal rows count once)."""
     doc = _load(NDA_PLAYBOOK)
     for clause in doc["evidence"]["clauses"]:
         confidence = clause["summary"]["confidence"]
         observed = clause.get("observed_positions", [])
-        n_ours = sum(1 for o in observed if o.get("provenance") == "our_paper")
-        n_theirs = sum(1 for o in observed if o.get("provenance") == "counterparty_paper")
+
+        def _deals(provenance: str, observed: list = observed) -> int:
+            return len(
+                {
+                    o["example_ref"]["document_id"]
+                    for o in observed
+                    if o.get("provenance") == provenance
+                }
+            )
+
+        n_ours = _deals("our_paper")
+        n_theirs = _deals("counterparty_paper")
         assert confidence.get("n_our_paper") == n_ours, clause["id"]
         assert confidence.get("n_counterparty_paper") == n_theirs, clause["id"]
 

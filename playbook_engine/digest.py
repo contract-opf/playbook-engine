@@ -19,7 +19,7 @@ Size discipline: the budget is ~40K tokens (chars/4 rule of thumb — this
 codebase has no tokenizer dependency) and is ENFORCED by construction, not
 aspirational: every list — preferred variations, concessions, unacceptable
 variations, exemplar forms — is deduplicated by normalized text and capped
-at the top-N by evidentiary weight (precedent-count-weighted ``n``) plus
+at the top-N by evidentiary weight (``n`` = distinct deals) plus
 every material-risk group; if the digest still exceeds the budget,
 ``build_digest`` tightens the cap stepwise (5 → 4 → 3) until it fits.
 Surviving entries are never truncated or paraphrased — a preferred
@@ -40,7 +40,9 @@ from playbook_engine.opf_accessors import clause_stance, playbook_clauses
 #: consumers can dispatch (the digest is consumed outside this repo).
 #: v2: preferred_variations deduped/ranked/capped like the other lists; digest
 #: entries carry {if, to, observation_ref, n, band} (rationale stays in the
-#: full OPF).
+#: full OPF). ``n`` is the number of distinct deals (``document_id``) behind an
+#: entry — changed in place 2026-09-25 (issue #216, owner-authorized exception
+#: recorded in spec/CHANGELOG.md); it previously summed ``precedent_count``.
 DIGEST_VERSION = "2"
 
 #: List selection (all four lists): keep the top N deduplicated entries by
@@ -81,6 +83,25 @@ def _is_material(obs: dict[str, Any]) -> bool:
     return isinstance(risk, dict) and risk.get("magnitude") == "material"
 
 
+def _deal_key(ref: Any) -> tuple[str, str]:
+    """The deal a digest row counts toward: its citation's ``document_id``.
+
+    Issue #216: the deal is the unit of precedent, so every digest ``n`` is
+    the number of DISTINCT deals in a group — never a sum of
+    ``precedent_count``, which the compiler stamps on every row of a text
+    (summing it reported a text signed in k deals as n = k*k). Every OPF
+    observation carries ``example_ref.document_id`` (required by every
+    playbook schema), so a row without one is not a conforming observation
+    and raises rather than being counted as a guessed deal.
+    """
+    if isinstance(ref, dict) and ref.get("document_id") is not None:
+        return ("doc", str(ref["document_id"]))
+    raise ValueError(
+        "digest: observation has no example_ref.document_id — every OPF "
+        "observation must cite the deal it was observed in"
+    )
+
+
 def _dedupe_rank(
     observations: list[dict[str, Any]], *, include_deviation: bool, top_n: int = EXEMPLAR_TOP_N
 ) -> list[dict[str, Any]]:
@@ -88,10 +109,10 @@ def _dedupe_rank(
 
     The digest's one size discipline, applied uniformly to exemplar forms,
     concessions, and unacceptable variations: group by the normalized
-    ``full_text`` (falling back to ``text_summary``); ``n`` sums each
-    member's ``precedent_count`` (default 1 — the compiler already folds
-    exact-duplicate observations into one position with a count); keep the
-    top ``EXEMPLAR_TOP_N`` groups by ``n`` plus every group containing
+    ``full_text`` (falling back to ``text_summary``); ``n`` is the number of
+    distinct deals (``example_ref.document_id``, see ``_deal_key``) among the
+    group's members — never a sum of ``precedent_count`` (issue #216); keep
+    the top ``EXEMPLAR_TOP_N`` groups by ``n`` plus every group containing
     material risk, in rank order. Output entries carry ``text_summary``
     ONLY — never ``full_text``; ``example_ref`` is the drill-down path.
     """
@@ -102,10 +123,11 @@ def _dedupe_rank(
         if not key:
             continue
         if key not in groups:
-            groups[key] = {"n": 0, "rep": obs, "material": False}
+            groups[key] = {"n": 0, "deals": set(), "rep": obs, "material": False}
             order.append(key)
         g = groups[key]
-        g["n"] += int(obs.get("precedent_count") or 1)
+        g["deals"].add(_deal_key(obs.get("example_ref")))
+        g["n"] = len(g["deals"])
         if _is_material(obs):
             g["material"] = True
             # A material observation is the most informative representative.
@@ -147,9 +169,16 @@ def _preferred_variations(clause: dict[str, Any], top_n: int) -> list[Any]:
 
     Same discipline as the other three lists. Grouping key: the normalized
     ``if``+``to`` text (or the whole entry for legacy bare strings). Rank
-    weight ``n``: the ``precedent_count`` of the underlying observation,
-    resolved by matching ``observation_ref`` against the clause's own
-    ``observed_positions`` (1 when unresolvable). Surviving dict entries ship
+    weight ``n``: the number of distinct deals (issue #216) behind the group
+    — each entry's own ``observation_ref`` deal plus every deal among the
+    clause's ``observed_positions`` whose normalized text equals the entry's
+    ``to`` language and whose ``outcome`` is ``"signed"`` (the compiler
+    lists each accepted text once, so its deals are read off the signed
+    positions carrying it; a deal that refused the text is not acceptance
+    precedent); never a sum of
+    ``precedent_count``. The underlying observation (for the material-risk
+    check) is resolved by matching ``observation_ref`` against
+    ``observed_positions``. Surviving dict entries ship
     ``if``/``to`` VERBATIM plus ``observation_ref``, ``n``, and ``band`` —
     the compiler-generated ``rationale`` narration stays in the full OPF.
     Legacy bare-string entries pass through as strings.
@@ -159,32 +188,53 @@ def _preferred_variations(clause: dict[str, Any], top_n: int) -> list[Any]:
         return []
 
     obs_by_ref: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
+    # Normalized observed text -> the distinct deals carrying it (issue #216).
+    deals_by_text: dict[str, set[tuple[str, Any]]] = {}
     for pos in clause.get("observed_positions") or []:
         pos_ref = pos.get("example_ref") or {}
         obs_by_ref[
             (pos_ref.get("document_id"), pos_ref.get("version"), pos_ref.get("clause_path"))
         ] = pos
+        # Only SIGNED positions are acceptance precedent (the compiler builds
+        # acceptable_if from signed rows only): a deal where the same text
+        # was proposed_then_reversed refused it, and never counts here.
+        if pos.get("outcome") != "signed":
+            continue
+        text_key = _normalize_text(str(pos.get("full_text") or pos.get("text_summary") or ""))
+        if text_key:
+            deals_by_text.setdefault(text_key, set()).add(_deal_key(pos_ref))
 
     groups: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    for entry in entries:
+    for i, entry in enumerate(entries):
         obs: dict[str, Any] = {}
+        deals: set[tuple[str, Any]] = set()
         if isinstance(entry, str):
             key = _normalize_text(entry)
+            deals |= deals_by_text.get(key, set())
         else:
             key = _normalize_text(f"{entry.get('if', '')} {entry.get('to', '')}")
             ref = entry.get("observation_ref") or {}
             obs = obs_by_ref.get(
                 (ref.get("document_id"), ref.get("version"), ref.get("clause_path")), {}
             )
+            deals |= deals_by_text.get(_normalize_text(str(entry.get("to") or "")), set())
+            if isinstance(ref, dict) and ref.get("document_id") is not None:
+                deals.add(_deal_key(ref))
         if not key:
             continue
-        n = int(obs.get("precedent_count") or 1)
+        if not deals:
+            # Nothing resolvable (a legacy bare-string entry, which the
+            # schema allows, with no signed position carrying its text): the
+            # entry itself is one deal's evidence.
+            deals.add(("entry", i))
+        n = len(deals)
         if key not in groups:
-            groups[key] = {"n": 0, "rep": entry, "rep_n": -1, "material": False}
+            groups[key] = {"n": 0, "deals": set(), "rep": entry, "rep_n": -1, "material": False}
             order.append(key)
         g = groups[key]
-        g["n"] += n
+        g["deals"] |= deals
+        g["n"] = len(g["deals"])
         if _is_material(obs):
             g["material"] = True
         if n > g["rep_n"]:

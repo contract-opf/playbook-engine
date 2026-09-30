@@ -34,11 +34,29 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - net diff (template/first → signed) = durable outcome
         - REVERSAL detection: inserted-then-removed-before-signing = proposed_then_reversed
         - for each changed clause: LLM assigns deviation + risk_delta vs our_standard
+        - ONE terminal observation per (deal, taxonomy_id): the signed version's nodes
+          for that clause, joined in document order, cited to the first node
+        - text removed before signing is never "signed": a clause with no signed
+          slot whose own text occurs verbatim (fill-in blanks aside) in one
+          clause-sized, contiguous stretch of the signed version (e.g.
+          relocated) is dropped and counted (corpus.stats.dropped_observations);
+          otherwise it was removed (narrowed or replaced text included, even
+          when its words recur), and its ORIGIN (never the deal's paper side,
+          tested against every template node for the taxonomy_id) decides:
+            · our standard language struck → our CONCESSION (a conceded deal in
+              stance_detail and the position; never a rejected/refused ask) —
+              only in a deal with a detected executed copy; in an unsigned
+              deal it is dropped and counted, never a concession
+            · non-standard (their) language struck → proposed_then_reversed
+              (in an unsigned deal too: like any reversal, within-trail history)
+            · no standard to compare against → dropped and counted
                                      │
   L5  COMPILE PLAYBOOK      aggregate observations → OPF (deterministic assembly)
         - build ClausePosition[] (template-anchored) honoring the provenance rule
         - build ClauseConcept[] (concept library) for counterparty-paper matching
         - compute rollups (acceptable_if / fallbacks / rejected), confidence, citations
+        - every evidence count (precedent_count, n_our_paper / n_counterparty_paper,
+          stance_detail held/of, digest n) counts DISTINCT DEALS
                                      │
             ┌──────────────────────────────────────────────────────────────┐
   OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.3.json)     │
@@ -53,14 +71,14 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
 
 **Reversal detection recovers "rejected" without labels.** A span inserted in one version and removed before the signed terminal is an explicit rejection — derivable purely from ordered diffs. This is the cleanest "unacceptable" signal in any corpus.
 
-**Each negotiation is one precedent.** Version count reflects how hard a deal was, not how important it is. The *signed outcome* counts once per deal; intermediate reversals are supplementary and must not double-count an outcome.
+**Each negotiation is one precedent.** Version count reflects how hard a deal was, not how important it is. The *signed outcome* counts once per deal; intermediate reversals are supplementary and must not double-count an outcome. Concretely: L4 emits exactly one signed (or, with no detected executed copy, unsigned) observation per deal per taxonomy_id, built from the signed version's own text — a clause the segmenter split across several nodes is still one precedent, and a draft's text that was replaced before signing is never reported as signed. L5 counts precedent per normalized text, `n_our_paper`/`n_counterparty_paper`, and `stance_detail` held/of as the number of distinct deals (`document_id`), never as observation rows. The digest's `n` is likewise the number of distinct deals in each group, never a sum of `precedent_count`, so a deal carrying two texts that the digest's looser normalization merges counts once.
 
 ## Intermediate artifacts (not part of OPF)
 
 The engine writes inspectable intermediates so runs are debuggable and re-runnable:
 - `normalized/<doc>/<version>.clauses.json` — the clause tree per version.
 - `trail/<doc>.json` — inferred order, signed version, provenance, per-round diffs.
-- `observations.jsonl` — one row per clause observation feeding L5.
+- `observations.jsonl` — one row per clause observation feeding L5: one terminal row per (deal, taxonomy_id), one per unclassified terminal node, one `proposed_then_reversed` row per reversal, and, for a clause removed before signing, one row classified by the origin of its text: `conceded_before_signing` for our standard language (only in a deal with a detected executed copy) or `proposed_then_reversed` for non-standard language. Removed text that survives in the signed version, whose origin cannot be determined, or that is our standard in a deal with no detected executed copy produces no row and is counted in `corpus.stats.dropped_observations`.
 - `scope.json` — the scope-gate decisions and rationales.
 
 These let a human (or a workflow) verify L2/L4 before trusting the compiled playbook.

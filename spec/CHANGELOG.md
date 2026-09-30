@@ -27,11 +27,62 @@ reverse-engineering `git log`.
 | `playbook.schema.json` | `c1a25b477eeb71c9a6daa2d2d390793301df5e4e6539503e622b72d2f8276962` |
 | `playbook.schema-0.2.json` | `eae5f882f9289f2144cc784109d3dd04de7673d6e563d195fd693fd38ae1138d` |
 | `playbook.schema-0.3.json` | `d2d81ca1c4f7547b508b2a22310906ce9a3bf43a2436e8730f0b1e4c9b0a0e15` |
-| `spec/conformance/` (manifest.json + vectors/*.json, concatenated) | `551a503c5749ee680e044546acea5bb50a0fd15b66138f4e9e0f7ae747385cf6` |
+| `spec/conformance/` (manifest.json + vectors/*.json, concatenated) | `9a9a9ee2cceff98226e7b11db83b847396e1a9e33b79ada1c78b92b554eeab2b` |
 
 Current `DIGEST_VERSION`: **2** (`playbook_engine/digest.py`).
 
 ## History
+
+### 2026-09-25 — digest v2 `n` counts distinct deals (issue #216) — OWNER-AUTHORIZED IN-PLACE EXCEPTION
+
+**Deliberate, owner-authorized exception to OPF-SPEC §11 (published-version
+immutability) and to this file's versioning policy.** The semantics of the
+digest's `n` change in place under `digest_version` **2** — no
+`digest_version` bump, no `opf_version` bump, and no schema file changes
+(every `playbook.schema*.json` is byte-identical; its pin above is
+unchanged). The owner authorized this on 2026-09-25 for issue #216 only.
+
+- **Semantic change:** in every digest list (`exemplar_forms`,
+  `concessions`, `unacceptable`, `preferred_variations`), `n` is now the
+  number of **distinct deals** — distinct `example_ref.document_id` values
+  (for `preferred_variations`: the entry's own `observation_ref` deal plus
+  every `observed_positions` deal that SIGNED its `to` text — a deal where
+  that text was `proposed_then_reversed` refused it and is not acceptance
+  precedent) — in the group.
+  It previously summed each member's `precedent_count`. The compiler
+  stamps each row of a text with that text's deal count, so the old rule
+  reported a text signed in k deals as n = k×k (the NDA example's
+  assignment clause showed `n: 16`, band "often", on a 4-deal group). A
+  row whose citation carries no `document_id` is non-conforming (every
+  playbook schema requires `example_ref.document_id`), so it is never
+  counted as a guessed deal: `build_digest` raises `ValueError` on it.
+  `band` thresholds are unchanged and now apply to deal counts. The
+  `n` description strings in `playbook.schema-0.3.json` (which still say
+  `n` counts observations sharing the same normalized text,
+  precedent_count-weighted) are superseded by this entry; they stay
+  unchanged only because that schema file is frozen.
+- **Why in place:** the owner decided on 2026-09-13 that the deal is the
+  unit of precedent (epic #227). The old `n` over-counted deals, so digests
+  already bound under `digest_version` 2 mis-stated precedent strength.
+  Correcting `n` under the same version fixes those digests on the next
+  compile instead of carrying the over-count forward.
+- **Conformance vectors regenerated** (`scripts/generate_conformance_vectors.py`):
+  `expected.digest` changes in 003–008 and 011–012, where each clause's
+  single observed row with `precedent_count: 3` is now `n: 1`, band
+  "rare". Their `input`, `canonical`, `content_hash` and `section_digests`
+  are unchanged. Vector 013's input was rebuilt so every observed row is
+  its own deal's single signed row for the clause, on a distinct
+  `document_id` (the shape the compiler now emits), with
+  `confidence.n_our_paper` set to the distinct our-paper deal count (29);
+  it still pins the `n=10` "often" and `n=9`/`n=2` "sometimes"
+  boundaries. One exception is deliberate: its collision group adds a
+  second signed row, with another spelling the digest merges, to a deal
+  that already carries one. The compiler never emits that shape; it
+  models a hand-curated or legacy-store `observed_positions` input, which
+  the digest must still count once per deal. 001, 002, 009 and 010 carry no clauses
+  and are byte-identical. The generator now pins the vector set's
+  `engine_version` stamp at `1.0.0` so a re-run reproduces the committed
+  files exactly. The pin above is updated.
 
 ### 2026-09-25 — clause-tree `ClauseNode` gains optional `heading_span`; `char_span` covers the whole clause (issue #217)
 

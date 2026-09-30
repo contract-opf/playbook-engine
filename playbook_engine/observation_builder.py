@@ -1,7 +1,18 @@
 """Observation builder — L4 → L5 bridge.
 
 Assembles one inspectable row per clause observation, writing them to
-``observations.jsonl`` (one JSON object per line).
+``observations.jsonl`` (one JSON object per line). The deal is the unit of
+precedent (issue #216): each document contributes exactly one terminal
+(signed/unsigned) observation per taxonomy_id, built from the terminal
+version's own text, plus one ``proposed_then_reversed`` row per reversal.
+A clause removed before signing (no terminal slot) is classified by the
+ORIGIN of its text: our standard language struck is one
+``conceded_before_signing`` row (only when the deal has a detected
+executed copy), non-standard language struck is one
+``proposed_then_reversed`` row, and removed text that survives in the
+terminal, whose origin is undetermined, or that is our standard in a deal
+with no detected executed copy produces no row at all — it is counted in
+``corpus.stats.dropped_observations``. See ``build_observations``.
 
 Each observation captures:
   - What was observed: taxonomy_id, text_summary (a ≤ 300-char prefix of the
@@ -12,9 +23,12 @@ Each observation captures:
     ObservationCitation for why version alone is not file-resolvable — issue #108)
   - Deviation assessment: deviation, risk_delta (from the deviation classifier)
   - Provenance: whose paper the document is on (OPF §2.2)
-  - Outcome: "signed", "unsigned", or "proposed_then_reversed" (from reversal
-    detector; "unsigned" when no version was detected as the executed copy —
-    see build_observations' has_signed_copy)
+  - Outcome: "signed", "unsigned", "proposed_then_reversed" (from reversal
+    detector, or a non-standard clause removed before signing), or
+    "conceded_before_signing" (our standard language removed before signing
+    in a deal with a detected executed copy; engine-internal, never an OPF
+    outcome). A terminal row is "unsigned" when no version was detected as
+    the executed copy — see build_observations' has_signed_copy
   - Source: document_id + version for traceability
 
 Only in-scope documents are included; out-of-scope decisions from the scope
@@ -30,14 +44,24 @@ import datetime
 import json
 import os
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from playbook_engine.clause_classifier import ClassifiedClause
 from playbook_engine.clause_differ import ClauseDiff, DocumentDiff
-from playbook_engine.deviation_classifier import DeviationResult
+from playbook_engine.deviation_classifier import (
+    REWORDED_EQUIVALENT_THRESHOLD,
+    DeviationResult,
+    _text_jaccard,
+)
+from playbook_engine.deviation_classifier import (
+    _normalize_for_containment as _normalize_for_origin,
+)
 from playbook_engine.docx_ingester import TrackedChanges
 from playbook_engine.reversal_detector import ReversalRecord
+from playbook_engine.reversal_detector import _tokens as _reversal_tokens
 from playbook_engine.tracked_changes_overlay import (
     HunkEnrichment,
     enrich_clause_diff,
@@ -234,7 +258,13 @@ class Observation:
         deviation:       How the clause deviates from our standard.
         risk_delta:      Direction and magnitude of risk shift.
         provenance:      ``"our_paper"`` or ``"counterparty_paper"``.
-        outcome:         ``"signed"``, ``"unsigned"``, or ``"proposed_then_reversed"``.
+        outcome:         ``"signed"``, ``"unsigned"``, ``"proposed_then_reversed"``,
+                         or ``"conceded_before_signing"`` (issue #216: OUR
+                         standard language removed before signing — our
+                         concession, never a refused ask; engine-internal
+                         like ``"unsigned"``, so it never reaches
+                         ``observed_positions``, and the position compiler
+                         counts it only as a conceded deal).
                          ``"unsigned"`` marks a clause from a document with no
                          detected executed copy (issue #83) — the position
                          compiler and clause library only ever treat
@@ -644,6 +674,224 @@ def read_round_moves_jsonl(path: Path) -> list[RoundMove]:
 # Public API
 # ---------------------------------------------------------------------------
 
+#: ``dropped`` counter key (issue #216): a net-diff row whose clause has no
+#: terminal slot (``clause_path_after is None``) but whose own text still
+#: survives in the terminal — its normalized text occurs verbatim in one
+#: clause-sized, contiguous stretch of the terminal version (fill-in blanks
+#: aside — see ``_survives_in_terminal``), e.g. a relocated clause the
+#: aligner left unpaired (``basis="alignment"``). Survival is decided on the
+#: text itself, never on its words recurring: text narrowed, restored or
+#: replaced before signing does not survive. A surviving row was not
+#: removed, and its text is already represented by the terminal's own
+#: signed observation, so it produces no observation of its own; it is
+#: counted here instead of being dropped silently (surfaced in
+#: ``corpus.stats.dropped_observations``).
+DROPPED_SURVIVES_IN_TERMINAL = "survives_in_terminal"
+
+#: ``dropped`` counter key (issue #216): a net-diff row whose clause has no
+#: terminal slot and whose text is absent from the terminal (removed before
+#: signing), but whose ORIGIN cannot be determined — there is no standard
+#: text for its clause (unclassified, or no template clause for its
+#: taxonomy_id) to tell our standard language from a counterparty ask. It is
+#: neither a refused ask (``proposed_then_reversed``) nor our concession
+#: (``conceded_before_signing``), so it produces no observation and is
+#: counted here (surfaced in ``corpus.stats.dropped_observations``).
+DROPPED_ORIGIN_UNDETERMINED = "removed_origin_undetermined"
+
+#: ``dropped`` counter key (issue #216, issue #83): a removed row whose text
+#: is OUR standard language, in a deal with no detected executed copy
+#: (``has_signed_copy=False``). In a signed deal it would be our concession
+#: (``conceded_before_signing``), but a deal never shown to be executed is
+#: not evidence of what we accept or concede — exactly as its terminal rows
+#: are ``"unsigned"`` rather than ``"signed"``. It produces no observation,
+#: so it never reaches ``stance_detail`` or the position, and is counted
+#: here (surfaced in ``corpus.stats.dropped_observations``).
+DROPPED_STANDARD_REMOVED_UNSIGNED = "removed_standard_no_signed_copy"
+
+#: Outcome of a removed-before-signing row whose text is OUR standard
+#: language (issue #216, owner decision 2026-09-13 (b): a provision's origin
+#: decides, never the deal's paper side). Striking our own standard before
+#: signing is a concession we made, not an ask we refused, so it is never
+#: ``proposed_then_reversed``. Engine-internal like ``"unsigned"``: the OPF
+#: ``observation.outcome`` enum does not carry it, so the position compiler
+#: keeps it out of ``observed_positions`` / ``rollup.rejected`` (and hence
+#: the digest's ``unacceptable`` list and Floor candidates) and counts it
+#: only as a conceded deal in ``stance_detail`` and the position. Emitted
+#: only for a deal with a detected executed copy; otherwise the row is
+#: dropped under ``DROPPED_STANDARD_REMOVED_UNSIGNED`` (issue #83).
+OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
+
+# Severity ranks used to pick the representative net-diff row when several
+# terminal nodes share one taxonomy_id (issue #216). The representative's
+# deviation + risk_delta pair is carried by the merged observation as one
+# consistent assessment; the worst risk dominates so a concession
+# (direction="worse") is never masked by an unchanged sibling node.
+_DEVIATION_RANK: dict[str, int] = {
+    "none": 0,
+    "reworded_equivalent": 1,
+    "needs_review": 2,
+    "substantive": 3,
+}
+_MAGNITUDE_RANK: dict[str, int] = {"none": 0, "minor": 1, "material": 2}
+_DIRECTION_RANK: dict[str, int] = {"neutral": 0, "better": 1, "worse": 2}
+
+# Bases meaning a row's assessment is weaker than a judge verdict, weakest
+# last. Mirrors clause_position_compiler._UNJUDGED_BASES/_STUB_BASES: if ANY
+# node of a merged taxonomy group carries one, the merged observation carries
+# the weakest of them, so merging never launders an unjudged node into a
+# judged one (the stub cap and the acceptable_if basis filter keep holding).
+_WEAK_BASIS_RANK: dict[str, int] = {"needs_review": 1, "judge_error": 2, "stub": 3}
+
+
+def _content_tokens(text: str) -> frozenset[str]:
+    """``detect_reversals``' token set for *text*, minus fill-in blanks.
+
+    ``\\w`` matches ``_``, so a signature-block placeholder (``By: ______``)
+    tokenizes as a "word" that the executed copy — where the blank was
+    filled in — never contains. A blank carries no clause content, so it
+    must not make a removed clause look absent from the signed terminal.
+    """
+    return frozenset(t for t in _reversal_tokens(text) if t.strip("_"))
+
+
+#: A removed row survives only inside a contiguous run of terminal nodes whose
+#: combined content-token count is at most this multiple of the row's own —
+#: a clause-sized stretch of the terminal, never its whole vocabulary.
+_SURVIVAL_WINDOW_FACTOR = 3
+
+#: A fill-in blank (``By: ______``): a run of two or more underscores.
+_FILL_IN_BLANK_RE = re.compile(r"_{2,}")
+
+
+@dataclass(frozen=True)
+class _SurvivalNode:
+    """One terminal node as ``_survives_in_terminal`` reads it: its text,
+    normalized like the origin test, its content-token count (the window
+    size unit), and whether its net-diff row is ``unchanged``."""
+
+    normalized: str
+    size: int
+    unchanged: bool
+
+
+def _survival_node(text: str, unchanged: bool) -> _SurvivalNode:
+    return _SurvivalNode(_normalize_for_origin(text), len(_content_tokens(text)), unchanged)
+
+
+def _survival_pattern(text: str) -> re.Pattern[str] | None:
+    """Matcher for a removed row's OWN text inside terminal text (issue #216).
+
+    The text is normalized like the origin test (case-, punctuation- and
+    whitespace-insensitive) and must occur verbatim, contiguous and in
+    order — words that merely recur, in another order or with other words
+    inserted between them, do not match, so text narrowed or replaced
+    before signing never passes as surviving. The one allowance is a
+    fill-in blank: it stands for whatever run of words (possibly none) the
+    executed copy filled it with. ``None`` when the text has no content
+    beyond blanks.
+    """
+    segments = [_normalize_for_origin(seg) for seg in _FILL_IN_BLANK_RE.split(text)]
+    segments = [seg for seg in segments if seg]
+    if not segments:
+        return None
+    body = r"(?: .*?)? ".join(re.escape(seg) for seg in segments)
+    return re.compile(r"(?<!\S)" + body + r"(?!\S)")
+
+
+def _survives_in_terminal(text: str, nodes: Sequence[_SurvivalNode]) -> bool:
+    """Whether a removed row's own *text* survives, as text, in ONE
+    clause-sized, contiguous stretch of the terminal (issue #216).
+
+    Survival is decided on the text itself (``_survival_pattern``: its
+    normalized text occurs verbatim in the stretch, fill-in blanks aside),
+    never on word-set membership — a clause narrowed, restored or replaced
+    before signing keeps most of its words but not its text, and falls
+    through to the origin test instead. *nodes* are the terminal nodes in
+    document order (see ``_survival_node``). A window of adjacent nodes
+    qualifies when their combined content-token count is at most
+    ``_SURVIVAL_WINDOW_FACTOR`` times the row's own, so a clause split
+    across several signed nodes (e.g. an executed signature block) still
+    survives, while a clause whose text recurs by coincidence inside a much
+    larger signed clause does not. An ``unchanged`` node's text is wholly
+    its own first-version clause, so it can be a single-node match (a
+    duplicate of the removed text) but never joins a multi-node window —
+    otherwise an adjacent unchanged clause could supply part of a replaced
+    clause's text.
+    """
+    tokens = _content_tokens(text)
+    pattern = _survival_pattern(text)
+    if not tokens or pattern is None:
+        return True
+    cap = _SURVIVAL_WINDOW_FACTOR * len(tokens)
+    for i, start in enumerate(nodes):
+        size = 0
+        parts: list[str] = []
+        for j in range(i, len(nodes)):
+            node = nodes[j]
+            if j > i and (node.unchanged or start.unchanged):
+                break
+            size += node.size
+            if size > cap:
+                break
+            parts.append(node.normalized)
+            if pattern.search(" ".join(parts)):
+                return True
+    return False
+
+
+def _standard_nodes(standard: str | Sequence[str]) -> list[str]:
+    """Our standard for one taxonomy_id as its non-empty template nodes, in
+    document order (a bare string is a single-node standard)."""
+    nodes = [standard] if isinstance(standard, str) else list(standard)
+    return [node for node in nodes if node.strip()]
+
+
+def _is_standard_language(text: str, standard: str | Sequence[str]) -> bool:
+    """Whether *text* is OUR standard language for its clause (issue #216).
+
+    The origin test for a clause removed before signing. *standard* is our
+    standard text for the clause's taxonomy_id — EVERY template node
+    carrying that taxonomy_id, in document order (a bare string is a
+    single-node standard). *text* matches when it is a near-identical
+    rendering (token Jaccard at or above ``REWORDED_EQUIVALENT_THRESHOLD`` —
+    the same bar ``assess_deviations`` uses to call a clause "matches our
+    standard") of the whole standard or of any one of its nodes, or when its
+    normalized text occurs verbatim inside the normalized standard (one
+    fragment of a standard the deal or the template split across several
+    nodes — including any later template node, never only the first).
+    """
+    nodes = _standard_nodes(standard)
+    if not text.strip() or not nodes:
+        return False
+    whole = "\n".join(nodes)
+    candidates = [whole] + (nodes if len(nodes) > 1 else [])
+    if any(_text_jaccard(text, cand) >= REWORDED_EQUIVALENT_THRESHOLD for cand in candidates):
+        return True
+    normalized = _normalize_for_origin(text)
+    return bool(normalized) and normalized in _normalize_for_origin(whole)
+
+
+def _row_severity(dr: DeviationResult) -> tuple[int, int, int]:
+    risk = dr.risk_delta
+    return (
+        _DIRECTION_RANK.get(risk.direction, 0),
+        _MAGNITUDE_RANK.get(risk.magnitude, 0),
+        _DEVIATION_RANK.get(dr.deviation, 0),
+    )
+
+
+@dataclass
+class _TerminalNode:
+    """One clause node of the terminal (signed/last) version, plus the
+    net-diff row (index, ClauseDiff, DeviationResult) whose after slot it is."""
+
+    taxonomy_id: str | None
+    clause_path: str
+    text: str
+    char_span: tuple[int, int] | None
+    version_id: str | None
+    row: tuple[int, ClauseDiff, DeviationResult]
+
 
 def build_observations(
     document_id: str,
@@ -657,8 +905,59 @@ def build_observations(
     our_party_aliases: list[str] | None = None,
     our_authors: list[str] | None = None,
     ordinal_by_vid: dict[str, int] | None = None,
+    terminal_clauses: Sequence[ClassifiedClause] | None = None,
+    terminal_version_id: str | None = None,
+    dropped: dict[str, int] | None = None,
+    standard_text_by_tid: Mapping[str, str | Sequence[str]] | None = None,
 ) -> list[Observation]:
-    """Assemble ``Observation`` objects for one document version.
+    """Assemble ``Observation`` objects for one document (one deal).
+
+    **The deal is the unit of precedent (issue #216).** The terminal
+    (signed, or last when unsigned) version contributes EXACTLY ONE
+    observation per taxonomy_id: its ``full_text`` is that version's nodes
+    carrying the taxonomy_id, concatenated in document order with a single
+    newline, cited to the first such node. A clause that spans several nodes
+    in one deal is one precedent, not several. Unclassified nodes
+    (``taxonomy_id=None``) are not a clause type and stay one observation per
+    node — they never reach a ClausePosition, only unclassified coverage.
+
+    Text that never reached the terminal is never ``outcome="signed"``: a
+    net-diff row whose clause has no terminal slot
+    (``clause_path_after is None``) is tested on its OWN text against one
+    clause-sized, contiguous stretch of the terminal version: it survives
+    only when its normalized text occurs there verbatim (fill-in blanks such
+    as ``By: ______`` aside), never merely because its words recur — see
+    ``_survives_in_terminal``. Text that survives in the terminal (a
+    relocation the aligner left unpaired) is not removed at all: it produces
+    no observation and is counted in *dropped* under
+    ``DROPPED_SURVIVES_IN_TERMINAL``. Text absent from the terminal was
+    removed before signing, and what that means is decided by the ORIGIN of
+    the text, never by the deal's paper side (owner decision 2026-09-13
+    (b)), against *standard_text_by_tid* (see ``_is_standard_language``):
+
+    - OUR standard language → ``OUTCOME_CONCEDED_BEFORE_SIGNING``: our
+      concession, never a refused ask — but only when *has_signed_copy*.
+      In a deal with no detected executed copy (issue #83) it produces no
+      observation and is counted in *dropped* under
+      ``DROPPED_STANDARD_REMOVED_UNSIGNED``: a deal never shown to be
+      executed is never evidence of a concession;
+    - non-standard (counterparty-originated) language →
+      ``"proposed_then_reversed"``: their refused ask. Like a
+      ``ReversalRecord`` this is within-trail negotiation history, so it
+      holds whether or not the deal has a detected executed copy;
+    - no standard to compare against (unclassified, or no standard text for
+      the taxonomy_id) → no observation, counted in *dropped* under
+      ``DROPPED_ORIGIN_UNDETERMINED``.
+
+    Both emitted kinds cite the first version the text was read from.
+    Removed rows never claim a
+    ``ReversalRecord``: a removed row's path is a FIRST-version path, a
+    reversal's is a later draft's, so a path match between them is a
+    coincidence of numbering, not the same text. Every ``ReversalRecord`` is
+    emitted as its own ``"proposed_then_reversed"`` observation carrying its
+    PROPOSED text and the draft citation — including a reversal inside a
+    clause that survived to the terminal, whose signed text stays the
+    (single) signed observation.
 
     Args:
         document_id:               Source document identifier.
@@ -675,25 +974,35 @@ def build_observations(
                                   same order as ``deviation_results``.  Each entry
                                   is a float in [0, 1] or ``None`` when unavailable.
                                   When omitted, all observations have
-                                  ``confidence=None``.
+                                  ``confidence=None``. A merged terminal
+                                  observation (issue #216) carries the lowest
+                                  confidence among its rows.
         has_signed_copy:            Whether the caller's version-ordering step
                                   (``order_versions``) actually identified a
                                   version as the executed copy of this
                                   document. Defaults to True for backward
                                   compatibility with existing callers/tests
                                   that don't model signed-copy detection.
-                                  When False, every non-reversed observation's
+                                  When False, every terminal observation's
                                   ``outcome`` is ``"unsigned"`` instead of
                                   ``"signed"`` — reporting a clause from a
                                   document with no detected signed copy as an
                                   accepted, signed position is exactly the
-                                  fabrication issue #83 closes. Reversed
-                                  clauses keep ``"proposed_then_reversed"``
-                                  regardless — that label describes
-                                  within-trail negotiation history
-                                  (something was proposed, then reverted by a
-                                  later draft), which holds independent of
-                                  whether the final draft was ever executed.
+                                  fabrication issue #83 closes — and a
+                                  removed row whose text is our standard
+                                  language is never
+                                  ``"conceded_before_signing"``: it produces
+                                  no observation and is counted under
+                                  ``DROPPED_STANDARD_REMOVED_UNSIGNED``, so
+                                  such a deal never contributes accepted or
+                                  conceded evidence. Reversals, and removed
+                                  non-standard (their) language, keep
+                                  ``"proposed_then_reversed"`` regardless —
+                                  that label describes within-trail
+                                  negotiation history (something was
+                                  proposed, then struck by a later draft),
+                                  which holds independent of whether the
+                                  final draft was ever executed.
         attributions:               Per-diff tracked-changes attribution (issue #88),
                                   in the same order as ``deviation_results`` — see
                                   ``playbook_engine.tracked_changes_overlay``. Each
@@ -739,123 +1048,223 @@ def build_observations(
                                   ``None`` (legacy callers/tests), every
                                   citation keeps the caller's *version*
                                   unchanged.
+        terminal_clauses:           The terminal version's classified clause tree
+                                  in document order. When supplied it is the
+                                  authority for which taxonomy_ids the terminal
+                                  carries, their text, and the first node each
+                                  observation cites; each net-diff row that
+                                  reached the terminal attaches to exactly one
+                                  node by (``clause_path_after``,
+                                  ``char_span_after``), and a node with no row
+                                  (or a row with no node) raises ``ValueError``
+                                  — the tree must be the net diff's after
+                                  side. When ``None`` (legacy callers/tests),
+                                  each row that reached the terminal stands for
+                                  its own node, in row order.
+        terminal_version_id:        Normalized-tree id of the terminal version,
+                                  cited as ``version_id`` for tree-derived
+                                  nodes (issue #108).
+        dropped:                    Optional counter, incremented per dropped
+                                  row by reason (see
+                                  ``DROPPED_SURVIVES_IN_TERMINAL``,
+                                  ``DROPPED_ORIGIN_UNDETERMINED`` and
+                                  ``DROPPED_STANDARD_REMOVED_UNSIGNED``).
+        standard_text_by_tid:       Our standard (template) clause text per
+                                  taxonomy_id — the origin reference for a
+                                  clause removed before signing (issue
+                                  #216): EVERY template node carrying the
+                                  taxonomy_id, in document order (a bare
+                                  string is a single-node standard; see
+                                  ``_is_standard_language``). ``None`` or a
+                                  missing/empty entry means the origin of
+                                  that clause's removed text cannot be
+                                  determined.
 
     Returns:
-        One ``Observation`` per entry in ``deviation_results``, PLUS one
-        additional ``Observation`` per ``reversals`` entry whose clause never
-        appears in ``deviation_results`` at all (issue #106 — see the
-        "whole-clause reversals" block below).
+        One ``Observation`` per terminal taxonomy_id (plus one per
+        unclassified terminal node), one per removed row whose text is
+        absent from the terminal and whose origin is determined (except our
+        standard language in a deal with no detected executed copy, which
+        is dropped), and one per distinct ``ReversalRecord``.
     """
-    # Match reversals on (taxonomy_id, clause_path) — not bare clause_path.
-    # Bare-path matching (the previous behavior) can false-mark an unrelated
-    # clause instance in the signed version that merely happens to land at
-    # the same path number as a reversal detected in an earlier negotiation
-    # round (e.g. after intervening clauses were added/removed and the
-    # document renumbered) — two genuinely different clauses essentially
-    # never also share a taxonomy_id, so pairing the two keys removes that
-    # cross-contamination risk (issue #106). This mirrors the existing
-    # clause-instance precision rationale in ReversalRecord.clause_path's
-    # docstring.
-    reversed_keys: set[tuple[str | None, str]] = {(r.taxonomy_id, r.clause_path) for r in reversals}
     default_outcome = "signed" if has_signed_copy else "unsigned"
 
     observations: list[Observation] = []
     obs_counter: dict[str, int] = {}
-    # Tracks which (taxonomy_id, clause_path) keys were already represented by
-    # a deviation_results row, so the whole-clause-reversal pass below never
-    # double-emits for a reversal that also matched an existing observation.
-    covered_keys: set[tuple[str | None, str]] = set()
 
-    for idx, (clause_diff, dr) in enumerate(deviation_results):
-        tid = clause_diff.taxonomy_id
-        clause_path = clause_diff.clause_path_after or clause_diff.clause_path_before or "?"
-        covered_keys.add((tid, clause_path))
-
-        # citation.version_id / char_span (issue #108) must come from whichever
-        # side of the diff clause_path was actually read from — a removed
-        # clause's clause_path is the "before" side (clause_path_after is
-        # None), so its version_id/char_span must be the "before" side too,
-        # never the signed/last version this observation batch is filed
-        # under. Mirrors the clause_path fallback above exactly.
-        if clause_diff.clause_path_after is not None:
-            cite_version_id = clause_diff.clause_version_after
-            cite_char_span = clause_diff.char_span_after
-        else:
-            cite_version_id = clause_diff.clause_version_before
-            cite_char_span = clause_diff.char_span_before
-
-        # citation.version must be the ordinal of cite_version_id — the
-        # version the cited clause_path/char_span were actually read from —
-        # not blanket the signed ordinal this batch is filed under. For a
-        # removed clause cite_version_id is an earlier draft, and filing it
-        # under the signed ordinal makes the citation resolve (via
-        # version_files) to a file the cited clause does not exist in. For
-        # signed clauses cite_version_id IS the signed version, so this is
-        # the caller's `version` either way.
-        cite_version: int | str = version
-        if ordinal_by_vid is not None and cite_version_id is not None:
-            cite_version = ordinal_by_vid.get(cite_version_id, version)
-
-        # Build text summary from the "after" text (or "before" for removed clauses).
-        # text_summary is a display-only truncation; full_text (issue #105) carries
-        # the untruncated clause text for our_standard / acceptable_if / fallback
-        # resolution and judge payloads downstream.
-        raw_text = clause_diff.text_after or clause_diff.text_before
-        text_summary = summarize_clause_text(raw_text)
-
-        outcome = (
-            "proposed_then_reversed" if (tid, clause_path) in reversed_keys else default_outcome
-        )
-
-        # Stable observation_id: document_id + version + clause_path (deduplicated).
+    def _next_id(clause_path: str) -> str:
         base_id = f"{document_id}/{version}/{clause_path}"
         obs_counter[base_id] = obs_counter.get(base_id, 0) + 1
         count = obs_counter[base_id]
-        obs_id = base_id if count == 1 else f"{base_id}#{count}"
+        return base_id if count == 1 else f"{base_id}#{count}"
 
-        conf: float | None = (
-            classification_confidences[idx]
-            if classification_confidences is not None and idx < len(classification_confidences)
-            else None
-        )
+    def _cite_version(version_id: str | None) -> int | str:
+        # citation.version is the ordinal of the version the cited text was
+        # actually read from, never blanket the terminal ordinal (issue #108).
+        if ordinal_by_vid is not None and version_id is not None:
+            return ordinal_by_vid.get(version_id, version)
+        return version
 
-        attribution: HunkEnrichment | None = (
-            attributions[idx] if attributions is not None and idx < len(attributions) else None
-        )
+    def _confidence(idx: int) -> float | None:
+        if classification_confidences is not None and idx < len(classification_confidences):
+            return classification_confidences[idx]
+        return None
 
+    def _attribution(idx: int) -> HunkEnrichment | None:
+        if attributions is not None and idx < len(attributions):
+            return attributions[idx]
+        return None
+
+    def _dynamics(
+        deviation: str, attribution: HunkEnrichment | None
+    ) -> tuple[str | None, str | None]:
         # Negotiation dynamics (issue #177). Only derived when the caller
         # opted in via our_party_aliases; only for clauses where something
         # actually moved (a deviation="none" row records absence of change —
         # there is no proposal to attribute or date).
-        proposed_by: str | None = None
-        observed_at: str | None = None
-        if our_party_aliases is not None and dr.deviation != "none":
-            if attribution is not None:
-                proposed_by = party_side_for_author(
-                    attribution.author, our_party_aliases, our_authors
-                )
-                observed_at = _date_from_tracked(attribution.date)
-            else:
-                proposed_by = "unknown"
+        if our_party_aliases is None or deviation == "none":
+            return None, None
+        if attribution is None:
+            return "unknown", None
+        return (
+            party_side_for_author(attribution.author, our_party_aliases, our_authors),
+            _date_from_tracked(attribution.date),
+        )
 
+    # --- 1. Partition rows: terminal (reached the terminal) vs removed ---
+    terminal_rows: list[tuple[int, ClauseDiff, DeviationResult]] = []
+    removed_rows: list[tuple[int, ClauseDiff, DeviationResult]] = []
+    for idx, (clause_diff, dr) in enumerate(deviation_results):
+        if clause_diff.clause_path_after is not None:
+            terminal_rows.append((idx, clause_diff, dr))
+        else:
+            removed_rows.append((idx, clause_diff, dr))
+
+    # --- 2. Terminal nodes, in document order, with their rows attached ---
+    nodes: list[_TerminalNode] = []
+    if terminal_clauses is not None:
+        # Rows attach to tree nodes by (clause_path, char_span) — the net
+        # diff's after slot IS the node (clause_differ._version_diff copies
+        # both from it), and the span disambiguates two nodes that share a
+        # path. Each node consumes exactly one row: the net diff emits one row
+        # per after-slot, and every terminal node sits in exactly one
+        # alignment, so a node no row reaches, or a row no node claims, means
+        # the caller passed a tree that is not the net diff's after side.
+        pending: dict[
+            tuple[str, tuple[int, int] | None], list[tuple[int, ClauseDiff, DeviationResult]]
+        ] = {}
+        for row in terminal_rows:
+            cd = row[1]
+            pending.setdefault((cd.clause_path_after or "?", cd.char_span_after), []).append(row)
+        for cc in terminal_clauses:
+            path = cc.node.clause_path or "?"
+            queue = pending.get((path, cc.node.char_span))
+            if not queue:
+                raise ValueError(
+                    f"{document_id}: terminal node {path!r} has no net-diff row — "
+                    "terminal_clauses must be the net diff's after-side tree"
+                )
+            nodes.append(
+                _TerminalNode(
+                    taxonomy_id=cc.classification.taxonomy_id,
+                    clause_path=path,
+                    text=cc.node.text or "",
+                    char_span=cc.node.char_span,
+                    version_id=terminal_version_id,
+                    row=queue.pop(0),
+                )
+            )
+        unclaimed = [row[1].clause_path_after for rows in pending.values() for row in rows]
+        if unclaimed:
+            raise ValueError(
+                f"{document_id}: net-diff rows {unclaimed!r} match no terminal node — "
+                "terminal_clauses must be the net diff's after-side tree"
+            )
+    else:
+        # Legacy callers/tests pass no tree: each row that reached the
+        # terminal stands for its own after-side node (exactly what the net
+        # diff emits — one row per after-slot), in row order.
+        for row in terminal_rows:
+            cd = row[1]
+            nodes.append(
+                _TerminalNode(
+                    taxonomy_id=cd.taxonomy_id,
+                    clause_path=cd.clause_path_after or "?",
+                    text=cd.text_after,
+                    char_span=cd.char_span_after,
+                    version_id=cd.clause_version_after,
+                    row=row,
+                )
+            )
+
+    # --- 2b. Removed rows: surviving, conceded, refused, or undetermined ---
+    # A removed row's own text, tested as text against ONE clause-sized
+    # stretch of the terminal (see _survives_in_terminal) — never against
+    # the whole signed document, and never by word-set membership, where a
+    # narrowed or replaced clause's words can all recur in the signed copy.
+    survival_nodes = [_survival_node(n.text, n.row[1].kind == "unchanged") for n in nodes]
+    for idx, clause_diff, dr in removed_rows:
+        # No terminal slot: the cited text is read from the FIRST version, so
+        # it is never the default (signed/unsigned) outcome. What its removal
+        # means is decided on its own text — never by matching a
+        # ReversalRecord, whose path belongs to a later draft, and never by
+        # the deal's paper side.
+        raw_text = clause_diff.text_before
+        if _survives_in_terminal(raw_text, survival_nodes):
+            # The text survives in the terminal (e.g. basis="alignment") —
+            # not reversed, and not draft-only.
+            if dropped is not None:
+                dropped[DROPPED_SURVIVES_IN_TERMINAL] = (
+                    dropped.get(DROPPED_SURVIVES_IN_TERMINAL, 0) + 1
+                )
+            continue
+        tid = clause_diff.taxonomy_id
+        standard = (standard_text_by_tid or {}).get(tid or "", "") if tid is not None else ""
+        if not _standard_nodes(standard):
+            # No standard to tell our language from theirs: neither a
+            # refused ask nor our concession — counted, never guessed.
+            if dropped is not None:
+                dropped[DROPPED_ORIGIN_UNDETERMINED] = (
+                    dropped.get(DROPPED_ORIGIN_UNDETERMINED, 0) + 1
+                )
+            continue
+        if _is_standard_language(raw_text, standard):
+            if not has_signed_copy:
+                # Our standard struck in a deal with no detected executed
+                # copy (issue #83): never a concession at L5 — counted,
+                # exactly as its terminal rows are "unsigned", not "signed".
+                if dropped is not None:
+                    dropped[DROPPED_STANDARD_REMOVED_UNSIGNED] = (
+                        dropped.get(DROPPED_STANDARD_REMOVED_UNSIGNED, 0) + 1
+                    )
+                continue
+            removed_outcome = OUTCOME_CONCEDED_BEFORE_SIGNING
+        else:
+            # Their (non-standard) language struck is their refused ask —
+            # within-trail negotiation history, so, like a ReversalRecord,
+            # it holds whether or not the deal was executed.
+            removed_outcome = "proposed_then_reversed"
+        clause_path = clause_diff.clause_path_before or "?"
+        attribution = _attribution(idx)
+        proposed_by, observed_at = _dynamics(dr.deviation, attribution)
         observations.append(
             Observation(
-                observation_id=obs_id,
+                observation_id=_next_id(clause_path),
                 taxonomy_id=tid,
-                text_summary=text_summary,
+                text_summary=summarize_clause_text(raw_text),
                 full_text=raw_text,
                 citation=ObservationCitation(
                     document_id=document_id,
-                    version=cite_version,
+                    version=_cite_version(clause_diff.clause_version_before),
                     clause_path=clause_path,
-                    char_span=cite_char_span,
-                    version_id=cite_version_id,
+                    char_span=clause_diff.char_span_before,
+                    version_id=clause_diff.clause_version_before,
                 ),
                 deviation=dr.deviation,
                 risk_delta=dr.risk_delta.to_dict(),
                 provenance=provenance,
-                outcome=outcome,
-                confidence=conf,
+                outcome=removed_outcome,
+                confidence=_confidence(idx),
                 basis=dr.basis,
                 attribution=attribution,
                 proposed_by=proposed_by,
@@ -863,49 +1272,96 @@ def build_observations(
             )
         )
 
-    # Whole-clause reversals (issue #106): a clause inserted mid-negotiation
-    # and removed again before the signed terminal is the cleanest "we
-    # rejected this ask" signal available — but a clause absent from BOTH the
-    # first and signed versions never produces a net-diff row at all
-    # (clause_differ.diff_aligned skips any (before=None, after=None) pair),
-    # so it never reaches ``deviation_results`` and was previously dropped
-    # silently. Emit an Observation directly from each such ReversalRecord —
-    # it already carries taxonomy_id, proposed_text, and version citations —
-    # instead of trying to join it back through a net-diff row that does not
-    # exist. Reversals that DID match an existing deviation_results row
-    # (in-clause reversal — the clause instance persists to the signed
-    # version, just with different final text) are skipped here: they were
-    # already labeled ``proposed_then_reversed`` above.
-    for r in reversals:
-        key = (r.taxonomy_id, r.clause_path)
-        if key in covered_keys:
+    # --- 3. One observation per terminal taxonomy_id (per node if None) ---
+    groups: list[list[_TerminalNode]] = []
+    group_by_tid: dict[str, list[_TerminalNode]] = {}
+    for node in nodes:
+        if node.taxonomy_id is None:
+            groups.append([node])
             continue
-        covered_keys.add(key)  # a repeated ReversalRecord for the same clause is not re-emitted
+        if node.taxonomy_id not in group_by_tid:
+            group_by_tid[node.taxonomy_id] = []
+            groups.append(group_by_tid[node.taxonomy_id])
+        group_by_tid[node.taxonomy_id].append(node)
 
-        base_id = f"{document_id}/{version}/{r.clause_path}"
-        obs_counter[base_id] = obs_counter.get(base_id, 0) + 1
-        count = obs_counter[base_id]
-        obs_id = base_id if count == 1 else f"{base_id}#{count}"
+    for group in groups:
+        first = group[0]
+        full_text = "\n".join(n.text for n in group if n.text)
+        rows = [n.row for n in group]
+        rep_idx, _rep_cd, rep_dr = max(rows, key=lambda r: _row_severity(r[2]))
+        deviation = rep_dr.deviation
+        risk_delta = rep_dr.risk_delta.to_dict()
+        basis = rep_dr.basis
+        weakest = max(rows, key=lambda r: _WEAK_BASIS_RANK.get(r[2].basis or "", 0))[2].basis
+        if _WEAK_BASIS_RANK.get(weakest or "", 0) > _WEAK_BASIS_RANK.get(basis or "", 0):
+            basis = weakest
+        confidences = [c for c in (_confidence(r[0]) for r in rows) if c is not None]
+        conf: float | None = min(confidences) if confidences else None
+        attribution = _attribution(rep_idx)
+        if attribution is None:
+            attribution = next(
+                (a for a in (_attribution(r[0]) for r in rows) if a is not None), None
+            )
 
-        # Same rule as the deviation loop above: the citation's version is
-        # the DRAFT's ordinal (the version the proposed text actually lives
-        # in), never the signed ordinal — the proposal was, by definition,
-        # reversed out of the signed version.
-        cite_version = (
-            ordinal_by_vid.get(r.version_inserted, version)
-            if ordinal_by_vid is not None
-            else version
+        proposed_by, observed_at = _dynamics(deviation, attribution)
+        observations.append(
+            Observation(
+                observation_id=_next_id(first.clause_path),
+                taxonomy_id=first.taxonomy_id,
+                text_summary=summarize_clause_text(full_text),
+                full_text=full_text,
+                citation=ObservationCitation(
+                    document_id=document_id,
+                    version=_cite_version(first.version_id),
+                    clause_path=first.clause_path,
+                    char_span=first.char_span,
+                    version_id=first.version_id,
+                ),
+                deviation=deviation,
+                risk_delta=risk_delta,
+                provenance=provenance,
+                outcome=default_outcome,
+                confidence=conf,
+                basis=basis,
+                attribution=attribution,
+                proposed_by=proposed_by,
+                observed_at=observed_at,
+            )
         )
+
+    # --- 4. Reversals (issue #106) ---
+    # A clause inserted mid-negotiation and removed again before the signed
+    # terminal is the cleanest "we rejected this ask" signal available. Emit
+    # an Observation directly from each ReversalRecord — it carries
+    # taxonomy_id, proposed_text, and the draft citation. Removed net-diff
+    # rows above never claim one (their paths are first-version paths), so
+    # every reversal keeps its own proposed text. This also covers a
+    # reversal inside a clause that survived to the terminal: the terminal's
+    # signed text is the signed observation above, and the proposal that was
+    # reversed out of it is this one.
+    # Only a true duplicate record (same clause, draft AND proposed text) is
+    # skipped: two proposals from different drafts that share a path number
+    # are distinct evidence, each emitted with its own proposed text.
+    emitted_reversals: set[tuple[str | None, str, str, str]] = set()
+    for r in reversals:
+        key = (r.taxonomy_id, r.clause_path, r.version_inserted, r.proposed_text)
+        if key in emitted_reversals:
+            continue
+        emitted_reversals.add(key)
 
         observations.append(
             Observation(
-                observation_id=obs_id,
+                observation_id=_next_id(r.clause_path),
                 taxonomy_id=r.taxonomy_id,
                 text_summary=summarize_clause_text(r.proposed_text),
                 full_text=r.proposed_text,
                 citation=ObservationCitation(
                     document_id=document_id,
-                    version=cite_version,
+                    # The citation's version is the DRAFT's ordinal (the
+                    # version the proposed text actually lives in), never the
+                    # signed ordinal — the proposal was, by definition,
+                    # reversed out of the signed version.
+                    version=_cite_version(r.version_inserted),
                     clause_path=r.clause_path,
                     char_span=r.char_span,
                     # r.clause_path is the clause instance path in the DRAFT
@@ -920,7 +1376,7 @@ def build_observations(
                 # signed terminal (that is exactly what detect_reversals
                 # verified via its token-subset check) — never "none".
                 deviation="substantive",
-                # No DeviationJudge ever assessed this clause (it never
+                # No DeviationJudge ever assessed the proposal (it never
                 # entered deviation_results) — a neutral placeholder, not a
                 # real risk judgment. clause_position_compiler's hold_firm
                 # derivation keys off outcome/provenance for rejected

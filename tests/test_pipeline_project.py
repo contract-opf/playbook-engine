@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 from docx import Document
 from lxml import etree
@@ -1487,7 +1488,26 @@ _REMOVED_CLAUSE_V2_BODY = (
 )
 
 
-def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Path) -> None:
+# Our standard (template) Insurance clause text for the test below: either a
+# DIFFERENT insurance clause (so v1's struck Insurance text is non-standard —
+# their ask, refused) or v1's own text (our standard, struck — our
+# concession). Issue #216: the origin of the struck text decides its outcome.
+_TEMPLATE_INSURANCE_OTHER = (
+    "Alpha Corp shall maintain professional indemnity cover of five million dollars."
+)
+_TEMPLATE_INSURANCE_SAME = "Alpha Corp shall maintain commercial general liability insurance."
+
+
+@pytest.mark.parametrize(
+    ("template_insurance", "expected_outcome"),
+    [
+        (_TEMPLATE_INSURANCE_OTHER, "proposed_then_reversed"),
+        (_TEMPLATE_INSURANCE_SAME, "conceded_before_signing"),
+    ],
+)
+def test_removed_clause_confidence_not_borrowed_from_signed_version(
+    tmp_path: Path, template_insurance: str, expected_outcome: str
+) -> None:
     """A removed clause's observation must carry ITS OWN draft-version
     classification confidence, never one borrowed from an unrelated clause
     that happens to occupy the same renumbered path in the signed version —
@@ -1505,19 +1525,30 @@ def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Pa
     classification instead of v1's own Insurance classification — silently
     attaching confidence 0.5 to the Insurance observation instead of its
     real 1.0.
+
+    Issue #216: the removed clause's outcome is decided by the ORIGIN of its
+    text against the template's Insurance standard (parametrized: a
+    different standard makes it their refused ask; the same text makes it
+    our concession) — both through the real pipeline. The deal is SIGNED
+    (hints.yaml names v2 as the executed copy): only a deal with a detected
+    executed copy can concede (issue #83; see
+    test_unsigned_deal_striking_our_standard_is_never_a_concession).
     """
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
     _write_rtf(deal_dir / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
     _write_rtf(deal_dir / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+    (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, rf"1. Insurance\par {template_insurance}\par ")
 
     cfg = {
         "agreement_type": {
             "id": "educational-affiliation",
             "name": "Educational Affiliation Agreement",
         },
-        "baseline": {},
+        "baseline": {"template": str(template_path)},
         "taxonomy": str(_TAXONOMY_PATH),
         "provenance": {"our_party_aliases": ["Alpha Corp"]},
     }
@@ -1544,6 +1575,11 @@ def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Pa
         f"got {len(insurance_obs)}: {insurance_obs}"
     )
     removed = insurance_obs[0]
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    assert [d["signed_version"] for d in manifest] == [2], "premise: v2 is the executed copy"
+    # Issue #216: text removed before signing is never "signed" — its own
+    # text is absent from the signed v2, and its origin decides the outcome.
+    assert removed["outcome"] == expected_outcome, removed
     assert removed["citation"]["version_id"] == "v1", (
         "premise: the removed Insurance clause's citation must resolve to v1 "
         f"(the version it actually came from); got {removed['citation']!r}"
@@ -1570,6 +1606,145 @@ def test_removed_clause_confidence_not_borrowed_from_signed_version(tmp_path: Pa
         "the signed version's own clause at path 2 must keep its own "
         f"confidence; got {signed_path_2[0]['confidence']!r}"
     )
+
+
+def test_removed_clause_with_no_template_is_dropped_as_origin_undetermined(
+    tmp_path: Path,
+) -> None:
+    """Issue #216: with no template there is no standard to tell our struck
+    language from their struck ask, so the removed Insurance clause is
+    neither proposed_then_reversed nor a concession: no observation, and the
+    drop is counted on the document's corpus_manifest.json row."""
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+    _write_rtf(deal_dir / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(config_path),
+        taxonomy=load_taxonomy(_TAXONOMY_PATH),
+        out_dir=out_dir,
+    )
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    assert [o for o in observations if o["taxonomy_id"] == "insurance"] == []
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    assert [d.get("dropped_observations") for d in manifest] == [{"removed_origin_undetermined": 1}]
+
+
+def _mine_and_project_insurance(
+    root: Path, *, deal_001: str | None
+) -> tuple[list[dict], list[dict], dict, dict]:
+    """Mine + project a corpus whose deal-002 is signed and keeps our
+    template's Insurance clause. *deal_001* adds a deal-001 that starts from
+    our template (v1) and strikes its Insurance clause in v2: ``"unsigned"``
+    (no hints.yaml, so no detected executed copy), ``"signed"`` (hints.yaml
+    names v2), or ``None`` (no deal-001 at all). Returns (observations,
+    corpus_manifest, the insurance evidence clause, corpus.stats)."""
+    corpus_dir = root / "corpus"
+    signed = corpus_dir / "deal-002"
+    signed.mkdir(parents=True)
+    _write_rtf(signed / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+    _write_rtf(signed / "v2.rtf", _REMOVED_CLAUSE_V1_BODY)
+    (signed / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    if deal_001 is not None:
+        struck = corpus_dir / "deal-001"
+        struck.mkdir(parents=True)
+        _write_rtf(struck / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+        _write_rtf(struck / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+        if deal_001 == "signed":
+            (struck / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = root / "template.rtf"
+    _write_rtf(template_path, _REMOVED_CLAUSE_V1_BODY)
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = root / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = root / "out"
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
+    return observations, manifest, clause, playbook["corpus"]["stats"]
+
+
+def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Path) -> None:
+    """Issue #216 + #83: a deal with no detected executed copy never counts
+    as "we conceded". deal-001 strikes our standard Insurance clause but has
+    no signed copy, so the strike produces no observation (counted under
+    removed_standard_no_signed_copy) and the Insurance clause's stance_detail,
+    position and observed_positions are exactly those of a corpus without
+    deal-001. The signed control proves the guard is what keeps it out: the
+    same strike in a signed deal-001 IS a conceded deal."""
+    from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
+
+    observations, manifest, clause, stats = _mine_and_project_insurance(
+        tmp_path / "unsigned", deal_001="unsigned"
+    )
+    assert [(d["document_id"], d["signed_version"]) for d in manifest] == [
+        ("deal-001", None),
+        ("deal-002", 2),
+    ], "premise: deal-001 has no detected executed copy; deal-002 is signed"
+    assert [o for o in observations if o["outcome"] == OUTCOME_CONCEDED_BEFORE_SIGNING] == []
+    assert [o for o in observations if o["taxonomy_id"] == "insurance"] == [
+        o
+        for o in observations
+        if o["citation"]["document_id"] == "deal-002" and o["taxonomy_id"] == "insurance"
+    ]
+    assert [d["dropped_observations"] for d in manifest] == [
+        {"removed_standard_no_signed_copy": 1},
+        {},
+    ]
+    assert stats["dropped_observations"]["by_reason"] == {"removed_standard_no_signed_copy": 1}
+    assert (
+        clause["summary"]["stance_detail"]["held"],
+        clause["summary"]["stance_detail"]["of"],
+    ) == (
+        1,
+        1,
+    )
+    assert [o["example_ref"]["document_id"] for o in clause["observed_positions"]] == ["deal-002"]
+
+    _, _, without_deal_001, _ = _mine_and_project_insurance(tmp_path / "absent", deal_001=None)
+    assert clause["summary"] == without_deal_001["summary"], (
+        "an unsigned deal must not move stance_detail or the position"
+    )
+    assert clause["observed_positions"] == without_deal_001["observed_positions"]
+
+    signed_obs, _, signed_clause, _ = _mine_and_project_insurance(
+        tmp_path / "signed", deal_001="signed"
+    )
+    assert [
+        o["citation"]["document_id"]
+        for o in signed_obs
+        if o["outcome"] == OUTCOME_CONCEDED_BEFORE_SIGNING
+    ] == ["deal-001"], "control: the same strike in a signed deal is our concession"
+    signed_detail = signed_clause["summary"]["stance_detail"]
+    assert (signed_detail["held"], signed_detail["of"]) == (1, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -1671,3 +1846,104 @@ def test_project_playbook_caps_search_snippet_for_legacy_store_missing_key(
         f"chars, even when restored from a legacy store missing the "
         f"search_snippet key; got lengths={[len(s) for s in snippet_values]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #216 fix round 2: the origin reference is EVERY template node
+# carrying the taxonomy_id, never only the first.
+# ---------------------------------------------------------------------------
+
+_MULTI_NODE_INSURANCE_A = "Alpha Corp shall maintain commercial general liability insurance."
+_MULTI_NODE_INSURANCE_B = (
+    "Alpha Corp shall name Beta University as an additional insured on every policy."
+)
+_MULTI_NODE_TEMPLATE_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify Beta University against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_A}\par "
+    r"3. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_B}\par "
+    r"4. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+# The signed copy strikes the template's SECOND insurance node (§3).
+_MULTI_NODE_SIGNED_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify Beta University against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_A}\par "
+    r"3. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+
+
+def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Path) -> None:
+    """Our template splits its Insurance standard across two nodes sharing a
+    taxonomy_id. Two deals start from our template and strike its SECOND
+    insurance node before signing. That struck text is our own standard
+    language, so each removal is conceded_before_signing — never a refused
+    ask: it is absent from summary.rejected, the digest's unacceptable list
+    and the Floor candidates, and neither deal counts as held."""
+    from playbook_engine.floor_candidates import derive_reversal_candidates
+    from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
+
+    corpus_dir = tmp_path / "corpus"
+    for deal in ("deal-001", "deal-002"):
+        deal_dir = corpus_dir / deal
+        deal_dir.mkdir(parents=True)
+        _write_rtf(deal_dir / "v1.rtf", _MULTI_NODE_TEMPLATE_BODY)
+        _write_rtf(deal_dir / "v2.rtf", _MULTI_NODE_SIGNED_BODY)
+        (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, _MULTI_NODE_TEMPLATE_BODY)
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+
+    template_obs = [
+        json.loads(line)
+        for line in (out_dir / "template_observations.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert [o["full_text"] for o in template_obs if o["taxonomy_id"] == "insurance"] == [
+        _MULTI_NODE_INSURANCE_A,
+        _MULTI_NODE_INSURANCE_B,
+    ], "premise: the template's insurance standard spans two nodes"
+
+    struck = [o for o in observations if o["full_text"] == _MULTI_NODE_INSURANCE_B]
+    assert [(o["citation"]["document_id"], o["outcome"]) for o in struck] == [
+        ("deal-001", OUTCOME_CONCEDED_BEFORE_SIGNING),
+        ("deal-002", OUTCOME_CONCEDED_BEFORE_SIGNING),
+    ]
+    assert not [o for o in observations if o["outcome"] == "proposed_then_reversed"]
+    assert derive_reversal_candidates(observations, min_deals=2) == []
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
+    assert clause["summary"].get("rejected", []) == []
+    assert _MULTI_NODE_INSURANCE_B not in [o.get("full_text") for o in clause["observed_positions"]]
+    stance = clause["summary"]["stance_detail"]
+    assert (stance["held"], stance["of"]) == (0, 2), stance
+    assert clause["summary"]["historical_stance"] != "consistently_held"
+    digest_clause = next(
+        c for c in playbook["digest"]["clauses"] if c["taxonomy_id"] == "insurance"
+    )
+    assert digest_clause["unacceptable"] == []

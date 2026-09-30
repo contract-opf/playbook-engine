@@ -558,6 +558,29 @@
             "x_search_snippet": "If Recipient is required by law or legal process to disclose Confidential Information, it shall,"
           },
           {
+            "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
+            "full_text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
+            "example_ref": {
+              "document_id": "epsilon-systems",
+              "version": 1,
+              "clause_path": "7",
+              "char_span": [
+                1972,
+                2136
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "provenance": "our_paper",
+            "outcome": "proposed_then_reversed",
+            "precedent_count": 1,
+            "proposed_by": "unknown",
+            "x_search_snippet": "If Recipient is required by law or legal process to disclose Confidential Information, it shall"
+          },
+          {
             "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
             "full_text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
             "example_ref": {
@@ -578,29 +601,6 @@
             "outcome": "signed",
             "precedent_count": 4,
             "x_search_snippet": "If Recipient is required by law or legal process to disclose Confidential Information, it shall,"
-          },
-          {
-            "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
-            "full_text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
-            "example_ref": {
-              "document_id": "epsilon-systems",
-              "version": 1,
-              "clause_path": "7",
-              "char_span": [
-                1972,
-                2136
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 1,
-            "proposed_by": "unknown",
-            "x_search_snippet": "If Recipient is required by law or legal process to disclose Confidential Information, it shall"
           },
           {
             "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -626,9 +626,10 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
+          "historical_stance": "consistently_held",
           "acceptable_if": [],
-          "fallbacks": [
+          "fallbacks": [],
+          "rejected": [
             {
               "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
               "full_text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
@@ -647,23 +648,22 @@
                 "magnitude": "material"
               },
               "provenance": "our_paper",
-              "outcome": "signed",
+              "outcome": "proposed_then_reversed",
               "precedent_count": 1,
               "proposed_by": "unknown",
               "x_search_snippet": "If Recipient is required by law or legal process to disclose Confidential Information, it shall"
             }
           ],
-          "rejected": [],
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
             "held": 4,
-            "of": 5,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -736,7 +736,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Neither party shall disclose the existence or status of the discussions between the parties without"
           },
           {
@@ -758,7 +758,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Neither party shall disclose the existence or status of the discussions between the parties without"
           },
           {
@@ -780,7 +780,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Neither party shall disclose the existence or status of the discussions between the parties without"
           },
           {
@@ -805,29 +805,6 @@
             "precedent_count": 1,
             "proposed_by": "unknown",
             "x_search_snippet": "Neither party shall issue any press release or public announcement concerning the discussions"
-          },
-          {
-            "text_summary": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "full_text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "17",
-              "char_span": [
-                4593,
-                4840
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 4,
-            "proposed_by": "unknown",
-            "x_search_snippet": "Neither party shall disclose the existence or status of the discussions between the parties without"
           }
         ],
         "summary": {
@@ -856,42 +833,19 @@
               "precedent_count": 1,
               "proposed_by": "unknown",
               "x_search_snippet": "Neither party shall issue any press release or public announcement concerning the discussions"
-            },
-            {
-              "text_summary": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-              "full_text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-              "example_ref": {
-                "document_id": "gamma-holdings",
-                "version": 1,
-                "clause_path": "17",
-                "char_span": [
-                  4593,
-                  4840
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 4,
-              "proposed_by": "unknown",
-              "x_search_snippet": "Neither party shall disclose the existence or status of the discussions between the parties without"
             }
           ],
           "rejected": [],
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
             "held": 3,
-            "of": 5,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -1257,29 +1211,6 @@
         },
         "observed_positions": [
           {
-            "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "full_text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "22",
-              "char_span": [
-                5681,
-                5895
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 3,
-            "proposed_by": "unknown",
-            "x_search_snippet": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any"
-          },
-          {
             "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
             "full_text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
             "example_ref": {
@@ -1344,7 +1275,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 3,
+            "precedent_count": 2,
             "x_search_snippet": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any"
           },
           {
@@ -1366,7 +1297,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 3,
+            "precedent_count": 2,
             "x_search_snippet": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any"
           }
         ],
@@ -1374,29 +1305,6 @@
           "historical_stance": "usually_conceded",
           "acceptable_if": [],
           "fallbacks": [
-            {
-              "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "full_text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 1,
-                "clause_path": "22",
-                "char_span": [
-                  5681,
-                  5895
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 3,
-              "proposed_by": "unknown",
-              "x_search_snippet": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any"
-            },
             {
               "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
               "full_text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -1448,13 +1356,13 @@
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
             "held": 2,
-            "of": 5,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -1666,30 +1574,8 @@
               "magnitude": "none"
             },
             "provenance": "our_paper",
-            "outcome": "proposed_then_reversed",
-            "precedent_count": 5,
-            "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
-          },
-          {
-            "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
-            "full_text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "4",
-              "char_span": [
-                968,
-                1500
-              ]
-            },
-            "deviation": "none",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "provenance": "our_paper",
-            "outcome": "proposed_then_reversed",
-            "precedent_count": 5,
+            "outcome": "signed",
+            "precedent_count": 4,
             "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
           },
           {
@@ -1711,7 +1597,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 5,
+            "precedent_count": 4,
             "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
           },
           {
@@ -1733,7 +1619,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 5,
+            "precedent_count": 4,
             "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
           },
           {
@@ -1755,7 +1641,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 5,
+            "precedent_count": 4,
             "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
           }
         ],
@@ -1763,62 +1649,17 @@
           "historical_stance": "consistently_held",
           "acceptable_if": [],
           "fallbacks": [],
-          "rejected": [
-            {
-              "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
-              "full_text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 4,
-                "clause_path": "4",
-                "char_span": [
-                  1027,
-                  1559
-                ]
-              },
-              "deviation": "none",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "provenance": "our_paper",
-              "outcome": "proposed_then_reversed",
-              "precedent_count": 5,
-              "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
-            },
-            {
-              "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
-              "full_text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 1,
-                "clause_path": "4",
-                "char_span": [
-                  968,
-                  1500
-                ]
-              },
-              "deviation": "none",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "provenance": "our_paper",
-              "outcome": "proposed_then_reversed",
-              "precedent_count": 5,
-              "x_search_snippet": "Confidential Information does not include information that: (a) was already known to Recipient"
-            }
-          ],
+          "rejected": [],
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
-            "held": 5,
-            "of": 5,
+            "held": 4,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -2036,29 +1877,6 @@
             "x_search_snippet": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of"
           },
           {
-            "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-            "full_text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "21",
-              "char_span": [
-                5547,
-                5680
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 3,
-            "proposed_by": "unknown",
-            "x_search_snippet": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of"
-          },
-          {
             "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
             "full_text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
             "example_ref": {
@@ -2100,7 +1918,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 3,
+            "precedent_count": 2,
             "x_search_snippet": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of"
           },
           {
@@ -2122,7 +1940,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 3,
+            "precedent_count": 2,
             "x_search_snippet": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of"
           },
           {
@@ -2200,29 +2018,6 @@
               "x_search_snippet": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of"
             },
             {
-              "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-              "full_text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 1,
-                "clause_path": "21",
-                "char_span": [
-                  5547,
-                  5680
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 3,
-              "proposed_by": "unknown",
-              "x_search_snippet": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of"
-            },
-            {
               "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
               "full_text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
               "example_ref": {
@@ -2248,15 +2043,15 @@
           ],
           "rejected": [],
           "confidence": {
-            "score": 0.857,
+            "score": 0.833,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 2,
             "evidence_sufficient": true
           },
           "stance_detail": {
             "held": 2,
-            "of": 5,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -2463,51 +2258,6 @@
             "x_search_snippet": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed"
           },
           {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "full_text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "example_ref": {
-              "document_id": "theta-logistics",
-              "version": 1,
-              "clause_path": "13",
-              "char_span": [
-                2118,
-                2274
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "better",
-              "magnitude": "material"
-            },
-            "provenance": "counterparty_paper",
-            "outcome": "signed",
-            "precedent_count": 2,
-            "proposed_by": "unknown",
-            "x_search_snippet": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed"
-          },
-          {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "full_text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "example_ref": {
-              "document_id": "zeta-diagnostics",
-              "version": 1,
-              "clause_path": "13",
-              "char_span": [
-                2120,
-                2276
-              ]
-            },
-            "deviation": "none",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "provenance": "counterparty_paper",
-            "outcome": "signed",
-            "precedent_count": 2,
-            "x_search_snippet": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed"
-          },
-          {
             "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "full_text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "example_ref": {
@@ -2561,10 +2311,10 @@
           ],
           "rejected": [],
           "confidence": {
-            "score": 0.625,
+            "score": 0.75,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
             "n_our_paper": 1,
-            "n_counterparty_paper": 3,
+            "n_counterparty_paper": 1,
             "evidence_sufficient": false
           },
           "stance_detail": {
@@ -3123,7 +2873,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or"
           },
           {
@@ -3145,7 +2895,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or"
           },
           {
@@ -3167,7 +2917,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or"
           },
           {
@@ -3192,29 +2942,6 @@
             "precedent_count": 1,
             "proposed_by": "unknown",
             "x_search_snippet": "Recipient shall notify Discloser in writing within five (5) business days of discovering any"
-          },
-          {
-            "text_summary": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "full_text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "8",
-              "char_span": [
-                2254,
-                2491
-              ]
-            },
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 4,
-            "proposed_by": "unknown",
-            "x_search_snippet": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or"
           }
         ],
         "summary": {
@@ -3243,42 +2970,19 @@
               "precedent_count": 1,
               "proposed_by": "unknown",
               "x_search_snippet": "Recipient shall notify Discloser in writing within five (5) business days of discovering any"
-            },
-            {
-              "text_summary": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-              "full_text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-              "example_ref": {
-                "document_id": "gamma-holdings",
-                "version": 1,
-                "clause_path": "8",
-                "char_span": [
-                  2254,
-                  2491
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 4,
-              "proposed_by": "unknown",
-              "x_search_snippet": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or"
             }
           ],
           "rejected": [],
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
             "held": 3,
-            "of": 5,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -4321,29 +4025,6 @@
             "text_summary": "Recipient shall protect Confidential Information using reasonable care.",
             "full_text": "Recipient shall protect Confidential Information using reasonable care.",
             "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "6",
-              "char_span": [
-                1876,
-                1967
-              ]
-            },
-            "deviation": "reworded_equivalent",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "provenance": "our_paper",
-            "outcome": "signed",
-            "precedent_count": 4,
-            "proposed_by": "unknown",
-            "x_search_snippet": "Recipient shall protect Confidential Information using reasonable care."
-          },
-          {
-            "text_summary": "Recipient shall protect Confidential Information using reasonable care.",
-            "full_text": "Recipient shall protect Confidential Information using reasonable care.",
-            "example_ref": {
               "document_id": "delta-ventures",
               "version": 2,
               "clause_path": "6",
@@ -4359,7 +4040,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall protect Confidential Information using reasonable care."
           },
           {
@@ -4381,7 +4062,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall protect Confidential Information using reasonable care."
           },
           {
@@ -4403,12 +4084,12 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 4,
+            "precedent_count": 3,
             "x_search_snippet": "Recipient shall protect Confidential Information using reasonable care."
           }
         ],
         "summary": {
-          "historical_stance": "usually_held",
+          "historical_stance": "usually_conceded",
           "acceptable_if": [
             {
               "if": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
@@ -4423,20 +4104,6 @@
                   2148
                 ]
               }
-            },
-            {
-              "if": "Recipient shall protect Confidential Information using reasonable care.",
-              "to": "Recipient shall protect Confidential Information using reasonable care.",
-              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 4x precedent in the corpus.",
-              "observation_ref": {
-                "document_id": "beta-industries",
-                "version": 1,
-                "clause_path": "6",
-                "char_span": [
-                  1876,
-                  1967
-                ]
-              }
             }
           ],
           "fallbacks": [],
@@ -4444,13 +4111,13 @@
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
-            "held": 5,
-            "of": 5,
+            "held": 3,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -4522,30 +4189,8 @@
               "magnitude": "none"
             },
             "provenance": "our_paper",
-            "outcome": "proposed_then_reversed",
-            "precedent_count": 5,
-            "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
-          },
-          {
-            "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-            "full_text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "10",
-              "char_span": [
-                2717,
-                2952
-              ]
-            },
-            "deviation": "none",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "provenance": "our_paper",
-            "outcome": "proposed_then_reversed",
-            "precedent_count": 5,
+            "outcome": "signed",
+            "precedent_count": 4,
             "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
           },
           {
@@ -4567,7 +4212,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 5,
+            "precedent_count": 4,
             "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
           },
           {
@@ -4589,7 +4234,7 @@
             },
             "provenance": "our_paper",
             "outcome": "signed",
-            "precedent_count": 5,
+            "precedent_count": 4,
             "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
           },
           {
@@ -4610,8 +4255,8 @@
               "magnitude": "none"
             },
             "provenance": "our_paper",
-            "outcome": "proposed_then_reversed",
-            "precedent_count": 5,
+            "outcome": "signed",
+            "precedent_count": 4,
             "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
           }
         ],
@@ -4619,84 +4264,17 @@
           "historical_stance": "consistently_held",
           "acceptable_if": [],
           "fallbacks": [],
-          "rejected": [
-            {
-              "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "full_text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 4,
-                "clause_path": "10",
-                "char_span": [
-                  2898,
-                  3133
-                ]
-              },
-              "deviation": "none",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "provenance": "our_paper",
-              "outcome": "proposed_then_reversed",
-              "precedent_count": 5,
-              "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
-            },
-            {
-              "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "full_text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 1,
-                "clause_path": "10",
-                "char_span": [
-                  2717,
-                  2952
-                ]
-              },
-              "deviation": "none",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "provenance": "our_paper",
-              "outcome": "proposed_then_reversed",
-              "precedent_count": 5,
-              "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
-            },
-            {
-              "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "full_text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-              "example_ref": {
-                "document_id": "gamma-holdings",
-                "version": 3,
-                "clause_path": "10",
-                "char_span": [
-                  2807,
-                  3042
-                ]
-              },
-              "deviation": "none",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "provenance": "our_paper",
-              "outcome": "proposed_then_reversed",
-              "precedent_count": 5,
-              "x_search_snippet": "Recipient's obligations with respect to Confidential Information continue for three (3) years from"
-            }
-          ],
+          "rejected": [],
           "confidence": {
             "score": 1.0,
             "basis": "provenance_mix (quality, not depth); raw counts in n_our_paper / n_counterparty_paper; evidence_sufficient requires n_our_paper >= min_evidence_n=2 (producer-configurable, see config.provenance.min_evidence_n)",
-            "n_our_paper": 5,
+            "n_our_paper": 4,
             "n_counterparty_paper": 0,
             "evidence_sufficient": true
           },
           "stance_detail": {
-            "held": 5,
-            "of": 5,
+            "held": 4,
+            "of": 4,
             "basis": "our_paper"
           }
         },
@@ -5118,23 +4696,6 @@
             }
           },
           {
-            "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
-            "example_ref": {
-              "document_id": "epsilon-systems",
-              "version": 1,
-              "clause_path": "7",
-              "char_span": [
-                1972,
-                2136
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "material"
-            }
-          },
-          {
             "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
             "example_ref": {
               "document_id": "gamma-holdings",
@@ -5218,23 +4779,6 @@
               "char_span": [
                 4682,
                 4951
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
-            }
-          },
-          {
-            "text_summary": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "17",
-              "char_span": [
-                4593,
-                4840
               ]
             },
             "provenance": "our_paper",
@@ -5436,23 +4980,6 @@
         "description": "Clause governing dispute resolution venue.",
         "accepted_forms": [
           {
-            "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "22",
-              "char_span": [
-                5681,
-                5895
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
-            }
-          },
-          {
             "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
             "example_ref": {
               "document_id": "beta-industries",
@@ -5605,6 +5132,23 @@
           {
             "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
             "example_ref": {
+              "document_id": "beta-industries",
+              "version": 4,
+              "clause_path": "4",
+              "char_span": [
+                1027,
+                1559
+              ]
+            },
+            "provenance": "our_paper",
+            "risk_delta_vs_our_standard": {
+              "direction": "neutral",
+              "magnitude": "none"
+            }
+          },
+          {
+            "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
+            "example_ref": {
               "document_id": "delta-ventures",
               "version": 2,
               "clause_path": "4",
@@ -5744,23 +5288,6 @@
               "char_span": [
                 5728,
                 5861
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
-            }
-          },
-          {
-            "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "21",
-              "char_span": [
-                5547,
-                5680
               ]
             },
             "provenance": "our_paper",
@@ -5955,40 +5482,6 @@
             }
           },
           {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "example_ref": {
-              "document_id": "theta-logistics",
-              "version": 1,
-              "clause_path": "13",
-              "char_span": [
-                2118,
-                2274
-              ]
-            },
-            "provenance": "counterparty_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "better",
-              "magnitude": "material"
-            }
-          },
-          {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "example_ref": {
-              "document_id": "zeta-diagnostics",
-              "version": 1,
-              "clause_path": "13",
-              "char_span": [
-                2120,
-                2276
-              ]
-            },
-            "provenance": "counterparty_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "neutral",
-              "magnitude": "none"
-            }
-          },
-          {
             "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "example_ref": {
               "document_id": "zeta-diagnostics",
@@ -6006,7 +5499,7 @@
             }
           }
         ],
-        "notes": "Accepted in 3 signed counterparty-paper observation(s)."
+        "notes": "Accepted in 1 signed counterparty-paper observation(s)."
       },
       {
         "concept_id": "concept.no_license_ip_ownership",
@@ -6333,23 +5826,6 @@
               "char_span": [
                 2313,
                 2580
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
-            }
-          },
-          {
-            "text_summary": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "8",
-              "char_span": [
-                2254,
-                2491
               ]
             },
             "provenance": "our_paper",
@@ -6905,23 +6381,6 @@
           {
             "text_summary": "Recipient shall protect Confidential Information using reasonable care.",
             "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "6",
-              "char_span": [
-                1876,
-                1967
-              ]
-            },
-            "provenance": "our_paper",
-            "risk_delta_vs_our_standard": {
-              "direction": "neutral",
-              "magnitude": "none"
-            }
-          },
-          {
-            "text_summary": "Recipient shall protect Confidential Information using reasonable care.",
-            "example_ref": {
               "document_id": "delta-ventures",
               "version": 2,
               "clause_path": "6",
@@ -6980,6 +6439,23 @@
           {
             "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
             "example_ref": {
+              "document_id": "beta-industries",
+              "version": 4,
+              "clause_path": "10",
+              "char_span": [
+                2898,
+                3133
+              ]
+            },
+            "provenance": "our_paper",
+            "risk_delta_vs_our_standard": {
+              "direction": "neutral",
+              "magnitude": "none"
+            }
+          },
+          {
+            "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
+            "example_ref": {
               "document_id": "delta-ventures",
               "version": 2,
               "clause_path": "10",
@@ -7003,6 +6479,23 @@
               "char_span": [
                 2780,
                 3015
+              ]
+            },
+            "provenance": "our_paper",
+            "risk_delta_vs_our_standard": {
+              "direction": "neutral",
+              "magnitude": "none"
+            }
+          },
+          {
+            "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
+            "example_ref": {
+              "document_id": "gamma-holdings",
+              "version": 3,
+              "clause_path": "10",
+              "char_span": [
+                2807,
+                3042
               ]
             },
             "provenance": "our_paper",
@@ -7130,7 +6623,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-09-26T00:46:49+00:00",
+      "generated_at": "2026-09-30T00:30:11+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -7163,7 +6656,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:0f3dcfda0f72c725b64219b8228d0a7adade0f6b48c0d4e75b0ea035250424f1"
+      "grounded_in": "evidence@sha256:4dc8cf54dd090e4aa122d34f3187838c47cd26ed7369547e2b4e47200afe0b60"
     }
   },
   "floor": {
@@ -7183,7 +6676,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-09-26T00:46:50+00:00",
+        "x_signed_at": "2026-09-30T00:30:11+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -7481,14 +6974,23 @@
       "unclassified": {
         "count": 48,
         "by_document": {
-          "beta-industries": 5,
+          "beta-industries": 6,
           "delta-ventures": 4,
           "epsilon-systems": 4,
           "gamma-holdings": 4,
           "theta-logistics": 15,
-          "zeta-diagnostics": 16
+          "zeta-diagnostics": 15
         },
         "example_citations": [
+          {
+            "document_id": "beta-industries",
+            "version": 4,
+            "clause_path": "0",
+            "char_span": [
+              0,
+              58
+            ]
+          },
           {
             "document_id": "beta-industries",
             "version": 4,
@@ -7518,15 +7020,6 @@
           },
           {
             "document_id": "beta-industries",
-            "version": 4,
-            "clause_path": "0",
-            "char_span": [
-              0,
-              58
-            ]
-          },
-          {
-            "document_id": "beta-industries",
             "version": 2,
             "clause_path": "21",
             "char_span": [
@@ -7535,6 +7028,18 @@
             ]
           }
         ]
+      },
+      "dropped_observations": {
+        "count": 5,
+        "by_reason": {
+          "removed_origin_undetermined": 1,
+          "survives_in_terminal": 4
+        },
+        "by_document": {
+          "beta-industries": 2,
+          "theta-logistics": 1,
+          "zeta-diagnostics": 2
+        }
       }
     },
     "snapshot": {
@@ -7544,7 +7049,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-09-26T00:46:48+00:00",
+    "generated_at": "2026-09-30T00:30:10+00:00",
     "stub_basis_present": false
   },
   "digest": {
@@ -7579,8 +7084,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -7598,7 +7103,7 @@
           },
           {
             "text_summary": "Neither party may assign this Agreement without the prior written consent of the other party.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -7621,10 +7126,10 @@
         "id": "clause.compelled_disclosure",
         "taxonomy_id": "compelled_disclosure",
         "title": "Compelled Disclosure",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "consistently_held",
         "stance_detail": {
           "held": 4,
-          "of": 5,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -7640,7 +7145,8 @@
           }
         },
         "preferred_variations": [],
-        "concessions": [
+        "concessions": [],
+        "unacceptable": [
           {
             "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
             "n": 1,
@@ -7660,12 +7166,11 @@
             }
           }
         ],
-        "unacceptable": [],
         "exemplar_forms": [
           {
             "text_summary": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -7709,7 +7214,7 @@
         "historical_stance": "usually_conceded",
         "stance_detail": {
           "held": 3,
-          "of": 5,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -7726,24 +7231,6 @@
         },
         "preferred_variations": [],
         "concessions": [
-          {
-            "text_summary": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "n": 4,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "17",
-              "char_span": [
-                4593,
-                4840
-              ]
-            }
-          },
           {
             "text_summary": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
             "n": 1,
@@ -7767,8 +7254,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "n": 16,
-            "band": "often",
+            "n": 3,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -7849,8 +7336,8 @@
         "exemplar_forms": [
           {
             "text_summary": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -7868,7 +7355,7 @@
           },
           {
             "text_summary": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "reworded_equivalent",
             "risk_delta": {
@@ -7915,8 +7402,8 @@
         "exemplar_forms": [
           {
             "text_summary": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -7941,7 +7428,7 @@
         "historical_stance": "usually_conceded",
         "stance_detail": {
           "held": 2,
-          "of": 5,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -7960,7 +7447,7 @@
         "concessions": [
           {
             "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "risk_delta": {
               "direction": "worse",
@@ -7973,24 +7460,6 @@
               "char_span": [
                 5862,
                 6081
-              ]
-            }
-          },
-          {
-            "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n": 3,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "22",
-              "char_span": [
-                5681,
-                5895
               ]
             }
           }
@@ -7998,27 +7467,8 @@
         "unacceptable": [],
         "exemplar_forms": [
           {
-            "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n": 9,
-            "band": "sometimes",
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "22",
-              "char_span": [
-                5681,
-                5895
-              ]
-            }
-          },
-          {
             "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -8032,6 +7482,25 @@
               "char_span": [
                 5862,
                 6081
+              ]
+            }
+          },
+          {
+            "text_summary": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+            "n": 2,
+            "band": "sometimes",
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "epsilon-systems",
+              "version": 3,
+              "clause_path": "23",
+              "char_span": [
+                5998,
+                6212
               ]
             }
           }
@@ -8065,8 +7534,8 @@
         "exemplar_forms": [
           {
             "text_summary": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8090,8 +7559,8 @@
         "title": "Exclusions from Confidential Information",
         "historical_stance": "consistently_held",
         "stance_detail": {
-          "held": 5,
-          "of": 5,
+          "held": 4,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -8108,31 +7577,12 @@
         },
         "preferred_variations": [],
         "concessions": [],
-        "unacceptable": [
-          {
-            "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
-            "n": 10,
-            "band": "often",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "4",
-              "char_span": [
-                1027,
-                1559
-              ]
-            }
-          }
-        ],
+        "unacceptable": [],
         "exemplar_forms": [
           {
             "text_summary": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or",
-            "n": 25,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8178,8 +7628,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8204,7 +7654,7 @@
         "historical_stance": "usually_conceded",
         "stance_detail": {
           "held": 2,
-          "of": 5,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -8223,7 +7673,7 @@
         "concessions": [
           {
             "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "risk_delta": {
               "direction": "worse",
@@ -8236,24 +7686,6 @@
               "char_span": [
                 5728,
                 5861
-              ]
-            }
-          },
-          {
-            "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-            "n": 3,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "21",
-              "char_span": [
-                5547,
-                5680
               ]
             }
           }
@@ -8261,27 +7693,8 @@
         "unacceptable": [],
         "exemplar_forms": [
           {
-            "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-            "n": 9,
-            "band": "sometimes",
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "21",
-              "char_span": [
-                5547,
-                5680
-              ]
-            }
-          },
-          {
             "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -8299,8 +7712,27 @@
             }
           },
           {
+            "text_summary": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
+            "n": 2,
+            "band": "sometimes",
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "epsilon-systems",
+              "version": 3,
+              "clause_path": "22",
+              "char_span": [
+                5864,
+                5997
+              ]
+            }
+          },
+          {
             "text_summary": "This Agreement is governed by the laws of the State of California.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -8347,8 +7779,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8381,8 +7813,8 @@
         "concessions": [
           {
             "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-            "n": 2,
-            "band": "sometimes",
+            "n": 1,
+            "band": "rare",
             "risk_delta": {
               "direction": "worse",
               "magnitude": "material"
@@ -8402,7 +7834,7 @@
         "exemplar_forms": [
           {
             "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -8416,25 +7848,6 @@
               "char_span": [
                 2453,
                 2706
-              ]
-            }
-          },
-          {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
-            "n": 4,
-            "band": "sometimes",
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "better",
-              "magnitude": "material"
-            },
-            "example_ref": {
-              "document_id": "theta-logistics",
-              "version": 1,
-              "clause_path": "13",
-              "char_span": [
-                2118,
-                2274
               ]
             }
           }
@@ -8468,8 +7881,8 @@
         "exemplar_forms": [
           {
             "text_summary": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8515,8 +7928,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8578,8 +7991,8 @@
         "exemplar_forms": [
           {
             "text_summary": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8597,7 +8010,7 @@
           },
           {
             "text_summary": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "reworded_equivalent",
             "risk_delta": {
@@ -8623,7 +8036,7 @@
         "historical_stance": "usually_conceded",
         "stance_detail": {
           "held": 3,
-          "of": 5,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -8640,24 +8053,6 @@
         },
         "preferred_variations": [],
         "concessions": [
-          {
-            "text_summary": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "n": 4,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 1,
-              "clause_path": "8",
-              "char_span": [
-                2254,
-                2491
-              ]
-            }
-          },
           {
             "text_summary": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
             "n": 1,
@@ -8681,8 +8076,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "n": 16,
-            "band": "often",
+            "n": 3,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8763,8 +8158,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8782,7 +8177,7 @@
           },
           {
             "text_summary": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "reworded_equivalent",
             "risk_delta": {
@@ -8933,8 +8328,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\").",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -8980,8 +8375,8 @@
         "exemplar_forms": [
           {
             "text_summary": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -9082,8 +8477,8 @@
         "exemplar_forms": [
           {
             "text_summary": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -9129,8 +8524,8 @@
         "exemplar_forms": [
           {
             "text_summary": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -9148,7 +8543,7 @@
           },
           {
             "text_summary": "If any provision is held invalid, the remaining provisions remain in effect.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -9171,10 +8566,10 @@
         "id": "clause.standard_of_care",
         "taxonomy_id": "standard_of_care",
         "title": "Standard of Care",
-        "historical_stance": "usually_held",
+        "historical_stance": "usually_conceded",
         "stance_detail": {
-          "held": 5,
-          "of": 5,
+          "held": 3,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -9190,21 +8585,6 @@
           }
         },
         "preferred_variations": [
-          {
-            "if": "Recipient shall protect Confidential Information using reasonable care.",
-            "to": "Recipient shall protect Confidential Information using reasonable care.",
-            "observation_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
-              "clause_path": "6",
-              "char_span": [
-                1876,
-                1967
-              ]
-            },
-            "n": 4,
-            "band": "sometimes"
-          },
           {
             "if": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "to": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
@@ -9226,20 +8606,20 @@
         "exemplar_forms": [
           {
             "text_summary": "Recipient shall protect Confidential Information using reasonable care.",
-            "n": 16,
-            "band": "often",
-            "deviation": "reworded_equivalent",
+            "n": 3,
+            "band": "sometimes",
+            "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
             },
             "example_ref": {
-              "document_id": "beta-industries",
-              "version": 1,
+              "document_id": "delta-ventures",
+              "version": 2,
               "clause_path": "6",
               "char_span": [
-                1876,
-                1967
+                1933,
+                2024
               ]
             }
           },
@@ -9270,8 +8650,8 @@
         "title": "Survival of Confidentiality Obligations",
         "historical_stance": "consistently_held",
         "stance_detail": {
-          "held": 5,
-          "of": 5,
+          "held": 4,
+          "of": 4,
           "basis": "our_paper"
         },
         "our_standard": {
@@ -9288,31 +8668,12 @@
         },
         "preferred_variations": [],
         "concessions": [],
-        "unacceptable": [
-          {
-            "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-            "n": 15,
-            "band": "often",
-            "risk_delta": {
-              "direction": "neutral",
-              "magnitude": "none"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "10",
-              "char_span": [
-                2898,
-                3133
-              ]
-            }
-          }
-        ],
+        "unacceptable": [],
         "exemplar_forms": [
           {
             "text_summary": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
-            "n": 25,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -9358,8 +8719,8 @@
         "exemplar_forms": [
           {
             "text_summary": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
-            "n": 16,
-            "band": "often",
+            "n": 4,
+            "band": "sometimes",
             "deviation": "none",
             "risk_delta": {
               "direction": "neutral",
@@ -9377,7 +8738,7 @@
           },
           {
             "text_summary": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
-            "n": 4,
+            "n": 2,
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
@@ -9399,11 +8760,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:35afe807524cd59938d2b5435a643909ea668b6e6ff7c0fd33e5f4be842f6e4f",
+    "content_hash": "sha256:f5d4a4184b9cafc01c99354c668d2458e3f8b5c2c495472af2a502f51b8b76e6",
     "section_digests": {
-      "evidence": "sha256:0f3dcfda0f72c725b64219b8228d0a7adade0f6b48c0d4e75b0ea035250424f1",
-      "posture": "sha256:7b83752bcccf7c2177f68ed5fbe50e0a88a091e6113efee0c1c6d9655ddad37c",
-      "floor": "sha256:dc04929174caaad5a746134f2f8179a8a99a0933fcd137d2757f30734c82139f",
+      "evidence": "sha256:4dc8cf54dd090e4aa122d34f3187838c47cd26ed7369547e2b4e47200afe0b60",
+      "posture": "sha256:b8fe1af2384f6b8881e80d2949f5dac6eac05e02f85813811f524198d01553ae",
+      "floor": "sha256:cc011c5321d195b4cfcfd58fe740f5199142faf3ac34f420bfd97c3ff250dd55",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }

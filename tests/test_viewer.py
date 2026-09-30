@@ -2553,16 +2553,34 @@ def _add_clause_summary(tmp_path: Path) -> None:
                 },
             }
         ],
+        # Conforming OPF observations (every playbook schema requires
+        # example_ref.document_id — the digest counts distinct deals by it).
         "fallbacks": [
             {
                 "text_summary": "Cap indemnity at fees paid.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 3,
+                    "clause_path": "8",
+                },
+                "deviation": "substantive",
                 "risk_delta": {"direction": "worse", "magnitude": "minor"},
+                "provenance": "our_paper",
+                "outcome": "signed",
             }
         ],
         "rejected": [
             {
                 "text_summary": "Uncapped one-way indemnity in our disfavour.",
+                "example_ref": {
+                    "document_id": "state-university-2023",
+                    "version": 2,
+                    "clause_path": "8",
+                },
+                "deviation": "substantive",
                 "risk_delta": {"direction": "worse", "magnitude": "material"},
+                "provenance": "our_paper",
+                "outcome": "proposed_then_reversed",
             }
         ],
     }
