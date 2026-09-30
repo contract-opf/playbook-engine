@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
+import pytest
 from click.testing import CliRunner
 
 from playbook_engine.canonicalize import canonicalize, content_hash
@@ -37,17 +39,26 @@ def _obs(
     magnitude: str = "none",
     direction: str = "neutral",
     deviation: str = "none",
+    doc_id: str = "deal-001",
 ) -> dict:
     return {
         "text_summary": text,
         "full_text": full_text or text,
-        "example_ref": {"document_id": "deal-001", "version": 1, "clause_path": "1"},
+        "example_ref": {"document_id": doc_id, "version": 1, "clause_path": "1"},
         "deviation": deviation,
         "risk_delta": {"direction": direction, "magnitude": magnitude},
         "provenance": "our_paper",
         "outcome": "signed",
         "precedent_count": n,
     }
+
+
+def _deals(text: str, k: int, start: int = 0, **kw: Any) -> list[dict]:
+    """*k* observed positions of *text*, one per distinct deal (deal-<start>
+    onward) — the shape the compiler emits after issue #216: one row per
+    (deal, clause), every row of a text stamped with that text's
+    distinct-deal ``precedent_count``."""
+    return [_obs(text, n=k, doc_id=f"deal-{j:03d}", **kw) for j in range(start, start + k)]
 
 
 # ---------------------------------------------------------------------------
@@ -107,21 +118,153 @@ def test_digest_token_estimate_positive() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_exemplar_dedupe_by_normalized_text_sums_precedent_counts() -> None:
-    obs = [
-        _obs("Indemnification survives termination.", n=7),
-        # Same text modulo case/punct/whitespace — must merge into one form.
-        _obs("indemnification  survives termination", n=5),
-    ]
+def test_exemplar_dedupe_by_normalized_text_counts_deals() -> None:
+    obs = _deals("Indemnification survives termination.", 7)
+    # Same text modulo case/punct/whitespace, in 5 other deals — must merge
+    # into one form whose n is all 12 deals.
+    obs += _deals("indemnification  survives termination", 5, start=7)
     forms = _exemplar_forms(obs)
     assert len(forms) == 1
     assert forms[0]["n"] == 12
     assert forms[0]["band"] == "often"
 
 
+def test_exemplar_n_is_deal_count_not_rows_times_precedent_count() -> None:
+    """Issue #216 regression: a text signed in k deals arrives as k rows,
+    each stamped precedent_count=k; summing per row reported n=k*k (the
+    NDA example's assignment clause showed n=16 on a 4-deal group)."""
+    forms = _exemplar_forms(_deals("Neither party may assign this Agreement.", 4))
+    assert [(f["n"], f["band"]) for f in forms] == [(4, "sometimes")]
+
+
+def test_exemplar_merged_texts_count_each_deal_once() -> None:
+    """Two texts the compiler counts separately (they differ in punctuation)
+    but the digest merges: n is the distinct deals across both, so a deal
+    carrying both texts counts once (never 3 + 2 summed precedent_counts)."""
+    forms = _exemplar_forms(_deals("Term: two (2) years.", 3) + _deals("Term two 2 years", 2))
+    # deal-000..002 and deal-000..001 — 3 distinct deals.
+    assert [f["n"] for f in forms] == [3]
+
+
+def test_row_without_document_id_raises_never_counted_as_a_guessed_deal() -> None:
+    """Every playbook schema requires example_ref.document_id, so a row
+    without one is non-conforming: the digest raises (spec/CHANGELOG.md,
+    2026-09-25 entry) rather than count it as a deal of its own."""
+    row = _obs("Neither party may assign this Agreement.")
+    del row["example_ref"]["document_id"]
+    doc = {
+        "opf_version": "0.2",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.assignment",
+                    "taxonomy_id": "assignment",
+                    "title": "Assignment",
+                    "observed_positions": [row],
+                    "summary": {
+                        "historical_stance": "mixed",
+                        "acceptable_if": [],
+                        "fallbacks": [],
+                        "rejected": [],
+                        "confidence": {"score": 0.5},
+                    },
+                }
+            ],
+            "clause_library": [],
+        },
+    }
+    with pytest.raises(ValueError, match="no example_ref.document_id"):
+        build_digest(doc)
+
+
+def test_preferred_variation_n_taken_once_per_text() -> None:
+    """acceptable_if entries whose `to` text is the same (whitespace/case)
+    count that text's deals once, not once per entry."""
+    text = "Either party may disclose to its professional advisers."
+    positions = _deals(text, 3, deviation="substantive")
+
+    def _entry(to: str, doc: str) -> dict:
+        return {
+            "if": text[:30],
+            "to": to,
+            "rationale": "engine narration",
+            "observation_ref": {"document_id": doc, "version": 1, "clause_path": "1"},
+        }
+
+    doc = {
+        "opf_version": "0.2",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.x",
+                    "taxonomy_id": "x",
+                    "title": "X",
+                    "observed_positions": positions,
+                    "summary": {
+                        "historical_stance": "mixed",
+                        "acceptable_if": [
+                            _entry(text, "deal-000"),
+                            _entry(text.upper(), "deal-001"),
+                        ],
+                        "fallbacks": [],
+                        "rejected": [],
+                        "confidence": {"score": 0.5},
+                    },
+                }
+            ],
+            "clause_library": [],
+        },
+    }
+    pv = build_digest(doc)["clauses"][0]["preferred_variations"]
+    assert [(p["n"], p["band"]) for p in pv] == [(3, "sometimes")]
+
+
+def test_preferred_variation_n_counts_only_signed_deals() -> None:
+    """Issue #216: a deal where the accepted `to` text was
+    proposed_then_reversed REFUSED it — it is unacceptable precedent, never
+    acceptance precedent. The text signed in one deal and reversed in two
+    others is preferred n=1 and unacceptable n=2."""
+    text = "Recipient may retain one archival copy of Confidential Information."
+    signed = _obs(text, deviation="substantive", doc_id="deal-000")
+    reversed_rows = [
+        {**_obs(text, doc_id=f"deal-{j:03d}"), "outcome": "proposed_then_reversed"} for j in (1, 2)
+    ]
+    doc = {
+        "opf_version": "0.2",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.x",
+                    "taxonomy_id": "x",
+                    "title": "X",
+                    "observed_positions": [signed, *reversed_rows],
+                    "summary": {
+                        "historical_stance": "mixed",
+                        "acceptable_if": [
+                            {
+                                "if": text[:30],
+                                "to": text,
+                                "rationale": "engine narration",
+                                "observation_ref": signed["example_ref"],
+                            }
+                        ],
+                        "fallbacks": [],
+                        "rejected": reversed_rows,
+                        "confidence": {"score": 0.5},
+                    },
+                }
+            ],
+            "clause_library": [],
+        },
+    }
+    clause = build_digest(doc)["clauses"][0]
+    assert [(p["n"], p["band"]) for p in clause["preferred_variations"]] == [(1, "rare")]
+    assert [u["n"] for u in clause["unacceptable"]] == [2]
+
+
 def test_exemplar_bands() -> None:
     forms = _exemplar_forms(
-        [_obs("alpha clause text", n=10), _obs("beta clause text", n=2), _obs("gamma clause", n=1)]
+        _deals("alpha clause text", 10) + _deals("beta clause text", 2) + _deals("gamma clause", 1)
     )
     by_text = {f["text_summary"]: f["band"] for f in forms}
     assert by_text["alpha clause text"] == "often"
@@ -130,7 +273,9 @@ def test_exemplar_bands() -> None:
 
 
 def test_exemplar_top_n_plus_material() -> None:
-    obs = [_obs(f"common form variant number {i}", n=20 - i) for i in range(EXEMPLAR_TOP_N)]
+    obs = [
+        o for i in range(EXEMPLAR_TOP_N) for o in _deals(f"common form variant number {i}", 20 - i)
+    ]
     obs.append(_obs("rare but material risk form", n=1, magnitude="material", direction="worse"))
     obs.append(_obs("rare and boring form", n=1))
     forms = _exemplar_forms(obs)
@@ -193,8 +338,8 @@ def test_rejected_and_fallbacks_deduped_and_capped() -> None:
     """concessions/unacceptable get the same dedupe/top-N+material discipline
     as exemplar forms — a raw rejected list of hundreds of near-duplicates
     must not flood the digest."""
-    rejected = [_obs(f"rejected ask variant {i}", n=1) for i in range(20)]
-    rejected += [_obs("rejected ask variant 0", n=4)]  # duplicate of variant 0
+    rejected = [_obs(f"rejected ask variant {i}", n=1) for i in range(1, 20)]
+    rejected += _deals("rejected ask variant 0", 5)  # the same ask refused in 5 deals
     rejected += [_obs("rare but material ask", n=1, magnitude="material", direction="worse")]
     doc = {
         "opf_version": "0.2",
@@ -223,7 +368,8 @@ def test_rejected_and_fallbacks_deduped_and_capped() -> None:
     assert len(unacceptable) == EXEMPLAR_TOP_N + 1  # top-5 + the material one
     texts = [u["text_summary"] for u in unacceptable]
     assert "rare but material ask" in texts
-    # the duplicated variant merged with summed n and ranks first
+    # the 5 rows of variant 0 merge into one entry whose n is its 5 deals
+    # (never 5 rows x precedent_count 5 = 25) and it ranks first
     top = unacceptable[0]
     assert top["text_summary"] == "rejected ask variant 0"
     assert top["n"] == 5
@@ -412,3 +558,40 @@ def test_view_bundle_escapes_script_closers(tmp_path: Path) -> None:
     end = html.index("</script>", start)
     block = html[start:end]
     assert "</script" not in block[1:], "unescaped </script> inside the JSON block"
+
+
+def test_preferred_variation_with_no_matching_position_counts_its_own_deal() -> None:
+    doc = {
+        "opf_version": "0.2",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.x",
+                    "taxonomy_id": "x",
+                    "title": "X",
+                    "observed_positions": _deals("Some other signed text.", 4),
+                    "summary": {
+                        "historical_stance": "mixed",
+                        "acceptable_if": [
+                            {
+                                "if": "Accepted language",
+                                "to": "Accepted language, verbatim.",
+                                "rationale": "engine narration",
+                                "observation_ref": {
+                                    "document_id": "deal-009",
+                                    "version": 1,
+                                    "clause_path": "3",
+                                },
+                            }
+                        ],
+                        "fallbacks": [],
+                        "rejected": [],
+                        "confidence": {"score": 0.5},
+                    },
+                }
+            ],
+            "clause_library": [],
+        },
+    }
+    pv = build_digest(doc)["clauses"][0]["preferred_variations"]
+    assert [(p["n"], p["band"]) for p in pv] == [(1, "rare")]

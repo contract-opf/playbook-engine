@@ -518,7 +518,8 @@ payload of a consuming review application. Per clause: `taxonomy_id`, `title`,
 entries verbatim (`preferred_variations`), and three deduplicated observation
 lists — `concessions` (from `fallbacks`), `unacceptable` (from `rejected`),
 and `exemplar_forms` (from `observed_positions`) — each grouped by normalized
-text with an observation count `n` (precedent-count-weighted), a frequency
+text with a deal count `n` (the number of distinct deals, i.e. distinct
+`example_ref.document_id` values, in the group), a frequency
 `band` (`often` n≥10 / `sometimes` 2–9 / `rare` 1), capped at the top 5
 groups by `n` plus every material-risk group, and carrying an `example_ref`
 citation resolving into the full playbook for on-demand drill-down.

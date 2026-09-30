@@ -8,10 +8,18 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_differ import ClauseDiff
+from playbook_engine.clause_tree import ClauseNode
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.entity_registry import EntityRegistry, pseudonymize_text
 from playbook_engine.observation_builder import (
+    DROPPED_ORIGIN_UNDETERMINED,
+    DROPPED_STANDARD_REMOVED_UNSIGNED,
+    DROPPED_SURVIVES_IN_TERMINAL,
+    OUTCOME_CONCEDED_BEFORE_SIGNING,
     Observation,
     ObservationCitation,
     build_observations,
@@ -59,6 +67,19 @@ def _dr(deviation: str = "none", basis: str = "deterministic") -> DeviationResul
         )
     )
     return DeviationResult(deviation=deviation, risk_delta=rd, basis=basis)
+
+
+# Our standard (template) clause text per taxonomy_id — the origin reference
+# for a clause removed before signing (issue #216). Every removed text in the
+# tests below that is NOT one of these is non-standard (their language), so
+# its removal is a refused ask.
+_STD: dict[str, str] = {
+    "ind": "Each party shall indemnify the other against third-party claims.",
+    "governing_law": "This Agreement is governed by the laws of the State of Delaware.",
+    "non_solicit": (
+        "For twelve months neither party shall solicit the other's employees for hire."
+    ),
+}
 
 
 def _reversal(taxonomy_id: str | None, clause_path: str = "1") -> ReversalRecord:
@@ -116,17 +137,28 @@ def test_build_observations_outcome_signed_by_default() -> None:
 
 
 def test_build_observations_outcome_proposed_then_reversed() -> None:
+    """Issue #216: a reversal inside a clause that survived to the terminal
+    is its own proposed_then_reversed observation carrying the PROPOSED text;
+    the terminal's own text stays the (single) signed observation — it is
+    never relabeled as rejected."""
     diffs = [(_cd("ind"), _dr())]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [_reversal("ind")])
-    assert obs[0].outcome == "proposed_then_reversed"
+    assert [(o.outcome, o.full_text) for o in obs] == [
+        ("signed", "revised text"),
+        ("proposed_then_reversed", "proposed text here"),
+    ]
 
 
 def test_build_observations_non_reversed_clause_stays_signed() -> None:
     # Use distinct clause paths so reversal on path "1" does not bleed into "2".
     diffs = [(_cd("ind", path="1"), _dr()), (_cd("gov", path="2"), _dr())]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [_reversal("ind", clause_path="1")])
-    assert obs[0].outcome == "proposed_then_reversed"  # ind reversed
-    assert obs[1].outcome == "signed"  # gov not reversed
+    outcomes = sorted((o.taxonomy_id, o.outcome) for o in obs)
+    assert outcomes == [
+        ("gov", "signed"),
+        ("ind", "proposed_then_reversed"),
+        ("ind", "signed"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +188,12 @@ def test_build_observations_no_signed_copy_reversed_clause_unaffected() -> None:
         [_reversal("ind", clause_path="1")],
         has_signed_copy=False,
     )
-    assert obs[0].outcome == "proposed_then_reversed"  # ind reversed
-    assert obs[1].outcome == "unsigned"  # gov not reversed, no signed copy detected
+    outcomes = sorted((o.taxonomy_id, o.outcome) for o in obs)
+    assert outcomes == [
+        ("gov", "unsigned"),  # no signed copy detected
+        ("ind", "proposed_then_reversed"),  # reversal history holds regardless
+        ("ind", "unsigned"),
+    ]
 
 
 def test_build_observations_has_signed_copy_defaults_true() -> None:
@@ -179,9 +215,13 @@ def test_build_observations_text_summary_from_after_text() -> None:
 
 
 def test_build_observations_text_summary_uses_before_for_removed() -> None:
+    # A removed row whose own (non-standard) text is absent from the terminal
+    # is proposed_then_reversed and reads its text from the before side.
     diffs = [(_cd("ind", kind="removed", text_before="Removed clause text.", text_after=""), _dr())]
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [])
+    obs = build_observations("doc1", "v2", "our_paper", diffs, [], standard_text_by_tid=_STD)
+    assert len(obs) == 1
     assert obs[0].text_summary == "Removed clause text."
+    assert obs[0].outcome == "proposed_then_reversed"
 
 
 def test_build_observations_text_summary_hard_cut_only_for_unbroken_token() -> None:
@@ -331,10 +371,11 @@ def test_build_observations_ids_unique() -> None:
 
 
 def test_build_observations_same_clause_path_deduplicated() -> None:
-    """Two clauses at the same path (split/merge) get distinct ids."""
-    diffs = [(_cd("ind", path="1"), _dr()), (_cd("ind", path="1"), _dr())]
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [])
+    """A signed observation and a reversal at the same path get distinct ids."""
+    diffs = [(_cd("ind", path="1"), _dr())]
+    obs = build_observations("doc1", "v2", "our_paper", diffs, [_reversal("ind", clause_path="1")])
     ids = [o.observation_id for o in obs]
+    assert len(obs) == 2
     assert len(set(ids)) == 2
 
 
@@ -423,28 +464,81 @@ def test_build_observations_same_taxonomy_id_only_reversed_instance_flagged() ->
     Acceptance criterion (P1.2): reversal matching must be clause-instance-level,
     not taxonomy-id-bucket-level.
     """
-    # Clause path "1" was reversed; clause path "2" was signed as-is.
+    # Both instances lost their terminal slot (issue #216). Path "1"'s text
+    # survives verbatim in the terminal (relocated to path "3"), so it is
+    # neither reversed nor signed — dropped and counted as surviving. Path
+    # "2"'s text is gone from the terminal: reversed. The later-draft
+    # reversal at the coincident path "1" is NOT claimed by the removed row —
+    # it is its own observation carrying its own proposed text.
     diffs = [
-        (_cd("ind", path="1"), _dr()),
-        (_cd("ind", path="2"), _dr()),
+        (_cd("ind", kind="removed", text_before="Alpha clause wording.", path="1"), _dr()),
+        (_cd("ind", kind="removed", text_before="Beta clause wording.", path="2"), _dr()),
+        (
+            _cd(
+                "ind",
+                kind="unchanged",
+                text_before="Alpha clause wording.",
+                text_after="Alpha clause wording.",
+                path="3",
+            ),
+            _dr(),
+        ),
     ]
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [_reversal("ind", clause_path="1")])
-    assert obs[0].outcome == "proposed_then_reversed"  # path "1" — reversed
-    assert obs[1].outcome == "signed"  # path "2" — must NOT be contaminated
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        "v2",
+        "our_paper",
+        diffs,
+        [_reversal("ind", clause_path="1")],
+        dropped=dropped,
+        standard_text_by_tid=_STD,
+    )
+    assert [(o.citation.clause_path, o.outcome, o.full_text) for o in obs] == [
+        ("2", "proposed_then_reversed", "Beta clause wording."),
+        ("3", "signed", "Alpha clause wording."),
+        ("1", "proposed_then_reversed", "proposed text here"),
+    ]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
 
 
 def test_build_observations_none_taxonomy_id_no_cross_contamination() -> None:
-    """Two unclassified clauses (taxonomy_id=None); only the reversed one is labeled.
+    """Two unclassified clauses (taxonomy_id=None); only the reversal is labeled.
 
     Acceptance criterion (P1.2): the None bucket must not cross-contaminate.
+    Issue #216: an unclassified clause removed before signing has no
+    standard to tell our language from theirs, so it is neither reversed nor
+    conceded — dropped and counted as origin-undetermined.
     """
     diffs = [
-        (_cd(None, path="1"), _dr()),
-        (_cd(None, path="2"), _dr()),
+        (_cd(None, kind="removed", text_before="Alpha clause wording.", path="1"), _dr()),
+        (_cd(None, kind="removed", text_before="Beta clause wording.", path="2"), _dr()),
+        (
+            _cd(
+                None,
+                kind="unchanged",
+                text_before="Alpha clause wording.",
+                text_after="Alpha clause wording.",
+                path="3",
+            ),
+            _dr(),
+        ),
     ]
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [_reversal(None, clause_path="1")])
-    assert obs[0].outcome == "proposed_then_reversed"  # path "1" — reversed
-    assert obs[1].outcome == "signed"  # path "2" — must NOT be contaminated
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        "v2",
+        "our_paper",
+        diffs,
+        [_reversal(None, clause_path="1")],
+        dropped=dropped,
+        standard_text_by_tid=_STD,
+    )
+    assert [(o.citation.clause_path, o.outcome, o.full_text) for o in obs] == [
+        ("3", "signed", "Alpha clause wording."),
+        ("1", "proposed_then_reversed", "proposed text here"),
+    ]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1, DROPPED_ORIGIN_UNDETERMINED: 1}
 
 
 # ---------------------------------------------------------------------------
@@ -477,15 +571,22 @@ def test_reversal_record_yields_reversed_observation() -> None:
     assert reversed_obs.basis == "deterministic"
 
 
-def test_reversal_record_no_duplicate_when_clause_already_covered() -> None:
-    """A reversal matching an existing deviation_results row must NOT also
-    get a second, redundant Observation emitted directly from the record."""
-    diffs = [(_cd("ind", path="1"), _dr())]
+def test_removed_row_never_claims_reversal_record_sharing_its_path() -> None:
+    """Issue #216: a removed row's path is a FIRST-version path, a
+    ReversalRecord's is a later draft's (version_inserted), so sharing
+    (taxonomy_id, clause_path) is a coincidence of numbering. The record is
+    never swallowed by the removed row: both are emitted, each with its own
+    text and citation."""
+    diffs = [(_cd("ind", kind="removed", path="1"), _dr())]
     reversal = _reversal("ind", clause_path="1")
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [reversal])
+    obs = build_observations(
+        "doc1", "v2", "our_paper", diffs, [reversal], standard_text_by_tid=_STD
+    )
 
-    assert len(obs) == 1
-    assert obs[0].outcome == "proposed_then_reversed"
+    assert [(o.outcome, o.full_text, o.citation.version_id) for o in obs] == [
+        ("proposed_then_reversed", "original text", None),
+        ("proposed_then_reversed", "proposed text here", "v2"),
+    ]
 
 
 def test_reversal_record_citation_uses_document_version() -> None:
@@ -822,7 +923,8 @@ def test_citation_removed_clause_cites_before_version() -> None:
         char_span_before=(10, 30),
         char_span_after=None,
     )
-    obs = build_observations("doc1", 3, "our_paper", [(cd, _dr())], [])
+    obs = build_observations("doc1", 3, "our_paper", [(cd, _dr())], [], standard_text_by_tid=_STD)
+    assert len(obs) == 1
     c = obs[0].citation
     assert c.clause_path == "2"
     assert c.version_id == "draft_v1_2024_03_01"
@@ -897,7 +999,16 @@ def test_removed_clause_citation_version_is_draft_ordinal() -> None:
         char_span_before=(10, 30),
         char_span_after=None,
     )
-    obs = build_observations("doc1", 3, "our_paper", [(cd, _dr())], [], ordinal_by_vid=_ORDINALS)
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(cd, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        standard_text_by_tid=_STD,
+    )
+    assert len(obs) == 1
     c = obs[0].citation
     assert c.version == 1  # draft_v1's ordinal, NOT the signed ordinal 3
     assert c.version_id == "draft_v1"
@@ -1071,3 +1182,736 @@ def test_acceptable_if_backing_observation_carries_verbatim_pseudonymized_preced
     pseudonymized = pseudonymize_text(obs.full_text, [_KNOWN_ENTITY], reg)
     assert _KNOWN_ENTITY not in pseudonymized
     assert reg.alias_for(_KNOWN_ENTITY) in pseudonymized
+
+
+# ---------------------------------------------------------------------------
+# build_observations: the deal is the unit of precedent (issue #216)
+#
+# Exactly one terminal observation per (document, taxonomy_id), built from
+# the terminal version's own tree; draft-only text is never "signed".
+# ---------------------------------------------------------------------------
+
+
+def _node_cc(
+    path: str, taxonomy_id: str | None, text: str, span: tuple[int, int]
+) -> ClassifiedClause:
+    return ClassifiedClause(
+        node=ClauseNode(clause_path=path, heading=None, text=text, char_span=span),
+        classification=ClauseClassification(
+            taxonomy_id=taxonomy_id, confidence=0.9, basis="exact_match"
+        ),
+    )
+
+
+def _terminal_cd(
+    taxonomy_id: str | None,
+    path: str,
+    text: str,
+    span: tuple[int, int],
+    kind: str = "unchanged",
+    before: str | None = None,
+) -> ClauseDiff:
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=path,
+        clause_path_after=path,
+        kind=kind,
+        hunks=(),
+        text_before=before if before is not None else text,
+        text_after=text,
+        clause_version_before="draft_v1",
+        clause_version_after="signed_final",
+        char_span_before=span,
+        char_span_after=span,
+    )
+
+
+def test_multi_node_clause_is_one_signed_observation_from_terminal_tree() -> None:
+    """A clause spanning several terminal nodes is ONE precedent: full_text is
+    the nodes' text in the terminal tree's document order joined by a single
+    newline, cited to the first node in the signed version."""
+    tree = [
+        _node_cc("4", "confidentiality", "Each party shall keep it confidential.", (100, 140)),
+        _node_cc("4.1", "confidentiality", "Including for three years.", (141, 170)),
+        _node_cc("5", "governing_law", "Governed by the laws of Delaware.", (171, 205)),
+        _node_cc("4.2", "confidentiality", "Return or destroy on request.", (206, 240)),
+    ]
+    # Rows deliberately NOT in document order — the tree is the authority.
+    rows = [
+        (
+            _terminal_cd("confidentiality", "4.2", "Return or destroy on request.", (206, 240)),
+            _dr(),
+        ),
+        (
+            _terminal_cd("governing_law", "5", "Governed by the laws of Delaware.", (171, 205)),
+            _dr(),
+        ),
+        (
+            _terminal_cd(
+                "confidentiality", "4", "Each party shall keep it confidential.", (100, 140)
+            ),
+            _dr(),
+        ),
+        (_terminal_cd("confidentiality", "4.1", "Including for three years.", (141, 170)), _dr()),
+    ]
+    obs = build_observations(
+        "deal7",
+        3,
+        "our_paper",
+        rows,
+        [],
+        ordinal_by_vid=_ORDINALS,
+        terminal_clauses=tree,
+        terminal_version_id="signed_final",
+    )
+    assert [o.taxonomy_id for o in obs] == ["confidentiality", "governing_law"]
+    conf = obs[0]
+    assert conf.outcome == "signed"
+    assert conf.full_text == (
+        "Each party shall keep it confidential.\n"
+        "Including for three years.\n"
+        "Return or destroy on request."
+    )
+    assert conf.citation.clause_path == "4"
+    assert conf.citation.char_span == (100, 140)
+    assert conf.citation.version == 3
+    assert conf.citation.version_id == "signed_final"
+
+
+def test_merged_observation_carries_worst_risk_and_weakest_basis() -> None:
+    """Merging nodes never hides a concession (the worse-risk row is the
+    representative) nor launders an unjudged node into a judged one (the
+    weakest basis wins); confidence is the lowest among the rows."""
+    worse = DeviationResult(
+        deviation="substantive",
+        risk_delta=RiskDelta(direction="worse", magnitude="minor"),
+        basis="judge",
+    )
+    # deviation="needs_review" + basis="needs_review" is the sentinel
+    # agent_judge._deviation_needs_review emits for a changed clause that has
+    # no stored verdict.
+    neutral_unjudged = DeviationResult(
+        deviation="needs_review",
+        risk_delta=RiskDelta(direction="neutral", magnitude="none"),
+        basis="needs_review",
+    )
+    rows = [
+        (
+            _terminal_cd(
+                "ind",
+                "1",
+                "First part of the clause.",
+                (0, 25),
+                kind="modified",
+                before="First draft part of the clause.",
+            ),
+            neutral_unjudged,
+        ),
+        (
+            _terminal_cd(
+                "ind",
+                "2",
+                "Second part of the clause.",
+                (26, 52),
+                kind="modified",
+                before="Second draft part of the clause.",
+            ),
+            worse,
+        ),
+        (_terminal_cd("ind", "3", "Third, unchanged part.", (53, 75)), _dr()),
+    ]
+    obs = build_observations(
+        "doc1", 3, "our_paper", rows, [], classification_confidences=[0.8, 0.6, 0.95]
+    )
+    assert len(obs) == 1
+    merged = obs[0]
+    assert merged.deviation == "substantive"
+    assert merged.risk_delta == {"direction": "worse", "magnitude": "minor"}
+    assert merged.basis == "needs_review"
+    assert merged.confidence == 0.6
+    assert merged.citation.clause_path == "1"
+
+
+def test_all_unchanged_group_keeps_deterministic_none() -> None:
+    rows = [
+        (_terminal_cd("ind", "1", "First part of the clause.", (0, 25)), _dr()),
+        (_terminal_cd("ind", "2", "Second part of the clause.", (26, 52)), _dr()),
+    ]
+    obs = build_observations("doc1", 3, "our_paper", rows, [])
+    assert len(obs) == 1
+    assert (obs[0].deviation, obs[0].basis) == ("none", "deterministic")
+    assert obs[0].risk_delta == {"direction": "neutral", "magnitude": "none"}
+
+
+def _removed_row(taxonomy_id: str, text: str, path: str = "9") -> ClauseDiff:
+    """A first-version clause with no terminal slot, read from draft_v1."""
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=path,
+        clause_path_after=None,
+        kind="removed",
+        hunks=(),
+        text_before=text,
+        text_after="",
+        clause_version_before="draft_v1",
+        clause_version_after=None,
+        char_span_before=(10, 10 + len(text)),
+    )
+
+
+_THEIR_GOV_LAW = "This Agreement is governed by the laws of the State of New York."
+
+
+def test_removed_before_signing_is_never_signed() -> None:
+    """Issue #216: text removed before signing is never signed. Its ORIGIN
+    decides what the removal means: their (non-standard) language struck is
+    their refused ask — proposed_then_reversed, cited to the draft it was
+    read from — whatever paper the deal is on."""
+    removed = _removed_row("governing_law", _THEIR_GOV_LAW)
+    kept = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    for provenance in ("our_paper", "counterparty_paper"):
+        dropped: dict[str, int] = {}
+        obs = build_observations(
+            "doc1",
+            3,
+            provenance,
+            [(removed, _dr()), (kept, _dr())],
+            [],
+            ordinal_by_vid=_ORDINALS,
+            dropped=dropped,
+            standard_text_by_tid=_STD,
+        )
+        assert [(o.outcome, o.full_text, o.citation.version) for o in obs] == [
+            ("proposed_then_reversed", _THEIR_GOV_LAW, 1),
+            ("signed", _STD["governing_law"], 3),
+        ]
+        assert dropped == {}
+
+
+def test_our_standard_clause_replaced_before_signing_is_our_concession() -> None:
+    """Issue #216 (owner decision 2026-09-13 (b)): OUR standard language
+    struck before signing, replaced by their language, is our concession —
+    conceded_before_signing, never proposed_then_reversed — on either
+    paper side, since origin decides, not paper."""
+    removed = _removed_row("governing_law", _STD["governing_law"])
+    replacement = ClauseDiff(
+        taxonomy_id="governing_law",
+        clause_path_before=None,
+        clause_path_after="10",
+        kind="added",
+        hunks=(),
+        text_before="",
+        text_after=_THEIR_GOV_LAW,
+        clause_version_before=None,
+        clause_version_after="signed_final",
+        char_span_after=(60, 124),
+    )
+    for provenance in ("our_paper", "counterparty_paper"):
+        obs = build_observations(
+            "doc1",
+            3,
+            provenance,
+            [(removed, _dr("substantive", basis="judge")), (replacement, _dr())],
+            [],
+            ordinal_by_vid=_ORDINALS,
+            standard_text_by_tid=_STD,
+        )
+        assert [(o.outcome, o.full_text, o.citation.version) for o in obs] == [
+            (OUTCOME_CONCEDED_BEFORE_SIGNING, _STD["governing_law"], 1),
+            ("signed", _THEIR_GOV_LAW, 3),
+        ]
+
+
+def test_our_standard_clause_struck_outright_is_our_concession() -> None:
+    """Our standard struck with no replacement: still our concession (and
+    the only observation this deal has for the clause)."""
+    removed = _removed_row("non_solicit", _STD["non_solicit"])
+    other = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("substantive", basis="judge")), (other, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        standard_text_by_tid=_STD,
+    )
+    assert [(o.taxonomy_id, o.outcome) for o in obs] == [
+        ("non_solicit", OUTCOME_CONCEDED_BEFORE_SIGNING),
+        ("governing_law", "signed"),
+    ]
+
+
+def test_unsigned_deal_removed_rows_never_concede_but_refusals_hold() -> None:
+    """Issue #216 + #83: with no detected executed copy (has_signed_copy=
+    False) a deal is never evidence of a concession. Our standard language
+    struck is dropped and counted under DROPPED_STANDARD_REMOVED_UNSIGNED —
+    never conceded_before_signing, whether struck outright or replaced.
+    Their (non-standard) language struck stays proposed_then_reversed: like
+    a ReversalRecord, a refusal is within-trail history that holds whether
+    or not the final draft was executed. Terminal rows are "unsigned"."""
+    ours_struck = _removed_row("non_solicit", _STD["non_solicit"], path="8")
+    ours_replaced = _removed_row("governing_law", _STD["governing_law"], path="9")
+    theirs_struck = _removed_row("ind", "Beta shall indemnify Alpha for all losses.", path="7")
+    replacement = _terminal_cd("governing_law", "10", _THEIR_GOV_LAW, (60, 124), kind="added")
+    for provenance in ("our_paper", "counterparty_paper"):
+        dropped: dict[str, int] = {}
+        obs = build_observations(
+            "doc1",
+            3,
+            provenance,
+            [
+                (ours_struck, _dr("substantive", basis="judge")),
+                (ours_replaced, _dr("substantive", basis="judge")),
+                (theirs_struck, _dr("substantive", basis="judge")),
+                (replacement, _dr()),
+            ],
+            [],
+            has_signed_copy=False,
+            ordinal_by_vid=_ORDINALS,
+            dropped=dropped,
+            standard_text_by_tid=_STD,
+        )
+        assert [(o.taxonomy_id, o.outcome, o.citation.version) for o in obs] == [
+            ("ind", "proposed_then_reversed", 1),
+            ("governing_law", "unsigned", 3),
+        ]
+        assert not [o for o in obs if o.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING]
+        assert dropped == {DROPPED_STANDARD_REMOVED_UNSIGNED: 2}
+
+
+def test_standard_node_split_from_a_longer_standard_is_our_language() -> None:
+    """A first-version node that is a verbatim piece of our standard clause
+    (the segmenter split the standard across nodes) is our language too."""
+    piece = "neither party shall solicit the other's employees"
+    removed = _removed_row("non_solicit", piece)
+    obs = build_observations(
+        "doc1", 3, "our_paper", [(removed, _dr())], [], standard_text_by_tid=_STD
+    )
+    assert [o.outcome for o in obs] == [OUTCOME_CONCEDED_BEFORE_SIGNING]
+
+
+def test_removed_text_with_no_standard_is_dropped_as_origin_undetermined() -> None:
+    """No standard to compare against (no template clause for the
+    taxonomy_id, or no standards at all): the removal is neither their
+    refused ask nor our concession — dropped and counted, never guessed."""
+    removed = _removed_row("confidentiality_term", "Obligations last five years.")
+    for standards in (None, {}, _STD, {"confidentiality_term": "   "}):
+        dropped: dict[str, int] = {}
+        obs = build_observations(
+            "doc1",
+            3,
+            "our_paper",
+            [(removed, _dr())],
+            [],
+            dropped=dropped,
+            standard_text_by_tid=standards,
+        )
+        assert obs == []
+        assert dropped == {DROPPED_ORIGIN_UNDETERMINED: 1}
+
+
+def test_removed_row_whose_text_survives_in_terminal_is_neither_reversed_nor_signed() -> None:
+    """Issue #216: a removed row whose own text still occurs in the signed
+    terminal (a relocation the aligner left unpaired, basis="alignment") was
+    not reversed — its text is already the terminal's signed observation. It
+    is not proposed_then_reversed, and it is counted as surviving, never as
+    removed before signing."""
+    removed = ClauseDiff(
+        taxonomy_id="survival",
+        clause_path_before="4",
+        clause_path_after=None,
+        kind="removed",
+        hunks=(),
+        text_before="Obligations survive for three years.",
+        text_after="",
+        clause_version_before="draft_v1",
+        clause_version_after=None,
+        char_span_before=(10, 46),
+    )
+    kept = _terminal_cd("survival", "9", "Obligations survive for three years.", (80, 116))
+    tree = [_node_cc("9", "survival", "Obligations survive for three years.", (80, 116))]
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("none", basis="alignment")), (kept, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        terminal_clauses=tree,
+        terminal_version_id="signed_final",
+        dropped=dropped,
+    )
+    assert [(o.outcome, o.citation.clause_path, o.citation.version) for o in obs] == [
+        ("signed", "9", 3)
+    ]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
+
+
+def test_surviving_removed_row_without_counter_is_still_not_emitted() -> None:
+    removed = _cd("ind", kind="removed", text_before="Struck text.", text_after="")
+    kept = _cd(
+        "gov",
+        kind="unchanged",
+        text_before="Struck text, kept.",
+        text_after="Struck text, kept.",
+        path="2",
+    )
+    obs = build_observations("doc1", "v2", "our_paper", [(removed, _dr()), (kept, _dr())], [])
+    assert [(o.taxonomy_id, o.outcome) for o in obs] == [("gov", "signed")]
+
+
+def test_unclassified_terminal_nodes_stay_one_per_node() -> None:
+    """taxonomy_id=None is not a clause type — unclassified nodes are not
+    merged into one observation (they feed unclassified coverage per node)."""
+    rows = [
+        (_terminal_cd(None, "0", "Title block text here.", (0, 22)), _dr()),
+        (_terminal_cd(None, "20", "Signature block text.", (900, 921)), _dr()),
+    ]
+    obs = build_observations("doc1", 3, "our_paper", rows, [])
+    assert [o.citation.clause_path for o in obs] == ["0", "20"]
+    assert all(o.taxonomy_id is None for o in obs)
+
+
+def test_unsigned_terminal_is_one_unsigned_observation_per_taxonomy() -> None:
+    rows = [
+        (_terminal_cd("ind", "1", "First part of the clause.", (0, 25)), _dr()),
+        (_terminal_cd("ind", "2", "Second part of the clause.", (26, 52)), _dr()),
+    ]
+    obs = build_observations("doc1", 3, "our_paper", rows, [], has_signed_copy=False)
+    assert [(o.taxonomy_id, o.outcome) for o in obs] == [("ind", "unsigned")]
+
+
+def test_terminal_tree_node_without_net_diff_row_raises() -> None:
+    """Every terminal node is the after slot of exactly one net-diff row
+    (clause_differ._version_diff emits one per after slot), so a tree node no
+    row reaches means the caller passed the wrong tree — raised, never
+    papered over with a fabricated observation."""
+    tree = [
+        _node_cc("1", "ind", "Indemnity text.", (0, 15)),
+        _node_cc("2", "gov", "Governing law text.", (16, 35)),
+    ]
+    rows = [(_terminal_cd("ind", "1", "Indemnity text.", (0, 15)), _dr())]
+    with pytest.raises(ValueError, match="has no net-diff row"):
+        build_observations(
+            "doc1", 3, "our_paper", rows, [], terminal_clauses=tree, terminal_version_id="v3"
+        )
+
+
+def test_terminal_row_matching_no_tree_node_raises() -> None:
+    tree = [_node_cc("1", "ind", "Indemnity text.", (0, 15))]
+    rows = [
+        (_terminal_cd("ind", "1", "Indemnity text.", (0, 15)), _dr()),
+        (_terminal_cd("gov", "2", "Governing law text.", (16, 35)), _dr()),
+    ]
+    with pytest.raises(ValueError, match="match no terminal node"):
+        build_observations(
+            "doc1", 3, "our_paper", rows, [], terminal_clauses=tree, terminal_version_id="v3"
+        )
+
+
+def test_removed_row_differing_only_in_filled_in_blanks_survives() -> None:
+    """A signature block whose blanks were filled in at signing is not a
+    reversal: ``______`` tokenizes as a word under ``\\w+``, but a blank is
+    not clause content, so the removed draft block still survives in the
+    executed copy (counted, not emitted as rejected)."""
+    removed = _cd(
+        "counterparts",
+        kind="removed",
+        text_before="Executed in counterparts.\nBy: __________\nName:",
+        text_after="",
+        path="27",
+    )
+    kept = _cd(
+        "counterparts",
+        kind="added",
+        text_after="Executed in counterparts.\nBy: /s/ Pat Doe\nName: Pat Doe",
+        path="27",
+    )
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1", "v2", "our_paper", [(removed, _dr()), (kept, _dr())], [], dropped=dropped
+    )
+    assert [o.outcome for o in obs] == ["signed"]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
+
+
+def test_replaced_clause_whose_words_recur_in_an_unrelated_clause_is_reversed() -> None:
+    """Issue #216 fix round 1: survival is judged against ONE clause-sized,
+    contiguous stretch of the signed terminal — never the whole document's
+    vocabulary. Governing-law text replaced before signing is
+    proposed_then_reversed even though every one of its words ("delaware"
+    included) recurs somewhere in the signed copy — here in an unchanged
+    recital that sits right next to the replacement clause."""
+    removed = ClauseDiff(
+        taxonomy_id="governing_law",
+        clause_path_before="9",
+        clause_path_after=None,
+        kind="removed",
+        hunks=(),
+        text_before="This Agreement is governed by the laws of the State of Delaware.",
+        text_after="",
+        clause_version_before="draft_v1",
+        clause_version_after=None,
+        char_span_before=(300, 364),
+    )
+    recital_text = "Acme, Inc., a Delaware corporation, enters into this Agreement."
+    replacement_text = "This Agreement is governed by the laws of the State of New York."
+    recital = _terminal_cd("parties", "1", recital_text, (0, 63))
+    replacement = ClauseDiff(
+        taxonomy_id="governing_law",
+        clause_path_before=None,
+        clause_path_after="2",
+        kind="added",
+        hunks=(),
+        text_before="",
+        text_after=replacement_text,
+        clause_version_before=None,
+        clause_version_after="signed_final",
+        char_span_after=(64, 128),
+    )
+    tree = [
+        _node_cc("1", "parties", recital_text, (0, 63)),
+        _node_cc("2", "governing_law", replacement_text, (64, 128)),
+    ]
+    rows = [(removed, _dr()), (recital, _dr()), (replacement, _dr())]
+    for kwargs in ({}, {"terminal_clauses": tree, "terminal_version_id": "signed_final"}):
+        dropped: dict[str, int] = {}
+        obs = build_observations(
+            "doc1",
+            3,
+            "our_paper",
+            rows,
+            [],
+            ordinal_by_vid=_ORDINALS,
+            dropped=dropped,
+            # Our standard is English law, so the struck Delaware text is
+            # their (non-standard) language: a refused ask once removed.
+            standard_text_by_tid={"governing_law": "Governed by the laws of England and Wales."},
+            **kwargs,
+        )
+        reversed_obs = [o for o in obs if o.outcome == "proposed_then_reversed"]
+        assert [(o.taxonomy_id, o.full_text, o.citation.version) for o in reversed_obs] == [
+            ("governing_law", removed.text_before, 1)
+        ]
+        assert dropped == {}
+
+
+def test_removed_clause_split_across_adjacent_signed_nodes_survives() -> None:
+    """A draft signature block the signed copy splits into several adjacent
+    nodes (blanks filled in) survives in that contiguous stretch — the window
+    spans more than one node, so a fixed per-node rule would miss it."""
+    removed = _cd(
+        "counterparts",
+        kind="removed",
+        text_before=(
+            "Executed in counterparts by the parties.\n"
+            "By: __________\nName: __________\nTitle: __________"
+        ),
+        text_after="",
+        path="27",
+    )
+    split = [
+        "Executed in counterparts by the parties.",
+        "By: /s/ Pat Doe",
+        "Name: Pat Doe",
+        "Title: Director",
+    ]
+    rows = [(removed, _dr())] + [
+        (_cd("counterparts", kind="added", text_after=text, path=str(28 + i)), _dr())
+        for i, text in enumerate(split)
+    ]
+    dropped: dict[str, int] = {}
+    obs = build_observations("doc1", "v2", "our_paper", rows, [], dropped=dropped)
+    assert [o.outcome for o in obs] == ["signed"]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
+
+
+def _added_row(taxonomy_id: str, text: str, path: str = "10") -> ClauseDiff:
+    """A signed-version clause with no first-version slot."""
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=None,
+        clause_path_after=path,
+        kind="added",
+        hunks=(),
+        text_before="",
+        text_after=text,
+        clause_version_before=None,
+        clause_version_after="signed_final",
+        char_span_after=(60, 60 + len(text)),
+    )
+
+
+_STD_COMPELLED = (
+    "If compelled by law, the Recipient shall promptly notify the Discloser "
+    "and shall disclose only that portion legally required."
+)
+_NARROWED_COMPELLED = (
+    "If compelled by law, the Recipient shall disclose only that portion legally required."
+)
+
+
+def test_v1_narrowing_restored_to_our_standard_by_signing_is_a_refused_ask() -> None:
+    """Issue #216 fix round 2: survival is decided on the TEXT, not its word
+    set. A first-version clause that narrowed our standard (dropping the
+    notice obligation) has every word recur in the signed clause, which
+    restored our standard — but the narrowed text itself was changed before
+    signing. It is not surviving: it is non-standard language struck, their
+    refused ask."""
+    removed = _removed_row("compelled_disclosure", _NARROWED_COMPELLED)
+    restored = _added_row("compelled_disclosure", _STD_COMPELLED)
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("substantive", basis="judge")), (restored, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        dropped=dropped,
+        standard_text_by_tid={"compelled_disclosure": _STD_COMPELLED},
+    )
+    assert [(o.outcome, o.full_text, o.citation.version) for o in obs] == [
+        ("proposed_then_reversed", _NARROWED_COMPELLED, 1),
+        ("signed", _STD_COMPELLED, 3),
+    ]
+    assert dropped == {}
+
+
+def test_our_standard_replaced_by_a_superset_of_its_words_is_our_concession() -> None:
+    """Our standard of care replaced before signing by a clause that repeats
+    every one of its words (and more, in another order) was still replaced:
+    the standard's text does not survive, so its removal is our concession,
+    never a silent survives_in_terminal drop."""
+    std = "The Recipient shall protect Confidential Information with reasonable care."
+    replacement = (
+        "The Recipient shall protect Confidential Information with the same "
+        "degree of care it uses for its own information, and no less than "
+        "reasonable care."
+    )
+    removed = _removed_row("standard_of_care", std)
+    signed = _added_row("standard_of_care", replacement)
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("substantive", basis="judge")), (signed, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        dropped=dropped,
+        standard_text_by_tid={"standard_of_care": std},
+    )
+    assert [(o.outcome, o.full_text) for o in obs] == [
+        (OUTCOME_CONCEDED_BEFORE_SIGNING, std),
+        ("signed", replacement),
+    ]
+    assert dropped == {}
+
+
+def test_removed_text_verbatim_inside_a_signed_clause_still_survives() -> None:
+    """The text test keeps a relocation surviving: the removed clause occurs
+    verbatim (case and punctuation aside) inside the signed clause."""
+    removed = _removed_row("survival", "Obligations survive for three years")
+    signed = _added_row("survival", "OBLIGATIONS SURVIVE FOR THREE YEARS; return on request.")
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("none", basis="alignment")), (signed, _dr())],
+        [],
+        dropped=dropped,
+        standard_text_by_tid={"survival": "Obligations survive for five years."},
+    )
+    assert [o.outcome for o in obs] == ["signed"]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
+
+
+def test_struck_text_equal_to_a_later_template_node_is_our_language() -> None:
+    """Issue #216 fix round 2: our standard is EVERY template node carrying
+    the taxonomy_id. Text struck before signing that equals the template's
+    SECOND insurance node is our standard language — our concession — even
+    though it shares nothing with the first node."""
+    first = "Supplier shall maintain commercial general liability insurance."
+    second = "Supplier shall name the Customer as an additional insured on every policy."
+    removed = _removed_row("insurance", second)
+    kept = _terminal_cd("insurance", "2", first, (0, len(first)))
+    for standards in ({"insurance": [first, second]}, {"insurance": (first, second)}):
+        obs = build_observations(
+            "doc1",
+            3,
+            "our_paper",
+            [(removed, _dr("substantive", basis="judge")), (kept, _dr())],
+            [],
+            ordinal_by_vid=_ORDINALS,
+            standard_text_by_tid=standards,
+        )
+        assert [(o.outcome, o.full_text) for o in obs] == [
+            (OUTCOME_CONCEDED_BEFORE_SIGNING, second),
+            ("signed", first),
+        ]
+    # Against the first node alone, the same text would read as their ask.
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(removed, _dr("substantive", basis="judge")), (kept, _dr())],
+        [],
+        standard_text_by_tid={"insurance": first},
+    )
+    assert obs[0].outcome == "proposed_then_reversed"
+
+
+def test_whole_multi_node_standard_reworded_in_one_node_is_our_language() -> None:
+    """A struck clause rendering our whole multi-node standard as one node
+    (near-identically) matches the standard's nodes joined in order."""
+    nodes = [
+        "Supplier shall maintain commercial general liability insurance.",
+        "Supplier shall name the Customer as an additional insured on every policy.",
+    ]
+    struck = (
+        "Supplier shall maintain commercial general liability insurance; "
+        "Supplier shall name the Customer as an additional insured on every policy"
+    )
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(_removed_row("insurance", struck), _dr())],
+        [],
+        standard_text_by_tid={"insurance": nodes},
+    )
+    assert [o.outcome for o in obs] == [OUTCOME_CONCEDED_BEFORE_SIGNING]
+
+
+def test_reversals_sharing_a_path_from_different_drafts_are_each_emitted() -> None:
+    """Two distinct proposals reversed out of the same (taxonomy_id, path) in
+    different drafts are separate evidence: both are emitted, each with its
+    own proposed text and draft citation. Only a true duplicate record (same
+    draft and text) is skipped. detect_reversals sets version_inserted to a
+    diff's version_after, so it is always a middle draft — never the first
+    version nor the signed terminal."""
+    ordinals = {"draft_v1": 1, "draft_v2": 2, "draft_v3": 3, "signed_final": 4}
+    v2 = ReversalRecord(
+        taxonomy_id=None,
+        clause_path="21",
+        version_inserted="draft_v2",
+        version_removed="signed_final",
+        proposed_text="twelve 12 months non solicit",
+    )
+    v3 = ReversalRecord(
+        taxonomy_id=None,
+        clause_path="21",
+        version_inserted="draft_v3",
+        version_removed="signed_final",
+        proposed_text="six 6 months directly involved",
+    )
+    obs = build_observations("doc1", 4, "our_paper", [], [v2, v3, v2], ordinal_by_vid=ordinals)
+    assert [(o.outcome, o.full_text, o.citation.version) for o in obs] == [
+        ("proposed_then_reversed", "twelve 12 months non solicit", 2),
+        ("proposed_then_reversed", "six 6 months directly involved", 3),
+    ]
+    assert len({o.observation_id for o in obs}) == 2

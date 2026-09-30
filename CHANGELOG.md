@@ -10,6 +10,45 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **The deal is the unit of precedent (issue #216).** L4 now emits exactly
+  one signed (or unsigned) observation per (deal, taxonomy_id), built from
+  the signed version's own tree: its nodes for that clause joined in
+  document order and cited to the first node. A clause split across several
+  nodes is one precedent, not several. Text removed before signing is never
+  `outcome: "signed"`. A clause with no signed slot whose own normalized
+  text still occurs verbatim (fill-in blanks aside) in one clause-sized,
+  contiguous stretch of signed nodes, for example a relocation the aligner
+  left unpaired, is dropped and counted under the new
+  `corpus.stats.dropped_observations` (reason `survives_in_terminal`).
+  Otherwise it was removed, and the ORIGIN of its text decides what that
+  means, never the deal's paper side (owner decision 2026-09-13): text
+  narrowed or replaced before signing is removed even when its words recur
+  in the signed copy; our standard (template) language struck — tested
+  against every template node carrying the clause's taxonomy_id, not only
+  the first — is our concession — the new
+  engine-internal outcome `conceded_before_signing`, which never reaches
+  `observed_positions`, `summary.rejected`, the digest's `unacceptable`
+  list, render_prompt's refused asks or Floor candidates, and counts its
+  deal as conceded in `stance_detail` and makes the position `negotiable`
+  (only in a deal with a detected executed copy: in an unsigned deal it is
+  dropped and counted, reason `removed_standard_no_signed_copy`, so a deal
+  never shown to be executed is never a concession, issue #83);
+  non-standard language struck is their refused ask,
+  `proposed_then_reversed`, cited to the draft it came from (in an unsigned
+  deal too, like any reversal); and a removal
+  with no standard to compare against is dropped and counted (reason
+  `removed_origin_undetermined`). Every detected reversal is its own
+  `proposed_then_reversed` observation carrying its proposed text; a
+  first-draft path number never claims it. `precedent_count`,
+  `confidence.n_our_paper`/`n_counterparty_paper`, `stance_detail`
+  held/of, and the digest's `n` all count distinct deals; the digest's
+  `preferred_variations` count only deals that signed the text. Digest v2 `n`
+  changed in place under an owner-authorized exception; the conformance
+  vectors were regenerated and the change is recorded in
+  `spec/CHANGELOG.md`. The deviation-cache version is bumped to 8, so a warm
+  run rebuilds its observations. `examples/nda/playbook.opf.json` was
+  regenerated. No schema file changed.
+
 - **Citations span the whole clause; signature blocks leave clause text;
   summaries end on a sentence boundary** (issue #217). Every ingester
   (RTF/DOCX/PDF) now makes a clause node's `char_span` cover the whole

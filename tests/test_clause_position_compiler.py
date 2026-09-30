@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from playbook_engine.clause_differ import ClauseDiff
 from playbook_engine.clause_position_compiler import (
     COHERENCE_MIN_CITATIONS,
     UNCLASSIFIED_EXAMPLE_LIMIT,
@@ -21,8 +22,12 @@ from playbook_engine.clause_position_compiler import (
     UnclassifiedCoverage,
     compile_clause_positions,
 )
-from playbook_engine.deviation_classifier import RiskDelta
-from playbook_engine.observation_builder import Observation, ObservationCitation
+from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.observation_builder import (
+    Observation,
+    ObservationCitation,
+    build_observations,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1345,3 +1350,367 @@ def test_exactly_min_length_text_is_not_degenerate() -> None:
     positions, flags, _ = compile_clause_positions([obs], [])
     assert len(positions[0].observed_positions) == 1
     assert flags == []
+
+
+# ---------------------------------------------------------------------------
+# precedent_count is a count of distinct deals (issue #216)
+# ---------------------------------------------------------------------------
+
+_ASSIGN_TEXT = "Neither party may assign this Agreement without consent."
+
+
+def test_precedent_count_counts_distinct_deals_not_rows() -> None:
+    """The same normalized text appearing in several rows of ONE deal (e.g.
+    a signed row plus a reversed row, or rows from a pre-#216 store) is one
+    precedent; across two deals it is two."""
+    same_deal = [
+        _obs("assignment", text=_ASSIGN_TEXT, doc_id="deal_001", clause_path="9"),
+        _obs(
+            "assignment",
+            text=_ASSIGN_TEXT.upper(),  # whitespace/case-insensitive match
+            doc_id="deal_001",
+            clause_path="10",
+            outcome="proposed_then_reversed",
+        ),
+    ]
+    other_deal = [_obs("assignment", text=_ASSIGN_TEXT, doc_id="deal_002", clause_path="9")]
+
+    positions = _compile(same_deal, [])
+    assert {op.precedent_count for op in positions[0].observed_positions} == {1}
+
+    positions = _compile(same_deal + other_deal, [])
+    assert {op.precedent_count for op in positions[0].observed_positions} == {2}
+
+
+def test_acceptable_if_rationale_cites_distinct_deal_count() -> None:
+    variant = "Recipient may disclose to its legal and financial advisers."
+    obs = [
+        _obs(
+            "confidentiality",
+            text=variant,
+            deviation="substantive",
+            basis="judge",
+            doc_id=doc_id,
+            clause_path=path,
+        )
+        for doc_id, path in (("deal_001", "4"), ("deal_001", "5"), ("deal_002", "4"))
+    ]
+    positions = _compile(obs, [])
+    entries = positions[0].rollup.acceptable_if
+    assert len(entries) == 1
+    assert "2x precedent" in entries[0].rationale
+
+
+def test_deal_with_signed_and_reversed_rows_counts_once_in_confidence_and_stance() -> None:
+    """Issue #216: a deal carrying both its signed row and a reversed row for
+    one clause is ONE deal in n_our_paper / n_counterparty_paper and in
+    stance_detail held/of — never two rows counted as two data points."""
+    signed_text = "Recipient keeps Confidential Information secret for three years."
+    reversed_text = "Recipient keeps Confidential Information secret in perpetuity."
+    obs = [
+        # deal_001 (our paper): signed row + a reversal from its own trail.
+        _obs("survival", text=signed_text, doc_id="deal_001", clause_path="4"),
+        _obs(
+            "survival",
+            text=reversed_text,
+            doc_id="deal_001",
+            version="v2",
+            clause_path="4",
+            outcome="proposed_then_reversed",
+        ),
+        # deal_002 (our paper): conceded in the signed text, even though a
+        # reversal also appears in its trail — the deal is not "held".
+        _obs(
+            "survival",
+            text=signed_text + " Extended.",
+            doc_id="deal_002",
+            clause_path="4",
+            deviation="substantive",
+            risk_delta=_WORSE_MINOR,
+            basis="judge",
+        ),
+        _obs(
+            "survival",
+            text=reversed_text,
+            doc_id="deal_002",
+            version="v2",
+            clause_path="4",
+            outcome="proposed_then_reversed",
+        ),
+        # deal_003 (counterparty paper): signed row + reversal.
+        _obs(
+            "survival",
+            provenance="counterparty_paper",
+            text=signed_text,
+            doc_id="deal_003",
+            clause_path="7",
+        ),
+        _obs(
+            "survival",
+            provenance="counterparty_paper",
+            text=reversed_text,
+            doc_id="deal_003",
+            version="v2",
+            clause_path="7",
+            outcome="proposed_then_reversed",
+        ),
+    ]
+    rollup = _compile(obs, [])[0].rollup
+    assert rollup.confidence["n_our_paper"] == 2
+    assert rollup.confidence["n_counterparty_paper"] == 1
+    assert rollup.stance_detail == {"held": 1, "of": 2, "basis": "our_paper"}
+
+
+# ---------------------------------------------------------------------------
+# Removed-before-signing rows are classified by ORIGIN (issue #216)
+#
+# Driven through the real producer (build_observations) so the compiler sees
+# exactly the rows the pipeline emits: our standard language struck before
+# signing is our concession — never a rejected ask — and a counterparty ask
+# struck before signing is a rejection. Paper side never decides.
+# ---------------------------------------------------------------------------
+
+_STD_NON_SOLICIT = "For twelve months neither party shall solicit the other's employees."
+_THEIR_NON_SOLICIT = "For thirty-six months neither party shall hire any of the other's staff."
+
+
+def _removed(taxonomy_id: str, text: str, path: str = "9") -> ClauseDiff:
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=path,
+        clause_path_after=None,
+        kind="removed",
+        hunks=(),
+        text_before=text,
+        text_after="",
+        clause_version_before="v1",
+        clause_version_after=None,
+        char_span_before=(0, len(text)),
+    )
+
+
+def _signed(taxonomy_id: str, text: str, path: str = "9", kind: str = "added") -> ClauseDiff:
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=None if kind == "added" else path,
+        clause_path_after=path,
+        kind=kind,
+        hunks=(),
+        text_before="" if kind == "added" else text,
+        text_after=text,
+        clause_version_before=None if kind == "added" else "v1",
+        clause_version_after="v3",
+        char_span_after=(0, len(text)),
+    )
+
+
+def _deal(
+    doc_id: str, rows: list[tuple[ClauseDiff, DeviationResult]], provenance: str = "our_paper"
+) -> list[Observation]:
+    return build_observations(
+        doc_id,
+        3,
+        provenance,
+        rows,
+        [],
+        ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
+        standard_text_by_tid={"non_solicit": _STD_NON_SOLICIT},
+    )
+
+
+_NONE_DR = DeviationResult(deviation="none", risk_delta=_NEUTRAL, basis="deterministic")
+_JUDGED_WORSE = DeviationResult(deviation="substantive", risk_delta=_WORSE_MATERIAL, basis="judge")
+_JUDGED_NEUTRAL = DeviationResult(deviation="substantive", risk_delta=_NEUTRAL, basis="judge")
+
+
+def _non_solicit_position(observations: list[Observation]) -> ClausePosition:
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+    positions = _compile(observations, template)
+    return next(p for p in positions if p.taxonomy_id == "non_solicit")
+
+
+def _rejected_texts(pos: ClausePosition) -> list[str]:
+    return [op.full_text for op in pos.rollup.rejected]
+
+
+def test_our_standard_clause_struck_outright_is_a_concession_not_a_rejection() -> None:
+    """Two our-paper deals strike our non-solicit outright before signing; a
+    third signs it unchanged. Our standard never lands in rollup.rejected,
+    the striking deals are conceded (not held), and the position is not
+    hold_firm."""
+    observations = (
+        _deal("deal_a", [(_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE)])
+        + _deal("deal_b", [(_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE)])
+        + _deal("deal_c", [(_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged"), _NONE_DR)])
+    )
+    pos = _non_solicit_position(observations)
+    assert _STD_NON_SOLICIT not in _rejected_texts(pos)
+    assert pos.rollup.rejected == ()
+    assert pos.rollup.stance_detail == {"held": 1, "of": 3, "basis": "our_paper"}
+    assert pos.rollup.position == "negotiable"
+    # Concessions are not OPF observations: never in observed_positions.
+    assert {op.outcome for op in pos.observed_positions} == {"signed"}
+    assert {op.example_ref.document_id for op in pos.observed_positions} == {"deal_c"}
+
+
+def test_our_standard_clause_replaced_is_a_concession_even_when_replacement_judged_neutral() -> (
+    None
+):
+    """Our non-solicit struck and replaced by their text in two deals. Even
+    where the signed replacement was judged neutral-risk, striking our
+    standard is a concession: the deal is conceded (never held), and our
+    standard never appears in rollup.rejected."""
+    observations = _deal(
+        "deal_a",
+        [
+            (_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE),
+            (_signed("non_solicit", _THEIR_NON_SOLICIT, path="10"), _JUDGED_NEUTRAL),
+        ],
+    ) + _deal(
+        "deal_b",
+        [
+            (_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE),
+            (_signed("non_solicit", _THEIR_NON_SOLICIT, path="10"), _JUDGED_WORSE),
+        ],
+    )
+    pos = _non_solicit_position(observations)
+    assert _STD_NON_SOLICIT not in _rejected_texts(pos)
+    assert pos.rollup.stance_detail == {"held": 0, "of": 2, "basis": "our_paper"}
+    assert pos.rollup.position == "negotiable"
+    assert all(op.outcome == "signed" for op in pos.observed_positions)
+    assert {op.full_text for op in pos.observed_positions} == {_THEIR_NON_SOLICIT}
+
+
+def test_their_ask_struck_before_signing_is_a_rejection_on_either_paper() -> None:
+    """Their non-standard language struck before signing is their refused
+    ask: it lands in rollup.rejected whatever paper the deal is on, and the
+    deal (which signed our standard) is held."""
+    for provenance in ("our_paper", "counterparty_paper"):
+        observations = _deal(
+            "deal_a",
+            [
+                (_removed("non_solicit", _THEIR_NON_SOLICIT), _JUDGED_WORSE),
+                (_signed("non_solicit", _STD_NON_SOLICIT, path="10"), _NONE_DR),
+            ],
+            provenance=provenance,
+        )
+        pos = _non_solicit_position(observations)
+        assert _rejected_texts(pos) == [_THEIR_NON_SOLICIT]
+        assert pos.rollup.stance_detail["held"] == pos.rollup.stance_detail["of"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue #216: conceded_before_signing counts by ORIGIN, never paper side —
+# position/historical_stance and stance_detail must agree.
+# ---------------------------------------------------------------------------
+
+
+def _stance_warnings(position: ClausePosition) -> list[str]:
+    from playbook_engine.validator import ValidationResult, _check_dynamics_v2
+
+    result = ValidationResult()
+    _check_dynamics_v2({"evidence": {"clauses": [position.to_dict()]}}, result)
+    return [e.message for e in result.errors if "historical_stance" in e.message]
+
+
+_GOV_STD = "This Agreement is governed by the laws of the State of Delaware."
+
+
+def test_counterparty_paper_concession_counts_beside_held_our_paper_deals() -> None:
+    """Our-paper deals A and B sign our standard unchanged; counterparty-paper
+    deal C struck our standard before signing. C is our concession (origin),
+    so stance_detail must show it, agreeing with the position — under basis
+    "all", because C is not an our-paper deal and must not be counted under
+    an our_paper label."""
+    obs = [
+        _obs("governing_law", doc_id="deal_a", text=_GOV_STD),
+        _obs("governing_law", doc_id="deal_b", text=_GOV_STD),
+        _obs(
+            "governing_law",
+            provenance="counterparty_paper",
+            outcome="conceded_before_signing",
+            doc_id="deal_c",
+            version="v1",
+            text=_GOV_STD,
+        ),
+    ]
+    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
+    summary = pos.to_dict()["summary"]
+    detail = summary["stance_detail"]
+    assert detail["basis"] == "all"
+    assert (detail["held"], detail["of"]) == (2, 3)
+    assert pos.rollup.position == "negotiable"
+    assert summary["historical_stance"] == "usually_conceded"
+    assert _stance_warnings(pos) == []
+
+
+def test_counterparty_paper_concession_with_no_our_paper_deals() -> None:
+    """No our-paper deal evidence at all: basis is "all", and the struck
+    standard still counts as a concession in stance_detail."""
+    obs = [
+        _obs(
+            "governing_law",
+            provenance="counterparty_paper",
+            doc_id="deal_x",
+            text="Governed by the laws of New York.",
+            deviation="substantive",
+            risk_delta=_NEUTRAL,
+        ),
+        _obs(
+            "governing_law",
+            provenance="counterparty_paper",
+            outcome="conceded_before_signing",
+            doc_id="deal_y",
+            version="v1",
+            text=_GOV_STD,
+        ),
+    ]
+    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
+    detail = pos.to_dict()["summary"]["stance_detail"]
+    assert detail["basis"] == "all"
+    assert detail["of"] == 2
+    assert detail["held"] == 1
+    assert _stance_warnings(pos) == []
+
+
+def test_counterparty_paper_holds_and_concessions_are_counted_symmetrically() -> None:
+    """Counterparty-paper deals that HOLD our standard must count exactly
+    like the one that conceded it — never only when they concede."""
+    obs = [_obs("governing_law", doc_id="deal_a", text=_GOV_STD)]
+    obs += [
+        _obs("governing_law", provenance="counterparty_paper", doc_id=f"deal_h{i}", text=_GOV_STD)
+        for i in range(3)
+    ]
+    obs.append(
+        _obs(
+            "governing_law",
+            provenance="counterparty_paper",
+            outcome="conceded_before_signing",
+            doc_id="deal_c",
+            version="v1",
+            text=_GOV_STD,
+        )
+    )
+    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
+    detail = pos.to_dict()["summary"]["stance_detail"]
+    assert detail == {"held": 4, "of": 5, "basis": "all"}
+    assert _stance_warnings(pos) == []
+
+
+def test_our_paper_only_concession_keeps_our_paper_basis() -> None:
+    """When every conceded row is our-paper, basis stays our_paper."""
+    obs = [
+        _obs("governing_law", doc_id="deal_a", text=_GOV_STD),
+        _obs("governing_law", doc_id="deal_b", text=_GOV_STD),
+        _obs(
+            "governing_law",
+            outcome="conceded_before_signing",
+            doc_id="deal_c",
+            version="v1",
+            text=_GOV_STD,
+        ),
+    ]
+    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
+    detail = pos.to_dict()["summary"]["stance_detail"]
+    assert detail == {"held": 2, "of": 3, "basis": "our_paper"}
+    assert _stance_warnings(pos) == []

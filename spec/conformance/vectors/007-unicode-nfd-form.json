@@ -101,8 +101,8 @@
           "exemplar_forms": [
             {
               "text_summary": "NFC café — standard form.",
-              "n": 3,
-              "band": "sometimes",
+              "n": 1,
+              "band": "rare",
               "deviation": "none",
               "risk_delta": {
                 "direction": "neutral",

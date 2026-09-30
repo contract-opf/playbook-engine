@@ -202,7 +202,14 @@ _MEDIA_TYPES: dict[str, str] = {
 # replaying the old judge-routed (and judge-cost-heavy) verdicts forever
 # without this bump, even though the deterministic result for identical
 # source content is now available for free.
-_DEVIATION_VS_TEMPLATE_VERSION = 7
+#
+# v8 (issue #216): build_observations now emits exactly one terminal
+# observation per (document, taxonomy_id) from the terminal version's own
+# tree, never labels removed-before-signing text "signed" (it is classified
+# by origin against template_std_by_tid), and corpus_doc
+# gained "dropped_observations" — a warm cache would otherwise keep
+# replaying the old one-row-per-node observations (inflated precedent) forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 8
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1057,6 +1064,10 @@ def _observations_from_single_version(
         has_signed_copy=has_signed_copy,
         our_party_aliases=our_party_aliases,
         our_authors=our_authors,
+        # Issue #216: one observation per taxonomy_id from this (only)
+        # version's own tree — the deal is the unit of precedent.
+        terminal_clauses=classified,
+        terminal_version_id=version_id,
     )
 
 
@@ -1918,8 +1929,14 @@ def _compute_doc_result(
     segmentation_cache: SegmentationVerdictCache | None = None,
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
+    template_std_nodes_by_tid: dict[str, list[str]] | None = None,
 ) -> dict[str, Any] | None:
     """Compute L1–L4 for a single document; return a cacheable result dict or None on skip.
+
+    *template_std_nodes_by_tid* (issue #216) is every template node's text
+    per taxonomy_id, in document order — the origin reference for a clause
+    removed before signing. When ``None`` (legacy callers), the first-node
+    *template_std_by_tid* stands in.
 
     Returns a dict with keys:
       - ``corpus_doc``:    corpus_documents entry (JSON-serialisable). Includes
@@ -2499,6 +2516,11 @@ def _compute_doc_result(
     )
 
     round_moves: list[RoundMove] = []
+    # Issue #216: per-reason count of net-diff rows that produced no
+    # observation (no signed slot, and either its text survives in the signed
+    # version or, removed before signing, its origin cannot be determined) —
+    # recorded on corpus_doc below and summed into corpus.stats at L5.
+    dropped_observations: dict[str, int] = {}
     if len(ordered_ids) < 2:
         doc_obs = _observations_from_single_version(
             doc_id,
@@ -2581,6 +2603,11 @@ def _compute_doc_result(
             for cd, _ in deviation_results
         ]
 
+        # Issue #216: the net diff's after side is ordered_ids[-1]; its
+        # observations are only "signed" when that terminal IS the detected
+        # signed copy (order_versions anchors the chain there). Draft text
+        # must never be reported as signed.
+        terminal_vid = ordered_ids[-1]
         doc_obs = build_observations(
             doc_id,
             signed_ordinal,
@@ -2588,7 +2615,7 @@ def _compute_doc_result(
             deviation_results,
             reversals,
             classification_confidences,
-            has_signed_copy=has_signed_copy,
+            has_signed_copy=has_signed_copy and terminal_vid == signed_vid,
             attributions=attributions,
             our_party_aliases=config.provenance.our_party_aliases,
             our_authors=config.provenance.our_authors,
@@ -2597,9 +2624,27 @@ def _compute_doc_result(
             # carry ITS draft's ordinal, not signed_ordinal, or it resolves
             # (via version_files) to a file the cited clause is not in.
             ordinal_by_vid={vid: i + 1 for i, vid in enumerate(ordered_ids)},
+            # Issue #216: exactly one terminal observation per taxonomy_id,
+            # built from the terminal version's own classified tree (its
+            # text, document order, first-node citation).
+            terminal_clauses=classified_by_version[terminal_vid],
+            terminal_version_id=terminal_vid,
+            dropped=dropped_observations,
+            # Issue #216: the origin reference for a clause removed before
+            # signing — our standard language struck is our concession (only
+            # when the deal has a detected executed copy), non-standard
+            # language struck is their refused ask.
+            standard_text_by_tid=(
+                template_std_nodes_by_tid
+                if template_std_nodes_by_tid is not None
+                else template_std_by_tid
+            ),
         )
 
     corpus_doc["provenance"] = provenance
+    # Issue #216: summed into corpus.stats.dropped_observations by
+    # assemble_playbook (and stripped from the embedded corpus document).
+    corpus_doc["dropped_observations"] = dict(sorted(dropped_observations.items()))
     corpus_doc["provenance_confidence"] = prov_result.confidence
     corpus_doc["provenance_is_ambiguous"] = prov_result.is_ambiguous
     # null when no signed copy was detected (issue #202): signed_ordinal is a
@@ -2977,9 +3022,17 @@ def mine_corpus(
     # indemnification/insurance clause is not a usable standard to diff
     # against (issue #105).
     template_std_by_tid: dict[str, str] = {}
+    # Issue #216: the ORIGIN reference for a clause removed before signing is
+    # EVERY template node carrying its taxonomy_id, in document order — not
+    # only the first (template_std_by_tid above), or our own standard text
+    # from a later node of a multi-node standard clause, struck before
+    # signing, would be misread as a counterparty ask we refused.
+    template_std_nodes_by_tid: dict[str, list[str]] = {}
     for t_obs in t_observations:
         if t_obs.taxonomy_id is not None and t_obs.taxonomy_id not in template_std_by_tid:
             template_std_by_tid[t_obs.taxonomy_id] = t_obs.full_text
+        if t_obs.taxonomy_id is not None:
+            template_std_nodes_by_tid.setdefault(t_obs.taxonomy_id, []).append(t_obs.full_text)
 
     # Config fingerprint: encodes the fields that affect L1-L4 outputs.
     # Assembled HERE — after template ingestion above, not from the template
@@ -3010,6 +3063,12 @@ def mine_corpus(
             "template_content_hash": template_content_hash,
             "template_tree_present": template_tree is not None,
             "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),
+            # Issue #216: the origin reference build_observations classifies
+            # removed-before-signing text against — every template node per
+            # taxonomy_id, so a change to any later node busts the cache too.
+            "template_origin_standards": make_config_fingerprint(
+                sorted(template_std_nodes_by_tid.items())
+            ),
             # Which extractor produced the source text changes L1 ingest
             # output for byte-identical source files — legacy
             # (pdfplumber/python-docx/pandoc) has no OCR and can garble
@@ -3276,6 +3335,7 @@ def mine_corpus(
                     segmentation_cache=segmentation_cache,
                     extraction_cache=extraction_cache,
                     refresh_extraction=refresh_extraction,
+                    template_std_nodes_by_tid=template_std_nodes_by_tid,
                 )
 
             return store.get_or_compute(cache_key, _compute)
@@ -3306,6 +3366,7 @@ def mine_corpus(
             segmentation_cache=segmentation_cache,
             extraction_cache=extraction_cache,
             refresh_extraction=refresh_extraction,
+            template_std_nodes_by_tid=template_std_nodes_by_tid,
         )
 
     # Documents whose LLM segmentation/normalization failed a fail-loud QA gate,

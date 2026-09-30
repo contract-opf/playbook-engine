@@ -42,7 +42,10 @@ Position derivation (from our-paper observations only):
                                   deviation ``"none"`` and neutral/better risk.
   ``"acceptable_variants_exist"`` — neutral-risk signed variants exist.
   ``"negotiable"``              — worse-risk signed observations exist (we have
-                                  conceded before), or no our-paper at all.
+                                  conceded before), our standard language was
+                                  removed before signing in some deal
+                                  (``conceded_before_signing``, issue #216),
+                                  or no our-paper at all.
   ``"hold_firm"``               — proposed_then_reversed observations exist with
                                   no concessions.
 
@@ -56,7 +59,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from playbook_engine.observation_builder import Observation, RoundMove
+from playbook_engine.observation_builder import (
+    OUTCOME_CONCEDED_BEFORE_SIGNING,
+    Observation,
+    RoundMove,
+)
 
 # ---------------------------------------------------------------------------
 # CoherenceJudge — LLM seam for flagging unreliable clause positions
@@ -142,7 +149,7 @@ class CoherenceJudge(Protocol):
     The summary dict passed to ``judge()`` contains:
         ``clause_id``     str   — ClausePosition.id
         ``position``      str   — rollup position (standard/negotiable/…)
-        ``n_our_paper``   int   — number of our-paper observations
+        ``n_our_paper``   int   — number of distinct our-paper deals
         ``risk_delta_directions``  list[str]  — risk_delta.direction values across citations
         ``is_fallback``   bool  — True when position is "negotiable" due to a
                                   fallback (position-vs-fallback tension indicator)
@@ -415,8 +422,10 @@ def _historical_stance(rollup: ClauseRollup, *, has_our_standard: bool = True) -
                               and ``stub_basis_present``).
       "usually_conceded"    — has_our_paper evidence exists, a real judge
                               assessed it, and the corpus shows we have
-                              conceded before (fallbacks present) with no
-                              our-paper rejections on record.
+                              conceded before — fallbacks present, OR some
+                              deal struck our standard language before
+                              signing (``conceded_before_signing``, issue
+                              #216) — with no our-paper rejections on record.
       "mixed"               — genuinely contradictory evidence: the corpus
                               shows BOTH a concession (fallback) AND an
                               our-paper rejection (proposed_then_reversed)
@@ -426,10 +435,13 @@ def _historical_stance(rollup: ClauseRollup, *, has_our_standard: bool = True) -
     Note: within the reachable ``position == "negotiable"`` branch of
     ``_derive_rollup``/``_derive_position``, "negotiable" is *only* ever
     returned once evidence is sufficient and non-stub for a genuine
-    concession pattern (``fallback_obs`` truthy) — the "no signal" reasons
+    concession pattern — ``fallback_obs`` truthy, or a
+    ``conceded_before_signing`` row (issue #216) — the "no signal" reasons
     for "negotiable" are already filtered out by the ``evidence_sufficient``/
-    ``stub_basis_present`` checks above, so ``rollup.fallbacks`` is
-    guaranteed non-empty whenever this function reaches that branch.
+    ``stub_basis_present`` checks above. ``rollup.fallbacks`` is therefore
+    NOT guaranteed non-empty here: a clause whose only concession is our
+    standard struck before signing reaches "usually_conceded" with
+    ``fallbacks == ()``; its concession is carried by ``stance_detail``.
     """
     evidence_sufficient = bool(rollup.confidence.get("evidence_sufficient", False))
     if rollup.stub_basis_present or not evidence_sufficient:
@@ -646,6 +658,12 @@ def compile_clause_positions(
     # than fabricate/relabel it to fit the schema. It remains visible in
     # observations.jsonl and the inspection report for human review.
     groups: dict[str, list[Observation]] = {}
+    # Issue #216: our standard language removed before signing
+    # (outcome="conceded_before_signing") is our concession. It is not an OPF
+    # outcome, so it never enters `groups` (observed_positions, rejected,
+    # precedent counts); it is kept per taxonomy_id only to count its deal
+    # as conceded in stance_detail and the position.
+    conceded_by_tid: dict[str, list[Observation]] = {}
     # Sub-sentence fragments (issue #210) are quarantined here — before they
     # ever reach `groups` — so they cannot inflate precedent_count or
     # n_our_paper for the taxonomy_id they'd otherwise land under. Counted
@@ -654,6 +672,10 @@ def compile_clause_positions(
     quarantined_by_tid: dict[str, int] = {}
     for obs in observations:
         if obs.taxonomy_id is None:
+            continue
+        if obs.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING:
+            if not _is_degenerate_observation_text(obs.full_text):
+                conceded_by_tid.setdefault(obs.taxonomy_id, []).append(obs)
             continue
         if obs.outcome not in _OPF_OUTCOMES:
             continue
@@ -681,7 +703,7 @@ def compile_clause_positions(
         moves.sort(key=lambda m: (m.document_id, m.round))
 
     # Collect all taxonomy_ids (from both deal observations and template).
-    all_tids = sorted(groups.keys() | template_map.keys())
+    all_tids = sorted(groups.keys() | template_map.keys() | conceded_by_tid.keys())
 
     positions: list[ClausePosition] = []
     coherence_flags: list[CoherenceFlag] = []
@@ -757,6 +779,7 @@ def compile_clause_positions(
             has_our_paper,
             precedent_counts,
             min_evidence_n=min_evidence_n,
+            conceded_before_signing=conceded_by_tid.get(tid, []),
             # §2.2 (issue #182): a strong position needs an our_standard to point
             # at; without one (no template clause for this taxonomy) cap at
             # negotiable so historical_stance stays validator-consistent.
@@ -844,19 +867,24 @@ def _normalize_for_dedup(text: str) -> str:
 
 
 def _count_precedents(group: list[Observation]) -> dict[str, int]:
-    """Count observations per normalized full_text within one taxonomy group.
+    """Count DISTINCT DEALS per normalized full_text within one taxonomy group.
 
     Issue #107: ``ObservedPosition.precedent_count`` was always 1 — identical
     clause texts across deals were never aggregated into a strength signal.
     This counts, across ALL observations in the group (any provenance), how
-    many share the same normalized text, so a variant seen in 5 agreements
-    is distinguishable from one seen in exactly 1.
+    many distinct documents carry the same normalized text, so a variant
+    seen in 5 agreements is distinguishable from one seen in exactly 1.
+
+    Issue #216: the deal is the unit of precedent — the count is of distinct
+    ``citation.document_id`` values, never of observation rows, so the same
+    text surfacing more than once in one deal (several nodes, or a signed
+    and a reversed row) is still one precedent.
     """
-    counts: dict[str, int] = {}
+    docs: dict[str, set[str]] = {}
     for obs in group:
         key = _normalize_for_dedup(obs.full_text)
-        counts[key] = counts.get(key, 0) + 1
-    return counts
+        docs.setdefault(key, set()).add(obs.citation.document_id)
+    return {key: len(ids) for key, ids in docs.items()}
 
 
 def _obs_to_observed_position(
@@ -897,6 +925,7 @@ def _derive_rollup(
     *,
     min_evidence_n: int = MIN_EVIDENCE_N,
     has_our_standard: bool = True,
+    conceded_before_signing: list[Observation] | None = None,
 ) -> ClauseRollup:
     """Derive rollup guidance from the observation group.
 
@@ -911,6 +940,15 @@ def _derive_rollup(
     ``our_standard``; capping at "negotiable" in that case keeps the rollup
     §2.2-consistent. Defaults to ``True`` so callers grounding every strong
     position in a template are unaffected.
+
+    ``conceded_before_signing`` (issue #216): this clause's
+    ``outcome="conceded_before_signing"`` observations — our standard
+    language removed before signing. Each is our concession: its deal counts
+    as conceded (never held) in ``stance_detail``, and any one of them
+    makes the position "negotiable". They are not OPF observations, so they
+    never reach ``rejected``/``fallbacks``/``acceptable_if`` or the
+    ``n_our_paper``/``n_counterparty_paper`` counts, which describe the
+    published ``observed_positions``.
 
     Confidence (§6) is published as two orthogonal numbers (issue #107):
       - ``score`` — provenance QUALITY: weighted = n_our_paper * 1.0 +
@@ -929,8 +967,14 @@ def _derive_rollup(
         consumer reading one playbook document (without the producer's
         config) can see what N was enforced.
     """
-    n_our_paper = sum(1 for obs in group if obs.provenance == "our_paper")
-    n_counterparty_paper = sum(1 for obs in group if obs.provenance == "counterparty_paper")
+    # Issue #216: the deal is the unit of precedent — n_our_paper /
+    # n_counterparty_paper count DISTINCT deals (citation.document_id), never
+    # observation rows, so a deal carrying both its signed row and a reversal
+    # row for this clause is one data point, not two.
+    n_our_paper = len({obs.citation.document_id for obs in group if obs.provenance == "our_paper"})
+    n_counterparty_paper = len(
+        {obs.citation.document_id for obs in group if obs.provenance == "counterparty_paper"}
+    )
     total = n_our_paper + n_counterparty_paper
     if total > 0:
         weighted = n_our_paper * 1.0 + n_counterparty_paper * 0.5
@@ -1047,18 +1091,46 @@ def _derive_rollup(
     # "held 0 of 0, basis our_paper" while real counterparty concessions
     # exist in the group — basis "all" over the group is the derivable truth
     # there (review finding, 2026-07-13).
-    detail_basis = "our_paper" if our_paper_obs else "all"
+    conceded_rows = list(conceded_before_signing or [])
+    # A conceded_before_signing row from a non-our-paper deal forces basis
+    # "all": counting that deal's concession under an our_paper label would
+    # count non-our-paper deals only when they concede and never when they
+    # hold — a one-directional paper-side weighting (owner decision
+    # 2026-09-13 (b)). Under "all" the whole group is the pool, so such deals
+    # count whether they held or conceded.
+    detail_basis = (
+        "our_paper"
+        if (our_paper_obs or any(obs.provenance == "our_paper" for obs in conceded_rows))
+        and all(obs.provenance == "our_paper" for obs in conceded_rows)
+        else "all"
+    )
     detail_pool = [
         obs
         for obs in (our_paper_obs if detail_basis == "our_paper" else group)
         if obs.outcome in _OPF_OUTCOMES
     ]
-    held = sum(
-        1
+    # Every conceded_before_signing row joins the pool: these rows are
+    # identified by ORIGIN (our standard language struck before signing),
+    # never by paper side (owner decision 2026-09-13 (b), applied on #216).
+    # The basis rule above guarantees the pool's label stays true.
+    # _derive_position below receives the same set, so the position and
+    # stance_detail cannot disagree about whether a concession exists.
+    conceded_pool = conceded_rows
+    # Issue #216: held/of count DISTINCT deals (citation.document_id), not
+    # rows — a deal's signed row and its reversal rows are one opportunity.
+    # A deal is "held" unless any of its rows conceded (signed, worse) or it
+    # struck our standard language before signing (conceded_before_signing
+    # — a concession even when the clause was struck outright and the deal
+    # has no signed row for it): the signed outcome is what the deal settled
+    # on, so a reversal earlier in the same trail never offsets a concession.
+    pool_deals = {obs.citation.document_id for obs in detail_pool + conceded_pool}
+    conceded_deals = {
+        obs.citation.document_id
         for obs in detail_pool
-        if obs.outcome == "proposed_then_reversed" or obs.risk_delta.get("direction") != "worse"
-    )
-    stance_detail: dict[str, Any] = {"held": held, "of": len(detail_pool), "basis": detail_basis}
+        if obs.outcome != "proposed_then_reversed" and obs.risk_delta.get("direction") == "worse"
+    } | {obs.citation.document_id for obs in conceded_pool}
+    held = len(pool_deals - conceded_deals)
+    stance_detail: dict[str, Any] = {"held": held, "of": len(pool_deals), "basis": detail_basis}
 
     # ---------------------------------------------------------------
     # §2.2 enforcement — position cap
@@ -1088,7 +1160,9 @@ def _derive_rollup(
         # is one data point, not a pattern, regardless of confidence.score.
         position = "negotiable"
     else:
-        position = _derive_position(our_paper_obs, fallback_obs, rejected_obs)
+        position = _derive_position(
+            our_paper_obs, fallback_obs, rejected_obs, conceded_before_signing=bool(conceded_rows)
+        )
 
     # Post-condition: structural guarantee that §2.2 was not violated.
     assert not (not has_our_paper and position in _POSITION_STRONGER_THAN_NEGOTIABLE), (
@@ -1121,8 +1195,14 @@ def _derive_position(
     our_paper_obs: list[Observation],
     fallback_obs: tuple[ObservedPosition, ...],
     rejected_obs: tuple[ObservedPosition, ...],
+    *,
+    conceded_before_signing: bool = False,
 ) -> str:
     """Derive position string from our-paper deal signal.
+
+    ``conceded_before_signing`` (issue #216): some deal removed our standard
+    language before signing — a concession, so the position is at most
+    "negotiable", exactly as a worse-risk signed fallback makes it.
 
     Note: when ``our_paper_obs`` is empty (only template grounding, no deal
     evidence), we conservatively return ``"negotiable"`` — a template alone
@@ -1137,7 +1217,7 @@ def _derive_position(
         # No our-paper deal evidence (template-only or counterparty-only) — cap.
         return "negotiable"
 
-    if fallback_obs:
+    if fallback_obs or conceded_before_signing:
         # We have conceded before — negotiable.
         return "negotiable"
 

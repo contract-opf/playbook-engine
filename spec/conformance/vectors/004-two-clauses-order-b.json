@@ -141,8 +141,8 @@
           "exemplar_forms": [
             {
               "text_summary": "Beta Clause — standard form.",
-              "n": 3,
-              "band": "sometimes",
+              "n": 1,
+              "band": "rare",
               "deviation": "none",
               "risk_delta": {
                 "direction": "neutral",
@@ -173,8 +173,8 @@
           "exemplar_forms": [
             {
               "text_summary": "Alpha Clause — standard form.",
-              "n": 3,
-              "band": "sometimes",
+              "n": 1,
+              "band": "rare",
               "deviation": "none",
               "risk_delta": {
                 "direction": "neutral",

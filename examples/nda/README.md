@@ -31,12 +31,18 @@ playbook.opf.json        -- the derived, worked playbook: populated
 ## The worked playbook
 
 `playbook.opf.json` is committed with genuine judged semantics: 26 clauses
-across all six deals, a real `proposed_then_reversed` round-trip (the
-`exclusions_from_confidential` and `survival_period` clauses in the
-four-version `beta-industries` deal were narrowed/extended mid-negotiation
-and then reversed back to our standard by signature -- the reversal
-detector needs >=3 versions on a deal to observe this, which is why
-`beta-industries` carries four), a populated `posture.system_prompt` from a
+across all six deals; a real `proposed_then_reversed` round-trip (a
+`residuals` clause inserted in v2 of the three-version `zeta-diagnostics`
+deal and struck again before signing -- the reversal detector needs >=3
+versions on a deal to observe this); non-standard language struck before
+signing (the `epsilon-systems` first draft's compelled-disclosure clause,
+which lacked the notice obligation the signed copy restores) counted as a
+refused ask; our own standard clauses struck before signing (standard of care,
+governing law and venue in `beta-industries`, confidentiality of
+discussions and breach notice in `gamma-holdings`) counted as concessions --
+those deals are conceded, not held, in `stance_detail` -- never as signed
+and never as rejected asks; a populated
+`posture.system_prompt` from a
 six-question GC interview, and three signed `floor.invariants`: two
 auto-promoted from the interview's "sacred clauses" answer (exclusions from
 Confidential Information; survival of confidentiality obligations) and one
