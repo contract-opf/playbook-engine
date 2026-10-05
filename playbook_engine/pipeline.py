@@ -42,6 +42,7 @@ from playbook_engine.clause_library_compiler import compile_clause_library
 from playbook_engine.clause_position_compiler import (
     CoherenceJudge,
     compile_clause_positions,
+    deviations_are_deterministic,
 )
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.config import EngineConfig
@@ -112,6 +113,7 @@ from playbook_engine.playbook_assembler import assemble_playbook, write_playbook
 from playbook_engine.provenance_detector import ProvenanceJudge, ProvenanceResult, detect_provenance
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
+from playbook_engine.run_manifest import read_deviation_mode, record_deviation_mode
 from playbook_engine.scope_gate import (
     ScopeDecision,
     ScopeJudge,
@@ -3864,6 +3866,12 @@ def mine_corpus(
     # round_moves truncation below already guards against for change_summary).
     scope_log.write(out_dir / "scope.json")
     write_observations_jsonl(truncate_search_snippets(all_observations), obs_path)
+    # Issue #230: record the deviation mode this store was mined in, right
+    # beside it, so project_playbook reads it back instead of inferring it
+    # from row contents (an opt-in judged run whose every clause matched the
+    # template carries only basis="deterministic" rows and is otherwise
+    # indistinguishable from the consumer path).
+    record_deviation_mode(out_dir, "deterministic" if _dev_judge is None else "judged")
     # Round moves (issue #177) — written post-pseudonymization like
     # observations.jsonl; project_playbook reads it back for the
     # negotiation_trail (absent file → no trail, e.g. a pre-#177 store).
@@ -4028,6 +4036,21 @@ def project_playbook(
     if round_moves:
         progress(f"  loaded {len(round_moves)} round move(s) from store")
 
+    # Issue #230: the deviation mode is the one mine_corpus recorded for this
+    # store, never guessed from its rows. Only an out-dir mined before the
+    # mode was recorded falls back to inference — and says so.
+    deviation_mode = read_deviation_mode(out_dir)
+    if deviation_mode is None:
+        deterministic_deviations = deviations_are_deterministic(all_observations)
+        progress(
+            "  WARNING: no deviation mode recorded for this store (mined before it was "
+            "recorded); inferred "
+            f"{'deterministic' if deterministic_deviations else 'judged'} from the "
+            "observations. Re-run 'playbook mine' to record it."
+        )
+    else:
+        deterministic_deviations = deviation_mode == "deterministic"
+
     taxonomy_titles = {e.id: e.label for e in taxonomy.entries}
     clause_positions, coherence_flags, unclassified_coverage = compile_clause_positions(
         all_observations,
@@ -4036,6 +4059,7 @@ def project_playbook(
         coherence_judge=coherence_judge,
         min_evidence_n=config.provenance.min_evidence_n,
         round_moves=round_moves,
+        deterministic_deviations=deterministic_deviations,
     )
     clause_library, _library_unclassified_coverage = compile_clause_library(all_observations)
 

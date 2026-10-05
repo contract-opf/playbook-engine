@@ -31,8 +31,10 @@ Design invariants:
     its taxonomy_id — never silently: it is counted and surfaced as a
     ``CoherenceFlag`` (severity ``"warn"``).
   - Consumer path (issue #220): when the store's deviations are the
-    deterministic standard check rather than judged verdicts
-    (``deviations_are_deterministic``), nothing is derived from risk
+    deterministic standard check rather than judged verdicts (the deviation
+    mode ``mine_corpus`` recorded for the store, issue #230 — inferred by
+    ``deviations_are_deterministic`` only for a store mined before the mode
+    was recorded), nothing is derived from risk
     direction — ``historical_stance`` is ``"no_signal"``, ``acceptable_if``
     and ``fallbacks`` stay empty, the internal position is capped at
     ``"negotiable"``, and ``stance_detail`` reports the deterministic facts
@@ -637,9 +639,15 @@ def compile_clause_positions(
                              (issue #220) instead of judged verdicts — then
                              no stance, tolerance or fallback is derived from
                              risk direction (see ``_derive_rollup``).
-                             ``None`` (the default) infers it from the
-                             observations themselves
-                             (``deviations_are_deterministic``).
+                             ``project_playbook`` always passes it
+                             explicitly — the mode ``mine_corpus`` recorded
+                             for the store (issue #230). ``None`` (the
+                             default) infers it from the observations
+                             themselves (``deviations_are_deterministic``),
+                             which is a fallback only: an opt-in judged run
+                             whose every clause matched the template carries
+                             only deterministic rows and would be inferred
+                             as the consumer path.
 
     Returns:
         Tuple of (positions, coherence_flags, unclassified_coverage):
@@ -952,6 +960,13 @@ _MAGNITUDE_ORDER: dict[str, int] = {"minor": 0, "material": 1}
 def deviations_are_deterministic(observations: list[Observation]) -> bool:
     """Whether a store's deviations are the consumer path's deterministic
     standard check (issue #220) rather than judged verdicts.
+
+    A FALLBACK only (issue #230): the mode is recorded at mine time
+    (``run_manifest.record_deviation_mode``) and ``project_playbook`` passes
+    it explicitly; this inference is used (with a WARNING) only for a store
+    mined before the mode was recorded. It cannot tell an opt-in judged run
+    whose every clause matched the template — every row then carries the
+    unchanged fast path's ``basis="deterministic"`` — from a consumer run.
 
     True when there is at least one observation and EVERY one carries
     ``basis="deterministic"`` and a computed ``standard`` fact — exactly what

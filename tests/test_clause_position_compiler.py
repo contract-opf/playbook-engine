@@ -26,6 +26,7 @@ from playbook_engine.clause_position_compiler import (
 from playbook_engine.deviation_classifier import (
     DeviationResult,
     RiskDelta,
+    assess_deviations,
     assess_deviations_deterministic,
 )
 from playbook_engine.observation_builder import (
@@ -1851,6 +1852,66 @@ def test_explicit_mode_overrides_inference() -> None:
     )
     pos = next(p for p in positions if p.taxonomy_id == "non_solicit")
     assert not pos.rollup.deterministic_deviations
+
+
+class _NeverCalledJudge:
+    """A configured deviation judge that every row bypasses (unchanged)."""
+
+    def assess_batch(self, items, our_standard):  # pragma: no cover - never reached
+        raise AssertionError("an unchanged clause never reaches the judge")
+
+
+def _opt_in_unchanged_deal(doc_id: str) -> list[Observation]:
+    """An opt-in judged run's deal that signed our standard unchanged: the
+    judged producer (``assess_deviations`` with a judge configured) takes its
+    unchanged fast path, and ``build_observations`` runs with
+    ``deterministic_deviations=False`` — exactly what ``mine_corpus`` writes
+    with ``--with-deviation-judge`` for a clause nobody touched."""
+    rows = assess_deviations(
+        [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")],
+        _STD_NON_SOLICIT,
+        _NeverCalledJudge(),
+        document_id=doc_id,
+    )
+    return build_observations(
+        doc_id,
+        3,
+        "our_paper",
+        rows,
+        [],
+        ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
+        standard_text_by_tid=_STD_ONLY,
+        deterministic_deviations=False,
+    )
+
+
+def test_opt_in_store_of_unchanged_clauses_compiles_judged_when_mode_is_given() -> None:
+    """Issue #230: an opt-in judged run where every clause matched the
+    template writes rows indistinguishable from the consumer path's, so the
+    inference reads it as the consumer path. The mode recorded at mine time,
+    passed explicitly, compiles the judged rollup."""
+    obs = _opt_in_unchanged_deal("deal-a") + _opt_in_unchanged_deal("deal-b")
+    assert {o.basis for o in obs} == {"deterministic"}
+    assert all(o.standard is True for o in obs)
+    assert deviations_are_deterministic(obs)  # the inference cannot tell
+
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+
+    def _summary(mode: bool | None) -> tuple[ClausePosition, dict]:
+        positions, _, _ = compile_clause_positions(obs, template, deterministic_deviations=mode)
+        pos = next(p for p in positions if p.taxonomy_id == "non_solicit")
+        return pos, pos.to_dict()["summary"]
+
+    judged, summary = _summary(False)
+    assert not judged.rollup.deterministic_deviations
+    assert summary["historical_stance"] == "consistently_held"
+    assert summary["stance_detail"] == {"held": 2, "of": 2, "basis": "our_paper"}
+
+    for mode in (True, None):  # recorded consumer mode, or the legacy inference
+        consumer, summary = _summary(mode)
+        assert consumer.rollup.deterministic_deviations
+        assert summary["historical_stance"] == "no_signal"
+        assert summary["stance_detail"] == {"held": 2, "of": 2, "basis": "all"}
 
 
 def test_consumer_path_multi_node_clause_is_standard_as_a_whole() -> None:

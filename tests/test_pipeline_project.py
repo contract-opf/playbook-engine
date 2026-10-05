@@ -27,7 +27,7 @@ from playbook_engine.config import load_config
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.floor_candidates import sign_floor_invariant
 from playbook_engine.observation_builder import Observation, ObservationCitation
-from playbook_engine.pipeline import mine_corpus, project_playbook
+from playbook_engine.pipeline import _NullDeviationJudge, mine_corpus, project_playbook
 from playbook_engine.posture import apply_posture_interview
 from playbook_engine.taxonomy import load_taxonomy
 
@@ -1310,7 +1310,17 @@ def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
     cfg = load_config(config_path)
 
-    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+    # Mined as an opt-in judged run (issue #230): the injected evidence below
+    # is judged rows (basis="judge"), which only a judged-mode store carries,
+    # and the mode recorded at mine time — not the rows — decides whether
+    # project derives a stance at all (the consumer path never does).
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        deviation_judge=_NullDeviationJudge(),
+    )
     playbook_v1 = project_playbook(
         out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
     )
