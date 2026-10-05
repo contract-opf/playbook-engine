@@ -173,12 +173,15 @@ def _sanitize_corpus_documents_for_schema(
 # Observation bases meaning no real judge assessed the clause — mirrors
 # ``clause_position_compiler._UNJUDGED_BASES``. "stub" (no judge configured
 # at all) is the strict case; "needs_review"/"judge_error" additionally
-# cover the *default zero-LLM* deviation stub (``_NullDeviationJudge``,
-# pipeline.py), which emits basis="needs_review" rather than "stub" for
-# every changed clause since a judge protocol IS wired (just not a real
-# one). Watermarking on all three is what makes a default `playbook mine` +
-# `playbook project` run (no LLM configured anywhere) actually watermark its
-# output — see issue #101.
+# cover the zero-LLM deviation stub (``_NullDeviationJudge``, pipeline.py)
+# that an opt-in ``--with-deviation-judge`` run wires until verdicts land,
+# which emits basis="needs_review" rather than "stub" for every changed
+# clause since a judge protocol IS wired (just not a real one). Watermarking
+# on all three is what makes such a run (no LLM configured anywhere)
+# actually watermark its output — see issue #101. The default consumer path
+# (issue #220) wires no deviation judge at all: its observations carry
+# basis="deterministic", the standard check, which is not an unjudged
+# placeholder.
 _UNJUDGED_OBSERVATION_BASES = frozenset({"stub", "needs_review", "judge_error"})
 
 

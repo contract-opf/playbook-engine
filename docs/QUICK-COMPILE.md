@@ -13,8 +13,10 @@ Turn a folder of contract files into a negotiation playbook — without writing 
 
 1. **Checks** your folder layout and tells you what to fix.
 2. **Runs** the deterministic pipeline stages (ingest, structure, classify).
-3. **Stubs** the LLM judgment stages (scope, deviation) — structurally
-   valid output, semantically blank (see the banner above).
+3. **Stubs** the LLM judgment stages (scope) — structurally valid output,
+   semantically blank (see the banner above). Deviation is not a judgment
+   stage by default: every clause gets the deterministic standard check
+   (does its text match your template clause?).
 4. **Emits** a validated `playbook.opf.json` you can review and share.
 
 ---
@@ -213,7 +215,10 @@ The engine auto-detects corpus changes (new files, modified files) and forces a 
 The engine ships with **stub judges** that run without LLM access. They produce valid output but do not perform semantic judgment:
 
 - Every document is accepted as in-scope.
-- All clause deviations are marked as substantive + neutral risk.
+- Clause deviations are not judged: each is the deterministic standard
+  check — `none` when the clause text matches your template clause,
+  `substantive` otherwise — with a neutral placeholder risk. Judged
+  deviation/risk verdicts are opt-in (`--with-deviation-judge`).
 - Clause classification relies on simple word-overlap matching (Jaccard similarity) only.
 
 For real semantic judgment, you don't write code: use the packaged

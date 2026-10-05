@@ -10,6 +10,35 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Judged deviation/risk verdicts leave the consumer path (issue #220).**
+  The consumer (a capable review model) does the judging; the playbook
+  supplies precedent (owner decision 2026-09-13). With no deviation judge
+  configured, now the default, L4 runs a deterministic standard check
+  instead: each observation carries a `standard` fact (its text, with
+  whitespace, case, punctuation and known party names normalized away,
+  exactly equals the template clause for its
+  taxonomy_id; a deal's clause split across nodes is compared as one merged
+  text). There is deliberately no similarity tolerance: an order-blind
+  token score absorbed reversed obligations ("Neither party may assign" to
+  "Either party may assign"), deleted carve-outs and negation flips as our
+  standard and `deviation` is derived from it: `none`
+  when standard, `substantive` otherwise, `basis: "deterministic"`, with the
+  neutral/none `risk_delta` placeholder OPF 0.3 still requires. Nothing is
+  ever `needs_review` and nothing is queued, so identical signed text gets
+  the identical answer whatever opening draft it was reached from. `project`
+  reads no stance out of it: `historical_stance` is `no_signal`,
+  `acceptable_if` and `fallbacks` are empty, and `stance_detail` is
+  `{held: deals that signed our standard, of: every deal with the clause,
+  basis: "all"}` (refused asks in `rejected` are kept). Judged deviation
+  verdicts are an opt-in advisory layer for posture/floor work:
+  `playbook judge --with-deviation-judge` / `playbook mine
+  --with-deviation-judge`; by default the plan and the drain loop report
+  `deviation: 0 pending`, and `judge-apply` notes that stored deviation
+  verdicts only replay under the flag. Scope, classification and provenance
+  judges are unchanged. The deviation-cache version is bumped to 9.
+  `examples/nda/canned-verdicts.jsonl` drops its deviation verdicts and
+  `examples/nda/playbook.opf.json` was regenerated. No schema file changed.
+
 - **The deal is the unit of precedent (issue #216).** L4 now emits exactly
   one signed (or unsigned) observation per (deal, taxonomy_id), built from
   the signed version's own tree: its nodes for that clause joined in

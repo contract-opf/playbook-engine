@@ -32,6 +32,12 @@ These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, deviation_judge=…,
 provenance_judge=…)``.
 
+``StoreBackedDeviationJudge`` is opt-in (issue #220): the CLI wires it only
+under ``--with-deviation-judge``, as an advisory layer for posture/floor
+tooling. By default ``mine_corpus`` gets no deviation judge at all and every
+deviation is the deterministic standard check, so no deviation item is ever
+queued and no stored deviation verdict reaches the consumer path.
+
 Rubric versioning (see :mod:`playbook_engine.rubric`): because the store key
 is purely content-derived, a change to the *judging criteria* — the taxonomy,
 the deviation vocabulary, the prose rubric in the ``playbook-from-corpus``
@@ -677,7 +683,8 @@ class StoreBackedDeviationJudge:
     """``DeviationJudge`` that replays stored verdicts or queues new payloads.
 
     Implements ``DeviationJudge.assess_batch`` and is a drop-in replacement for
-    the ``deviation_judge`` parameter of ``mine_corpus``.
+    the ``deviation_judge`` parameter of ``mine_corpus``. Opt-in only (issue
+    #220, ``--with-deviation-judge``) — see the module docstring.
 
     On a store hit: returns ``DeviationResult(basis="judge")`` reconstructed
     from the stored verdict dict.

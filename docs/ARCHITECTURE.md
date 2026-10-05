@@ -29,11 +29,20 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - tag each clause into an ACTIVE taxonomy entry
         - align "the same clause" across versions of one document
                                      │
-  L4  MINE DELTAS           (deterministic diff + LLM judgment on changed hunks only)
+  L4  MINE DELTAS           (deterministic diff + deterministic standard facts)
         - consecutive diffs (vᵢ→vᵢ₊₁) = negotiation moves
         - net diff (template/first → signed) = durable outcome
         - REVERSAL detection: inserted-then-removed-before-signing = proposed_then_reversed
-        - for each changed clause: LLM assigns deviation + risk_delta vs our_standard
+        - DEFAULT (the consumer path): no deviation judge. Each observation carries
+          two deterministic facts — `standard` (its normalized text equals, or
+          token-Jaccard near-equals at the documented threshold, the template
+          clause for its taxonomy_id; party names neutralized) and `outcome` —
+          and `deviation` is derived from `standard` ("none" / "substantive",
+          basis "deterministic", neutral placeholder risk_delta). Nothing is
+          queued; the consumer (a review model) does the judging
+        - OPT-IN (`--with-deviation-judge`): an advisory judged layer for
+          posture/floor work — the judge assigns deviation + risk_delta vs
+          our_standard on the changed hunks
         - ONE terminal observation per (deal, taxonomy_id): the signed version's nodes
           for that clause, joined in document order, cited to the first node
         - text removed before signing is never "signed": a clause with no signed
@@ -55,6 +64,10 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - build ClausePosition[] (template-anchored) honoring the provenance rule
         - build ClauseConcept[] (concept library) for counterparty-paper matching
         - compute rollups (acceptable_if / fallbacks / rejected), confidence, citations
+        - consumer path (no judged deviations): no stance, tolerance or fallback is
+          read from risk direction — historical_stance "no_signal", acceptable_if /
+          fallbacks empty, stance_detail {held: n_signed_standard, of: n_deals,
+          basis: "all"}; refused asks (rejected) are kept
         - every evidence count (precedent_count, n_our_paper / n_counterparty_paper,
           stance_detail held/of, digest n) counts DISTINCT DEALS
                                      │

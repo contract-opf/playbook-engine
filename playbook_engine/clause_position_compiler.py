@@ -30,6 +30,14 @@ Design invariants:
     ``observed_positions``, ``precedent_count``, and rollup derivation for
     its taxonomy_id — never silently: it is counted and surfaced as a
     ``CoherenceFlag`` (severity ``"warn"``).
+  - Consumer path (issue #220): when the store's deviations are the
+    deterministic standard check rather than judged verdicts
+    (``deviations_are_deterministic``), nothing is derived from risk
+    direction — ``historical_stance`` is ``"no_signal"``, ``acceptable_if``
+    and ``fallbacks`` stay empty, the internal position is capped at
+    ``"negotiable"``, and ``stance_detail`` reports the deterministic facts
+    ``{held: n_signed_standard, of: n_deals, basis: "all"}``. The consumer
+    (a review model) does the judging; the playbook supplies precedent.
   - Observations with ``taxonomy_id=None`` (unclassified clauses) cannot be
     anchored to a template clause, so they are excluded from the ``clauses``
     array — but they are never silently dropped (issue #113): every call
@@ -365,6 +373,10 @@ class ClauseRollup:
     # needs it to distinguish "no reliable signal" (no_signal) from a genuine
     # observed concession pattern (usually_conceded/mixed) when translating.
     stub_basis_present: bool = False
+    # Issue #220: this clause's deviations are the deterministic standard
+    # check (the consumer path), not judged verdicts — so no stance may be
+    # read out of them; `_historical_stance()` returns "no_signal".
+    deterministic_deviations: bool = False
 
     def __post_init__(self) -> None:
         if self.position not in _VALID_POSITIONS:
@@ -413,7 +425,9 @@ def _historical_stance(rollup: ClauseRollup, *, has_our_standard: bool = True) -
     you do" — see OPF-SPEC.md §2.2 and the opf-v0.2-redesign
     rationale. The five values:
 
-      "no_signal"           — no reliable our-paper signal: either the §2.2
+      "no_signal"           — the consumer path (issue #220: deterministic
+                              deviations, nothing judged — always), or no
+                              reliable our-paper signal: either the §2.2
                               provenance cap applies (zero/insufficient
                               our-paper evidence — ``evidence_sufficient`` is
                               False) or a stub-basis observation means no
@@ -444,6 +458,11 @@ def _historical_stance(rollup: ClauseRollup, *, has_our_standard: bool = True) -
     ``fallbacks == ()``; its concession is carried by ``stance_detail``.
     """
     evidence_sufficient = bool(rollup.confidence.get("evidence_sufficient", False))
+    if rollup.deterministic_deviations:
+        # Issue #220: a stance is a judged category (it reads risk direction);
+        # the consumer path carries only the deterministic facts, in
+        # stance_detail. Until OPF 0.4 (#223) deletes the field, no_signal.
+        return "no_signal"
     if rollup.stub_basis_present or not evidence_sufficient:
         return "no_signal"
     if rollup.position == "negotiable":
@@ -582,6 +601,7 @@ def compile_clause_positions(
     coherence_judge: CoherenceJudge | None = None,
     min_evidence_n: int = MIN_EVIDENCE_N,
     round_moves: list[RoundMove] | None = None,
+    deterministic_deviations: bool | None = None,
 ) -> tuple[list[ClausePosition], list[CoherenceFlag], UnclassifiedCoverage]:
     """Aggregate observations into OPF-conformant ClausePosition records.
 
@@ -612,6 +632,14 @@ def compile_clause_positions(
                              ``negotiation_trail``, ordered by (document_id,
                              round). ``None``/empty (single-version corpora,
                              legacy stores) emits no trail.
+        deterministic_deviations: Whether *observations* carry the consumer
+                             path's deterministic standard-check deviations
+                             (issue #220) instead of judged verdicts — then
+                             no stance, tolerance or fallback is derived from
+                             risk direction (see ``_derive_rollup``).
+                             ``None`` (the default) infers it from the
+                             observations themselves
+                             (``deviations_are_deterministic``).
 
     Returns:
         Tuple of (positions, coherence_flags, unclassified_coverage):
@@ -634,6 +662,9 @@ def compile_clause_positions(
         ``our_standard=None`` and ``rollup.position="negotiable"``.
         No code path can produce a stronger position for them.
     """
+    if deterministic_deviations is None:
+        deterministic_deviations = deviations_are_deterministic(observations)
+
     for tmpl_obs in template_observations:
         if tmpl_obs.provenance != "our_paper":
             raise ValueError(
@@ -784,6 +815,7 @@ def compile_clause_positions(
             # at; without one (no template clause for this taxonomy) cap at
             # negotiable so historical_stance stays validator-consistent.
             has_our_standard=our_standard is not None,
+            deterministic_deviations=deterministic_deviations,
         )
 
         title = (taxonomy_titles or {}).get(tid) or _title_from_id(tid)
@@ -917,6 +949,23 @@ def _obs_to_observed_position(
 _MAGNITUDE_ORDER: dict[str, int] = {"minor": 0, "material": 1}
 
 
+def deviations_are_deterministic(observations: list[Observation]) -> bool:
+    """Whether a store's deviations are the consumer path's deterministic
+    standard check (issue #220) rather than judged verdicts.
+
+    True when there is at least one observation and EVERY one carries
+    ``basis="deterministic"`` and a computed ``standard`` fact — exactly what
+    ``mine_corpus`` writes with no deviation judge configured (the default).
+    Any judged row (``"judge"``), judge fallback (``"needs_review"``,
+    ``"judge_error"``, ``"stub"``), judged-path fast path
+    (``"reworded_equivalent"``, ``"alignment"``), or a legacy store that
+    never computed ``standard`` keeps the judged derivation unchanged.
+    """
+    return bool(observations) and all(
+        obs.basis == "deterministic" and obs.standard is not None for obs in observations
+    )
+
+
 def _derive_rollup(
     group: list[Observation],
     our_paper_obs: list[Observation],
@@ -926,8 +975,23 @@ def _derive_rollup(
     min_evidence_n: int = MIN_EVIDENCE_N,
     has_our_standard: bool = True,
     conceded_before_signing: list[Observation] | None = None,
+    deterministic_deviations: bool = False,
 ) -> ClauseRollup:
     """Derive rollup guidance from the observation group.
+
+    ``deterministic_deviations`` (issue #220): the group's deviations are the
+    consumer path's deterministic standard check, not judged verdicts, and
+    every risk_delta is a neutral/none placeholder. Nothing is derived from
+    risk direction then: ``acceptable_if`` and ``fallbacks`` are empty (both
+    are judged categories), the position is capped at "negotiable" and
+    ``historical_stance`` is "no_signal"; ``rejected`` (refused asks — a
+    deterministic outcome fact) is kept; and ``stance_detail`` is
+    ``{held: n_signed_standard, of: n_deals, basis: "all"}`` — the distinct
+    deals that signed our standard text for this clause, out of every
+    distinct deal with an observation of it (including a deal that struck our
+    standard before signing). ``basis`` is "all" because every deal counts
+    whatever its paper side (owner decision 2026-09-13 (b)); "all" is the
+    OPF 0.3 spelling of that pool (its enum has no "deals").
 
     §2.2 cap: if not has_our_paper, position is capped at ``"negotiable"``.
 
@@ -994,6 +1058,15 @@ def _derive_rollup(
         "n_counterparty_paper": n_counterparty_paper,
         "evidence_sufficient": n_our_paper >= min_evidence_n,
     }
+
+    if deterministic_deviations:
+        return _derive_rollup_deterministic(
+            group,
+            confidence,
+            precedent_counts,
+            conceded_before_signing=list(conceded_before_signing or []),
+            has_stub_basis=any(obs.basis in _STUB_BASES for obs in group),
+        )
 
     # ---------------------------------------------------------------
     # acceptable_if: neutral-risk signed variants (OPF §2.1)
@@ -1188,6 +1261,43 @@ def _derive_rollup(
         confidence=confidence,
         stub_basis_present=has_stub_basis,
         stance_detail=stance_detail,
+    )
+
+
+def _derive_rollup_deterministic(
+    group: list[Observation],
+    confidence: dict[str, Any],
+    precedent_counts: dict[str, int] | None,
+    *,
+    conceded_before_signing: list[Observation],
+    has_stub_basis: bool,
+) -> ClauseRollup:
+    """The consumer-path rollup (issue #220) — see ``_derive_rollup``.
+
+    Deterministic facts only: refused asks (``proposed_then_reversed``) and
+    the held-rate ``n_signed_standard / n_deals``, both counted in distinct
+    deals (issue #216). No tolerance, fallback or stance is read out of the
+    placeholder risk_delta.
+    """
+    rejected_obs = tuple(
+        _obs_to_observed_position(obs, precedent_counts)
+        for obs in group
+        if obs.outcome == "proposed_then_reversed"
+    )
+    pool = [obs for obs in group if obs.outcome in _OPF_OUTCOMES] + conceded_before_signing
+    n_deals = len({obs.citation.document_id for obs in pool})
+    n_signed_standard = len(
+        {obs.citation.document_id for obs in group if obs.outcome == "signed" and obs.standard}
+    )
+    return ClauseRollup(
+        position="negotiable",
+        acceptable_if=(),
+        fallbacks=(),
+        rejected=rejected_obs,
+        confidence=confidence,
+        stub_basis_present=has_stub_basis,
+        stance_detail={"held": n_signed_standard, "of": n_deals, "basis": "all"},
+        deterministic_deviations=True,
     )
 
 

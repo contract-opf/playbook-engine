@@ -613,6 +613,18 @@ def _pick_signed(versions: list[VersionInput]) -> VersionInput | None:
     return max(signed, key=lambda v: v.signed.confidence)
 
 
+def collapse_whitespace(text: str) -> str:
+    """Collapse every whitespace run (embedded newlines included) to one space.
+
+    The format-independence step of :func:`_fingerprint` — ingesters wrap the
+    same content across physical lines differently (DOCX vs PDF vs RTF), so
+    only the words, never the line shape, may decide a comparison. Shared
+    with ``deviation_classifier.normalize_for_standard`` (issue #220) so the
+    deterministic standard check normalizes exactly the way ordering does.
+    """
+    return " ".join(text.split())
+
+
 def _fingerprint(tree: ClauseTree) -> list[str]:
     """Extract a format-independent text fingerprint from a ClauseTree.
 
@@ -639,11 +651,11 @@ def _fingerprint(tree: ClauseTree) -> list[str]:
     lines: list[str] = []
     for node in tree.all_nodes():
         if node.heading:
-            heading = " ".join(node.heading.split())
+            heading = collapse_whitespace(node.heading)
             if heading:
                 lines.append(heading)
         if node.text:
-            body = " ".join(node.text.split())
+            body = collapse_whitespace(node.text)
             if body:
                 lines.append(body)
     return lines

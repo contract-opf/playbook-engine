@@ -6,7 +6,13 @@ Counts agreements/versions, classifies each PDF as born-digital vs scanned
 range plus rough corpus-size and judgment-load estimates. Uses only pdfplumber
 (no docling/torch), so it runs on the host venv in seconds.
 
-Usage: .venv/bin/python estimate_runtime.py <corpus_dir> [out_dir]
+Usage: .venv/bin/python estimate_runtime.py <corpus_dir> [out_dir] [--with-deviation-judge]
+
+The judgment-load line covers what a default derivation asks the agent to
+judge — scope, classification and provenance. Deviation items are queued only
+when the run opts into the advisory deviation judge (``playbook mine
+--with-deviation-judge``, issue #220); pass the same flag here to include
+them in the estimate.
 
 If an ``out_dir`` with a warm extraction cache exists (``<out>/extraction_cache.jsonl``,
 written by a prior/parallel ``mine``/``judge``/``segment`` run over the same
@@ -231,10 +237,13 @@ def fmt(seconds: float) -> str:
 
 
 def main() -> None:
-    corpus = sys.argv[1] if len(sys.argv) > 1 else "."
-    # Default out_dir mirrors the CLI (<corpus>/../out); override with argv[2].
+    args = [a for a in sys.argv[1:] if a != "--with-deviation-judge"]
+    with_deviation_judge = len(args) != len(sys.argv) - 1
+    corpus = args[0] if args else "."
+    # Default out_dir mirrors the CLI (<corpus>/../out); override with the
+    # second positional argument.
     default_out = os.path.join(os.path.dirname(os.path.abspath(corpus)), "out")
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else default_out
+    out_dir = args[1] if len(args) > 1 else default_out
     cached_keys = load_cached_keys(out_dir)
     target_env = _target_env()
     other_env = next(e for e in _EXTRACTOR_ENVS if e != target_env)
@@ -330,8 +339,14 @@ def main() -> None:
         print(f"EXTRACTION/OCR ETA        : ~{fmt(lo)}–{fmt(hi)} wall-clock (CPU), {label}")
         print("                            (this is the expensive step; render is seconds)")
     print("LLM API cost              : $0  (key-free; agent is the judge)")
-    print(f"Judgment load (rough)     : ~{versions} scope+provenance + a few hundred")
-    print("                            deduped deviation items for the agent to judge")
+    print(f"Judgment load (rough)     : ~{versions} scope+provenance + deduped")
+    print("                            classification items for the agent to judge")
+    if with_deviation_judge:
+        print("                            + a few hundred deduped deviation items")
+        print("                            (--with-deviation-judge: advisory layer)")
+    else:
+        print("                            (no deviation items — deviation is the")
+        print("                            deterministic standard check by default)")
     print("=" * 60)
     if n_uncached:
         print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")

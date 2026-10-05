@@ -408,11 +408,163 @@ def test_e2e_full_path_taxonomy_ids_populated(e2e_out: Path) -> None:
         f"still None for: {[o['observation_id'] for o in none_tax]}"
     )
 
-    # At least one observation must have basis='judge' (store-backed verdict replayed).
+    # Issue #220: with no --with-deviation-judge (the default) the fixture's
+    # stored deviation verdicts are never replayed onto the consumer path —
+    # every observation's deviation is the deterministic standard check, and
+    # carries the `standard` fact it was derived from.
+    assert all(o["basis"] == "deterministic" for o in obs_list), sorted(
+        {o["basis"] for o in obs_list}
+    )
+    assert all(isinstance(o.get("standard"), bool) for o in obs_list)
+    assert all(o["deviation"] == ("none" if o["standard"] else "substantive") for o in obs_list)
+
+
+def test_e2e_with_deviation_judge_replays_judged_verdicts(e2e_out: Path) -> None:
+    """Issue #220: judged deviation verdicts are opt-in — the SAME fixture path
+    run with --with-deviation-judge on both judge and mine replays the stored
+    deviation verdicts (basis='judge'), while the default path above never
+    does."""
+    code, output = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(e2e_out),
+        "--with-deviation-judge",
+    )
+    assert code == 0, f"judge failed:\n{output}"
+    pending = [
+        json.loads(line)
+        for line in (e2e_out / "judge" / "pending.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(rec["kind"] == "deviation" for rec in pending), (
+        "--with-deviation-judge must queue deviation items"
+    )
+
+    code, output = _invoke("judge-apply", str(e2e_out), "--verdicts", str(_CANNED_VERDICTS))
+    assert code == 0, f"judge-apply failed:\n{output}"
+    code, output = _invoke(
+        "mine",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(e2e_out),
+        "--with-deviation-judge",
+    )
+    assert code == 0, f"mine failed:\n{output}"
+
+    obs_list = read_observations_jsonl(e2e_out / "observations.jsonl")
     judge_obs = [o for o in obs_list if o["basis"] == "judge"]
     assert len(judge_obs) > 0, (
         "Expected at least one observation with basis='judge' after applying verdicts"
     )
+
+
+def test_e2e_default_judge_queues_no_deviation_items(e2e_out: Path) -> None:
+    """Issue #220: the default drain loop never queues a deviation item, and
+    both the plan and the normal round report deviation as zero pending."""
+    code, plan_output = _invoke(
+        "judge",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(e2e_out),
+        "--plan-only",
+    )
+    assert code == 0, plan_output
+    assert "deviation: 0 pending" in plan_output
+
+    code, output = _invoke(
+        "judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(e2e_out)
+    )
+    assert code == 0, output
+    assert "deviation: 0 pending" in output
+    pending = [
+        json.loads(line)
+        for line in (e2e_out / "judge" / "pending.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert pending, "the fixture still has scope/classification items to queue"
+    assert not [rec for rec in pending if rec["kind"] == "deviation"]
+
+
+def test_mine_with_deviation_judge_on_fresh_out_dir_is_honoured(tmp_path: Path) -> None:
+    """Issue #220: --with-deviation-judge on an out-dir with no verdict store
+    is never silently ignored — mine warns that no verdicts exist and wires
+    the stub deviation judge, so changed clauses are recorded needs_review
+    rather than the default deterministic standard check."""
+    out_dir = tmp_path / "out"
+    code, output = _invoke(
+        "mine",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(out_dir),
+        "--with-deviation-judge",
+    )
+    assert code == 0, f"mine failed:\n{output}"
+    assert not (out_dir / "judge" / "verdicts.jsonl").exists()
+    assert "WARNING: --with-deviation-judge but no verdict store" in output
+    bases = {o["basis"] for o in read_observations_jsonl(out_dir / "observations.jsonl")}
+    assert "needs_review" in bases, bases
+
+    default_out = tmp_path / "default"
+    code, output = _invoke(
+        "mine", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(default_out)
+    )
+    assert code == 0, f"mine failed:\n{output}"
+    assert "--with-deviation-judge" not in output
+    default_bases = {
+        o["basis"] for o in read_observations_jsonl(default_out / "observations.jsonl")
+    }
+    assert default_bases == {"deterministic"}, default_bases
+
+
+def test_mine_warns_when_banked_deviation_verdicts_are_ignored(tmp_path: Path) -> None:
+    """Issue #220: an out-dir whose verdict store holds deviation verdicts
+    (e.g. one derived before #220) is re-mined on the deterministic consumer
+    path by default. That silently drops every judged stance, so mine must
+    WARN with the count and name the opt-in flag."""
+    out_dir = tmp_path / "out"
+    store = out_dir / "judge" / "verdicts.jsonl"
+    store.parent.mkdir(parents=True)
+    store.write_text(
+        "\n".join(
+            json.dumps({"key": f"k{i}", "verdict": v})
+            for i, v in enumerate(
+                [
+                    {"deviation": "substantive", "risk_delta": {"direction": "worse"}},
+                    {"deviation": "none", "risk_delta": {"direction": "neutral"}},
+                    {"in_scope": True, "scope_confidence": 0.9},
+                ]
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    code, output = _invoke(
+        "mine", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir)
+    )
+    assert code == 0, f"mine failed:\n{output}"
+    assert "WARNING: 2 stored deviation verdict(s)" in output, output
+    assert "--with-deviation-judge" in output
+
+    code, output = _invoke(
+        "mine",
+        str(_CORPUS_DIR),
+        "--config",
+        str(_CONFIG_PATH),
+        "--out",
+        str(out_dir),
+        "--with-deviation-judge",
+    )
+    assert code == 0, f"mine failed:\n{output}"
+    assert "stored deviation verdict(s)" not in output
 
 
 def test_e2e_validate_exits_zero(e2e_out: Path) -> None:
