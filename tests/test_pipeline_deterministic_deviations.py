@@ -21,9 +21,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from click.testing import CliRunner
 
 from playbook_engine.clause_differ import ClauseDiff
-from playbook_engine.clause_position_compiler import _normalize_for_dedup
+from playbook_engine.clause_position_compiler import (
+    _normalize_for_dedup,
+    deviations_are_deterministic,
+)
+from playbook_engine.cli import cli
 from playbook_engine.config import load_config
 from playbook_engine.observation_builder import (
     Observation,
@@ -33,8 +38,14 @@ from playbook_engine.observation_builder import (
 from playbook_engine.pipeline import (
     _assess_deviations_with_standards,
     _NullDeviationJudge,
+    _restore_observations,
     mine_corpus,
     project_playbook,
+)
+from playbook_engine.run_manifest import (
+    RUN_MANIFEST_FILENAME,
+    read_deviation_mode,
+    read_run_manifest,
 )
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.tracked_changes_overlay import HunkEnrichment
@@ -190,6 +201,134 @@ def test_opt_in_deviation_judge_keeps_the_judged_layer(tmp_path: Path) -> None:
         clause["summary"]["stance_detail"]["basis"] == "our_paper"
         for clause in playbook["evidence"]["clauses"]
     )
+
+
+# -- the deviation mode is recorded at mine time, not inferred (issue #230) --
+
+
+def _all_template_corpus(root: Path) -> Path:
+    """Two synthetic deals that each signed our template unchanged.
+
+    Each deal is a copy of the NDA example's own ``standard-form.rtf`` with a
+    ``hints.yaml`` naming it the executed copy (the production hint
+    ``version_orderer.Hints`` reads), so every clause takes the unchanged
+    fast path: on the opt-in judged run too, every row carries
+    ``basis="deterministic"`` and a computed ``standard`` fact — the store
+    shape that used to be indistinguishable from the consumer path.
+    """
+    corpus = root / "corpus"
+    for deal in ("deal-one", "deal-two"):
+        (corpus / deal).mkdir(parents=True)
+        (corpus / deal / "v1.rtf").write_bytes((_NDA_DIR / "standard-form.rtf").read_bytes())
+        (corpus / deal / "hints.yaml").write_text("signed_version: v1\n", encoding="utf-8")
+    return corpus
+
+
+def _mine_all_template(out_dir: Path, corpus: Path, **judges: Any) -> dict[str, Any]:
+    cfg = load_config(_SMOKE_CONFIG)
+    taxonomy = load_taxonomy(cfg.taxonomy_path)
+    mine_corpus(corpus, cfg, taxonomy, out_dir, no_cache=True, **judges)
+    return {"cfg": cfg, "taxonomy": taxonomy}
+
+
+def _stances(playbook: dict[str, Any]) -> tuple[set[str], set[str]]:
+    clauses = playbook["evidence"]["clauses"]
+    assert clauses
+    return (
+        {c["summary"]["historical_stance"] for c in clauses},
+        {c["summary"]["stance_detail"]["basis"] for c in clauses},
+    )
+
+
+def test_opt_in_run_where_every_clause_matches_the_template_compiles_judged(
+    tmp_path: Path,
+) -> None:
+    """The #220 review's failure scenario: a judge was configured but every
+    clause was unchanged from the template, so the store's rows look exactly
+    like the consumer path's. The mode recorded at mine time — not the rows —
+    decides: the opt-in run compiles the judged rollup, the default run the
+    consumer path, over the very same corpus."""
+    corpus = _all_template_corpus(tmp_path)
+
+    judged_out = tmp_path / "judged"
+    ctx = _mine_all_template(judged_out, corpus, deviation_judge=_NullDeviationJudge())
+    rows = read_observations_jsonl(judged_out / "observations.jsonl")
+    assert rows
+    assert {o["outcome"] for o in rows} == {"signed"}
+    # The rows alone would be inferred as the consumer path ...
+    assert deviations_are_deterministic(_restore_observations(rows))
+    # ... but the mode was recorded when they were written.
+    assert read_deviation_mode(judged_out) == "judged"
+    messages: list[str] = []
+    playbook = project_playbook(
+        judged_out, ctx["cfg"], ctx["taxonomy"], opf_version="0.3", progress=messages.append
+    )
+    assert not any("WARNING: no deviation mode" in m for m in messages)
+    stances, bases = _stances(playbook)
+    assert stances != {"no_signal"}, stances  # a judged stance is derived
+    assert "consistently_held" in stances
+    assert "our_paper" in bases  # the judged held-rate on the our-paper pool
+
+    consumer_out = tmp_path / "consumer"
+    ctx = _mine_all_template(consumer_out, corpus)
+    assert read_deviation_mode(consumer_out) == "deterministic"
+    playbook = project_playbook(consumer_out, ctx["cfg"], ctx["taxonomy"], opf_version="0.3")
+    assert _stances(playbook) == ({"no_signal"}, {"all"})
+
+
+def test_store_without_a_recorded_mode_falls_back_to_inference_with_a_warning(
+    tmp_path: Path,
+) -> None:
+    """An out-dir mined before the mode was recorded has no ``deviation_mode``
+    in its manifest (or no manifest at all): project infers the mode from the
+    rows, as before, and says it did."""
+    corpus = _all_template_corpus(tmp_path)
+    out_dir = tmp_path / "legacy"
+    ctx = _mine_all_template(out_dir, corpus, deviation_judge=_NullDeviationJudge())
+    (out_dir / RUN_MANIFEST_FILENAME).unlink()
+    messages: list[str] = []
+    playbook = project_playbook(
+        out_dir, ctx["cfg"], ctx["taxonomy"], opf_version="0.3", progress=messages.append
+    )
+    warnings = [m for m in messages if "WARNING: no deviation mode recorded" in m]
+    assert len(warnings) == 1
+    assert "inferred deterministic" in warnings[0]
+    # Inference cannot see the opt-in here — exactly why the mode is recorded.
+    assert _stances(playbook) == ({"no_signal"}, {"all"})
+
+
+def test_cli_mine_records_the_mode_and_project_reads_it(tmp_path: Path) -> None:
+    """Through the CLI: ``mine --with-deviation-judge`` stamps the run
+    manifest with its environment AND keeps the recorded mode (the end-of-run
+    environment stamp must not erase it), and ``project`` compiles judged."""
+    corpus = _all_template_corpus(tmp_path)
+    out_dir = tmp_path / "out"
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "mine",
+            str(corpus),
+            "--config",
+            str(_SMOKE_CONFIG),
+            "--out",
+            str(out_dir),
+            "--with-deviation-judge",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    manifest = read_run_manifest(out_dir)
+    assert manifest is not None and manifest.written_by == "mine"
+    assert manifest.deviation_mode == "judged"
+
+    result = runner.invoke(
+        cli, ["project", str(out_dir), "--config", str(_SMOKE_CONFIG), "--opf-version", "0.3"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "WARNING: no deviation mode" not in result.output
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    stances, _ = _stances(playbook)
+    assert "consistently_held" in stances
 
 
 # -- dynamics follow the emitted deviation, not the per-row one --------------
