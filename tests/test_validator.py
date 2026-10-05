@@ -931,3 +931,165 @@ def test_validate_tolerates_mixed_type_clause_library() -> None:
     result = validate_document({"opf_version": "0.2", "clause_library": [{"concept_id": "a"}, 5]})
     assert isinstance(result, ValidationResult)
     assert not result.ok
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 (issue #223) — the verdict-free per-deal precedent record. Every
+# case mutates the REAL compiled NDA example (examples/nda/playbook.opf.json,
+# produced by `playbook project`), so the valid baseline is a shape the
+# compiler actually emits; each mutation is one a hand edit or a buggy
+# producer could make, and must be rejected.
+# ---------------------------------------------------------------------------
+
+_NDA_PLAYBOOK = Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json"
+
+
+def _nda_04() -> dict[str, Any]:
+    doc: dict[str, Any] = json.loads(_NDA_PLAYBOOK.read_text(encoding="utf-8"))
+    assert doc["opf_version"] == "0.4"
+    return doc
+
+
+def _restamp_identity(doc: dict[str, Any]) -> dict[str, Any]:
+    """Re-stamp identity so a test isolates the rule it targets rather than
+    tripping the content-hash check first."""
+    doc["identity"]["content_hash"] = content_hash(doc)
+    doc["identity"]["section_digests"] = compute_section_digests(doc)
+    return doc
+
+
+def _blocking(doc: dict[str, Any]) -> list[str]:
+    return [str(e) for e in validate_document(doc).errors if e.blocking]
+
+
+def test_v04_compiled_example_validates() -> None:
+    assert _blocking(_nda_04()) == []
+
+
+def test_v04_all_older_versions_still_validate() -> None:
+    """0.1/0.2/0.3 must keep validating (their schemas are frozen)."""
+    for name in ("minimal_valid.json", "valid_v0_2_minimal.json"):
+        assert validate_document(_load(name)).ok, name
+    v03 = _load("valid_v0_2_minimal.json")
+    v03["opf_version"] = "0.3"
+    assert validate_document(v03).ok
+
+
+def test_v04_rejects_a_0_3_evidence_shape() -> None:
+    doc = _nda_04()
+    doc["evidence"]["clause_library"] = []
+    errors = _blocking(_restamp_identity(doc))
+    assert any("clause_library" in e for e in errors), errors
+
+
+def test_v04_rejects_a_judged_field_on_a_precedent() -> None:
+    """Judged verdicts never enter evidence.precedent (closed records)."""
+    doc = _nda_04()
+    doc["evidence"]["precedent"][0]["x_deviation"] = "substantive"
+    errors = _blocking(_restamp_identity(doc))
+    assert any("x_deviation" in e for e in errors), errors
+
+
+def test_v04_rejects_tampered_precedent_id() -> None:
+    doc = _nda_04()
+    doc["evidence"]["precedent"][0]["id"] = "prec.0000000000000000"
+    errors = _blocking(_restamp_identity(doc))
+    assert any("does not match the id recomputed" in e for e in errors), errors
+
+
+def test_v04_rejects_signed_text_edit_without_restamp() -> None:
+    """Editing a signed text changes what the id hashes, the digest, and
+    possibly the counts — the id check alone catches the edit."""
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    record["signed_text"]["text"] += " Edited."
+    errors = _blocking(_restamp_identity(doc))
+    assert any("does not match the id recomputed" in e for e in errors), errors
+
+
+def test_v04_rejects_two_precedents_for_one_deal_and_clause() -> None:
+    from playbook_engine.opf_accessors import perspective_party
+    from playbook_engine.precedent import restamp_evidence
+
+    doc = _nda_04()
+    first = doc["evidence"]["precedent"][0]
+    twin = copy.deepcopy(first)
+    twin["signed_text"] = {"text": "A different text.", "ref": first["signed_text"]["ref"]}
+    twin["standard"] = False
+    doc["evidence"]["precedent"].append(twin)
+    restamp_evidence(doc["evidence"], doc["agreement_type"]["id"], party=perspective_party(doc))
+    errors = _blocking(_restamp_identity(doc))
+    assert any("more than one precedent" in e for e in errors), errors
+
+
+def test_v04_rejects_count_that_disagrees_with_precedent() -> None:
+    doc = _nda_04()
+    doc["evidence"]["clauses"][0]["n_deals"] += 1
+    errors = _blocking(_restamp_identity(doc))
+    assert any("n_deals=" in e and "implies" in e for e in errors), errors
+
+
+def test_v04_rejects_dangling_deal_and_signed_mismatch() -> None:
+    doc = _nda_04()
+    record = doc["evidence"]["precedent"][0]
+    record["signed"] = not record["signed"]
+    errors = _blocking(_restamp_identity(doc))
+    assert any("signed_version" in e for e in errors), errors
+
+    doc = _nda_04()
+    doc["corpus"]["documents"] = [
+        d
+        for d in doc["corpus"]["documents"]
+        if d["document_id"] != doc["evidence"]["precedent"][0]["document_id"]
+    ]
+    errors = _blocking(_restamp_identity(doc))
+    assert any("not in corpus.documents" in e for e in errors), errors
+
+
+def test_v04_rejects_standard_true_without_signed_text() -> None:
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["standard"])
+    record["signed_text"] = None
+    errors = _blocking(_restamp_identity(doc))
+    assert any("standard=true but signed_text is null" in e for e in errors), errors
+
+
+def test_v04_rejects_edited_digest() -> None:
+    doc = _nda_04()
+    clause = next(c for c in doc["digest"]["clauses"] if c["signed_variants"])
+    clause["signed_variants"][0]["n_deals"] += 1
+    errors = _blocking(_restamp_identity(doc))
+    assert any("digest does not equal build_digest" in e for e in errors), errors
+
+
+def test_v04_rejects_digest_without_perspective_key() -> None:
+    doc = _nda_04()
+    del doc["digest"]["perspective"]
+    errors = _blocking(_restamp_identity(doc))
+    assert any("perspective" in e for e in errors), errors
+
+
+def test_v04_rejects_full_text_in_digest() -> None:
+    doc = _nda_04()
+    doc["digest"]["clauses"][0]["signed_variants"].append(
+        {
+            "full_text": "x",
+            "text": "x",
+            "n_deals": 1,
+            "last_signed": None,
+            "ref": {"document_id": "template", "version": "template", "clause_path": "1"},
+            "precedent_ids": ["prec.0000000000000000"],
+        }
+    )
+    errors = _blocking(_restamp_identity(doc))
+    assert any("full_text" in e for e in errors), errors
+
+
+def test_v04_rejects_impossible_signed_at() -> None:
+    doc = _nda_04()
+    from playbook_engine.digest import build_digest
+
+    doc["evidence"]["precedent"][0]["signed_at"] = "2025-13-45"
+    doc["digest"] = build_digest(doc)
+    errors = _blocking(_restamp_identity(doc))
+    assert any("signed_at" in e for e in errors), errors

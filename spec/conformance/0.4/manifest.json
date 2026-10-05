@@ -1,0 +1,30 @@
+{
+  "format_version": {
+    "opf_version": "0.4",
+    "engine_version": "1.0.0",
+    "digest_version": "3"
+  },
+  "algorithm": "canonical / content_hash / section_digests: exactly as the 0.3 set (../manifest.json). digest: playbook_engine.digest.build_digest(input) with the default token_budget, which for opf_version 0.4 is build_digest_v3 (OPF-SPEC.md §3.12.1): signed variants and refused asks grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent.normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', then deviation_classifier.normalize_for_standard with the document's perspective.party as the one party name -> 'party'), text = observation_builder.summarize_clause_text of the group representative.",
+  "vectors": [
+    {
+      "name": "minimal-no-perspective",
+      "file": "vectors/001-minimal-no-perspective.json",
+      "description": "Smallest well-formed OPF 0.4 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null."
+    },
+    {
+      "name": "variants-refused-and-exclusions",
+      "file": "vectors/002-variants-refused-and-exclusions.json",
+      "description": "One clause, eight deals, pinning digest_version 3 grouping and every exclusion rule: two deals signed our standard (n_signed_standard 2, never a variant); variant A signed in three deals, one spelled with different case/punctuation (exact normalization merges it) — its representative is the deal with the latest signed_at, a YYYY-Qn quarter that sorts at the quarter's first day; variant B differs from A by the negator 'not' only and stays a separate group; an unsigned deal's text is never a signed variant; a deal whose standard was struck (signed_text null, opening_text set) contributes no variant. The same refused ask in three deals (three spellings) is one group with n_deals 3 whose representative is the earliest-round ask. perspective is copied into the digest."
+    },
+    {
+      "name": "cap-totals-and-summary",
+      "file": "vectors/003-cap-totals-and-summary.json",
+      "description": "One clause with seven distinct signed variants: the digest lists the top 5 (n_deals desc, last_signed desc with unknown last, then normalized text) and n_variants_total reports all 7. The two-deal variant's text exceeds 300 characters, pinning the sentence-boundary summary (a verbatim prefix ending on a sentence end, <= 300 chars). our_standard is null."
+    },
+    {
+      "name": "party-alias-grouping",
+      "file": "vectors/004-party-alias-grouping.json",
+      "description": "The grouping key's party neutralization (OPF-SPEC §3.5.4): every entity-registry alias (Counterparty-<n>, case-insensitive, on word boundaries) becomes the token 'counterparty' and the document's perspective.party becomes the token 'party' before case and punctuation are dropped. Two deals whose signed texts differ only by the counterparty alias (Counterparty-2 vs Counterparty-5) are one variant with n_deals 2, and two refused asks that differ only by alias are one group with n_deals 2. The same words with the parties' places swapped stay a separate variant (our party and the counterparty are distinct tokens). The order of the two one-deal variants pins the perspective.party rewrite: 'notice of termination given to party ...' sorts before 'party may terminate ...'."
+    }
+  ]
+}

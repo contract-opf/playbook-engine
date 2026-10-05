@@ -30,6 +30,7 @@ _QUARTER_DATE_RE = re.compile(r"^\d{4}-Q[1-4]$")
 _SCHEMA_PATH_V1 = Path(__file__).parent.parent / "spec" / "playbook.schema.json"
 _SCHEMA_PATH_V2 = Path(__file__).parent.parent / "spec" / "playbook.schema-0.2.json"
 _SCHEMA_PATH_V3 = Path(__file__).parent.parent / "spec" / "playbook.schema-0.3.json"
+_SCHEMA_PATH_V4 = Path(__file__).parent.parent / "spec" / "playbook.schema-0.4.json"
 
 # Versions this validator's normative checks know how to enforce:
 #   "0.1" — clauses/clause_library top-level, rollup.position (§2.2, §3.6, §4)
@@ -38,11 +39,20 @@ _SCHEMA_PATH_V3 = Path(__file__).parent.parent / "spec" / "playbook.schema-0.3.j
 #   "0.3" — the 0.2 shape plus an optional top-level `digest` section (the
 #           compact model-facing projection); all 0.2 normative checks apply
 #           unchanged, plus the digest consistency check.
+#   "0.4" — the verdict-free per-deal precedent record (issue #223):
+#           `evidence` is {clauses, precedent}; the 0.2/0.3 shape-independent
+#           checks (scope rationale, citations, posture/floor, perspective,
+#           identity) apply, plus the precedent cross-checks and the
+#           digest == build_digest(document) equality check (digest 3).
 # Anything else (missing, or an unrecognized version) must fail loud rather
 # than silently pass with an empty `doc.get("clauses", [])`.
-_SUPPORTED_OPF_VERSIONS = {"0.1", "0.2", "0.3"}
+_SUPPORTED_OPF_VERSIONS = {"0.1", "0.2", "0.3", "0.4"}
 
-_SCHEMA_PATH_BY_VERSION = {"0.2": _SCHEMA_PATH_V2, "0.3": _SCHEMA_PATH_V3}
+_SCHEMA_PATH_BY_VERSION = {
+    "0.2": _SCHEMA_PATH_V2,
+    "0.3": _SCHEMA_PATH_V3,
+    "0.4": _SCHEMA_PATH_V4,
+}
 
 # Public alias — `playbook --version` (cli.py) reports these alongside the
 # engine version so bug reports carry both, since engine version and OPF
@@ -84,7 +94,8 @@ def _load_schema(opf_version: Any) -> dict[str, Any]:
     """Select the schema to validate against based on `opf_version`.
 
     "0.2" gets the v0.2 (Evidence/Posture/Floor) schema; "0.3" gets the v0.3
-    schema (0.2 + digest); everything else (including missing/unrecognized
+    schema (0.2 + digest); "0.4" gets the v0.4 schema (precedent record +
+    digest 3); everything else (including missing/unrecognized
     versions) is validated against the v0.1 schema, whose `const: "0.1"` on
     `opf_version` produces the expected schema error for those cases —
     preserving pre-existing v0.1 behavior byte-for-byte.
@@ -869,6 +880,211 @@ def _check_digest_v3(doc: dict[str, Any], result: ValidationResult) -> None:
     walk(digest, "digest")
 
 
+# ---------------------------------------------------------------------------
+# v0.4 normative checks — the verdict-free per-deal precedent record (#223).
+# ---------------------------------------------------------------------------
+
+
+def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
+    evidence = doc.get("evidence")
+    value = evidence.get(key) if isinstance(evidence, dict) else None
+    return value if isinstance(value, list) else []
+
+
+def _check_citations_v4(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.4 §4: every asserted text carries a citation that resolves.
+
+    Covers ``evidence.clauses[].our_standard.source_ref`` and, per precedent,
+    ``signed_text.ref``, ``opening_text.ref`` and ``refused_asks[].ref``.
+    The digest's refs are copies of these (enforced by the digest equality
+    check), so they need no separate pass.
+    """
+    corpus_docs = _corpus_docs(doc)
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if not isinstance(clause, dict):
+            continue
+        std = clause.get("our_standard")
+        if isinstance(std, dict):
+            text = std.get("text") or ""
+            if not isinstance(text, str) or not text.strip():
+                result.add(
+                    "our_standard.text is empty", path=f"evidence.clauses[{i}].our_standard.text"
+                )
+            _check_citation_ref(
+                std.get("source_ref"),
+                f"evidence.clauses[{i}].our_standard.source_ref",
+                result,
+                corpus_docs,
+            )
+    for i, record in enumerate(_evidence_list(doc, "precedent")):
+        if not isinstance(record, dict):
+            continue
+        for key in ("signed_text", "opening_text"):
+            entry = record.get(key)
+            if isinstance(entry, dict):
+                _check_citation_ref(
+                    entry.get("ref"), f"evidence.precedent[{i}].{key}.ref", result, corpus_docs
+                )
+        for j, ask in enumerate(record.get("refused_asks") or []):
+            if isinstance(ask, dict):
+                _check_citation_ref(
+                    ask.get("ref"),
+                    f"evidence.precedent[{i}].refused_asks[{j}].ref",
+                    result,
+                    corpus_docs,
+                )
+
+
+def _check_precedent_v4(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.4 precedent cross-checks (normative, beyond the schema).
+
+    - every precedent ``id`` is unique and equals
+      ``precedent.precedent_id(agreement_type.id, document_id, taxonomy_id,
+      signed_text.text)`` — a stable, recomputable id;
+    - at most one precedent per (document_id, taxonomy_id): the deal is the
+      unit of precedent (issue #216);
+    - every ``taxonomy_id`` names an ``evidence.clauses`` entry;
+    - every ``document_id`` resolves to ``corpus.documents`` and ``signed``
+      agrees with that document's ``signed_version`` (when recorded);
+    - ``standard: true`` requires a ``signed_text``; ``signed_at`` is a real
+      date (or a ``YYYY-Qn`` quarter);
+    - each clause's ``n_deals``/``n_signed_standard``/``n_variants``/
+      ``n_refused`` equal what ``precedent`` implies
+      (``precedent.clause_counts``, grouping with the document's own
+      ``perspective.party``).
+    """
+    from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
+    from playbook_engine.precedent import clause_counts, precedent_id  # noqa: PLC0415
+
+    corpus_docs = _corpus_docs(doc)
+    agreement_type = doc.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    clauses = [c for c in _evidence_list(doc, "clauses") if isinstance(c, dict)]
+    clause_tids = {c.get("taxonomy_id") for c in clauses}
+    precedent = _evidence_list(doc, "precedent")
+
+    seen_ids: dict[str, int] = {}
+    seen_pairs: dict[tuple[Any, Any], int] = {}
+    for i, record in enumerate(precedent):
+        if not isinstance(record, dict):
+            continue
+        path = f"evidence.precedent[{i}]"
+        pid, doc_id, tid = record.get("id"), record.get("document_id"), record.get("taxonomy_id")
+        if isinstance(pid, str):
+            if pid in seen_ids:
+                result.add(
+                    f"duplicate precedent id {pid!r} (first seen at evidence.precedent[{seen_ids[pid]}])",
+                    path=f"{path}.id",
+                )
+            else:
+                seen_ids[pid] = i
+            signed_text = record.get("signed_text")
+            text = signed_text.get("text") if isinstance(signed_text, dict) else None
+            if (
+                isinstance(agreement_type_id, str)
+                and isinstance(doc_id, str)
+                and isinstance(tid, str)
+            ):
+                expected = precedent_id(
+                    agreement_type_id, doc_id, tid, text if isinstance(text, str) else None
+                )
+                if pid != expected:
+                    result.add(
+                        f"precedent id {pid!r} does not match the id recomputed from "
+                        f"(agreement_type.id, document_id, taxonomy_id, signed_text) ({expected!r})",
+                        path=f"{path}.id",
+                    )
+        pair = (doc_id, tid)
+        if pair in seen_pairs:
+            result.add(
+                f"more than one precedent for deal {doc_id!r} and clause {tid!r} "
+                f"(first at evidence.precedent[{seen_pairs[pair]}]) — the deal is the "
+                "unit of precedent",
+                path=path,
+            )
+        else:
+            seen_pairs[pair] = i
+        if tid not in clause_tids:
+            result.add(
+                f"precedent taxonomy_id {tid!r} names no evidence.clauses entry",
+                path=f"{path}.taxonomy_id",
+            )
+        corpus_doc = corpus_docs.get(doc_id) if isinstance(doc_id, str) else None
+        if corpus_doc is None:
+            result.add(
+                f"precedent document_id {doc_id!r} is not in corpus.documents — dangling deal",
+                path=f"{path}.document_id",
+            )
+        elif "signed_version" in corpus_doc and isinstance(record.get("signed"), bool):
+            has_signed_copy = corpus_doc.get("signed_version") is not None
+            if record["signed"] != has_signed_copy:
+                result.add(
+                    f"precedent signed={record['signed']} but corpus.documents[{doc_id!r}]"
+                    f".signed_version={corpus_doc.get('signed_version')!r}",
+                    path=f"{path}.signed",
+                )
+        if record.get("standard") is True and not isinstance(record.get("signed_text"), dict):
+            result.add(
+                "precedent standard=true but signed_text is null — nothing was signed to "
+                "be standard",
+                path=f"{path}.standard",
+            )
+        signed_at = record.get("signed_at")
+        if isinstance(signed_at, str) and not _QUARTER_DATE_RE.match(signed_at):
+            try:
+                datetime.date.fromisoformat(signed_at)
+            except ValueError:
+                result.add(
+                    f"signed_at={signed_at!r} is not an ISO-8601 date", path=f"{path}.signed_at"
+                )
+
+    records = [p for p in precedent if isinstance(p, dict)]
+    party = perspective_party(doc)
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if not isinstance(clause, dict) or not isinstance(clause.get("taxonomy_id"), str):
+            continue
+        expected_counts = clause_counts(clause["taxonomy_id"], records, party=party)
+        for key, expected_n in expected_counts.items():
+            if clause.get(key) != expected_n:
+                result.add(
+                    f"{key}={clause.get(key)!r} but evidence.precedent implies {expected_n}",
+                    path=f"evidence.clauses[{i}].{key}",
+                )
+
+
+def _check_digest_v4(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.4: a present ``digest`` MUST equal ``build_digest(document)``.
+
+    The digest is a pure function of the document (issue #223) — an
+    embedded digest that differs from a recomputation describes evidence the
+    document does not carry. The id-match and no-``full_text`` rules of 0.3
+    (:func:`_check_digest_v3`) still run first so a mismatch names its most
+    specific cause.
+    """
+    digest = doc.get("digest")
+    if digest is None:
+        return
+    _check_digest_v3(doc, result)
+    if not isinstance(digest, dict):
+        return
+    from playbook_engine.digest import build_digest  # noqa: PLC0415
+
+    try:
+        expected = build_digest(doc)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        result.add(f"digest cannot be recomputed from this document: {exc}", path="digest")
+        return
+    if digest != expected:
+        differing = sorted(
+            k for k in set(digest) | set(expected) if digest.get(k) != expected.get(k)
+        )
+        result.add(
+            "digest does not equal build_digest(document) — it was edited, or "
+            f"built from different evidence (differs in: {', '.join(differing)})",
+            path="digest",
+        )
+
+
 def _check_identity_hash_v2(doc: dict[str, Any], result: ValidationResult) -> None:
     """OPF v0.2/v0.3 (issue #143 / #178): a present ``identity.content_hash``
     or ``identity.section_digests`` must match what
@@ -968,7 +1184,19 @@ def validate_document(
     if _check_opf_version(doc, result):
         # _check_out_of_scope_rationale (§3.6) reads only `corpus`, which is
         # identical in shape across v0.1/v0.2 — one implementation serves both.
-        if opf_version in ("0.2", "0.3"):
+        if opf_version == "0.4":
+            # Paper side never gates anything in 0.4 (owner decision
+            # 2026-09-13 (b)) and there is no stance to cap, so the 0.2/0.3
+            # §2.2 provenance and evidence-depth rules do not apply.
+            _check_out_of_scope_rationale(doc, result)
+            _check_citations_v4(doc, result)
+            _check_precedent_v4(doc, result)
+            _check_posture_floor_conflict_v2(doc, result)
+            _check_posture_interview_provenance_v2(doc, result)
+            _check_perspective_present_v2(doc, result)
+            _check_identity_hash_v2(doc, result)
+            _check_digest_v4(doc, result)
+        elif opf_version in ("0.2", "0.3"):
             _check_provenance_rule_v2(doc, result)
             _check_evidence_depth_rule_v2(doc, result, min_evidence_n)
             _check_out_of_scope_rationale(doc, result)

@@ -17,6 +17,17 @@ one file.
 v0.1 fixtures (hand-authored in existing test suites) continue to work
 unchanged — every accessor here falls back to the v0.1 shape when the v0.2
 key is absent.
+
+OPF 0.4 (issue #223) replaces the 0.2/0.3 evidence shape with the
+verdict-free per-deal precedent record: ``evidence.clauses`` keeps one
+entry per clause type (with counts, but no ``summary`` or
+``observed_positions``) and ``evidence.precedent`` holds one record per
+(deal, clause type). :func:`playbook_clauses` reads both shapes;
+:func:`playbook_precedent` / :func:`clause_precedent` read the 0.4 records
+and return ``[]`` for any older document. On a 0.4 clause the 0.2/0.3
+accessors (:func:`clause_stance`, :func:`clause_confidence`,
+:func:`clause_trail`) degrade to their documented "absent" values —
+``"unknown"``, ``{}``, ``[]`` — rather than inventing a stance.
 """
 
 from __future__ import annotations
@@ -24,6 +35,10 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "is_precedent_shape",
+    "playbook_precedent",
+    "clause_precedent",
+    "perspective_party",
     "playbook_clauses",
     "playbook_clause_library",
     "clause_stance",
@@ -32,6 +47,70 @@ __all__ = [
     "observation_dynamics",
     "clause_trail",
 ]
+
+
+def is_precedent_shape(doc: dict[str, Any]) -> bool:
+    """True when *doc* carries the OPF 0.4 precedent record (issue #223).
+
+    Keyed on ``evidence.precedent`` being present as a list, not on the
+    ``opf_version`` string alone, so a renderer handed a hand-built 0.4-shaped
+    fixture reads it the same way as a compiled one.
+    """
+    evidence = doc.get("evidence")
+    return isinstance(evidence, dict) and isinstance(evidence.get("precedent"), list)
+
+
+def playbook_precedent(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the OPF 0.4 ``evidence.precedent`` records (``[]`` otherwise).
+
+    One record per (deal, clause type): the deal's signed text, whether it
+    is our standard language, whether the clause moved, and the asks refused
+    before signing — facts only, never a judged verdict. Pre-0.4 documents
+    have no precedent records and yield ``[]``.
+
+    Args:
+        doc: A parsed ``playbook.opf.json`` dict (any OPF version).
+
+    Returns:
+        The precedent list (non-dict entries dropped), or ``[]``.
+    """
+    if not is_precedent_shape(doc):
+        return []
+    return [p for p in doc["evidence"]["precedent"] if isinstance(p, dict)]
+
+
+def clause_precedent(doc: dict[str, Any], clause: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the precedent records for one clause (matched on taxonomy_id).
+
+    Args:
+        doc:    A parsed ``playbook.opf.json`` dict (any OPF version).
+        clause: One clause dict from :func:`playbook_clauses`.
+
+    Returns:
+        That clause's precedent records in document order, or ``[]``.
+    """
+    tid = clause.get("taxonomy_id")
+    return [p for p in playbook_precedent(doc) if p.get("taxonomy_id") == tid]
+
+
+def perspective_party(doc: dict[str, Any]) -> str | None:
+    """Return ``perspective.party`` — the side the playbook reviews for — or ``None``.
+
+    The one party name an OPF document itself carries. OPF 0.4's grouping
+    key (``precedent.normalize_variant_text``) neutralizes it, so every
+    reader of a 0.4 document — counts, digest, renderers, validator — must
+    take it from here to group texts the same way.
+
+    Args:
+        doc: A parsed ``playbook.opf.json`` dict (any OPF version).
+
+    Returns:
+        The party name, or ``None`` when there is no perspective, no
+        ``party``, or the party is not a non-blank string.
+    """
+    perspective = doc.get("perspective")
+    party = perspective.get("party") if isinstance(perspective, dict) else None
+    return party if isinstance(party, str) and party.strip() else None
 
 
 def playbook_clauses(doc: dict[str, Any]) -> list[dict[str, Any]]:

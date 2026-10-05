@@ -1,0 +1,1167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.4.json",
+  "title": "Open Playbook Format (OPF) v0.4",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 3 model-facing projection. OPF 0.4 = the 0.3 document with `evidence` replaced by {clauses, precedent} (no observed_positions, clause_library, summary or negotiation_trail; no stance, band, risk or deviation verdict anywhere in evidence or digest). Judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "type": "object",
+  "required": [
+    "opf_version",
+    "agreement_type",
+    "baseline",
+    "taxonomy",
+    "evidence",
+    "posture",
+    "floor",
+    "corpus",
+    "compiler"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": true
+  },
+  "properties": {
+    "opf_version": {
+      "type": "string",
+      "const": "0.4"
+    },
+    "agreement_type": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other names this agreement type is known by, e.g. a consuming app's own dial key."
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "required": [
+        "has_canonical_template"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "has_canonical_template": {
+          "type": "boolean"
+        },
+        "template_ref": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "document_id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "Content address of the template source file (\u00a74 resolution) \u2014 a consumer verifies it holds the cited template by hashing its own copy."
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "required": [
+        "source",
+        "entries"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]+$"
+              },
+              "label": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "inactive",
+                  "custom"
+                ]
+              },
+              "cuad_origin": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "composes": {
+      "type": "array",
+      "description": "OPTIONAL \u2014 pinned external clause-intelligence modules (OPF-SPEC.md \u00a73.4). Recorded for lineage; wiring into runtime behavior is a later slice.",
+      "items": {
+        "type": "object",
+        "required": [
+          "module",
+          "version",
+          "integrity",
+          "role"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "module": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "applies_to_taxonomy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "role": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "description": "\u00a73.5 (OPF 0.4) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
+      "required": [
+        "clauses",
+        "precedent"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clauses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/precedentClause"
+          }
+        },
+        "precedent": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/precedent"
+          }
+        }
+      }
+    },
+    "posture": {
+      "type": "object",
+      "description": "\u00a73.6 \u2014 negotiation intent as generated prose. Soft at runtime. MAY be empty (e.g. a corpus-only compile with no interview yet run).",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "system_prompt": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Governed version counter (issue #156). Starts at 1 on the first generated Posture; bumped by 1 each time the interview is re-run against an existing Posture. The genesis (compiler-generated) version; a consumer that lets a human edit the Posture owns subsequent versions per \u00a78."
+        },
+        "generation": {
+          "type": "object",
+          "description": "Provenance for how system_prompt was produced.",
+          "additionalProperties": false,
+          "properties": {
+            "generated_by": {
+              "type": "string"
+            },
+            "generated_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "interview": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "q",
+                  "question",
+                  "answer"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  },
+                  "question": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "grounded_in": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "floor": {
+      "type": "object",
+      "description": "\u00a73.7 \u2014 deterministic red lines. Hard at runtime. Invariants are OPTIONAL natural-language statements; a judge (not lexical detection) evaluates them. MAY be empty (a corpus-mined playbook compiles with zero invariants).",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "invariants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "statement"
+            ],
+            "additionalProperties": false,
+            "patternProperties": {
+              "^x_": true
+            },
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "perspective": {
+      "type": "object",
+      "description": "Whose perspective this playbook is reviewed 'as' \u2014 an open-standard OPF instance must say who 'us' is.",
+      "required": [
+        "party",
+        "counterparty_type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "party": {
+          "type": "string",
+          "description": "Our legal entity/party name for this agreement type."
+        },
+        "counterparty_type": {
+          "type": "string",
+          "description": "What the other side typically is, e.g. 'Educational Institution'."
+        }
+      }
+    },
+    "de_minimis": {
+      "type": "array",
+      "description": "Categories of change accepted even if technically novel. Negotiation knowledge, owned by OPF.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "curation": {
+      "type": "object",
+      "description": "OPTIONAL \u2014 embedded attorney-pinned positions (issue #147). Pins are EMBEDDED here (not a sidecar) so they survive a recompile: the pipeline's merge layer preserves every pin and flags `conflict` when fresh evidence contradicts it. Excluded from `identity.content_hash`; digested separately as `identity.section_digests.curation` so pin edits/conflict flags don't perturb the playbook's own content identity.",
+      "additionalProperties": false,
+      "properties": {
+        "pins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/curationPin"
+          }
+        }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "required": [
+        "documents",
+        "stats"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "document_id",
+              "provenance",
+              "in_scope"
+            ],
+            "additionalProperties": false,
+            "patternProperties": {
+              "^x_": true
+            },
+            "properties": {
+              "document_id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "provenance": {
+                "$ref": "#/$defs/provenance"
+              },
+              "provenance_confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "provenance_is_ambiguous": {
+                "type": "boolean"
+              },
+              "in_scope": {
+                "type": "boolean"
+              },
+              "scope_rationale": {
+                "type": "string"
+              },
+              "scope_confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "versions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "versions_found": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "versions_mined": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "version_ingest": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "status"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "version": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "failed",
+                        "unknown"
+                      ]
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "extractor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "signed_version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "version_order_basis": {
+                "type": "string"
+              },
+              "version_files": {
+                "type": "array",
+                "description": "Per-version content addresses (\u00a74, issue #185): sha256 of each SOURCE file's bytes, keyed by the same inferred ordinal citations use \u2014 a consumer holding the corpus verifies 'I have the cited document' by hashing its copy. Hashes of confidential files leak nothing; source_uri does and is stripped by the public export profile.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "sha256"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "media_type": {
+                      "type": "string"
+                    },
+                    "source_uri": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "in_scope": {
+                      "const": false
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "scope_rationale"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "stats": {
+          "type": "object"
+        },
+        "snapshot": {
+          "type": "object",
+          "description": "Corpus snapshot identity (\u00a73.8, issue #185): manifest_hash = sha256 of the canonical JSON of sorted [(document_id, version, sha256), \u2026] \u2014 one value naming the exact corpus state this playbook was compiled from.",
+          "required": [
+            "manifest_hash"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "manifest_hash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "compiler": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "generated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stub_basis_present": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "description": "Artifact identity (issue #143) \u2014 content-addressed hash + per-section digests, so a consumer can record which exact playbook governed which document and lineage is reconstructible. `content_hash`/`section_digests` are engine-computed and always populated by this compiler; `id`/`version`/`supersedes` are lineage metadata a producer/orchestrator may assign (like `compiler.run_id`) and are omitted, not fabricated, when not supplied. OPTIONAL at the top level (not every producer populates it) \u2014 see playbook_engine/canonicalize.py for the canonical-form + hashing definition.",
+      "required": [
+        "content_hash",
+        "section_digests"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Producer-assigned playbook identifier. Not derived from content."
+        },
+        "version": {
+          "type": "string",
+          "description": "Producer-assigned version label for this playbook id."
+        },
+        "supersedes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Identifier of the playbook (id/version or content_hash) this one supersedes, if any."
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 over the whole-document canonical form, excluding `identity`, `curation` (digested separately as section_digests.curation \u2014 see \u00a73.11), and `compiler.generated_at`/`compiler.run_id`."
+        },
+        "section_digests": {
+          "type": "object",
+          "required": [
+            "evidence",
+            "posture",
+            "floor"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "evidence": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "posture": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "floor": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "curation": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "Digest of the `curation` section alone (issue #147), computed even when `curation` is absent (digests `{}`)."
+            }
+          }
+        }
+      }
+    },
+    "digest": {
+      "type": "object",
+      "description": "digest_version 3 \u2014 the compact model-facing projection of the 0.4 evidence (playbook_engine/digest.py build_digest_v3). Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields. Covered by identity.content_hash like every content section.",
+      "required": [
+        "digest_version",
+        "perspective",
+        "agreement_type",
+        "corpus",
+        "clauses"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "digest_version": {
+          "type": "string",
+          "const": "3"
+        },
+        "perspective": {
+          "description": "Copy of the document's top-level `perspective` (null when absent) \u2014 the digest always says who 'us' is.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/properties/perspective"
+            }
+          ]
+        },
+        "agreement_type": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "corpus": {
+          "type": "object",
+          "required": [
+            "n_deals",
+            "n_signed",
+            "first_signed",
+            "last_signed"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "n_deals": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "In-scope deals in corpus.documents."
+            },
+            "n_signed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "In-scope deals with a detected executed copy."
+            },
+            "first_signed": {
+              "$ref": "#/$defs/signedAtOrNull"
+            },
+            "last_signed": {
+              "$ref": "#/$defs/signedAtOrNull"
+            }
+          }
+        },
+        "clauses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestClause"
+          }
+        }
+      }
+    },
+    "x_judgments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/xJudgment"
+      }
+    }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "string",
+      "enum": [
+        "our_paper",
+        "counterparty_paper"
+      ]
+    },
+    "citation": {
+      "type": "object",
+      "required": [
+        "document_id",
+        "version",
+        "clause_path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "const": "template"
+            }
+          ]
+        },
+        "clause_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "char_span": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "curationPin": {
+      "type": "object",
+      "description": "One attorney-pinned clause position (issue #147). `position` is the attorney's asserted stance (free-form \u2014 the engine preserves and surfaces it but does not validate or interpret it); `baseline_stance` is the engine's own `summary.historical_stance` for this clause at the moment the pin was made, i.e. what the attorney was overriding FROM. On recompile, `conflict` is set when the freshly recomputed historical_stance differs from `baseline_stance` (evidence moved since the pin was made) and cleared when it matches \u2014 see playbook_engine/curation.py.",
+      "required": [
+        "clause_id",
+        "item_id",
+        "position",
+        "baseline_stance",
+        "pinned_at"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "clause_id": {
+          "type": "string",
+          "description": "clausePosition.id this pin applies to."
+        },
+        "item_id": {
+          "type": "string",
+          "description": "Viewer item number (e.g. 'C3') at pin time \u2014 informational, not authoritative (clause_id is)."
+        },
+        "position": {
+          "type": "string",
+          "description": "Attorney-asserted position. Not validated against any enum."
+        },
+        "baseline_stance": {
+          "type": "string",
+          "description": "summary.historical_stance for this clause at the moment this pin was made."
+        },
+        "pinned_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "pinned_by": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "conflict": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "flagged_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "recomputed_historical_stance": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "signedAt": {
+      "type": "string",
+      "pattern": "^\\d{4}-(\\d{2}-\\d{2}|Q[1-4])$",
+      "description": "An ISO-8601 date, or the YYYY-Qn quarter `playbook publish` coarsens it to."
+    },
+    "signedAtOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/signedAt"
+        }
+      ]
+    },
+    "ourStandard": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "text",
+        "source_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/citation"
+        }
+      }
+    },
+    "textRef": {
+      "type": "object",
+      "required": [
+        "text",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/citation"
+        }
+      }
+    },
+    "precedentClause": {
+      "type": "object",
+      "description": "One clause type (OPF 0.4). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
+      "required": [
+        "id",
+        "taxonomy_id",
+        "title",
+        "our_standard",
+        "n_deals",
+        "n_signed_standard",
+        "n_variants",
+        "n_refused"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "our_standard": {
+          "$ref": "#/$defs/ourStandard"
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct deals with a precedent record for this clause."
+        },
+        "n_signed_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose signed text is our standard language (`standard: true`)."
+        },
+        "n_variants": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct non-standard texts signed in signed deals, grouped by normalized text (exact after normalization)."
+        },
+        "n_refused": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct refused-ask texts, grouped the same way."
+        }
+      }
+    },
+    "refusedAsk": {
+      "type": "object",
+      "description": "Text proposed during the negotiation and struck before signing.",
+      "required": [
+        "text",
+        "round",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Round the ask arrived in: the cited draft's version ordinal - 1 (0 = the opening draft)."
+        },
+        "ref": {
+          "$ref": "#/$defs/citation"
+        }
+      }
+    },
+    "precedent": {
+      "type": "object",
+      "description": "One deal's record for one clause type (OPF 0.4) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
+      "required": [
+        "id",
+        "taxonomy_id",
+        "document_id",
+        "paper",
+        "paper_basis",
+        "paper_confidence",
+        "signed",
+        "rounds",
+        "signed_text",
+        "opening_text",
+        "standard",
+        "moved",
+        "refused_asks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^prec\\.[0-9a-f]{16}$",
+          "description": "\"prec.\" + the first 16 hex chars of sha256(canonical([agreement_type.id, document_id, taxonomy_id, signed_text.text or \"\"]))."
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "counterparty_ref": {
+          "type": "object",
+          "required": [
+            "alias"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "alias": {
+              "type": "string"
+            }
+          }
+        },
+        "paper": {
+          "type": "string",
+          "enum": [
+            "ours",
+            "theirs",
+            "unknown"
+          ],
+          "description": "Whose paper the deal is on \u2014 metadata only; never partitions, gates or weights anything."
+        },
+        "paper_basis": {
+          "type": "string"
+        },
+        "paper_confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "signed": {
+          "type": "boolean",
+          "description": "The deal has a detected executed copy; MUST agree with corpus.documents[].signed_version."
+        },
+        "signed_at": {
+          "$ref": "#/$defs/signedAt"
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct negotiation rounds in which this clause changed."
+        },
+        "signed_text": {
+          "description": "The deal's terminal text for the clause (the executed copy when `signed`, else the last draft); null when the clause was struck before signing.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/textRef"
+            }
+          ]
+        },
+        "opening_text": {
+          "description": "The text the deal opened with, when recorded as distinct evidence (our standard language struck before signing); null otherwise.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/textRef"
+            }
+          ]
+        },
+        "standard": {
+          "type": "boolean",
+          "description": "signed_text is our standard language: an exact match after normalization (deterministic, never judged). False when signed_text is null."
+        },
+        "moved": {
+          "type": "boolean",
+          "description": "The clause changed during the negotiation, was struck, or carried a refused ask."
+        },
+        "refused_asks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/refusedAsk"
+          }
+        }
+      }
+    },
+    "digestVariant": {
+      "type": "object",
+      "required": [
+        "text",
+        "n_deals",
+        "last_signed",
+        "ref",
+        "precedent_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Sentence-boundary summary (\u2264 300 chars) of the group's representative signed text."
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last_signed": {
+          "$ref": "#/$defs/signedAtOrNull"
+        },
+        "ref": {
+          "$ref": "#/$defs/citation"
+        },
+        "precedent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "digestRefusedAsk": {
+      "type": "object",
+      "required": [
+        "text",
+        "n_deals",
+        "ref",
+        "precedent_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ref": {
+          "$ref": "#/$defs/citation"
+        },
+        "precedent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "digestClause": {
+      "type": "object",
+      "required": [
+        "id",
+        "taxonomy_id",
+        "title",
+        "our_standard",
+        "n_deals",
+        "n_signed_standard",
+        "signed_variants",
+        "refused_asks",
+        "n_variants_total",
+        "n_refused_total"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "our_standard": {
+          "$ref": "#/$defs/ourStandard"
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_signed_standard": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signed_variants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestVariant"
+          },
+          "description": "Non-standard signed variants, ordered n_deals desc, last_signed desc, then normalized text; capped (see n_variants_total)."
+        },
+        "refused_asks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestRefusedAsk"
+          },
+          "description": "Refused asks, ordered n_deals desc, then normalized text; capped (see n_refused_total)."
+        },
+        "n_variants_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_refused_total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "xJudgment": {
+      "type": "object",
+      "description": "One judged verdict from an opt-in judged run, keyed by precedent id. Vendor-namespace data: never part of evidence.precedent or the digest.",
+      "required": [
+        "precedent_id"
+      ],
+      "properties": {
+        "precedent_id": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

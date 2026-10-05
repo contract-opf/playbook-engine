@@ -77,13 +77,13 @@ not the full control ladder above.
 
 ## What a playbook knows
 
-OPF 1.0 (document shape `opf_version` "0.3") is **one document with three
+OPF 1.0 (document shape `opf_version` "0.4"; 0.1–0.3 documents still validate) is **one document with three
 sections**, each with a different runtime binding — this is the design
 that makes it safe to point a stochastic model at high-stakes legal work:
 
 | Section | What it carries | Binding at review time |
 |---|---|---|
-| **Evidence** | What the corpus shows: accepted variants, fallbacks, refusals, per-round negotiation trails, held-rates — all cited | **Advisory** — the model reasons over it |
+| **Evidence** | What the corpus shows, one verdict-free precedent record per (deal, clause): what each deal signed, whether that is our standard language, whether the clause moved, and the asks refused before signing — all cited | **Advisory** — the model reasons over it |
 | **Posture** | Negotiation intent as prose, drafted from a short interview: risk appetite, what's sacred, what's flexible | **Soft** — shapes judgment, never a gate |
 | **Floor** | The hard lines, as judge-checkable invariants ("never accept uncapped liability") | **Hard** — a violation forces the outcome; the model cannot override it |
 
@@ -239,18 +239,22 @@ Two guards run without being asked:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
-| [`spec/`](spec/) | JSON Schemas — current: `playbook.schema-0.3.json` (frozen); superseded: v0.2, v0.1 — and shipped taxonomies |
+| [`spec/`](spec/) | JSON Schemas — current: `playbook.schema-0.4.json`; frozen and still validated: v0.3, v0.2, v0.1 — and shipped taxonomies |
 | [`examples/`](examples/) | The flagship v0.2 example playbook, fixtures, the quickstart corpus, and a second agreement type (NDA) at [`examples/nda/`](examples/nda/) |
 
 ## Status
 
-**Engine 1.0.1; OPF 1.0 (stable).** The current document shape —
-`opf_version` 0.3, additive over 0.2 (the `digest` section) — is frozen: it
-is never edited in place. 1.0 is a stability commitment for the 1.x series
-as a whole: a 1.x release may add a new OPTIONAL field or `x_*` extension,
-but ships it under a new `opf_version` rather than an in-place edit of 0.3
-(a breaking shape or normative-rule change requires 2.0; see the spec's
-§11).
+**Engine 1.0.1; OPF 1.0 (stable).** The compiler emits `opf_version` 0.4
+— the verdict-free per-deal precedent record with a `digest_version` 3
+digest (issue #223), shipped as a new schema file; `playbook project
+--opf-version 0.3` keeps the previous shape for one release. Published
+shapes are never edited in place: 0.3 (additive over 0.2, the `digest`
+section) is frozen and still validates. A shape or semantic change ships
+under a new `opf_version` rather than an in-place edit; a breaking shape or
+normative-rule change requires 2.0 (see the spec's §11). 0.4 removes and
+replaces 0.3's evidence fields, so whether it also calls for an OPF 2.0
+stamp under that policy is an open question for the owner, recorded in the
+spec's §11 0.3 → 0.4 migration note — not decided by this change.
 The engine's full pipeline is exercised end-to-end in CI — currently ~2,600
 tests, all offline. Real-world derivation runs on a private educational-
 affiliation corpus; a synthetic public showcase corpus ships at

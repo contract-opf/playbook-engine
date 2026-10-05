@@ -1264,7 +1264,9 @@ def test_curation_pin_survives_recompile_with_unchanged_evidence(tmp_path: Path)
     cfg = load_config(config_path)
 
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v1 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     clause = next(
         c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
@@ -1278,7 +1280,9 @@ def test_curation_pin_survives_recompile_with_unchanged_evidence(tmp_path: Path)
     )
 
     # Recompile with NO change to the observation store.
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v2 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     pins = playbook_v2["curation"]["pins"]
     assert len(pins) == 1
@@ -1307,7 +1311,9 @@ def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -
     cfg = load_config(config_path)
 
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v1 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     clause = next(
         c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
@@ -1330,7 +1336,9 @@ def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -
     # clause_position_compiler._historical_stance).
     _add_our_paper_observations(out_dir, taxonomy_id="governing_law", n=2)
 
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v2 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     clause_v2 = next(
         c for c in playbook_v2["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
@@ -1349,6 +1357,57 @@ def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -
     assert conflict is not None, "contradicting evidence must raise a conflict flag"
     assert conflict["recomputed_historical_stance"] == recomputed_stance
     assert baseline_stance in conflict["reason"]
+
+
+def test_curation_pin_on_opf_04_survives_recompile_and_03_pin_is_flagged(
+    tmp_path: Path,
+) -> None:
+    """Issue #223: curation is unchanged in OPF 0.4, which carries no stance.
+    A pin made on a 0.4 document by the real producer (``playbook curate``)
+    records ``baseline_stance`` "unknown" — the same accessor the recompile
+    compares against — so it survives a 0.4 recompile with no conflict. A pin
+    carried over from a 0.3 compile (a real stance as its baseline) is flagged
+    once on the first 0.4 compile: its stance is no longer computed."""
+    from playbook_engine.chat_curate import apply_curate_commands
+    from playbook_engine.validator import validate_document
+
+    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+
+    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    apply_curate_commands(
+        out_dir, ["pin governing_law to usually_held"], now="2026-01-01T00:00:00Z"
+    )
+    pinned = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    (pin,) = pinned["curation"]["pins"]
+    assert pin["baseline_stance"] == "unknown"
+    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    (pin_v2,) = playbook_v2["curation"]["pins"]
+    assert pin_v2["position"] == "usually_held"
+    assert pin_v2.get("conflict") is None
+
+    # A 0.3 pin (real stance baseline) carried into a 0.4 compile.
+    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3")
+    (out_dir / "playbook.opf.json").write_text(
+        json.dumps(
+            {
+                **json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8")),
+                "curation": {"pins": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    apply_curate_commands(
+        out_dir, ["pin governing_law to usually_held"], now="2026-01-01T00:00:00Z"
+    )
+    pinned_03 = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    assert pinned_03["curation"]["pins"][0]["baseline_stance"] == "no_signal"
+    playbook_v3 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    conflict = playbook_v3["curation"]["pins"][0]["conflict"]
+    assert conflict["recomputed_historical_stance"] == "unknown"
+    assert validate_document(playbook_v3).ok
 
 
 def test_posture_and_floor_survive_recompile(tmp_path: Path) -> None:
@@ -1428,7 +1487,9 @@ def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_pat
     cfg = load_config(config_path)
 
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v1 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
     hash_v1 = content_hash(playbook_v1)
     assert hash_v1 == playbook_v1["identity"]["content_hash"]
     curation_digest_v1 = playbook_v1["identity"]["section_digests"]["curation"]
@@ -1443,7 +1504,9 @@ def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_pat
         baseline_stance=clause["summary"]["historical_stance"],
     )
 
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    playbook_v2 = project_playbook(
+        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     assert playbook_v2["identity"]["content_hash"] == hash_v1, (
         "a curation-only change (no evidence change) must not perturb content_hash"
@@ -1646,7 +1709,7 @@ def test_removed_clause_with_no_template_is_dropped_as_origin_undetermined(
 
 
 def _mine_and_project_insurance(
-    root: Path, *, deal_001: str | None
+    root: Path, *, deal_001: str | None, opf_version: str = "0.3"
 ) -> tuple[list[dict], list[dict], dict, dict]:
     """Mine + project a corpus whose deal-002 is signed and keeps our
     template's Insurance clause. *deal_001* adds a deal-001 that starts from
@@ -1687,8 +1750,18 @@ def _mine_and_project_insurance(
     obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
     observations = [json.loads(line) for line in obs_lines if line.strip()]
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
-    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    playbook = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version=opf_version
+    )
     clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
+    if opf_version == "0.4":
+        # The 0.4 clause plus its precedent, for the issue #223 assertions.
+        clause = {
+            **clause,
+            "_precedent": [
+                p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"
+            ],
+        }
     return observations, manifest, clause, playbook["corpus"]["stats"]
 
 
@@ -1745,6 +1818,35 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
     ] == ["deal-001"], "control: the same strike in a signed deal is our concession"
     signed_detail = signed_clause["summary"]["stance_detail"]
     assert (signed_detail["held"], signed_detail["of"]) == (1, 2)
+
+
+def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) -> None:
+    """Issue #223: the same three corpora projected as OPF 0.4. An unsigned
+    deal that struck our standard produces no precedent for the clause; the
+    same strike in a signed deal is a precedent with no signed text, our
+    standard as its opening text, ``standard: false``, ``moved: true`` — and
+    never a refused ask. Counts are distinct deals."""
+    _, _, unsigned, _ = _mine_and_project_insurance(
+        tmp_path / "unsigned", deal_001="unsigned", opf_version="0.4"
+    )
+    assert [p["document_id"] for p in unsigned["_precedent"]] == ["deal-002"]
+    (kept,) = unsigned["_precedent"]
+    assert kept["signed"] is True and kept["standard"] is True
+    assert (unsigned["n_deals"], unsigned["n_signed_standard"]) == (1, 1)
+
+    _, _, signed, _ = _mine_and_project_insurance(
+        tmp_path / "signed", deal_001="signed", opf_version="0.4"
+    )
+    by_deal = {p["document_id"]: p for p in signed["_precedent"]}
+    assert set(by_deal) == {"deal-001", "deal-002"}
+    struck = by_deal["deal-001"]
+    assert struck["signed"] is True
+    assert struck["signed_text"] is None
+    assert struck["opening_text"] is not None
+    assert struck["opening_text"]["ref"]["version"] == 1
+    assert struck["standard"] is False and struck["moved"] is True
+    assert struck["refused_asks"] == []
+    assert (signed["n_deals"], signed["n_signed_standard"], signed["n_refused"]) == (2, 1, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1832,7 +1934,9 @@ def test_project_playbook_caps_search_snippet_for_legacy_store_missing_key(
         o.pop("search_snippet", None)
     obs_path.write_text("\n".join(json.dumps(o) for o in raw_observations) + "\n", encoding="utf-8")
 
-    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    playbook = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
+    )
 
     snippet_values = [
         op.get("x_search_snippet")
@@ -1936,7 +2040,9 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
     assert not [o for o in observations if o["outcome"] == "proposed_then_reversed"]
     assert derive_reversal_candidates(observations, min_deals=2) == []
 
-    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    playbook = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
+    )
     clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
     assert clause["summary"].get("rejected", []) == []
     assert _MULTI_NODE_INSURANCE_B not in [o.get("full_text") for o in clause["observed_positions"]]
@@ -1947,3 +2053,103 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
         c for c in playbook["digest"]["clauses"] if c["taxonomy_id"] == "insurance"
     )
     assert digest_clause["unacceptable"] == []
+
+    # OPF 0.4 (issue #223): each deal's struck later node is its opening
+    # text, never a refused ask, and neither deal signed our standard.
+    playbook_04 = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    records = [p for p in playbook_04["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"]
+    assert sorted(p["document_id"] for p in records) == ["deal-001", "deal-002"]
+    for record in records:
+        assert record["refused_asks"] == []
+        assert record["opening_text"]["text"] == _MULTI_NODE_INSURANCE_B
+        assert record["standard"] is False and record["moved"] is True
+    clause_04 = next(
+        c for c in playbook_04["evidence"]["clauses"] if c["taxonomy_id"] == "insurance"
+    )
+    assert (clause_04["n_deals"], clause_04["n_signed_standard"], clause_04["n_refused"]) == (
+        2,
+        0,
+        0,
+    )
+    digest_04 = next(c for c in playbook_04["digest"]["clauses"] if c["taxonomy_id"] == "insurance")
+    assert digest_04["refused_asks"] == []
+
+
+# Issue #223 fix round 1: one conceded_before_signing row is written per
+# struck node, so a deal that strikes TWO nodes of a multi-node standard has
+# two rows for the (deal, clause) — the 0.4 precedent must carry both.
+_MULTI_NODE_INSURANCE_C = "Alpha Corp shall deliver certificates of insurance on request."
+_THREE_NODE_TEMPLATE_BODY = (
+    r"1. Indemnification\par "
+    r"Alpha Corp shall indemnify Beta University against third-party claims "
+    r"arising from the placement programme.\par "
+    r"2. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_A}\par "
+    r"3. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_B}\par "
+    r"4. Insurance\par "
+    rf"{_MULTI_NODE_INSURANCE_C}\par "
+    r"5. Term\par "
+    r"This agreement commences on the date of execution and continues for one year.\par "
+)
+
+
+def test_two_struck_nodes_of_multi_node_standard_both_reach_opening_text(
+    tmp_path: Path,
+) -> None:
+    """Our template's Insurance standard spans three nodes (A, B, C); two
+    deals start from it and sign keeping only A. Each deal's store has a
+    conceded_before_signing row for B and one for C, and its OPF 0.4
+    precedent's opening_text carries BOTH struck texts (joined in clause
+    order), never only the first row."""
+    from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
+
+    corpus_dir = tmp_path / "corpus"
+    for deal in ("deal-001", "deal-002"):
+        deal_dir = corpus_dir / deal
+        deal_dir.mkdir(parents=True)
+        _write_rtf(deal_dir / "v1.rtf", _THREE_NODE_TEMPLATE_BODY)
+        _write_rtf(deal_dir / "v2.rtf", _MULTI_NODE_SIGNED_BODY)
+        (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, _THREE_NODE_TEMPLATE_BODY)
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    for deal in ("deal-001", "deal-002"):
+        conceded = sorted(
+            o["full_text"]
+            for o in observations
+            if o["citation"]["document_id"] == deal
+            and o["outcome"] == OUTCOME_CONCEDED_BEFORE_SIGNING
+        )
+        assert conceded == sorted([_MULTI_NODE_INSURANCE_B, _MULTI_NODE_INSURANCE_C]), (
+            f"premise: {deal} has one conceded row per struck node; got {conceded!r}"
+        )
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    records = [p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"]
+    assert sorted(p["document_id"] for p in records) == ["deal-001", "deal-002"]
+    for record in records:
+        opening = record["opening_text"]["text"]
+        assert _MULTI_NODE_INSURANCE_B in opening, opening
+        assert _MULTI_NODE_INSURANCE_C in opening, opening
+        assert opening == f"{_MULTI_NODE_INSURANCE_B}\n{_MULTI_NODE_INSURANCE_C}"
+        assert record["signed_text"]["text"] == _MULTI_NODE_INSURANCE_A
+        assert record["refused_asks"] == []
+        assert record["standard"] is False and record["moved"] is True

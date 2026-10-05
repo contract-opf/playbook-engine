@@ -52,7 +52,10 @@ from typing import Any
 from playbook_engine.opf_accessors import (
     clause_confidence,
     clause_stance,
+    is_precedent_shape,
+    perspective_party,
     playbook_clauses,
+    playbook_precedent,
 )
 from playbook_engine.viewer import _resolve_aliases_in_doc
 
@@ -256,6 +259,63 @@ def _render_clause(
     return "\n".join(parts)
 
 
+def _render_clause_v04(
+    clause: dict[str, Any],
+    precedent: list[dict[str, Any]],
+    tax_labels: dict[str, str],
+    number: int,
+    *,
+    party: str | None,
+) -> str:
+    """One OPF 0.4 clause (issue #223): our standard, how many deals signed
+    it, every non-standard variant signed and every refused ask — each with
+    its distinct-deal count and citation. No stance chip, no risk marker:
+    0.4 carries no judged verdict."""
+    from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
+
+    tid = str(clause.get("taxonomy_id", ""))
+    title = clause.get("title") or tax_labels.get(tid, tid)
+    parts: list[str] = [f'<section class="clause" id="clause-{number}">']
+    parts.append(f'<h2><span class="cnum">{number}.</span> {html_lib.escape(str(title))}</h2>')
+    meta_bits = [
+        f"taxonomy: {html_lib.escape(tax_labels.get(tid, tid))}",
+        f"{clause.get('n_deals', 0)} deal(s)",
+        f"our standard signed in {clause.get('n_signed_standard', 0)}",
+    ]
+    parts.append(f'<p class="meta">{" · ".join(meta_bits)}</p>')
+
+    our_standard = clause.get("our_standard") or {}
+    std_text = our_standard.get("text") if isinstance(our_standard, dict) else None
+    if std_text:
+        parts.append("<h3>Our standard</h3>")
+        parts.append(_quote_block(str(std_text), _cite_str(our_standard.get("source_ref"))))
+
+    groups = clause_precedent_groups(clause.get("taxonomy_id"), precedent, party=party)
+    if groups["signed_variants"]:
+        parts.append(
+            '<h3 title="Non-standard language signed in at least one deal, grouped by '
+            'normalized text. (OPF field: evidence.precedent[].signed_text)">'
+            "Signed variants</h3>"
+        )
+        for v in groups["signed_variants"]:
+            parts.append(
+                _quote_block(str(v["text"]), f"{_cite_str(v.get('ref'))} · {v['n_deals']} deal(s)")
+            )
+    if groups["refused_asks"]:
+        parts.append(
+            f'<details><summary title="Text proposed in a draft and struck before '
+            f'signing. (OPF field: evidence.precedent[].refused_asks)">'
+            f"Refused asks ({len(groups['refused_asks'])})</summary>"
+        )
+        for a in groups["refused_asks"]:
+            parts.append(
+                _quote_block(str(a["text"]), f"{_cite_str(a.get('ref'))} · {a['n_deals']} deal(s)")
+            )
+        parts.append("</details>")
+    parts.append("</section>")
+    return "\n".join(parts)
+
+
 def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> str:
     """The "Method & provenance" panel: how this document was built, from the
     document's own numbers — so "where did this come from?" is answerable
@@ -295,16 +355,27 @@ def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> 
 
     dev_counts: dict[str, int] = {}
     n_obs = 0
-    for clause in clauses:
-        for obs in clause.get("observed_positions", []):
+    if is_precedent_shape(doc):
+        # OPF 0.4: one precedent per (deal, clause); the standard check is a
+        # deterministic fact, not a judged deviation.
+        for record in playbook_precedent(doc):
             n_obs += 1
-            key = str(obs.get("deviation", "?"))
+            key = "standard" if record.get("standard") is True else "non-standard"
             dev_counts[key] = dev_counts.get(key, 0) + 1
-    dev_line = ", ".join(
-        f"{dev_counts[k]} {k.replace('_', ' ')}"
-        for k in ("none", "reworded_equivalent", "substantive")
-        if k in dev_counts
-    )
+        dev_line = ", ".join(
+            f"{dev_counts[k]} {k}" for k in ("standard", "non-standard") if k in dev_counts
+        )
+    else:
+        for clause in clauses:
+            for obs in clause.get("observed_positions", []):
+                n_obs += 1
+                key = str(obs.get("deviation", "?"))
+                dev_counts[key] = dev_counts.get(key, 0) + 1
+        dev_line = ", ".join(
+            f"{dev_counts[k]} {k.replace('_', ' ')}"
+            for k in ("none", "reworded_equivalent", "substantive")
+            if k in dev_counts
+        )
 
     judge_line = (
         "structural stages are deterministic; scope, provenance, and "
@@ -472,19 +543,37 @@ def _render_document_page(
         sum(1 for d in corpus.get("documents", []) if d.get("in_scope")),
     )
     versions_total = stats.get("versions_total", "—")
-    n_acceptable = sum(len((c.get("summary") or {}).get("acceptable_if") or []) for c in clauses)
-    n_rejected = sum(len((c.get("summary") or {}).get("rejected") or []) for c in clauses)
+    precedent_shape = is_precedent_shape(doc)
+    if precedent_shape:
+        acceptable_label, rejected_label = "signed variants", "refused asks"
+        n_acceptable = sum(c.get("n_variants") or 0 for c in clauses)
+        n_rejected = sum(c.get("n_refused") or 0 for c in clauses)
+    else:
+        acceptable_label, rejected_label = "acceptable variations", "rejected asks"
+        n_acceptable = sum(
+            len((c.get("summary") or {}).get("acceptable_if") or []) for c in clauses
+        )
+        n_rejected = sum(len((c.get("summary") or {}).get("rejected") or []) for c in clauses)
 
     toc_items = "".join(
         f'<li><a href="#clause-{i}">{html_lib.escape(str(c.get("title") or tax_labels.get(str(c.get("taxonomy_id", "")), "")))}</a>'
-        f" {_stance_chip(clause_stance(c))}</li>"
+        + ("" if precedent_shape else f" {_stance_chip(clause_stance(c))}")
+        + "</li>"
         for i, c in enumerate(clauses_sorted, start=1)
     )
 
-    clause_html = "\n".join(
-        _render_clause(c, library_by_tid, tax_labels, i)
-        for i, c in enumerate(clauses_sorted, start=1)
-    )
+    if precedent_shape:
+        precedent = playbook_precedent(doc)
+        party = perspective_party(doc)
+        clause_html = "\n".join(
+            _render_clause_v04(c, precedent, tax_labels, i, party=party)
+            for i, c in enumerate(clauses_sorted, start=1)
+        )
+    else:
+        clause_html = "\n".join(
+            _render_clause(c, library_by_tid, tax_labels, i)
+            for i, c in enumerate(clauses_sorted, start=1)
+        )
 
     posture = doc.get("posture") or {}
     floor = doc.get("floor") or {}
@@ -576,8 +665,8 @@ def _render_document_page(
     <div><b>{docs_in_scope}/{docs_total}</b> agreements in scope</div>
     <div><b>{versions_total}</b> negotiation versions</div>
     <div><b>{len(clauses)}</b> clause concepts</div>
-    <div><b>{n_acceptable}</b> acceptable variations</div>
-    <div><b>{n_rejected}</b> rejected asks</div>
+    <div><b>{n_acceptable}</b> {acceptable_label}</div>
+    <div><b>{n_rejected}</b> {rejected_label}</div>
   </div>
 </header>
 {watermark}
@@ -645,6 +734,65 @@ def _escape_json_for_script(json_text: str) -> str:
     return json_text.replace("</", "<\\/")
 
 
+def _render_digest_v2_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
+    """Digest-section summary table for a digest_version 2 digest (OPF 0.3)."""
+    rows = "".join(
+        "<tr>"
+        f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
+        f"<td>{_stance_chip(str(c.get('historical_stance') or 'unknown'))}</td>"
+        f"<td>{len(c.get('preferred_variations') or [])}</td>"
+        f"<td>{len(c.get('concessions') or [])}</td>"
+        f"<td>{len(c.get('unacceptable') or [])}</td>"
+        f"<td>{len(c.get('exemplar_forms') or [])}</td>"
+        "</tr>"
+        for c in d_clauses
+    )
+    return f"""<section class="clause" id="digest">
+  <h2>Digest (model-facing projection)</h2>
+  <p>This bundle embeds a compact digest of the evidence section — per clause:
+  stance, preferred variations verbatim, concession/unacceptable summaries, and
+  frequency-annotated exemplar forms (deduped; <code>n</code>-weighted; bands
+  often/sometimes/rare). Estimated size: ~{token_est:,} tokens. The machine
+  blocks below carry the digest and the canonical OPF JSON; the bare
+  <code>playbook.opf.json</code> remains the canonical artifact.</p>
+  <table>
+    <thead><tr><th>Clause</th><th>Stance</th><th>Preferred</th>
+    <th>Concessions</th><th>Unacceptable</th><th>Exemplars</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</section>
+"""
+
+
+def _render_digest_v3_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
+    """Digest-section summary table for a digest_version 3 digest (OPF 0.4)."""
+    rows = "".join(
+        "<tr>"
+        f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
+        f"<td>{c.get('n_signed_standard', 0)} of {c.get('n_deals', 0)}</td>"
+        f"<td>{c.get('n_variants_total', 0)}</td>"
+        f"<td>{c.get('n_refused_total', 0)}</td>"
+        "</tr>"
+        for c in d_clauses
+    )
+    return f"""<section class="clause" id="digest">
+  <h2>Digest (model-facing projection)</h2>
+  <p>This bundle embeds a compact, verdict-free digest of the precedent record
+  (digest_version 3) — per clause: our standard, how many deals signed it, the
+  non-standard variants signed and the asks refused before signing, each with
+  its distinct-deal count and citation (capped; the totals are always given).
+  Estimated size: ~{token_est:,} tokens. The machine blocks below carry the
+  digest and the canonical OPF JSON; the bare <code>playbook.opf.json</code>
+  remains the canonical artifact.</p>
+  <table>
+    <thead><tr><th>Clause</th><th>Signed our standard</th><th>Signed variants</th>
+    <th>Refused asks</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</section>
+"""
+
+
 def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     """Render the single-file OPF bundle: ``playbook.opf.html``.
 
@@ -677,32 +825,10 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
 
     d_clauses = digest.get("clauses", [])
     token_est = digest_token_estimate(digest)
-    rows = "".join(
-        "<tr>"
-        f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
-        f"<td>{_stance_chip(str(c.get('historical_stance') or 'unknown'))}</td>"
-        f"<td>{len(c.get('preferred_variations') or [])}</td>"
-        f"<td>{len(c.get('concessions') or [])}</td>"
-        f"<td>{len(c.get('unacceptable') or [])}</td>"
-        f"<td>{len(c.get('exemplar_forms') or [])}</td>"
-        "</tr>"
-        for c in d_clauses
-    )
-    digest_summary = f"""<section class="clause" id="digest">
-  <h2>Digest (model-facing projection)</h2>
-  <p>This bundle embeds a compact digest of the evidence section — per clause:
-  stance, preferred variations verbatim, concession/unacceptable summaries, and
-  frequency-annotated exemplar forms (deduped; <code>n</code>-weighted; bands
-  often/sometimes/rare). Estimated size: ~{token_est:,} tokens. The machine
-  blocks below carry the digest and the canonical OPF JSON; the bare
-  <code>playbook.opf.json</code> remains the canonical artifact.</p>
-  <table>
-    <thead><tr><th>Clause</th><th>Stance</th><th>Preferred</th>
-    <th>Concessions</th><th>Unacceptable</th><th>Exemplars</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</section>
-"""
+    if digest.get("digest_version") == "3":
+        digest_summary = _render_digest_v3_summary(d_clauses, token_est)
+    else:
+        digest_summary = _render_digest_v2_summary(d_clauses, token_est)
 
     scripts = (
         "<!-- Machine-readable payloads. Extract a block, JSON-parse it, and verify\n"

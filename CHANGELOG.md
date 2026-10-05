@@ -10,6 +10,29 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **OPF 0.4 + digest_version 3: the verdict-free per-deal precedent record
+  (issue #223).** `playbook project` now emits `opf_version` "0.4"
+  (`spec/playbook.schema-0.4.json`, a new file; 0.1/0.2/0.3 schemas are
+  untouched and keep validating). `evidence` becomes `{clauses, precedent}`:
+  one `precedent` record per (deal, clause) carrying the deal's signed text,
+  whether it is our standard language (the deterministic exact check),
+  `rounds`/`moved`, the text it opened with when our standard was struck,
+  the asks refused before signing, and paper side as three-valued metadata
+  that gates nothing; each clause carries `n_deals`, `n_signed_standard`,
+  `n_variants` and `n_refused`, all distinct deals or distinct texts. No
+  stance, band, risk or deviation verdict remains in evidence or digest;
+  verdicts from an opt-in judged run go under the root `x_judgments`
+  extension. The digest (`digest_version` "3") carries `perspective`,
+  `agreement_type`, corpus counts, and per clause the grouped signed
+  variants and refused asks with deal counts, citations and precedent ids.
+  `playbook project --opf-version 0.3` keeps the 0.3 shape for one release.
+  `validate`, `digest`, `view`, `report`, `render-prompt`,
+  `resolve-citation`, `publish` and `export_profile` all read 0.4 (publish
+  and export re-derive the digest after rewriting text, and publish
+  coarsens `signed_at`). New conformance vectors under
+  `spec/conformance/0.4/`; the 0.3 set is unchanged.
+  `examples/nda/playbook.opf.json` is regenerated as 0.4.
+
 - **Judged deviation/risk verdicts leave the consumer path (issue #220).**
   The consumer (a capable review model) does the judging; the playbook
   supplies precedent (owner decision 2026-09-13). With no deviation judge
@@ -242,6 +265,18 @@ adding warnings after the fact.
   (a config edit, an engine upgrade) print one short `note:` line and
   continue. Existing output directories have no manifest and are treated as
   a first run: silent, then stamped.
+
+### Normative rule changes
+
+For `opf_version` "0.4" a conformant validator MUST reject: a precedent id
+that is duplicated or differs from its recomputation; more than one
+precedent per (document_id, taxonomy_id); a precedent whose taxonomy_id
+names no clause or whose document_id is not in `corpus.documents`; a
+precedent whose `signed` disagrees with its document's `signed_version`;
+`standard: true` with no `signed_text`; clause `n_*` counts that differ
+from what `precedent` implies; a `signed_at` that is not a date or
+quarter; and a digest that differs from `build_digest(document)`
+(OPF-SPEC §3.5.4, §3.12.1).
 
 ## [1.0.1] - 2026-08-22
 

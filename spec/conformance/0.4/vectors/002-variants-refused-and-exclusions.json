@@ -1,0 +1,476 @@
+{
+  "name": "variants-refused-and-exclusions",
+  "description": "One clause, eight deals, pinning digest_version 3 grouping and every exclusion rule: two deals signed our standard (n_signed_standard 2, never a variant); variant A signed in three deals, one spelled with different case/punctuation (exact normalization merges it) — its representative is the deal with the latest signed_at, a YYYY-Qn quarter that sorts at the quarter's first day; variant B differs from A by the negator 'not' only and stays a separate group; an unsigned deal's text is never a signed variant; a deal whose standard was struck (signed_text null, opening_text set) contributes no variant. The same refused ask in three deals (three spellings) is one group with n_deals 3 whose representative is the earliest-round ask. perspective is copied into the digest.",
+  "opf_version": "0.4",
+  "engine_version": "1.0.0",
+  "digest_version": "3",
+  "input": {
+    "opf_version": "0.4",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": true
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "perspective": {
+      "party": "Fixture Co",
+      "counterparty_type": "Fixture Counterparty"
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.assignment",
+          "taxonomy_id": "assignment",
+          "title": "Assignment",
+          "our_standard": {
+            "text": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "source_ref": {
+              "document_id": "template",
+              "version": "template",
+              "clause_path": "9"
+            }
+          },
+          "n_deals": 8,
+          "n_signed_standard": 2,
+          "n_variants": 2,
+          "n_refused": 1
+        }
+      ],
+      "precedent": [
+        {
+          "id": "prec.f6b62baad5d33580",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-a",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "signed_at": "2025-01-10",
+          "rounds": 0,
+          "signed_text": {
+            "text": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "ref": {
+              "document_id": "deal-a",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": true,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.5fa9069e8beae839",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-b",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "signed_at": "2025-02-10",
+          "rounds": 0,
+          "signed_text": {
+            "text": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "ref": {
+              "document_id": "deal-b",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": true,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.0e78ee359f88afa8",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-c",
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "signed_at": "2025-03-01",
+          "rounds": 0,
+          "signed_text": {
+            "text": "Either party may assign this Agreement to an affiliate without consent.",
+            "ref": {
+              "document_id": "deal-c",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": false,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.95e0c99f0443a47d",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-d",
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "signed_at": "2025-Q4",
+          "rounds": 1,
+          "signed_text": {
+            "text": "EITHER party may assign this Agreement to an affiliate, without consent",
+            "ref": {
+              "document_id": "deal-d",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": false,
+          "moved": true,
+          "refused_asks": [
+            {
+              "text": "Either party may assign this Agreement freely.",
+              "round": 1,
+              "ref": {
+                "document_id": "deal-d",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "prec.4228380fca9841a0",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-e",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 1,
+          "signed_text": {
+            "text": "Either party may assign this Agreement to an affiliate without consent.",
+            "ref": {
+              "document_id": "deal-e",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": false,
+          "moved": true,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.8ee16a97c9b307b0",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-g",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "signed_at": "2024-06-30",
+          "rounds": 0,
+          "signed_text": {
+            "text": "Either party may not assign this Agreement to an affiliate without consent.",
+            "ref": {
+              "document_id": "deal-g",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": false,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.5f46cec9cc1eb065",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-f",
+          "paper": "unknown",
+          "paper_basis": "ambiguous_detection",
+          "paper_confidence": null,
+          "signed": false,
+          "rounds": 0,
+          "signed_text": {
+            "text": "Either party may assign this Agreement on notice.",
+            "ref": {
+              "document_id": "deal-f",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opening_text": null,
+          "standard": false,
+          "moved": true,
+          "refused_asks": [
+            {
+              "text": "Either party may assign this Agreement freely.",
+              "round": 2,
+              "ref": {
+                "document_id": "deal-f",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "prec.20e5ca2a0cd7124e",
+          "taxonomy_id": "assignment",
+          "document_id": "deal-h",
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 0,
+          "signed_text": null,
+          "opening_text": {
+            "text": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "ref": {
+              "document_id": "deal-h",
+              "version": 1,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "standard": false,
+          "moved": true,
+          "refused_asks": [
+            {
+              "text": "either party may assign this agreement freely",
+              "round": 0,
+              "ref": {
+                "document_id": "deal-h",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [
+        {
+          "document_id": "deal-a",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-b",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-c",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-d",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-e",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-f",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": null
+        },
+        {
+          "document_id": "deal-g",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-h",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        }
+      ],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-e\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-f\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":null,\"versions\":3},{\"document_id\":\"deal-g\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-h\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.assignment\",\"n_deals\":8,\"n_refused\":1,\"n_signed_standard\":2,\"n_variants\":2,\"our_standard\":{\"source_ref\":{\"clause_path\":\"9\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"Neither party may assign this Agreement without the other party's prior written consent.\"},\"taxonomy_id\":\"assignment\",\"title\":\"Assignment\"}],\"precedent\":[{\"document_id\":\"deal-a\",\"id\":\"prec.f6b62baad5d33580\",\"moved\":false,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2025-01-10\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"Neither party may assign this Agreement without the other party's prior written consent.\"},\"standard\":true,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-b\",\"id\":\"prec.5fa9069e8beae839\",\"moved\":false,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2025-02-10\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"Neither party may assign this Agreement without the other party's prior written consent.\"},\"standard\":true,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-c\",\"id\":\"prec.0e78ee359f88afa8\",\"moved\":false,\"opening_text\":null,\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2025-03-01\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"Either party may assign this Agreement to an affiliate without consent.\"},\"standard\":false,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-d\",\"id\":\"prec.95e0c99f0443a47d\",\"moved\":true,\"opening_text\":null,\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":2},\"round\":1,\"text\":\"Either party may assign this Agreement freely.\"}],\"rounds\":1,\"signed\":true,\"signed_at\":\"2025-Q4\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"EITHER party may assign this Agreement to an affiliate, without consent\"},\"standard\":false,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-e\",\"id\":\"prec.4228380fca9841a0\",\"moved\":true,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-e\",\"version\":3},\"text\":\"Either party may assign this Agreement to an affiliate without consent.\"},\"standard\":false,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-g\",\"id\":\"prec.8ee16a97c9b307b0\",\"moved\":false,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2024-06-30\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-g\",\"version\":3},\"text\":\"Either party may not assign this Agreement to an affiliate without consent.\"},\"standard\":false,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-f\",\"id\":\"prec.5f46cec9cc1eb065\",\"moved\":true,\"opening_text\":null,\"paper\":\"unknown\",\"paper_basis\":\"ambiguous_detection\",\"paper_confidence\":null,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-f\",\"version\":3},\"round\":2,\"text\":\"Either party may assign this Agreement freely.\"}],\"rounds\":0,\"signed\":false,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-f\",\"version\":3},\"text\":\"Either party may assign this Agreement on notice.\"},\"standard\":false,\"taxonomy_id\":\"assignment\"},{\"document_id\":\"deal-h\",\"id\":\"prec.20e5ca2a0cd7124e\",\"moved\":true,\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-h\",\"version\":1},\"text\":\"Neither party may assign this Agreement without the other party's prior written consent.\"},\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-h\",\"version\":1},\"round\":0,\"text\":\"either party may assign this agreement freely\"}],\"rounds\":0,\"signed\":true,\"signed_text\":null,\"standard\":false,\"taxonomy_id\":\"assignment\"}]},\"floor\":{},\"opf_version\":\"0.4\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:0b713965b31464046284e7afa651362026eb777d90c7c341e1b690589679014f",
+    "section_digests": {
+      "evidence": "sha256:608afeba889c5c9583ab1c8c22336733d750833f831a40792306cd57a549ff61",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "3",
+      "perspective": {
+        "party": "Fixture Co",
+        "counterparty_type": "Fixture Counterparty"
+      },
+      "agreement_type": {
+        "id": "conformance-fixture",
+        "name": "Conformance Fixture Agreement"
+      },
+      "corpus": {
+        "n_deals": 8,
+        "n_signed": 7,
+        "first_signed": "2024-06-30",
+        "last_signed": "2025-Q4"
+      },
+      "clauses": [
+        {
+          "id": "clause.assignment",
+          "taxonomy_id": "assignment",
+          "title": "Assignment",
+          "our_standard": {
+            "text": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "source_ref": {
+              "document_id": "template",
+              "version": "template",
+              "clause_path": "9"
+            }
+          },
+          "n_deals": 8,
+          "n_signed_standard": 2,
+          "signed_variants": [
+            {
+              "text": "EITHER party may assign this Agreement to an affiliate, without consent",
+              "n_deals": 3,
+              "last_signed": "2025-Q4",
+              "ref": {
+                "document_id": "deal-d",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              },
+              "precedent_ids": [
+                "prec.0e78ee359f88afa8",
+                "prec.4228380fca9841a0",
+                "prec.95e0c99f0443a47d"
+              ]
+            },
+            {
+              "text": "Either party may not assign this Agreement to an affiliate without consent.",
+              "n_deals": 1,
+              "last_signed": "2024-06-30",
+              "ref": {
+                "document_id": "deal-g",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              },
+              "precedent_ids": [
+                "prec.8ee16a97c9b307b0"
+              ]
+            }
+          ],
+          "refused_asks": [
+            {
+              "text": "either party may assign this agreement freely",
+              "n_deals": 3,
+              "ref": {
+                "document_id": "deal-h",
+                "version": 1,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              },
+              "precedent_ids": [
+                "prec.20e5ca2a0cd7124e",
+                "prec.5f46cec9cc1eb065",
+                "prec.95e0c99f0443a47d"
+              ]
+            }
+          ],
+          "n_variants_total": 2,
+          "n_refused_total": 1
+        }
+      ]
+    }
+  }
+}

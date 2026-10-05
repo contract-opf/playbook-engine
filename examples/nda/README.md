@@ -32,31 +32,34 @@ playbook.opf.json        -- the derived, worked playbook: populated
 
 ## The worked playbook
 
-`playbook.opf.json` is committed with genuine judged semantics: 26 clauses
-across all six deals; a real `proposed_then_reversed` round-trip (a
-`residuals` clause inserted in v2 of the three-version `zeta-diagnostics`
-deal and struck again before signing -- the reversal detector needs >=3
-versions on a deal to observe this); non-standard language struck before
-signing (the `epsilon-systems` first draft's compelled-disclosure clause,
-which lacked the notice obligation the signed copy restores) counted as a
-refused ask; our own standard clauses struck before signing (standard of care,
-governing law and venue in `beta-industries`, confidentiality of
-discussions and breach notice in `gamma-holdings`) counted as concessions --
-those deals count in `stance_detail`'s `of` but never in its `held`, which
-counts only deals that signed our standard text -- never as signed and never
-as rejected asks; no judged deviation or risk verdict anywhere (every
-observation's `deviation` is the deterministic standard check, so every
-`historical_stance` is `no_signal` and `stance_detail` reads
-`{held: deals that signed our standard, of: all deals, basis: "all"}` --
-the consumer model does the judging); a populated
-`posture.system_prompt` from a
-six-question GC interview, and three signed `floor.invariants`: two
-auto-promoted from the interview's "sacred clauses" answer (exclusions from
-Confidential Information; survival of confidentiality obligations) and one
-hand-authored conditional hard line via `playbook floor sign` (limitation of
-liability, if present, must not reach a confidentiality breach --
-responding to the $50,000 liability cap that appears in three of the six
-deals, introduced by the counterparty in two of them).
+`playbook.opf.json` is committed as an **OPF 0.4** document (`opf_version`
+"0.4", issue #223): the verdict-free per-deal precedent record with a
+`digest_version` "3" digest. 26 clauses across all six deals, one
+`evidence.precedent` record per (deal, clause): what each deal signed, whether
+that is our standard language (`standard` — an exact match after
+normalization, never a judged verdict), whether the clause moved, and the
+asks refused before signing. It demonstrates a real refused ask from a
+proposed-then-reversed round-trip (a `residuals` clause inserted in v2 of the
+three-version `zeta-diagnostics` deal and struck again before signing -- the
+reversal detector needs >=3 versions on a deal to observe this);
+non-standard language struck before signing (the `epsilon-systems` first
+draft's compelled-disclosure clause, which lacked the notice obligation the
+signed copy restores) as a refused ask; our own standard clauses struck
+before signing (standard of care, governing law and venue in
+`beta-industries`, confidentiality of discussions and breach notice in
+`gamma-holdings`) as precedents whose `opening_text` is our standard and
+whose `standard` is false -- our concession, never a refused ask; and no
+stance, risk or deviation verdict anywhere (the consumer model does the
+judging; each clause's `n_signed_standard` of `n_deals` is the fact it reads).
+It also carries a populated `posture.system_prompt` from a six-question GC
+interview, and three signed `floor.invariants`: two auto-promoted from the
+interview's "sacred clauses" answer (exclusions from Confidential
+Information; survival of confidentiality obligations) and one hand-authored
+conditional hard line via `playbook floor sign` (limitation of liability, if
+present, must not reach a confidentiality breach -- responding to the
+$50,000 liability cap that appears in three of the six deals, introduced by
+the counterparty in two of them). `playbook project --opf-version 0.3` still
+projects the same store into the previous (0.3) shape for one release.
 
 **It is reproducible from the committed inputs above, with no
 `ANTHROPIC_API_KEY`:**

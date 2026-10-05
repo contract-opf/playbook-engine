@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import file_sha256
-from playbook_engine.opf_accessors import playbook_clauses
+from playbook_engine.opf_accessors import clause_precedent, is_precedent_shape, playbook_clauses
 
 
 class CitationResolutionError(ValueError):
@@ -85,6 +85,17 @@ def _find_by_hash(corpus_dir: Path, document_id: str, expected_sha256: str) -> P
     return None
 
 
+def _precedent_ref(record: dict[str, Any]) -> dict[str, Any]:
+    for key in ("signed_text", "opening_text"):
+        entry = record.get(key)
+        if isinstance(entry, dict) and isinstance(entry.get("ref"), dict):
+            return dict(entry["ref"])
+    for ask in record.get("refused_asks") or []:
+        if isinstance(ask, dict) and isinstance(ask.get("ref"), dict):
+            return dict(ask["ref"])
+    return {}
+
+
 def resolve_citation(
     playbook: dict[str, Any],
     clause_id: str,
@@ -94,9 +105,11 @@ def resolve_citation(
     """Resolve one observation's citation to a hash-verified source file.
 
     Args:
-        playbook:   Parsed playbook document (OPF v0.2).
+        playbook:   Parsed playbook document (OPF 0.2-0.4).
         clause_id:  ``evidence.clauses[].id`` (e.g. ``"clause.indemnification"``).
-        obs_index:  Index into that clause's ``observed_positions``.
+        obs_index:  Index into that clause's ``observed_positions`` (OPF
+                    0.2/0.3), or into its ``evidence.precedent`` records
+                    (OPF 0.4).
         corpus_dir: Directory holding the corpus source files.
 
     Raises:
@@ -110,13 +123,19 @@ def resolve_citation(
         known = ", ".join(c.get("id", "?") for c in playbook_clauses(playbook))
         raise CitationResolutionError(f"no clause with id {clause_id!r} (known: {known})")
 
-    observations = clause.get("observed_positions", [])
-    if not 0 <= obs_index < len(observations):
+    if is_precedent_shape(playbook):
+        # OPF 0.4 (issue #223): obs_index indexes the clause's precedent
+        # records; each cites its signed text, else the text it opened with,
+        # else its first refused ask.
+        refs = [_precedent_ref(p) for p in clause_precedent(playbook, clause)]
+    else:
+        refs = [o.get("example_ref") or {} for o in clause.get("observed_positions", [])]
+    if not 0 <= obs_index < len(refs):
         raise CitationResolutionError(
             f"observation index {obs_index} out of range for {clause_id!r} "
-            f"({len(observations)} observation(s))"
+            f"({len(refs)} observation(s))"
         )
-    ref = observations[obs_index].get("example_ref") or {}
+    ref = refs[obs_index]
     document_id = ref.get("document_id", "")
     version: int | str | None = ref.get("version")
     if not isinstance(version, (int, str)):

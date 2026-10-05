@@ -1,6 +1,6 @@
 """Reference prompt-pack consumer (issue #179, owner decision 2026-07-12).
 
-``render_prompt(doc)`` composes a v0.2 playbook's three sections into one
+``render_prompt(doc)`` composes a playbook's three sections into one
 review-ready Markdown system prompt a user pastes into any chat LLM
 alongside a contract. It is executable documentation of the §5 determinism
 boundary — Floor hard, Posture soft, Evidence advisory — and deliberately
@@ -15,11 +15,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from playbook_engine.digest import clause_precedent_groups
 from playbook_engine.opf_accessors import (
     clause_confidence,
     clause_stance,
     clause_trail,
+    is_precedent_shape,
+    perspective_party,
     playbook_clauses,
+    playbook_precedent,
 )
 
 _NO_INVARIANTS_MARKER = (
@@ -308,6 +312,52 @@ def _render_clause(clause: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _deal_count(n: Any) -> str:
+    n = n if isinstance(n, int) else 0
+    return f"{n} deal{'s' if n != 1 else ''}"
+
+
+def _render_clause_v04(
+    clause: dict[str, Any], precedent: list[dict[str, Any]], *, party: str | None
+) -> list[str]:
+    """One OPF 0.4 clause (issue #223): facts only — no stance, no verdict.
+
+    Our standard and how many deals signed it, then every non-standard
+    variant signed and every ask refused before signing, each with its
+    distinct-deal count and a citation (``digest.clause_precedent_groups``,
+    uncapped). The reviewing model does the judging.
+    """
+    title = clause.get("title", clause.get("id", "Clause"))
+    lines: list[str] = [f"### {title}"]
+    n_deals = clause.get("n_deals")
+    our_standard = clause.get("our_standard")
+    if isinstance(our_standard, dict) and our_standard.get("text"):
+        lines.append(
+            f"{clause.get('n_signed_standard', 0)} of {_deal_count(n_deals)} on record "
+            "signed our standard language."
+        )
+        lines.append("")
+        lines.append(
+            f'Our standard{_citation(our_standard.get("source_ref"))}: "{our_standard["text"]}"'
+        )
+    else:
+        lines.append(f"No standard language on record; {_deal_count(n_deals)} on record.")
+    lines.append("")
+
+    groups = clause_precedent_groups(clause.get("taxonomy_id"), precedent, party=party)
+    if groups["signed_variants"]:
+        lines.append("Non-standard language we have signed:")
+        for v in groups["signed_variants"]:
+            lines.append(f'- "{v["text"]}"{_citation(v.get("ref"))} [{_deal_count(v["n_deals"])}]')
+        lines.append("")
+    if groups["refused_asks"]:
+        lines.append("Asks refused before signing (proposed, then struck):")
+        for a in groups["refused_asks"]:
+            lines.append(f'- "{a["text"]}"{_citation(a.get("ref"))} [{_deal_count(a["n_deals"])}]')
+        lines.append("")
+    return lines
+
+
 def _indefinite_article(noun: str) -> str:
     """``"a"`` or ``"an"`` for *noun* — first-letter vowel heuristic.
 
@@ -411,8 +461,14 @@ def render_prompt(doc: dict[str, Any]) -> str:
             "shown; it never directs what you must do."
         )
         out.append("")
-        for clause in clauses:
-            out.extend(_render_clause(clause))
+        if is_precedent_shape(doc):
+            precedent = playbook_precedent(doc)
+            party = perspective_party(doc)
+            for clause in clauses:
+                out.extend(_render_clause_v04(clause, precedent, party=party))
+        else:
+            for clause in clauses:
+                out.extend(_render_clause(clause))
         if clause_library:
             out.append("### Clause library (for counterparty-paper matching)")
             for concept in clause_library:

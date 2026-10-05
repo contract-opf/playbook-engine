@@ -507,3 +507,70 @@ def test_text_sample_is_a_plain_value_object() -> None:
     s = TextSample(path="p", text="hello")
     assert s.path == "p"
     assert s.text == "hello"
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 (issue #223): precedent texts are residue surfaces, and a rewrite
+# re-derives the digest — over the real compiled NDA example.
+# ---------------------------------------------------------------------------
+
+
+def test_export_profile_v04_samples_precedent_text_and_rederives_digest() -> None:
+    import json as _json
+    from pathlib import Path as _Path
+
+    from playbook_engine.digest import build_digest
+    from playbook_engine.export_profile import (
+        RedactionFinding as _RF,
+    )
+    from playbook_engine.export_profile import (
+        VerifyFinding as _VF,
+    )
+    from playbook_engine.export_profile import (
+        _extract_text_samples,
+        export_profile,
+    )
+    from playbook_engine.validator import validate_document as _validate
+
+    doc = _json.loads(
+        (_Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    samples, _ = _extract_text_samples(doc)
+    paths = {s.path for s in samples}
+    assert any(".signed_text.text" in p for p in paths)
+    assert any(".opening_text.text" in p for p in paths)
+    assert any(".refused_asks[" in p for p in paths)
+    assert not any(p.startswith("digest") for p in paths), "the digest is derived, not sampled"
+
+    target = next(p for p in sorted(paths) if p.endswith(".signed_text.text"))
+
+    class _Rewrite:
+        def evaluate_batch(self, batch):  # noqa: ANN001
+            return [
+                _RF(
+                    path=s.path,
+                    has_residue=s.path == target,
+                    rationale="identifying" if s.path == target else "clean",
+                    rewritten_text="[REDACTED CLAUSE]" if s.path == target else None,
+                )
+                for s in batch
+            ]
+
+    class _Clean:
+        def evaluate_batch(self, batch):  # noqa: ANN001
+            return [_VF(path=s.path, leaked=False, rationale="clean") for s in batch]
+
+    report = export_profile(doc, redaction_judge=_Rewrite(), verify_judge=_Clean())
+    exported = report.doc
+    assert "[REDACTED CLAUSE]" in _json.dumps(exported["evidence"])
+    assert exported["digest"] == build_digest(exported)
+    # export_profile does not re-stamp identity (publish does) — re-stamp it
+    # so the check isolates the precedent ids, counts and digest.
+    from playbook_engine.canonicalize import compute_section_digests, content_hash
+
+    exported["identity"]["content_hash"] = content_hash(exported)
+    exported["identity"]["section_digests"] = compute_section_digests(exported)
+    errors = [str(e) for e in _validate(exported).errors if e.blocking]
+    assert errors == [], errors

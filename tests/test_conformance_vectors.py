@@ -42,6 +42,8 @@ from playbook_engine.digest import build_digest
 ROOT = Path(__file__).parent.parent
 CONFORMANCE_DIR = ROOT / "spec" / "conformance"
 VECTORS_DIR = CONFORMANCE_DIR / "vectors"
+#: The separately stamped OPF 0.4 / digest_version 3 set (issue #223).
+CONFORMANCE_DIR_V04 = CONFORMANCE_DIR / "0.4"
 
 
 def _load_manifest() -> dict[str, Any]:
@@ -246,3 +248,104 @@ def test_mutated_digest_is_detected() -> None:
     recomputed = build_digest(doc)
     assert recomputed != tampered_expected
     assert recomputed == vector["expected"]["digest"]
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 / digest_version 3 set (issue #223) — spec/conformance/0.4/
+# ---------------------------------------------------------------------------
+
+
+def _load_manifest_v04() -> dict[str, Any]:
+    return json.loads((CONFORMANCE_DIR_V04 / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _vector_files_v04() -> list[str]:
+    files = [entry["file"] for entry in _load_manifest_v04()["vectors"]]
+    assert files, "0.4/manifest.json lists no vectors"
+    return files
+
+
+def _load_vector_v04(relative_file: str) -> dict[str, Any]:
+    return json.loads((CONFORMANCE_DIR_V04 / relative_file).read_text(encoding="utf-8"))
+
+
+def test_v04_manifest_lists_every_vector_file_on_disk() -> None:
+    manifest_files = {entry["file"] for entry in _load_manifest_v04()["vectors"]}
+    on_disk = {f"vectors/{p.name}" for p in (CONFORMANCE_DIR_V04 / "vectors").glob("*.json")}
+    assert manifest_files == on_disk
+
+
+def test_v04_manifest_is_stamped_0_4_digest_3() -> None:
+    fv = _load_manifest_v04()["format_version"]
+    assert fv["opf_version"] == "0.4"
+    assert fv["digest_version"] == "3"
+    # The 0.3 set keeps its own, unchanged stamp alongside.
+    assert _load_manifest()["format_version"]["opf_version"] == "0.3"
+    assert _load_manifest()["format_version"]["digest_version"] == "2"
+
+
+@pytest.mark.parametrize("filename", _vector_files_v04())
+def test_v04_vector_reproduces_exactly(filename: str) -> None:
+    vector = _load_vector_v04(filename)
+    doc = vector["input"]
+    expected = vector["expected"]
+    assert vector["opf_version"] == "0.4" and doc["opf_version"] == "0.4"
+    assert canonicalize_playbook(doc) == expected["canonical"], filename
+    assert content_hash(doc) == expected["content_hash"], filename
+    assert compute_section_digests(doc) == expected["section_digests"], filename
+    assert build_digest(doc) == expected["digest"], filename
+    assert expected["digest"]["digest_version"] == "3"
+    assert "full_text" not in json.dumps(expected["digest"])
+
+
+@pytest.mark.parametrize("filename", _vector_files_v04())
+def test_v04_vector_inputs_are_valid_0_4_documents(filename: str) -> None:
+    """Every 0.4 input is a self-consistent document the validator accepts —
+    precedent ids, clause counts, and (once embedded) the digest all agree."""
+    from playbook_engine.validator import validate_document
+
+    vector = _load_vector_v04(filename)
+    doc = copy.deepcopy(vector["input"])
+    doc["digest"] = vector["expected"]["digest"]
+    result = validate_document(doc)
+    assert result.ok, [str(e) for e in result.errors if e.blocking]
+
+
+def test_v04_mutated_digest_is_detected() -> None:
+    """A tampered expected digest (one deal count off) must not match."""
+    vector = _load_vector_v04("vectors/002-variants-refused-and-exclusions.json")
+    tampered = copy.deepcopy(vector["expected"]["digest"])
+    tampered["clauses"][0]["signed_variants"][0]["n_deals"] += 1
+    recomputed = build_digest(vector["input"])
+    assert recomputed != tampered
+    assert recomputed == vector["expected"]["digest"]
+
+
+def test_v04_negator_is_never_merged_into_a_variant() -> None:
+    """002 pins exact normalization: 'may not assign' is its own group, and the
+    case/punctuation respelling of variant A is merged into A (3 deals)."""
+    digest = _load_vector_v04("vectors/002-variants-refused-and-exclusions.json")["expected"][
+        "digest"
+    ]
+    variants = digest["clauses"][0]["signed_variants"]
+    assert [v["n_deals"] for v in variants] == [3, 1]
+    assert " not " in variants[1]["text"]
+    assert digest["clauses"][0]["refused_asks"][0]["n_deals"] == 3
+
+
+def test_v04_counterparty_alias_never_splits_a_variant() -> None:
+    """004 pins the grouping key's party neutralization (OPF-SPEC §3.5.4):
+    texts differing only by the counterparty's Counterparty-<n> alias are one
+    group with n_deals 2 (signed variants and refused asks alike), the
+    parties' places swapped stays its own group, and the one-deal variants'
+    order shows perspective.party was rewritten to 'party'."""
+    vector = _load_vector_v04("vectors/004-party-alias-grouping.json")
+    entry = vector["expected"]["digest"]["clauses"][0]
+    assert [(v["n_deals"], v["ref"]["document_id"]) for v in entry["signed_variants"]] == [
+        (2, "deal-a"),
+        (1, "deal-d"),
+        (1, "deal-c"),
+    ]
+    assert [a["n_deals"] for a in entry["refused_asks"]] == [2]
+    clause = vector["input"]["evidence"]["clauses"][0]
+    assert (clause["n_variants"], clause["n_refused"]) == (3, 1)

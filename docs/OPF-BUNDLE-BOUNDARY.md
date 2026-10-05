@@ -5,7 +5,7 @@
 
 ## The canonical-format decision
 
-**OPF 1.0 (document shape `opf_version` 0.3) is the canonical playbook format.**
+**OPF 1.0 (document shape `opf_version` 0.4; 0.3 still validates) is the canonical playbook format.**
 There is no second, parallel
 "review-engine playbook format" that OPF must be converted into. What a review
 engine installs and runs is **an OPF document plus a

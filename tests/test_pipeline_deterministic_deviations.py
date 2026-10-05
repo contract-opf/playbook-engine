@@ -46,11 +46,17 @@ _CORPUS_DIR = _NDA_DIR / "corpus"
 _SMOKE_CONFIG = _NDA_DIR / "config.smoke.yaml"
 
 
-def _mine_and_project(out_dir: Path, **judges: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _mine_and_project(
+    out_dir: Path, *, opf_version: str = "0.3", **judges: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Mine + project. Defaults to the OPF 0.3 projection: these tests pin how
+    the 0.3 compiler reads the standard fact (stance_detail, summary), a
+    shape kept for one release. The OPF 0.4 projection of the same store is
+    pinned by ``test_default_project_04_is_the_verdict_free_precedent``."""
     cfg = load_config(_SMOKE_CONFIG)
     taxonomy = load_taxonomy(cfg.taxonomy_path)
     mine_corpus(_CORPUS_DIR, cfg, taxonomy, out_dir, no_cache=True, **judges)
-    playbook = project_playbook(out_dir, cfg, taxonomy)
+    playbook = project_playbook(out_dir, cfg, taxonomy, opf_version=opf_version)
     return read_observations_jsonl(out_dir / "observations.jsonl"), playbook
 
 
@@ -120,6 +126,52 @@ def test_default_project_reads_no_stance_and_validates(consumer_run: tuple) -> N
         assert clause["historical_stance"] == "no_signal"
         assert not clause.get("concessions")
         assert not clause.get("preferred_variations")
+
+
+def test_default_project_04_is_the_verdict_free_precedent(tmp_path: Path) -> None:
+    """Issue #223: the default OPF 0.4 projection of the consumer-path store
+    carries each terminal row's deterministic standard fact as the
+    precedent's ``standard``, counts distinct deals, and has no stance,
+    risk, deviation or x_judgments anywhere."""
+    observations, playbook = _mine_and_project(tmp_path, opf_version="0.4")
+    assert playbook["opf_version"] == "0.4"
+    assert validate_document(playbook).ok
+    precedent = playbook["evidence"]["precedent"]
+    by_key = {(p["document_id"], p["taxonomy_id"]): p for p in precedent}
+    terminal = [
+        o
+        for o in observations
+        if o["outcome"] in ("signed", "unsigned") and o["taxonomy_id"] is not None
+    ]
+    assert terminal
+    for obs in terminal:
+        record = by_key.get((obs["citation"]["document_id"], obs["taxonomy_id"]))
+        if record is None:  # a sub-sentence fragment, excluded like 0.3 does
+            assert len(obs["full_text"].strip()) < 25
+            continue
+        assert record["standard"] is obs["standard"]
+        assert record["signed"] is (obs["outcome"] == "signed")
+    for clause in playbook["evidence"]["clauses"]:
+        signed_standard = {
+            o["citation"]["document_id"]
+            for o in terminal
+            if o["taxonomy_id"] == clause["taxonomy_id"]
+            and o["outcome"] == "signed"
+            and o["standard"]
+        }
+        assert clause["n_signed_standard"] == len(signed_standard), clause["id"]
+    # Struck standard language is our concession: an opening text, no signed text
+    # for that clause unless the deal signed replacement text, never a refused ask.
+    conceded = [o for o in observations if o["outcome"] == "conceded_before_signing"]
+    assert conceded
+    for obs in conceded:
+        record = by_key[(obs["citation"]["document_id"], obs["taxonomy_id"])]
+        assert record["opening_text"]["text"] == obs["full_text"]
+        assert obs["full_text"] not in {a["text"] for a in record["refused_asks"]}
+    serialized = json.dumps({"evidence": playbook["evidence"], "digest": playbook["digest"]})
+    for judged in ("historical_stance", "risk_delta", "deviation", "band", "full_text"):
+        assert f'"{judged}"' not in serialized, judged
+    assert "x_judgments" not in playbook
 
 
 def test_opt_in_deviation_judge_keeps_the_judged_layer(tmp_path: Path) -> None:

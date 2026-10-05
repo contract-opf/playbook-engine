@@ -598,10 +598,21 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
     playbook_text = json.dumps(playbook)
     assert entity not in playbook_text
     assert "Wintermoor" not in playbook_text
+    # OPF 0.4 (issue #223): the precedent record carries the aliased text.
+    precedent_texts = [
+        p["signed_text"]["text"] for p in playbook["evidence"]["precedent"] if p["signed_text"]
+    ]
+    assert any(alias in t for t in precedent_texts)
 
+    # x_search_snippet is an OPF 0.3 observed_positions extension — check it
+    # on the 0.3 projection of the same store.
+    playbook_03 = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
+    )
+    assert entity not in json.dumps(playbook_03)
     snippet_values = [
         op.get("x_search_snippet")
-        for clause in playbook["evidence"]["clauses"]
+        for clause in playbook_03["evidence"]["clauses"]
         for op in clause.get("observed_positions", [])
         if op.get("x_search_snippet")
     ]

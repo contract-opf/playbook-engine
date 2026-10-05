@@ -70,9 +70,14 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
           basis: "all"}; refused asks (rejected) are kept
         - every evidence count (precedent_count, n_our_paper / n_counterparty_paper,
           stance_detail held/of, digest n) counts DISTINCT DEALS
+        - OPF 0.4 (default, issue #223): evidence = {clauses, precedent} — one
+          verdict-free precedent per (deal, clause) (signed_text, standard,
+          rounds/moved, refused_asks, paper as metadata only); clause n_* counts
+          and the digest_version 3 digest are derived from it (precedent.py);
+          `project --opf-version 0.3` keeps the 0.3 shape above for one release
                                      │
             ┌──────────────────────────────────────────────────────────────┐
-  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.3.json)     │
+  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.4.json)     │
             └──────────────────────────────────────────────────────────────┘
 ```
 
