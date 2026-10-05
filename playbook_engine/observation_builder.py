@@ -57,13 +57,12 @@ from typing import Any
 from playbook_engine.clause_classifier import ClassifiedClause
 from playbook_engine.clause_differ import ClauseDiff, DocumentDiff
 from playbook_engine.deviation_classifier import (
-    REWORDED_EQUIVALENT_THRESHOLD,
     DeviationResult,
-    _text_jaccard,
     is_standard_text,
+    normalize_for_standard,
 )
 from playbook_engine.deviation_classifier import (
-    _normalize_for_containment as _normalize_for_origin,
+    _normalize_for_containment as _normalize_for_survival,
 )
 from playbook_engine.docx_ingester import TrackedChanges
 from playbook_engine.reversal_detector import ReversalRecord
@@ -785,8 +784,9 @@ _FILL_IN_BLANK_RE = re.compile(r"_{2,}")
 @dataclass(frozen=True)
 class _SurvivalNode:
     """One terminal node as ``_survives_in_terminal`` reads it: its text,
-    normalized like the origin test, its content-token count (the window
-    size unit), and whether its net-diff row is ``unchanged``."""
+    normalized like ``_survival_pattern`` normalizes the removed row, its
+    content-token count (the window size unit), and whether its net-diff
+    row is ``unchanged``."""
 
     normalized: str
     size: int
@@ -794,22 +794,23 @@ class _SurvivalNode:
 
 
 def _survival_node(text: str, unchanged: bool) -> _SurvivalNode:
-    return _SurvivalNode(_normalize_for_origin(text), len(_content_tokens(text)), unchanged)
+    return _SurvivalNode(_normalize_for_survival(text), len(_content_tokens(text)), unchanged)
 
 
 def _survival_pattern(text: str) -> re.Pattern[str] | None:
     """Matcher for a removed row's OWN text inside terminal text (issue #216).
 
-    The text is normalized like the origin test (case-, punctuation- and
-    whitespace-insensitive) and must occur verbatim, contiguous and in
-    order — words that merely recur, in another order or with other words
-    inserted between them, do not match, so text narrowed or replaced
-    before signing never passes as surviving. The one allowance is a
-    fill-in blank: it stands for whatever run of words (possibly none) the
-    executed copy filled it with. ``None`` when the text has no content
-    beyond blanks.
+    The text is normalized case-, punctuation- and whitespace-insensitively
+    (``deviation_classifier._normalize_for_containment``; both sides are
+    text of the same deal, so no party-name neutralization) and must occur
+    verbatim, contiguous and in order — words that merely recur, in another
+    order or with other words inserted between them, do not match, so text
+    narrowed or replaced before signing never passes as surviving. The one
+    allowance is a fill-in blank: it stands for whatever run of words
+    (possibly none) the executed copy filled it with. ``None`` when the
+    text has no content beyond blanks.
     """
-    segments = [_normalize_for_origin(seg) for seg in _FILL_IN_BLANK_RE.split(text)]
+    segments = [_normalize_for_survival(seg) for seg in _FILL_IN_BLANK_RE.split(text)]
     segments = [seg for seg in segments if seg]
     if not segments:
         return None
@@ -865,29 +866,37 @@ def _standard_nodes(standard: str | Sequence[str]) -> list[str]:
     return [node for node in nodes if node.strip()]
 
 
-def _is_standard_language(text: str, standard: str | Sequence[str]) -> bool:
-    """Whether *text* is OUR standard language for its clause (issue #216).
+def _is_standard_language(
+    text: str, standard: str | Sequence[str], party_names: Sequence[str] = ()
+) -> bool:
+    """Whether *text* is OUR standard language for its clause (issues #216, #229).
 
     The origin test for a clause removed before signing. *standard* is our
     standard text for the clause's taxonomy_id — EVERY template node
     carrying that taxonomy_id, in document order (a bare string is a
-    single-node standard). *text* matches when it is a near-identical
-    rendering (token Jaccard at or above ``REWORDED_EQUIVALENT_THRESHOLD`` —
-    the same bar ``assess_deviations`` uses to call a clause "matches our
-    standard") of the whole standard or of any one of its nodes, or when its
-    normalized text occurs verbatim inside the normalized standard (one
-    fragment of a standard the deal or the template split across several
-    nodes — including any later template node, never only the first).
+    single-node standard). It shares the consumer path's one definition of
+    "our standard language" (issue #229): *text* matches when
+    ``deviation_classifier.is_standard_text`` holds against the nodes —
+    an EXACT match, after ``normalize_for_standard`` with the same
+    *party_names*, of the whole standard or of any one of its nodes, with
+    no similarity tolerance, so a draft that flips a negation, deletes a
+    mid-clause carve-out or changes an amount is never our language. The
+    one addition is a fragment: *text*'s normalized form occurs, on word
+    boundaries, inside the normalized whole standard (one contiguous piece
+    of a standard the deal or the template split across several nodes —
+    including any later template node, never only the first). Both sides of
+    that containment test are ``normalize_for_standard`` output with the
+    same *party_names*, so party names are neutralized identically in both
+    branches.
     """
     nodes = _standard_nodes(standard)
     if not text.strip() or not nodes:
         return False
-    whole = "\n".join(nodes)
-    candidates = [whole] + (nodes if len(nodes) > 1 else [])
-    if any(_text_jaccard(text, cand) >= REWORDED_EQUIVALENT_THRESHOLD for cand in candidates):
+    if is_standard_text(text, nodes, party_names):
         return True
-    normalized = _normalize_for_origin(text)
-    return bool(normalized) and normalized in _normalize_for_origin(whole)
+    normalized = normalize_for_standard(text, party_names)
+    whole = normalize_for_standard("\n".join(nodes), party_names)
+    return bool(normalized) and f" {normalized} " in f" {whole} "
 
 
 def _row_severity(dr: DeviationResult) -> tuple[int, int, int]:
@@ -1299,7 +1308,7 @@ def build_observations(
                     dropped.get(DROPPED_ORIGIN_UNDETERMINED, 0) + 1
                 )
             continue
-        if _is_standard_language(raw_text, standard):
+        if _is_standard_language(raw_text, standard, party_names):
             if not has_signed_copy:
                 # Our standard struck in a deal with no detected executed
                 # copy (issue #83): never a concession at L5 — counted,

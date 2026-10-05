@@ -216,7 +216,15 @@ _MEDIA_TYPES: dict[str, str] = {
 # deviation is the deterministic standard check instead of a needs_review
 # stub, and observations gained a "standard" field — a warm cache would
 # otherwise replay stub-mode verdicts with no standard fact forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 9
+#
+# v10 (issue #229): the origin test for text removed before signing
+# (observation_builder._is_standard_language) is now the exact
+# is_standard_text check (plus a word-boundary fragment test on
+# normalize_for_standard output, party names neutralized), not the token
+# Jaccard >= 0.92 — a first draft that flips a negation or deletes a carve-out
+# from our clause is their refused ask, no longer our concession. A warm
+# cache would otherwise replay the old conceded_before_signing rows forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 10
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage

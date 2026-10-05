@@ -10,6 +10,23 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **The origin test for text removed before signing is the exact standard
+  check (issue #229).** Whether a first-draft clause struck before signing
+  was our standard language (our concession, `conceded_before_signing`) or
+  theirs (their refused ask, `proposed_then_reversed`) is now decided by
+  `deviation_classifier.is_standard_text`, the same exact match after
+  `normalize_for_standard` (known party names neutralized) that #220 put on
+  the consumer path, instead of the order-blind token Jaccard >= 0.92 it
+  retired. A draft that flips a negation ("Neither party may assign" ->
+  "Either party may assign"), deletes a mid-clause carve-out or negates a
+  protection is their ask, no longer recorded as our concession. A fragment
+  of a multi-node standard still counts as ours: its normalized text must
+  occur on word boundaries inside the normalized whole standard (both sides
+  run through `normalize_for_standard` with the same party names), so
+  "either" no longer matches inside "neither". As before, a fragment that is
+  a leading or trailing piece of our clause is still read as ours. The L1-L4
+  stage cache identity (`_DEVIATION_VS_TEMPLATE_VERSION`) is bumped to 10.
+
 - **OPF 0.4 + digest_version 3: the verdict-free per-deal precedent record
   (issue #223).** `playbook project` now emits `opf_version` "0.4"
   (`spec/playbook.schema-0.4.json`, a new file; 0.1/0.2/0.3 schemas are
