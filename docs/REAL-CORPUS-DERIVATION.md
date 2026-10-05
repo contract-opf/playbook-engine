@@ -38,14 +38,20 @@ Before spending any judgment budget:
 2. **Stage and lint.** Run `playbook stage` (if the corpus has a nested
    layout) and `playbook lint-corpus` until it exits 0. Do not proceed past
    lint errors.
-3. **Decide the judge mechanism.** Confirm how classification, deviation, and
+3. **Decide the judge mechanism.** Confirm how scope, classification, and
    provenance judgments will be supplied for this run (agent-as-judge via the
    packaged skill, or API-key-backed judges — see PLAN-FIRST.md) — do not
    assume; check `playbook_engine/` for the current judge seams before
-   starting.
+   starting. Deviation is not judged by default: `mine` records each
+   observation's deterministic standard check (`standard: true|false`) and
+   derives `deviation` from it, and the consumer LLM does the judging at
+   review time. Deviation judging is the opt-in advisory layer
+   (`--with-deviation-judge` on BOTH `mine` and `judge`) — plan for it only
+   if this run deliberately wants it.
 4. **Write a stage-by-stage plan** with explicit checkpoints: stage → lint →
-   mine (deterministic backbone) → judge (classification / deviation /
-   provenance) → project → validate → report/inspect. Identify where you will
+   mine (deterministic backbone + standard check) → judge (scope /
+   classification / provenance; deviation only under
+   `--with-deviation-judge`) → project → validate → report/inspect. Identify where you will
    pause to sanity-check the backbone (trail order, signed-copy detection,
    provenance plausibility) *before* spending judgment effort on it — a bad
    backbone makes every downstream judgment worthless.

@@ -16,7 +16,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +50,7 @@ from playbook_engine.deviation_classifier import (
     DeviationResult,
     RiskDelta,
     assess_deviations,
+    assess_deviations_deterministic,
 )
 from playbook_engine.docx_ingester import TextUnit, TrackedChanges, ingest_docx
 from playbook_engine.entity_registry import (
@@ -209,7 +210,12 @@ _MEDIA_TYPES: dict[str, str] = {
 # by origin against template_std_by_tid), and corpus_doc
 # gained "dropped_observations" — a warm cache would otherwise keep
 # replaying the old one-row-per-node observations (inflated precedent) forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 8
+#
+# v9 (issue #220): with no deviation judge configured (the new default) every
+# deviation is the deterministic standard check instead of a needs_review
+# stub, and observations gained a "standard" field — a warm cache would
+# otherwise replay stub-mode verdicts with no standard fact forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 9
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -324,8 +330,22 @@ class _NullClassificationJudge:
 _NEUTRAL_RISK = RiskDelta(direction="neutral", magnitude="none")
 
 
+# Judge identity recorded (issue #102) when no deviation judge is wired — the
+# consumer path's deterministic standard check (issue #220). Versioned so a
+# change to the check's normalization/threshold can bust the verdict cache
+# the same way a changed judge model_id does.
+_DETERMINISTIC_DEVIATION_IDENTITY = (
+    "deterministic-standard-check:v3"  # v3: exact match, no Jaccard, no prefix strip
+)
+
+
 class _NullDeviationJudge:
     """Records every changed clause as unjudged (no LLM available to assess it).
+
+    No longer the default (issue #220): with no deviation judge configured,
+    ``mine_corpus`` runs the deterministic standard check instead. This stub
+    remains for callers that opt in to the judged layer without a real judge
+    (and for the tests that pin that contract).
 
     This is a stub used when no real ``DeviationJudge`` is injected. It must NOT
     claim ``basis="judge"`` — that masquerades a fabricated default as a real
@@ -1007,11 +1027,17 @@ def _observations_from_single_version(
     classified: list[ClassifiedClause],
     has_signed_copy: bool,
     template_std_by_tid: dict[str, str],
-    deviation_judge: DeviationJudge,
+    deviation_judge: DeviationJudge | None,
     our_party_aliases: list[str] | None = None,
     our_authors: list[str] | None = None,
+    template_std_nodes_by_tid: dict[str, list[str]] | None = None,
+    party_names: Sequence[str] = (),
 ) -> list[Observation]:
     """Create observations from a single-version document, diffed against the template.
+
+    ``deviation_judge=None`` is the consumer path (issue #220): every clause
+    gets the deterministic standard check instead of a judge verdict — see
+    ``_assess_deviations_with_standards``.
 
     Previously every clause of a single-version document was hardcoded
     ``deviation="none"``/``basis="deterministic"`` — a document with no
@@ -1043,7 +1069,12 @@ def _observations_from_single_version(
     """
     diffs = _single_version_clause_diffs(classified, version_id)
     deviation_results = _assess_deviations_with_standards(
-        diffs, template_std_by_tid, deviation_judge, document_id=doc_id
+        diffs,
+        template_std_by_tid,
+        deviation_judge,
+        document_id=doc_id,
+        template_std_nodes_by_tid=template_std_nodes_by_tid,
+        party_names=party_names,
     )
 
     cls_conf_by_path: dict[str, float] = {
@@ -1068,6 +1099,15 @@ def _observations_from_single_version(
         # version's own tree — the deal is the unit of precedent.
         terminal_clauses=classified,
         terminal_version_id=version_id,
+        # Issue #220: the reference every observation's `standard` fact is
+        # computed against; on the consumer path it also decides deviation.
+        standard_text_by_tid=(
+            template_std_nodes_by_tid
+            if template_std_nodes_by_tid is not None
+            else template_std_by_tid
+        ),
+        deterministic_deviations=deviation_judge is None,
+        party_names=party_names,
     )
 
 
@@ -1111,21 +1151,45 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 proposed_by=raw.get("proposed_by"),
                 observed_at=raw.get("observed_at"),
                 counterparty_ref=raw.get("counterparty_ref"),
+                standard=raw.get("standard"),
             )
         )
     return result
 
 
+def _standard_party_names(config: EngineConfig) -> list[str]:
+    """Party names neutralized by the deterministic standard check (issue #220).
+
+    Our own aliases plus every configured ``provenance.known_entities`` name
+    — the same real names the born-safe entity registry aliases after L4 —
+    so neither side's name decides whether a clause is our standard.
+    """
+    return [*config.provenance.our_party_aliases, *config.provenance.known_entities]
+
+
 def _assess_deviations_with_standards(
     net_diffs: list[Any],
     template_std_by_tid: dict[str, str],
-    deviation_judge: DeviationJudge,
+    deviation_judge: DeviationJudge | None,
     document_id: str | None = None,
     counterpart_clause_texts: tuple[frozenset[str], frozenset[str]] | None = None,
+    *,
+    template_std_nodes_by_tid: dict[str, list[str]] | None = None,
+    party_names: Sequence[str] = (),
 ) -> list[Any]:
     """Call assess_deviations per taxonomy_id so each group gets the correct our_standard.
 
     Preserves the original diff order in the returned list.
+
+    ``deviation_judge=None`` is the consumer path (issue #220, the default):
+    no judge is consulted and nothing is ever queued. Each row gets the
+    deterministic standard check instead
+    (``deviation_classifier.assess_deviations_deterministic``) — "none" for
+    our standard text, "substantive" otherwise, ``basis="deterministic"``,
+    neutral/none ``risk_delta`` — against every template node for its
+    taxonomy_id (*template_std_nodes_by_tid*, falling back to the first-node
+    *template_std_by_tid*), with *party_names* neutralized. Never
+    ``needs_review``.
 
     ``document_id`` (issue #109) is passed straight through to
     ``assess_deviations`` so every judge batch item carries the owning
@@ -1154,13 +1218,19 @@ def _assess_deviations_with_standards(
         indices = [i for i, _ in group_items]
         diffs = [d for _, d in group_items]
         our_std = template_std_by_tid.get(tid or "", "")
-        assessed = assess_deviations(
-            diffs,
-            our_std,
-            deviation_judge,
-            document_id=document_id,
-            counterpart_clause_texts=counterpart_clause_texts,
-        )
+        if deviation_judge is None:
+            nodes: str | list[str] = (
+                template_std_nodes_by_tid.get(tid or "", []) if template_std_nodes_by_tid else []
+            ) or our_std
+            assessed = assess_deviations_deterministic(diffs, nodes, party_names)
+        else:
+            assessed = assess_deviations(
+                diffs,
+                our_std,
+                deviation_judge,
+                document_id=document_id,
+                counterpart_clause_texts=counterpart_clause_texts,
+            )
         for orig_idx, pair in zip(indices, assessed, strict=True):
             result[orig_idx] = pair
 
@@ -1914,7 +1984,7 @@ def _compute_doc_result(
     template_std_by_tid: dict[str, str],
     _scope_judge: ScopeJudge,
     _cls_judge: ClassificationJudge,
-    _dev_judge: DeviationJudge,
+    _dev_judge: DeviationJudge | None,
     alignment_judge: AlignmentJudge | None,
     trail_judge: TrailJudge | None,
     progress: Callable[[str], None],
@@ -1937,6 +2007,9 @@ def _compute_doc_result(
     per taxonomy_id, in document order — the origin reference for a clause
     removed before signing. When ``None`` (legacy callers), the first-node
     *template_std_by_tid* stands in.
+
+    *_dev_judge* ``None`` is the consumer path (issue #220, the default):
+    deviations come from the deterministic standard check, never a judge.
 
     Returns a dict with keys:
       - ``corpus_doc``:    corpus_documents entry (JSON-serialisable). Includes
@@ -2533,6 +2606,8 @@ def _compute_doc_result(
             deviation_judge=_dev_judge,
             our_party_aliases=config.provenance.our_party_aliases,
             our_authors=config.provenance.our_authors,
+            template_std_nodes_by_tid=template_std_nodes_by_tid,
+            party_names=_standard_party_names(config),
         )
     else:
         classified_versions = [(vid, classified_by_version[vid]) for vid in ordered_ids]
@@ -2575,6 +2650,8 @@ def _compute_doc_result(
             _dev_judge,
             document_id=doc_id,
             counterpart_clause_texts=(net_before_texts, net_after_texts),
+            template_std_nodes_by_tid=template_std_nodes_by_tid,
+            party_names=_standard_party_names(config),
         )
 
         # Per-version confidence map (issue #65) — see
@@ -2639,6 +2716,10 @@ def _compute_doc_result(
                 if template_std_nodes_by_tid is not None
                 else template_std_by_tid
             ),
+            # Issue #220: no deviation judge (the default) → deviation is the
+            # deterministic standard fact, never a judged verdict.
+            deterministic_deviations=_dev_judge is None,
+            party_names=_standard_party_names(config),
         )
 
     corpus_doc["provenance"] = provenance
@@ -2741,7 +2822,12 @@ def mine_corpus(
         classification_judge: L3 judge; defaults to stub (Jaccard + all-unclassified).
                               Ignored for documents segmented via
                               ``use_llm_segmentation`` (see below).
-        deviation_judge:      L4 judge; defaults to stub (substantive + neutral risk).
+        deviation_judge:      L4 judge; defaults to None — the consumer path (issue
+                              #220): no judge, every deviation is the
+                              deterministic standard check ("none" for our
+                              standard text, "substantive" otherwise,
+                              basis="deterministic"), nothing is queued. Pass
+                              one only to opt in to the advisory judged layer.
         alignment_judge:      L3 alignment judge; defaults to None (deterministic only).
         trail_judge:          Version-ordering judge; defaults to None (deterministic only).
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).
@@ -2885,7 +2971,12 @@ def mine_corpus(
     """
     _scope_judge: ScopeJudge = scope_judge or _AllInScopeJudge()
     _cls_judge: ClassificationJudge = classification_judge or _NullClassificationJudge()
-    _dev_judge: DeviationJudge = deviation_judge or _NullDeviationJudge()
+    # Issue #220: no deviation judge is the DEFAULT, not a stub — the consumer
+    # path runs the deterministic standard check instead (see
+    # _assess_deviations_with_standards). A judge (store-backed, LLM, or the
+    # _NullDeviationJudge stub) is only ever wired when the caller opts in
+    # (`--with-deviation-judge`), as an advisory layer for posture/floor work.
+    _dev_judge: DeviationJudge | None = deviation_judge
 
     # Judge identity — combines each delegate's class name (+ optional model_id
     # attribute) into a single fingerprint fragment (issue #102). Computed from
@@ -2901,7 +2992,11 @@ def mine_corpus(
         {
             "scope": _judge_identity(_scope_judge),
             "classification": _judge_identity(_cls_judge),
-            "deviation": _judge_identity(_dev_judge),
+            "deviation": (
+                _judge_identity(_dev_judge)
+                if _dev_judge is not None
+                else _DETERMINISTIC_DEVIATION_IDENTITY
+            ),
         },
         sort_keys=True,
     )
@@ -2927,7 +3022,8 @@ def mine_corpus(
         )
         _scope_judge = BatchedScopeJudge(delegate=_scope_judge, cache=verdict_cache)
         _cls_judge = BatchedClassificationJudge(delegate=_cls_judge, cache=verdict_cache)
-        _dev_judge = BatchedDeviationJudge(delegate=_dev_judge, cache=verdict_cache)
+        if _dev_judge is not None:
+            _dev_judge = BatchedDeviationJudge(delegate=_dev_judge, cache=verdict_cache)
 
     # Config fingerprint prep: hash the template file's *content* (not its
     # path) so that changing the file's text under the same path correctly
@@ -3054,6 +3150,10 @@ def mine_corpus(
         {
             "agreement_type_id": config.agreement_type.id,
             "provenance_aliases": sorted(config.provenance.our_party_aliases),
+            # Issue #220: known_entities are neutralized by the deterministic
+            # standard check (_standard_party_names), so they change L4's
+            # standard/deviation output for identical source content.
+            "standard_party_names": sorted(config.provenance.known_entities),
             # Issue #119: our_authors feeds party_side_for_author exactly like
             # our_party_aliases does (proposed_by/moved_by) — a config change
             # here must bust the per-doc cache the same way an alias change
@@ -4089,7 +4189,8 @@ def compile_corpus(
         out_dir:              Output directory for intermediates + playbook.opf.json.
         scope_judge:          L1b judge; defaults to stub (all in-scope).
         classification_judge: L3 judge; defaults to stub (Jaccard + all-unclassified).
-        deviation_judge:      L4 judge; defaults to stub (substantive + neutral risk).
+        deviation_judge:      L4 judge; defaults to None — the deterministic
+                              standard check (issue #220), see mine_corpus.
         alignment_judge:      L3 alignment judge; defaults to None (deterministic only).
         trail_judge:          Version-ordering judge; defaults to None (deterministic only).
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).

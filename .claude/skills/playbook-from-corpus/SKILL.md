@@ -245,9 +245,11 @@ What this changes about the steps below:
    segmentation/classification. On the agent/LLM segmentation path the
    template is segmented through the same store-backed path as the corpus
    documents (a blank form that also appears as a corpus version is a cache
-   hit). Also expect: flipping a corpus from emergent to template mode
-   re-keys every deviation verdict (payloads embed `our_standard`), so a
-   full re-judging pass is normal, not a bug.
+   hit). Also expect, only if you opted in to judged deviations
+   (`--with-deviation-judge`): flipping a corpus from emergent to template
+   mode re-keys every deviation verdict (payloads embed `our_standard`), so a
+   full re-judging pass is normal, not a bug. On the default path there are
+   no deviation verdicts to re-key — the standard check simply re-runs.
 4. **Keep config + template inside the corpus.** The baseline template and
    `playbook.config.yaml` must live **inside** the corpus dir — a relative
    `../../..` template path escapes `/work/corpus` and won't resolve. Put the
@@ -315,7 +317,9 @@ pdfplumber, so it runs on the host venv in seconds and needs no Docker:
 
 It classifies every version (born-digital PDF / scanned PDF / DOCX), prints a
 wall-clock **extraction ETA range**, a rough extracted-token size, the `$0`
-API-cost note (key-free), and the approximate judgment load. Show that summary
+API-cost note (key-free), and the approximate judgment load (scope,
+classification and provenance items — deviation items only when you pass
+`--with-deviation-judge`, the same opt-in `mine`/`judge` take). Show that summary
 to the human verbatim, then ask: proceed as-is, exclude the scanned agreements
 to finish faster, or OCR the scans separately? Only start extraction once they
 confirm. (Time constants are calibrated from a real 44-agreement / 161-version
@@ -607,7 +611,8 @@ required; scripting the SEGMENTATION JUDGMENT is fabrication.
 
 **Benefits:** semantic (not heuristic) clause grouping, and first-pass
 classification for free (the judge loop then has **no `classify` items** left —
-only deviation/provenance/scope).
+only provenance/scope; deviation items appear only under the opt-in
+`--with-deviation-judge`).
 
 **Trade-off:** that first-pass classification carries no dedicated judge
 verdict, so the engine stamps every one of it at a flat, deliberately-low
@@ -707,15 +712,19 @@ make docker-run CORPUS=./corpus OUT=./out \
 `--entity-registry` pins the sensitive alias→real-name registry into the
 gitignored `$OUT` (see the born-safe note under "Running commands"); omit it
 only if you deliberately want the machine-global `~/.cache` default. Runs L1–L4
-(ingest, scope gate, classification skeleton, alignment, deviation placeholders).
+(ingest, scope gate, classification skeleton, alignment, and the deterministic
+standard check — each observation records whether its text is our template
+clause, `standard: true|false`, and its `deviation` is derived from that; no
+deviation judge runs and nothing is queued for deviation).
 Writes `scope.json`, `trail/`, `observations.jsonl`, `corpus_manifest.json`,
 `normalized/`. If `provenance.our_party_aliases` matched no document text, `mine`
 prints a WARNING — treat it as a signal that "us" is misconfigured (see "Derive
 party names").
 
 `normalized/<document_id>/v<N>.clauses.json` is more than a mine
-by-product — it is the relocation-triage resource at Step 6's judge stage:
-each file holds one document version's full clause tree (`clause_path`,
+by-product — under the opt-in `--with-deviation-judge` it is the
+relocation-triage resource at Step 6's judge stage (a default derivation
+queues no deviation items, so there is nothing to triage): each file holds one document version's full clause tree (`clause_path`,
 `heading`, `text` per node), which is where a relocation's *unchanged*
 counterpart clause lives when it generates no `pending.jsonl` hunk of its
 own (see REFERENCE.md's "Relocation triage FIRST" bullet under
@@ -818,8 +827,10 @@ make docker-run CORPUS=./corpus OUT=./out \
         --entity-registry /work/out/entity_registry.json --plan-only"
 ```
 
-Review the deduped counts by kind (classification, deviation, provenance)
-and the judgment token estimate (scaled from the real pending payload sizes,
+Review the deduped counts by kind (classification, provenance, scope — the
+plan also prints `deviation: 0 pending (deviation judge off ...)`: by default
+deviations are never judged, see "Judging each item" below) and the judgment
+token estimate (scaled from the real pending payload sizes,
 not a flat guess) — this part is a genuine forecast, made before any
 judgment spend. The `Segmentation: N version(s) not yet cached` line next to
 it is a receipt for calls this `--plan-only` invocation just made, not
@@ -894,9 +905,20 @@ make docker-run CORPUS=./corpus OUT=./out \
   `null` if the clause does not fit any entry. Low-confidence items: mark
   `needs_review: true` in the verdict, do not guess — see REFERENCE.md
   Guardrail 2, this is a store audit-trail flag, not a report channel.
-- **Deviation:** classify as `none` / `reworded_equivalent` / `substantive`
-  against the baseline template hunk. Assess `risk_delta` direction and
-  magnitude.
+- **Deviation: not judged by default — there are no deviation items to
+  drain.** The consumer (the review model reading the playbook) does the
+  judging; the playbook supplies precedent. Every clause's deviation is the
+  deterministic standard check (its text matches our template clause →
+  `none`, otherwise `substantive`), `judge`/`--plan-only` report
+  `deviation: 0 pending`, and `project` reads no stance, tolerance or
+  fallback out of it (`historical_stance: no_signal`, `stance_detail` =
+  deals that signed our standard, of all deals). Do not route the human
+  through deviation judging. **Opt-in only**, as an advisory layer for
+  Posture/Floor work: pass `--with-deviation-judge` to BOTH `playbook judge`
+  and `playbook mine` on this `$OUT`; then classify each deviation item as
+  `none` / `reworded_equivalent` / `substantive` against the baseline
+  template hunk and assess `risk_delta` direction and magnitude (see
+  REFERENCE.md).
 - **Provenance:** read the document's recital/header text to determine
   `our_paper` vs `counterparty_paper`. Unknown entity aliases: record for
   human review; do not silently guess.
@@ -1601,9 +1623,10 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
   judgment token cost — but note it is not a dry run for LLM segmentation,
   which it performs and bills for real on a cache miss; no tool in this repo
   forecasts that cost before spend, so see Step 5's "Plan" section for how to
-  budget for it instead. Do relocation triage (REFERENCE.md's "Relocation
-  triage FIRST" bullet under `deviation`) before judging item-by-item — a
-  relocation's unchanged counterpart never appears in `pending.jsonl`, so
+  budget for it instead. Under `--with-deviation-judge` only (a default
+  derivation queues no deviation items), do relocation triage (REFERENCE.md's
+  "Relocation triage FIRST" bullet under `deviation`) before judging
+  deviation items one by one — a relocation's unchanged counterpart never appears in `pending.jsonl`, so
   finding it means reading the per-version clause trees at
   `$OUT/normalized/<document_id>/v<N>.clauses.json`, not pair-scanning the
   pending set.

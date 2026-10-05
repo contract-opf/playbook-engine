@@ -444,8 +444,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -467,8 +467,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -478,7 +478,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -491,8 +491,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       },
@@ -571,8 +571,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "proposed_then_reversed",
@@ -626,7 +626,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [
@@ -644,8 +644,8 @@
               },
               "deviation": "substantive",
               "risk_delta": {
-                "direction": "worse",
-                "magnitude": "material"
+                "direction": "neutral",
+                "magnitude": "none"
               },
               "provenance": "our_paper",
               "outcome": "proposed_then_reversed",
@@ -664,7 +664,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -797,8 +797,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -808,33 +808,9 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
-          "fallbacks": [
-            {
-              "text_summary": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-              "full_text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-              "example_ref": {
-                "document_id": "gamma-holdings",
-                "version": 3,
-                "clause_path": "17",
-                "char_span": [
-                  4682,
-                  4951
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 1,
-              "proposed_by": "unknown",
-              "x_search_snippet": "Neither party shall issue any press release or public announcement concerning the discussions"
-            }
-          ],
+          "fallbacks": [],
           "rejected": [],
           "confidence": {
             "score": 1.0,
@@ -846,7 +822,7 @@
           "stance_detail": {
             "held": 3,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -999,7 +975,7 @@
                 3527
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -1022,7 +998,7 @@
                 3782
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -1035,23 +1011,8 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
-          "acceptable_if": [
-            {
-              "if": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-              "to": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 2x precedent in the corpus.",
-              "observation_ref": {
-                "document_id": "theta-logistics",
-                "version": 2,
-                "clause_path": "21",
-                "char_span": [
-                  3428,
-                  3527
-                ]
-              }
-            }
-          ],
+          "historical_stance": "no_signal",
+          "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
           "confidence": {
@@ -1063,8 +1024,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       },
@@ -1175,7 +1136,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -1189,7 +1150,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -1224,8 +1185,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -1247,8 +1208,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -1302,56 +1263,9 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
-          "fallbacks": [
-            {
-              "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "full_text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 4,
-                "clause_path": "22",
-                "char_span": [
-                  5862,
-                  6081
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 2,
-              "proposed_by": "unknown",
-              "x_search_snippet": "The state and federal courts located in New York County, New York have exclusive jurisdiction over"
-            },
-            {
-              "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "full_text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-              "example_ref": {
-                "document_id": "delta-ventures",
-                "version": 2,
-                "clause_path": "22",
-                "char_span": [
-                  5738,
-                  5957
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 2,
-              "proposed_by": "unknown",
-              "x_search_snippet": "The state and federal courts located in New York County, New York have exclusive jurisdiction over"
-            }
-          ],
+          "fallbacks": [],
           "rejected": [],
           "confidence": {
             "score": 1.0,
@@ -1363,7 +1277,7 @@
           "stance_detail": {
             "held": 2,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -1521,7 +1435,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -1535,7 +1449,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -1646,7 +1560,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -1660,7 +1574,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -1818,7 +1732,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -1832,7 +1746,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -1867,8 +1781,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -1890,8 +1804,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -1957,8 +1871,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -1980,8 +1894,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -1991,56 +1905,9 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
-          "fallbacks": [
-            {
-              "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-              "full_text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-              "example_ref": {
-                "document_id": "beta-industries",
-                "version": 4,
-                "clause_path": "21",
-                "char_span": [
-                  5728,
-                  5861
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 2,
-              "proposed_by": "unknown",
-              "x_search_snippet": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of"
-            },
-            {
-              "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-              "full_text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-              "example_ref": {
-                "document_id": "delta-ventures",
-                "version": 2,
-                "clause_path": "21",
-                "char_span": [
-                  5604,
-                  5737
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 2,
-              "proposed_by": "unknown",
-              "x_search_snippet": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of"
-            }
-          ],
+          "fallbacks": [],
           "rejected": [],
           "confidence": {
             "score": 0.833,
@@ -2051,8 +1918,8 @@
           },
           "stance_detail": {
             "held": 2,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -2210,7 +2077,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -2224,7 +2091,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -2248,8 +2115,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -2271,8 +2138,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -2284,31 +2151,7 @@
         "summary": {
           "historical_stance": "no_signal",
           "acceptable_if": [],
-          "fallbacks": [
-            {
-              "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-              "full_text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-              "example_ref": {
-                "document_id": "epsilon-systems",
-                "version": 3,
-                "clause_path": "16",
-                "char_span": [
-                  4379,
-                  4632
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "material"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 2,
-              "proposed_by": "unknown",
-              "x_search_snippet": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed"
-            }
-          ],
+          "fallbacks": [],
           "rejected": [],
           "confidence": {
             "score": 0.75,
@@ -2319,8 +2162,8 @@
           },
           "stance_detail": {
             "held": 0,
-            "of": 1,
-            "basis": "our_paper"
+            "of": 2,
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -2508,7 +2351,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -2522,7 +2365,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -2633,7 +2476,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -2647,7 +2490,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -2768,7 +2611,7 @@
                 2451
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -2791,7 +2634,7 @@
                 2452
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -2804,23 +2647,8 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
-          "acceptable_if": [
-            {
-              "if": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-              "to": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 2x precedent in the corpus.",
-              "observation_ref": {
-                "document_id": "theta-logistics",
-                "version": 2,
-                "clause_path": "12",
-                "char_span": [
-                  2338,
-                  2451
-                ]
-              }
-            }
-          ],
+          "historical_stance": "no_signal",
+          "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
           "confidence": {
@@ -2832,8 +2660,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       },
@@ -2934,8 +2762,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "our_paper",
             "outcome": "signed",
@@ -2945,33 +2773,9 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
-          "fallbacks": [
-            {
-              "text_summary": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-              "full_text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-              "example_ref": {
-                "document_id": "gamma-holdings",
-                "version": 3,
-                "clause_path": "8",
-                "char_span": [
-                  2313,
-                  2580
-                ]
-              },
-              "deviation": "substantive",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "provenance": "our_paper",
-              "outcome": "signed",
-              "precedent_count": 1,
-              "proposed_by": "unknown",
-              "x_search_snippet": "Recipient shall notify Discloser in writing within five (5) business days of discovering any"
-            }
-          ],
+          "fallbacks": [],
           "rejected": [],
           "confidence": {
             "score": 1.0,
@@ -2983,7 +2787,7 @@
           "stance_detail": {
             "held": 3,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -3136,7 +2940,7 @@
                 3159
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3159,7 +2963,7 @@
                 3414
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3172,23 +2976,8 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
-          "acceptable_if": [
-            {
-              "if": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-              "to": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 2x precedent in the corpus.",
-              "observation_ref": {
-                "document_id": "theta-logistics",
-                "version": 2,
-                "clause_path": "18",
-                "char_span": [
-                  3050,
-                  3159
-                ]
-              }
-            }
-          ],
+          "historical_stance": "no_signal",
+          "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
           "confidence": {
@@ -3200,8 +2989,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       },
@@ -3234,7 +3023,7 @@
                 425
               ]
             },
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3242,6 +3031,7 @@
             "provenance": "our_paper",
             "outcome": "signed",
             "precedent_count": 1,
+            "proposed_by": "unknown",
             "x_search_snippet": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp"
           },
           {
@@ -3256,7 +3046,7 @@
                 423
               ]
             },
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3264,6 +3054,7 @@
             "provenance": "our_paper",
             "outcome": "signed",
             "precedent_count": 1,
+            "proposed_by": "unknown",
             "x_search_snippet": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp"
           },
           {
@@ -3278,7 +3069,7 @@
                 429
               ]
             },
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3286,6 +3077,7 @@
             "provenance": "our_paper",
             "outcome": "signed",
             "precedent_count": 1,
+            "proposed_by": "unknown",
             "x_search_snippet": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp"
           },
           {
@@ -3300,7 +3092,7 @@
                 426
               ]
             },
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -3308,11 +3100,12 @@
             "provenance": "our_paper",
             "outcome": "signed",
             "precedent_count": 1,
+            "proposed_by": "unknown",
             "x_search_snippet": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp"
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -3324,9 +3117,9 @@
             "evidence_sufficient": true
           },
           "stance_detail": {
-            "held": 4,
+            "held": 0,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -3437,7 +3230,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -3451,7 +3244,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -3562,7 +3355,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -3576,7 +3369,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -3647,7 +3440,7 @@
             "evidence_sufficient": false
           },
           "stance_detail": {
-            "held": 1,
+            "held": 0,
             "of": 1,
             "basis": "all"
           }
@@ -3792,7 +3585,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -3806,7 +3599,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         }
       },
@@ -3929,8 +3722,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -3952,8 +3745,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -3963,7 +3756,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -3976,8 +3769,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       },
@@ -4010,7 +3803,7 @@
                 2148
               ]
             },
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -4089,23 +3882,8 @@
           }
         ],
         "summary": {
-          "historical_stance": "usually_conceded",
-          "acceptable_if": [
-            {
-              "if": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
-              "to": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
-              "rationale": "Signed with neutral risk_delta (deviation=reworded_equivalent); 1x precedent in the corpus.",
-              "observation_ref": {
-                "document_id": "beta-industries",
-                "version": 4,
-                "clause_path": "6",
-                "char_span": [
-                  1935,
-                  2148
-                ]
-              }
-            }
-          ],
+          "historical_stance": "no_signal",
+          "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
           "confidence": {
@@ -4118,7 +3896,7 @@
           "stance_detail": {
             "held": 3,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -4261,7 +4039,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -4275,7 +4053,7 @@
           "stance_detail": {
             "held": 4,
             "of": 4,
-            "basis": "our_paper"
+            "basis": "all"
           }
         },
         "negotiation_trail": [
@@ -4475,8 +4253,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -4498,8 +4276,8 @@
             },
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "provenance": "counterparty_paper",
             "outcome": "signed",
@@ -4509,7 +4287,7 @@
           }
         ],
         "summary": {
-          "historical_stance": "consistently_held",
+          "historical_stance": "no_signal",
           "acceptable_if": [],
           "fallbacks": [],
           "rejected": [],
@@ -4522,8 +4300,8 @@
           },
           "stance_detail": {
             "held": 4,
-            "of": 4,
-            "basis": "our_paper"
+            "of": 6,
+            "basis": "all"
           }
         }
       }
@@ -4615,8 +4393,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -4632,8 +4410,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ],
@@ -4783,8 +4561,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ]
@@ -4992,8 +4770,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5009,8 +4787,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5292,8 +5070,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5309,8 +5087,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5360,8 +5138,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5377,8 +5155,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ],
@@ -5477,8 +5255,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -5494,8 +5272,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ],
@@ -5830,8 +5608,8 @@
             },
             "provenance": "our_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ]
@@ -6332,8 +6110,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -6349,8 +6127,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ],
@@ -6592,8 +6370,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           },
           {
@@ -6609,8 +6387,8 @@
             },
             "provenance": "counterparty_paper",
             "risk_delta_vs_our_standard": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             }
           }
         ],
@@ -6623,7 +6401,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-09-30T00:30:11+00:00",
+      "generated_at": "2026-09-30T17:23:18+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -6656,7 +6434,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:4dc8cf54dd090e4aa122d34f3187838c47cd26ed7369547e2b4e47200afe0b60"
+      "grounded_in": "evidence@sha256:2045cbd94c1f4e619f5bc0b2b78d214377ff7b61865190a63101ca4efcc065b2"
     }
   },
   "floor": {
@@ -6676,7 +6454,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-09-30T00:30:11+00:00",
+        "x_signed_at": "2026-09-30T17:23:18+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -7049,7 +6827,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-09-30T00:30:10+00:00",
+    "generated_at": "2026-09-30T17:23:17+00:00",
     "stub_basis_present": false
   },
   "digest": {
@@ -7060,11 +6838,11 @@
         "id": "clause.assignment",
         "taxonomy_id": "assignment",
         "title": "Assignment",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -7107,8 +6885,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "theta-logistics",
@@ -7126,11 +6904,11 @@
         "id": "clause.compelled_disclosure",
         "taxonomy_id": "compelled_disclosure",
         "title": "Compelled Disclosure",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -7152,8 +6930,8 @@
             "n": 1,
             "band": "rare",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "epsilon-systems",
@@ -7192,8 +6970,8 @@
             "band": "rare",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "epsilon-systems",
@@ -7211,11 +6989,11 @@
         "id": "clause.confidentiality_of_discussions",
         "taxonomy_id": "confidentiality_of_discussions",
         "title": "Confidentiality of the Discussions",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 3,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -7230,26 +7008,7 @@
           }
         },
         "preferred_variations": [],
-        "concessions": [
-          {
-            "text_summary": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-            "n": 1,
-            "band": "rare",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 3,
-              "clause_path": "17",
-              "char_span": [
-                4682,
-                4951
-              ]
-            }
-          }
-        ],
+        "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
           {
@@ -7277,8 +7036,8 @@
             "band": "rare",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "gamma-holdings",
@@ -7296,11 +7055,11 @@
         "id": "clause.counterparts",
         "taxonomy_id": "counterparts",
         "title": "Counterparts",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -7314,23 +7073,7 @@
             ]
           }
         },
-        "preferred_variations": [
-          {
-            "if": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-            "to": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-            "observation_ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "21",
-              "char_span": [
-                3428,
-                3527
-              ]
-            },
-            "n": 2,
-            "band": "sometimes"
-          }
-        ],
+        "preferred_variations": [],
         "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
@@ -7357,7 +7100,7 @@
             "text_summary": "This Agreement may be signed in counterparts, each of which is deemed an original.",
             "n": 2,
             "band": "sometimes",
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -7378,11 +7121,11 @@
         "id": "clause.definition_confidential_info",
         "taxonomy_id": "definition_confidential_info",
         "title": "Definition of Confidential Information",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -7425,11 +7168,11 @@
         "id": "clause.dispute_resolution_venue",
         "taxonomy_id": "dispute_resolution_venue",
         "title": "Dispute Resolution & Venue",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 2,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -7444,26 +7187,7 @@
           }
         },
         "preferred_variations": [],
-        "concessions": [
-          {
-            "text_summary": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n": 2,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "22",
-              "char_span": [
-                5862,
-                6081
-              ]
-            }
-          }
-        ],
+        "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
           {
@@ -7472,8 +7196,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "beta-industries",
@@ -7510,11 +7234,11 @@
         "id": "clause.entire_agreement_amendment",
         "taxonomy_id": "entire_agreement_amendment",
         "title": "Entire Agreement & Amendment",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -7557,11 +7281,11 @@
         "id": "clause.exclusions_from_confidential",
         "taxonomy_id": "exclusions_from_confidential",
         "title": "Exclusions from Confidential Information",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -7604,11 +7328,11 @@
         "id": "clause.export_control",
         "taxonomy_id": "export_control",
         "title": "Export Control",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -7651,11 +7375,11 @@
         "id": "clause.governing_law",
         "taxonomy_id": "governing_law",
         "title": "Governing Law",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 2,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
@@ -7670,26 +7394,7 @@
           }
         },
         "preferred_variations": [],
-        "concessions": [
-          {
-            "text_summary": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-            "n": 2,
-            "band": "sometimes",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "21",
-              "char_span": [
-                5728,
-                5861
-              ]
-            }
-          }
-        ],
+        "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
           {
@@ -7698,8 +7403,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "beta-industries",
@@ -7736,8 +7441,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "theta-logistics",
@@ -7755,11 +7460,11 @@
         "id": "clause.injunctive_relief",
         "taxonomy_id": "injunctive_relief",
         "title": "Injunctive Relief",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -7805,19 +7510,22 @@
         "historical_stance": "no_signal",
         "stance_detail": {
           "held": 0,
-          "of": 1,
-          "basis": "our_paper"
+          "of": 2,
+          "basis": "all"
         },
         "our_standard": null,
         "preferred_variations": [],
-        "concessions": [
+        "concessions": [],
+        "unacceptable": [],
+        "exemplar_forms": [
           {
             "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-            "n": 1,
-            "band": "rare",
+            "n": 2,
+            "band": "sometimes",
+            "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "epsilon-systems",
@@ -7829,39 +7537,17 @@
               ]
             }
           }
-        ],
-        "unacceptable": [],
-        "exemplar_forms": [
-          {
-            "text_summary": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-            "n": 2,
-            "band": "sometimes",
-            "deviation": "substantive",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "material"
-            },
-            "example_ref": {
-              "document_id": "zeta-diagnostics",
-              "version": 3,
-              "clause_path": "13",
-              "char_span": [
-                2453,
-                2706
-              ]
-            }
-          }
         ]
       },
       {
         "id": "clause.no_license_ip_ownership",
         "taxonomy_id": "no_license_ip_ownership",
         "title": "No License / IP Ownership",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -7904,11 +7590,11 @@
         "id": "clause.no_obligation_to_proceed",
         "taxonomy_id": "no_obligation_to_proceed",
         "title": "No Obligation to Proceed",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -7951,11 +7637,11 @@
         "id": "clause.no_warranty_as_is",
         "taxonomy_id": "no_warranty_as_is",
         "title": "No Warranty / AS IS",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -7969,23 +7655,7 @@
             ]
           }
         },
-        "preferred_variations": [
-          {
-            "if": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-            "to": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-            "observation_ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "12",
-              "char_span": [
-                2338,
-                2451
-              ]
-            },
-            "n": 2,
-            "band": "sometimes"
-          }
-        ],
+        "preferred_variations": [],
         "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
@@ -8012,7 +7682,7 @@
             "text_summary": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
             "n": 2,
             "band": "sometimes",
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8033,11 +7703,11 @@
         "id": "clause.notice_of_unauthorized_disclosure",
         "taxonomy_id": "notice_of_unauthorized_disclosure",
         "title": "Notice of Unauthorized Disclosure",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 3,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -8052,26 +7722,7 @@
           }
         },
         "preferred_variations": [],
-        "concessions": [
-          {
-            "text_summary": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-            "n": 1,
-            "band": "rare",
-            "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
-            },
-            "example_ref": {
-              "document_id": "gamma-holdings",
-              "version": 3,
-              "clause_path": "8",
-              "char_span": [
-                2313,
-                2580
-              ]
-            }
-          }
-        ],
+        "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
           {
@@ -8099,8 +7750,8 @@
             "band": "rare",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "gamma-holdings",
@@ -8118,11 +7769,11 @@
         "id": "clause.notices",
         "taxonomy_id": "notices",
         "title": "Notices",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -8136,23 +7787,7 @@
             ]
           }
         },
-        "preferred_variations": [
-          {
-            "if": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-            "to": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-            "observation_ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "18",
-              "char_span": [
-                3050,
-                3159
-              ]
-            },
-            "n": 2,
-            "band": "sometimes"
-          }
-        ],
+        "preferred_variations": [],
         "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
@@ -8179,7 +7814,7 @@
             "text_summary": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
             "n": 2,
             "band": "sometimes",
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8200,11 +7835,11 @@
         "id": "clause.parties_and_recitals",
         "taxonomy_id": "parties_and_recitals",
         "title": "Parties & Recitals",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
-          "held": 4,
+          "held": 0,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -8226,7 +7861,7 @@
             "text_summary": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\").",
             "n": 1,
             "band": "rare",
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8245,7 +7880,7 @@
             "text_summary": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\").",
             "n": 1,
             "band": "rare",
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8264,7 +7899,7 @@
             "text_summary": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\").",
             "n": 1,
             "band": "rare",
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8283,7 +7918,7 @@
             "text_summary": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\").",
             "n": 1,
             "band": "rare",
-            "deviation": "none",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8304,11 +7939,11 @@
         "id": "clause.permitted_disclosure_reps",
         "taxonomy_id": "permitted_disclosure_reps",
         "title": "Permitted Disclosure to Representatives",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -8351,11 +7986,11 @@
         "id": "clause.purpose_permitted_use",
         "taxonomy_id": "purpose_permitted_use",
         "title": "Purpose & Permitted Use",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -8400,7 +8035,7 @@
         "title": "Residuals",
         "historical_stance": "no_signal",
         "stance_detail": {
-          "held": 1,
+          "held": 0,
           "of": 1,
           "basis": "all"
         },
@@ -8453,11 +8088,11 @@
         "id": "clause.return_or_destruction",
         "taxonomy_id": "return_or_destruction",
         "title": "Return or Destruction of Materials",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -8500,11 +8135,11 @@
         "id": "clause.severability",
         "taxonomy_id": "severability",
         "title": "Severability",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -8547,8 +8182,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "theta-logistics",
@@ -8566,11 +8201,11 @@
         "id": "clause.standard_of_care",
         "taxonomy_id": "standard_of_care",
         "title": "Standard of Care",
-        "historical_stance": "usually_conceded",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 3,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -8584,23 +8219,7 @@
             ]
           }
         },
-        "preferred_variations": [
-          {
-            "if": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
-            "to": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
-            "observation_ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "6",
-              "char_span": [
-                1935,
-                2148
-              ]
-            },
-            "n": 1,
-            "band": "rare"
-          }
-        ],
+        "preferred_variations": [],
         "concessions": [],
         "unacceptable": [],
         "exemplar_forms": [
@@ -8627,7 +8246,7 @@
             "text_summary": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "n": 1,
             "band": "rare",
-            "deviation": "reworded_equivalent",
+            "deviation": "substantive",
             "risk_delta": {
               "direction": "neutral",
               "magnitude": "none"
@@ -8648,11 +8267,11 @@
         "id": "clause.survival_period",
         "taxonomy_id": "survival_period",
         "title": "Survival of Confidentiality Obligations",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
           "of": 4,
-          "basis": "our_paper"
+          "basis": "all"
         },
         "our_standard": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -8695,11 +8314,11 @@
         "id": "clause.term",
         "taxonomy_id": "term",
         "title": "Term",
-        "historical_stance": "consistently_held",
+        "historical_stance": "no_signal",
         "stance_detail": {
           "held": 4,
-          "of": 4,
-          "basis": "our_paper"
+          "of": 6,
+          "basis": "all"
         },
         "our_standard": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -8742,8 +8361,8 @@
             "band": "sometimes",
             "deviation": "substantive",
             "risk_delta": {
-              "direction": "worse",
-              "magnitude": "minor"
+              "direction": "neutral",
+              "magnitude": "none"
             },
             "example_ref": {
               "document_id": "theta-logistics",
@@ -8760,11 +8379,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:f5d4a4184b9cafc01c99354c668d2458e3f8b5c2c495472af2a502f51b8b76e6",
+    "content_hash": "sha256:7a77f0b3dd92596762aadae3a6f73dc40fb34519faa5bb1645bac8407c85bd45",
     "section_digests": {
-      "evidence": "sha256:4dc8cf54dd090e4aa122d34f3187838c47cd26ed7369547e2b4e47200afe0b60",
-      "posture": "sha256:b8fe1af2384f6b8881e80d2949f5dac6eac05e02f85813811f524198d01553ae",
-      "floor": "sha256:cc011c5321d195b4cfcfd58fe740f5199142faf3ac34f420bfd97c3ff250dd55",
+      "evidence": "sha256:2045cbd94c1f4e619f5bc0b2b78d214377ff7b61865190a63101ca4efcc065b2",
+      "posture": "sha256:b3abab1d6a53df9babc95534891403ddcc37fb8a1391fb40384d85ee161eddcf",
+      "floor": "sha256:f502f935a29e77f855e29c30dbae5eecac3beb695fff0607935c07a7e7a92d96",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }

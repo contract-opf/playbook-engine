@@ -370,8 +370,16 @@ def _echo_rubric_report(policy: Any, echo: Callable[[str], None]) -> None:
         )
 
 
-def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[str, Any]:
+def _verdict_store_kwargs(
+    out_dir: Path, echo: Callable[[str], None], *, with_deviation_judge: bool = False
+) -> dict[str, Any]:
     """Wire store-backed judges when a verdict store exists at ``out_dir/judge/verdicts.jsonl``.
+
+    The deviation judge is wired only when *with_deviation_judge* (issue
+    #220): by default deviations are the deterministic standard check, so a
+    stored deviation verdict is never replayed onto the consumer path and no
+    deviation item is ever queued. Scope, classification and provenance
+    judges are wired exactly as before.
 
     Used by ``mine`` (issue #102) — before this, ``mine`` never checked for
     a verdict store at all, so it always ran the stub judges even over an
@@ -384,11 +392,24 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
     the ``VerdictStore`` is the authoritative source for judge verdicts.
 
     Returns an empty dict when no verdict store exists (the stub judges
-    remain the default, same as before).
+    remain the default, same as before) — except under
+    *with_deviation_judge*, where the opt-in is still honoured: the
+    ``_NullDeviationJudge`` stub is wired (every changed clause
+    ``basis="needs_review"``, watermarked) and a warning says no verdicts
+    exist yet, so the flag is never silently ignored on a fresh out-dir.
     """
     verdicts_path = out_dir / "judge" / "verdicts.jsonl"
     if not verdicts_path.exists():
-        return {}
+        if not with_deviation_judge:
+            return {}
+        from playbook_engine.pipeline import _NullDeviationJudge  # noqa: PLC0415
+
+        echo(
+            f"WARNING: --with-deviation-judge but no verdict store at {verdicts_path} — "
+            "every changed clause is recorded needs_review (stub deviation judge) until "
+            "`playbook judge --with-deviation-judge` + `playbook judge-apply` bank verdicts"
+        )
+        return {"deviation_judge": _NullDeviationJudge()}
 
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
@@ -406,16 +427,61 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
     # single coherent rubric tally afterwards (``_echo_rubric_report``).
     policy = RubricPolicy()
     echo(f"  judge store: {verdicts_path} (store-backed judges active)")
-    return {
+    kwargs: dict[str, Any] = {
         "scope_judge": StoreBackedScopeJudge(store=store, pending=pending, rubric=policy),
         "classification_judge": StoreBackedClassificationJudge(
             store=store, pending=pending, rubric=policy
         ),
-        "deviation_judge": StoreBackedDeviationJudge(store=store, pending=pending, rubric=policy),
         "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending, rubric=policy),
         "no_cache": True,
         "_rubric_policy": policy,
     }
+    if with_deviation_judge:
+        kwargs["deviation_judge"] = StoreBackedDeviationJudge(
+            store=store, pending=pending, rubric=policy
+        )
+    else:
+        echo("  deviation: deterministic standard check (no deviation judge; issue #220)")
+        n_banked = _count_stored_deviation_verdicts(verdicts_path)
+        if n_banked:
+            # An out-dir derived before #220 can carry hundreds of banked
+            # deviation verdicts. Re-mining without the flag ignores them by
+            # design, which drops every judged stance, acceptable_if and
+            # fallback from the result; say so loudly rather than leave a
+            # one-line status as the only trace.
+            echo(
+                f"WARNING: {n_banked} stored deviation verdict(s) in {verdicts_path} are NOT "
+                "applied — the consumer path uses the deterministic standard check. Pass "
+                "--with-deviation-judge to replay them (opt-in advisory layer)."
+            )
+    return kwargs
+
+
+def _count_stored_deviation_verdicts(verdicts_path: Path) -> int:
+    """Count deviation-kind verdicts banked in a verdict store (issue #220).
+
+    Reads the JSONL directly and classifies each record with
+    ``agent_judge.infer_verdict_kind``; unreadable lines are skipped, the same
+    tolerance ``VerdictStore`` itself applies on load.
+    """
+    import json  # noqa: PLC0415
+
+    from playbook_engine.agent_judge import infer_verdict_kind  # noqa: PLC0415
+
+    n = 0
+    try:
+        lines = verdicts_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        verdict = record.get("verdict") if isinstance(record, dict) else None
+        if isinstance(verdict, dict) and infer_verdict_kind(verdict) == "deviation":
+            n += 1
+    return n
 
 
 #: version_ingest[].reason values that represent a real extraction
@@ -1116,6 +1182,32 @@ _SKIP_PREFLIGHT_HELP = (
     "and decided they do not apply."
 )
 
+_WITH_DEVIATION_JUDGE_HELP = (
+    "Opt in to judged deviation/risk verdicts (an advisory layer for "
+    "posture/floor work). Off by default: every deviation is the "
+    "deterministic standard check — does the clause text match our template "
+    "clause? — and no deviation item is ever queued. Pass it to BOTH "
+    "`playbook judge` and `playbook mine` on the same out-dir, or the mine "
+    "round ignores the judged verdicts."
+)
+
+_with_deviation_judge_option = click.option(
+    "--with-deviation-judge",
+    "with_deviation_judge",
+    is_flag=True,
+    default=False,
+    help=_WITH_DEVIATION_JUDGE_HELP,
+)
+
+
+def _echo_deviation_judge_off(echo: Callable[[str], None]) -> None:
+    """The plan/drain loop's deviation line when no deviation judge is wired
+    (issue #220, the default): zero pending, and why."""
+    echo(
+        "  deviation: 0 pending (deviation judge off — deterministic standard check; "
+        "pass --with-deviation-judge to queue judged deviation verdicts)"
+    )
+
 
 def _run_corpus_preflight(
     corpus_dir: Path,
@@ -1222,6 +1314,7 @@ def _run_corpus_preflight(
         "place. Only relevant when provenance.known_entities is set."
     ),
 )
+@_with_deviation_judge_option
 @_accept_environment_change_option
 def mine_cmd(
     corpus_dir: Path,
@@ -1230,6 +1323,7 @@ def mine_cmd(
     no_cache: bool,
     skip_preflight: bool,
     entity_registry_path: Path | None,
+    with_deviation_judge: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine CORPUS_DIR and write the observation store (L1–L4).
@@ -1327,7 +1421,9 @@ def mine_cmd(
     # mine round after a judge round to re-extract/re-OCR the whole corpus
     # (the exact regression this issue's fix must avoid — see
     # extraction.py's ExtractionCache docstring).
-    verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
+    verdict_kwargs = _verdict_store_kwargs(
+        out_dir, click.echo, with_deviation_judge=with_deviation_judge
+    )
     # Not a mine_corpus parameter — the shared RubricPolicy the wired judges
     # tally into, read back for reporting after the run.
     rubric_policy = verdict_kwargs.pop("_rubric_policy", None)
@@ -1846,6 +1942,7 @@ def stage_cmd(
     default=False,
     help=_SKIP_PREFLIGHT_HELP,
 )
+@_with_deviation_judge_option
 @_accept_environment_change_option
 def judge_cmd(
     corpus_dir: Path,
@@ -1857,9 +1954,15 @@ def judge_cmd(
     strict_rubric: bool,
     entity_registry_path: Path | None,
     skip_preflight: bool,
+    with_deviation_judge: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
+
+    Deviation verdicts are opt-in (``--with-deviation-judge``): by default
+    every deviation is the deterministic standard check, so the plan and the
+    drain loop report zero pending deviation items and only scope,
+    classification and provenance items are ever queued.
 
     Reads the verdict store at <out>/judge/verdicts.jsonl and replays any
     previously supplied verdicts.  For every new clause payload not in the store,
@@ -1990,8 +2093,10 @@ def judge_cmd(
             cls_judge = StoreBackedClassificationJudge(
                 store=store, pending=plan_pending, rubric=rubric_policy
             )
-            dev_judge = StoreBackedDeviationJudge(
-                store=store, pending=plan_pending, rubric=rubric_policy
+            dev_judge = (
+                StoreBackedDeviationJudge(store=store, pending=plan_pending, rubric=rubric_policy)
+                if with_deviation_judge
+                else None
             )
             prov_judge = StoreBackedProvenanceJudge(
                 store=store, pending=plan_pending, rubric=rubric_policy
@@ -2028,6 +2133,8 @@ def judge_cmd(
             plan_pending_path = Path(_tmp) / "pending.jsonl"
             if not plan_pending_path.exists():
                 click.secho("OK  0 pending items (all verdicts already in store)", fg="green")
+                if not with_deviation_judge:
+                    _echo_deviation_judge_off(click.echo)
                 _echo_segmentation_cost_line(seg_stats, click.echo)
                 _echo_rubric_report(rubric_policy, click.echo)
                 return
@@ -2075,6 +2182,8 @@ def judge_cmd(
             click.echo(f"Pending items: {total} (token estimate: ~{token_estimate:,})")
             for kind, count in sorted(counts.items()):
                 click.echo(f"  {kind}: {count}")
+            if not with_deviation_judge:
+                _echo_deviation_judge_off(click.echo)
             _echo_segmentation_cost_line(seg_stats, click.echo)
             _echo_rubric_report(rubric_policy, click.echo)
         return
@@ -2091,7 +2200,11 @@ def judge_cmd(
     cls_judge = StoreBackedClassificationJudge(
         store=store, pending=pending_queue, rubric=rubric_policy
     )
-    dev_judge = StoreBackedDeviationJudge(store=store, pending=pending_queue, rubric=rubric_policy)
+    dev_judge = (
+        StoreBackedDeviationJudge(store=store, pending=pending_queue, rubric=rubric_policy)
+        if with_deviation_judge
+        else None
+    )
     prov_judge = StoreBackedProvenanceJudge(
         store=store, pending=pending_queue, rubric=rubric_policy
     )
@@ -2157,6 +2270,8 @@ def judge_cmd(
         click.echo(f"Pending items: {total_pending}")
         for kind, count in sorted(counts.items()):
             click.echo(f"  {kind}: {count}")
+        if not with_deviation_judge:
+            _echo_deviation_judge_off(click.echo)
 
         # A pending item whose key is ALREADY in the verdict store is a
         # re-queue of a stored verdict that failed replay reconstruction
@@ -2189,6 +2304,8 @@ def judge_cmd(
         _echo_rubric_report(rubric_policy, click.echo)
     else:
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
+        if not with_deviation_judge:
+            _echo_deviation_judge_off(click.echo)
         _echo_rubric_report(rubric_policy, click.echo)
 
     # This round ran mine_corpus to completion (the except PipelineError
@@ -2374,6 +2491,18 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
         loaded += 1
 
     click.secho(f"OK  loaded {loaded} verdict(s) into {verdicts_store_path}", fg="green")
+    n_deviation = sum(1 for _key, _verdict, kind in valid_records if kind == "deviation")
+    if n_deviation:
+        # Issue #220: deviation verdicts are the opt-in advisory layer. They
+        # are stored, but a default `mine`/`judge` round never replays them —
+        # the consumer path uses the deterministic standard check instead.
+        click.secho(
+            f"NOTE: {n_deviation} deviation verdict(s) stored — replayed only by "
+            "`playbook judge`/`playbook mine` run with --with-deviation-judge; the "
+            "default consumer path uses the deterministic standard check instead.",
+            fg="yellow",
+            err=True,
+        )
     if unstamped:
         click.secho(
             f"WARN: {unstamped} verdict(s) loaded without a rubric stamp — their "

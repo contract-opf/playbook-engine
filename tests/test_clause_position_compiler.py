@@ -21,8 +21,13 @@ from playbook_engine.clause_position_compiler import (
     OPFCitation,
     UnclassifiedCoverage,
     compile_clause_positions,
+    deviations_are_deterministic,
 )
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.deviation_classifier import (
+    DeviationResult,
+    RiskDelta,
+    assess_deviations_deterministic,
+)
 from playbook_engine.observation_builder import (
     Observation,
     ObservationCitation,
@@ -1714,3 +1719,163 @@ def test_our_paper_only_concession_keeps_our_paper_basis() -> None:
     detail = pos.to_dict()["summary"]["stance_detail"]
     assert detail == {"held": 2, "of": 3, "basis": "our_paper"}
     assert _stance_warnings(pos) == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #220: the consumer path — deterministic standard facts, no stance
+#
+# Driven through the real producers (deviation_classifier.
+# assess_deviations_deterministic -> build_observations(deterministic_
+# deviations=True)), exactly what mine_corpus writes with no deviation judge
+# configured (its default), so the compiler sees the shape production emits.
+# ---------------------------------------------------------------------------
+
+_STD_ONLY = {"non_solicit": _STD_NON_SOLICIT}
+
+
+def _consumer_deal(
+    doc_id: str, diffs: list[ClauseDiff], provenance: str = "our_paper"
+) -> list[Observation]:
+    rows = assess_deviations_deterministic(diffs, _STD_NON_SOLICIT)
+    return build_observations(
+        doc_id,
+        3,
+        provenance,
+        rows,
+        [],
+        ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
+        standard_text_by_tid=_STD_ONLY,
+        deterministic_deviations=True,
+    )
+
+
+def _consumer_corpus() -> list[Observation]:
+    return [
+        # Two deals signed our standard (one on counterparty paper — paper
+        # side never partitions the count).
+        *_consumer_deal("deal-a", [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")]),
+        *_consumer_deal(
+            "deal-b",
+            [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")],
+            provenance="counterparty_paper",
+        ),
+        # One deal signed their language.
+        *_consumer_deal("deal-c", [_signed("non_solicit", _THEIR_NON_SOLICIT)]),
+        # One deal struck our standard before signing (a concession) ...
+        *_consumer_deal("deal-d", [_removed("non_solicit", _STD_NON_SOLICIT)]),
+        # ... and one refused their ask, then signed our standard.
+        *_consumer_deal(
+            "deal-e",
+            [
+                _removed("non_solicit", _THEIR_NON_SOLICIT, path="4"),
+                _signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged"),
+            ],
+        ),
+    ]
+
+
+def test_consumer_path_observations_carry_the_standard_fact() -> None:
+    obs = _consumer_corpus()
+    assert deviations_are_deterministic(obs)
+    for o in obs:
+        assert o.basis == "deterministic"
+        assert isinstance(o.standard, bool)
+        assert o.deviation == ("none" if o.standard else "substantive")
+        assert o.risk_delta == {"direction": "neutral", "magnitude": "none"}
+    by_outcome = {(o.citation.document_id, o.outcome): o.standard for o in obs}
+    assert by_outcome[("deal-c", "signed")] is False
+    assert by_outcome[("deal-d", "conceded_before_signing")] is True
+    assert by_outcome[("deal-e", "proposed_then_reversed")] is False
+    assert by_outcome[("deal-e", "signed")] is True
+
+
+def test_consumer_path_rollup_reads_no_stance_out_of_placeholder_risk() -> None:
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+    pos = next(p for p in _compile(_consumer_corpus(), template) if p.taxonomy_id == "non_solicit")
+    summary = pos.to_dict()["summary"]
+    assert summary["historical_stance"] == "no_signal"
+    # held = distinct deals that SIGNED our standard (a, b, e); of = every
+    # distinct deal with an observation of this clause, the concession
+    # included (a..e). basis "all": the 0.3 spelling of "every deal".
+    assert summary["stance_detail"] == {"held": 3, "of": 5, "basis": "all"}
+    # Judged categories never reach the consumer path ...
+    assert summary["acceptable_if"] == []
+    assert summary["fallbacks"] == []
+    assert pos.rollup.position == "negotiable"
+    # ... but the refused ask (a deterministic outcome fact) is kept.
+    assert [op.full_text for op in pos.rollup.rejected] == [_THEIR_NON_SOLICIT]
+
+
+def test_consumer_path_stance_detail_validates_against_frozen_0_3_schema() -> None:
+    import json
+    from pathlib import Path
+
+    import jsonschema
+
+    schema = json.loads(
+        (Path(__file__).resolve().parent.parent / "spec" / "playbook.schema-0.3.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    detail_schema = schema["$defs"]["clausePosition"]["properties"]["summary"]["properties"][
+        "stance_detail"
+    ]
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+    pos = next(p for p in _compile(_consumer_corpus(), template) if p.taxonomy_id == "non_solicit")
+    jsonschema.validate(pos.to_dict()["summary"]["stance_detail"], detail_schema)
+
+
+def test_judged_store_keeps_the_judged_derivation() -> None:
+    """A store with a judged row (the opt-in advisory layer), a legacy store
+    that never computed `standard`, and a hand-built basis=None row all keep
+    the judged cascade unchanged."""
+    consumer = _consumer_corpus()
+    judged_row = _deal("deal-f", [(_signed("non_solicit", _THEIR_NON_SOLICIT), _JUDGED_WORSE)])
+    assert not deviations_are_deterministic(consumer + judged_row)
+    assert not deviations_are_deterministic([_obs("non_solicit", basis="deterministic")])
+    assert not deviations_are_deterministic([_obs("non_solicit")])
+    assert not deviations_are_deterministic([])
+
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+    pos = next(
+        p for p in _compile(consumer + judged_row, template) if p.taxonomy_id == "non_solicit"
+    )
+    assert not pos.rollup.deterministic_deviations
+    assert pos.rollup.fallbacks  # the judged worse-risk signing is a fallback again
+
+
+def test_explicit_mode_overrides_inference() -> None:
+    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
+    positions, _, _ = compile_clause_positions(
+        _consumer_corpus(), template, deterministic_deviations=False
+    )
+    pos = next(p for p in positions if p.taxonomy_id == "non_solicit")
+    assert not pos.rollup.deterministic_deviations
+
+
+def test_consumer_path_multi_node_clause_is_standard_as_a_whole() -> None:
+    """A deal that splits our one-clause standard across two nodes signed our
+    standard: the terminal observation's standard fact is its MERGED text
+    against the whole template clause, not each node alone."""
+    first = "For twelve months neither party shall solicit"
+    second = "the other's employees."
+    rows = assess_deviations_deterministic(
+        [
+            _signed("non_solicit", first, path="9", kind="unchanged"),
+            _signed("non_solicit", second, path="10", kind="unchanged"),
+        ],
+        _STD_NON_SOLICIT,
+    )
+    assert [dr.deviation for _, dr in rows] == ["substantive", "substantive"]
+    obs = build_observations(
+        "deal-g",
+        3,
+        "our_paper",
+        rows,
+        [],
+        standard_text_by_tid=_STD_ONLY,
+        deterministic_deviations=True,
+    )
+    assert len(obs) == 1
+    assert obs[0].standard is True
+    assert obs[0].deviation == "none"

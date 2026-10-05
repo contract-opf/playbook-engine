@@ -32,7 +32,19 @@ Fast path (deterministic):
     ``counterpart_clause_texts``; callers that omit it (or pre-#167 callers)
     keep routing every added/removed clause to the judge, unchanged.
 
-Slow path (LLM — injected ``DeviationJudge``):
+Consumer path (issue #220 — the default; no deviation judge at all):
+  - :func:`assess_deviations_deterministic` answers one deterministic
+    question per clause instead of a judged one: is its text OUR standard
+    (:func:`is_standard_text` — after normalization, does its text equal the
+    template clause for its taxonomy_id)? ``deviation="none"`` when it is, ``"substantive"``
+    otherwise, always ``basis="deterministic"`` with a neutral/none
+    ``risk_delta`` placeholder (kept only so OPF 0.3 keeps validating; it is
+    not a risk assessment). Never ``needs_review``, never a judge call. The
+    consumer (a capable review model) does the judging; the playbook supplies
+    precedent (owner decision 2026-09-13 (c)).
+
+Slow path (opt-in advisory layer — injected ``DeviationJudge``, only under
+``--with-deviation-judge``):
   - Changed clauses (added/removed/modified) that do not pass a deterministic
     fast path above are batched and passed to the judge.  The judge receives
     a compact hunk payload (not the full clause text) and the
@@ -56,7 +68,8 @@ Slow path (LLM — injected ``DeviationJudge``):
   ``"material"`` — significant risk shift.
 
 ``DeviationResult.basis`` values:
-  ``"deterministic"``       — decided without LLM (unchanged clause).
+  ``"deterministic"``       — decided without LLM (unchanged clause, or the
+                              issue #220 standard check on the consumer path).
   ``"reworded_equivalent"`` — Jaccard pre-filter; no judge call needed.
   ``"alignment"``           — added/removed clause whose text also occurs in
                               the counterpart version's clause tree (issue
@@ -69,6 +82,7 @@ Slow path (LLM — injected ``DeviationJudge``):
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -89,6 +103,21 @@ _BASIS_VALUES = frozenset(
 # Jaccard similarity threshold above which a modified clause is treated as a
 # near-identical reword and classified without calling the judge.
 REWORDED_EQUIVALENT_THRESHOLD: float = 0.92
+
+# The deterministic standard check (issue #220) is an EXACT match after
+# ``normalize_for_standard`` — never a similarity score. A token-set Jaccard
+# is order-blind and absorbs a one-token swap in any clause over ~25 tokens,
+# so at the old 0.92 bar "Neither party may assign" -> "Either party may
+# assign", a deleted carve-out, or "remain protected" -> "are not protected"
+# all scored as our standard and reached the consumer as signed standard
+# language. Normalization already absorbs everything "near-equal" is meant to
+# (rewrapping, case, punctuation, party names), so
+# the check needs no tolerance on top of it.
+
+# The neutral token every known party name is rewritten to before the
+# standard comparison, so "AlphaCorp" in a deal and "AlphaCorp Holdings,
+# Inc." (or a counterparty's own name) in the template never decide it.
+_PARTY_TOKEN = "party"
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -293,6 +322,116 @@ def _is_alignment_artifact(clause_text: str, normalized_counterpart_texts: froze
     if len(norm) < MOVE_EXACT_MIN_CHARS:
         return False
     return any(norm in counterpart for counterpart in normalized_counterpart_texts)
+
+
+def normalize_for_standard(text: str, party_names: Sequence[str] = ()) -> str:
+    """Normalize *text* for the deterministic standard check (issue #220).
+
+    Known party names (``party_names`` — the configured
+    ``provenance.our_party_aliases`` plus ``provenance.known_entities``, the
+    same names the entity registry aliases) are rewritten to one neutral
+    token first, longest name first and case-insensitively on word
+    boundaries, so the parties' own names never decide whether a clause is
+    our standard. Then whitespace is collapsed exactly the way
+    ``version_orderer``'s fingerprint does it
+    (:func:`~playbook_engine.version_orderer.collapse_whitespace`), and case
+    and punctuation are dropped (``_normalize_for_containment``). Word order
+    and every content token — negators, modals, numerals — survive, so the
+    exact comparison in :func:`is_standard_text` stays sensitive to them.
+    Clause numbering is deliberately NOT stripped: the segmenter keeps it out
+    of node text, and any prefix stripper also eats leading content numbers
+    ("30 days" vs "60 days", "1.5 times" vs "2.5 times").
+    """
+    # Imported here, not at module top: version_orderer -> provenance_detector
+    # -> config -> clause_position_compiler -> observation_builder imports
+    # this module, so a top-level import would be circular.
+    from playbook_engine.version_orderer import collapse_whitespace  # noqa: PLC0415
+
+    s = collapse_whitespace(text)
+    for name in sorted({collapse_whitespace(n) for n in party_names if n.strip()}, key=len)[::-1]:
+        s = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", _PARTY_TOKEN, s, flags=re.IGNORECASE)
+    return _normalize_for_containment(s)
+
+
+def is_standard_text(
+    text: str, standard: str | Sequence[str], party_names: Sequence[str] = ()
+) -> bool:
+    """Whether *text* is OUR standard language for its clause (issue #220).
+
+    *standard* is the template text for the clause's taxonomy_id: a string is
+    compared as one whole clause; a sequence is the template's nodes for that
+    taxonomy_id, in document order, and *text* matches the whole (the nodes
+    joined) OR any single node — the node-granular comparison a single
+    clause-tree row needs when the template splits one clause across several
+    nodes. A match is an exact match after ``normalize_for_standard`` — no
+    similarity tolerance (see the comment above ``_PARTY_TOKEN`` for why a
+    token-set score is unsafe here). Empty text,
+    or no standard text at all (no template clause for this taxonomy_id), is
+    never a match: there is nothing to be standard against.
+    """
+    nodes = [standard] if isinstance(standard, str) else list(standard)
+    nodes = [node for node in nodes if node.strip()]
+    if not text.strip() or not nodes:
+        return False
+    candidates = ["\n".join(nodes)] + (nodes if len(nodes) > 1 else [])
+    norm_text = normalize_for_standard(text, party_names)
+    for cand in candidates:
+        norm_cand = normalize_for_standard(cand, party_names)
+        if norm_text and norm_text == norm_cand:
+            return True
+    return False
+
+
+_STANDARD_RATIONALE = "deterministic standard check: text matches our template clause"
+_NON_STANDARD_RATIONALE = (
+    "deterministic standard check: text does not match our template clause "
+    "(or there is no template clause for this taxonomy_id)"
+)
+
+
+def standard_check_result(standard: bool) -> DeviationResult:
+    """The consumer-path ``DeviationResult`` for one standard-check outcome
+    (issue #220): ``"none"`` for standard text, ``"substantive"`` otherwise,
+    always ``basis="deterministic"`` with the neutral/none placeholder
+    ``risk_delta`` OPF 0.3 requires. Never ``needs_review``."""
+    return DeviationResult(
+        deviation="none" if standard else "substantive",
+        risk_delta=_NEUTRAL_ZERO,
+        basis="deterministic",
+        rationale=_STANDARD_RATIONALE if standard else _NON_STANDARD_RATIONALE,
+    )
+
+
+def assess_deviations_deterministic(
+    clause_diffs: list[ClauseDiff],
+    our_standard: str | Sequence[str],
+    party_names: Sequence[str] = (),
+) -> list[tuple[ClauseDiff, DeviationResult]]:
+    """Consumer-path deviation assessment — no judge, ever (issue #220).
+
+    Each row's own text (the after side; the before side for a removed row)
+    is checked against *our_standard* with :func:`is_standard_text`, and the
+    row gets :func:`standard_check_result` for the answer. Unlike
+    :func:`assess_deviations` this never compares the net first-to-last hunk
+    and never consults the opening draft: identical signed text gets the
+    identical answer whatever draft it was reached from.
+
+    Returns one ``(ClauseDiff, DeviationResult)`` pair per input diff, same
+    order.
+    """
+    return [
+        (
+            cd,
+            standard_check_result(
+                is_standard_text(
+                    cd.text_before if cd.kind == "removed" else (cd.text_after or cd.text_before),
+                    our_standard,
+                    party_names,
+                )
+            ),
+        )
+        for cd in clause_diffs
+    ]
 
 
 _ALIGNMENT_ARTIFACT_RATIONALE = (

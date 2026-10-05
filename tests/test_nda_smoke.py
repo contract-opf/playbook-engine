@@ -6,8 +6,8 @@ claim on a second, wholly synthetic agreement type -- the committed NDA
 example at examples/nda/ (see examples/nda/README.md and
 docs/QUICK-COMPILE.md) -- through the real CLI: lint-corpus -> mine ->
 project -> validate, entirely on the deterministic no-LLM pipeline path
-(stub scope judge, Jaccard classification fast-path, heuristic deviation
-stub -- same stub judges as tests/test_golden_affiliation.py and
+(stub scope judge, Jaccard classification fast-path, deterministic
+standard check for deviation -- same stub judges as tests/test_golden_affiliation.py and
 tests/test_cli.py's mine/project acceptance tests).
 
 Hermetic:

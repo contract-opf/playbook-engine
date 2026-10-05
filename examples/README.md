@@ -29,8 +29,10 @@ The fixture ships `judge-fixture/canned-verdicts.jsonl` — pre-computed judge
 verdicts, keyed by clause content hash, standing in for the LLM/attorney
 review round a real corpus needs. Loading it into the verdict store *before*
 the first `mine` means that first pass comes out fully judged (every clause
-classified, every deviation and provenance call made) instead of queuing
-everything as `needs_review`.
+classified, every provenance call made) instead of queuing everything as
+`needs_review`. Deviation needs no verdict by default — it is the
+deterministic standard check; the fixture's deviation verdicts replay only
+under the opt-in `--with-deviation-judge`.
 
 Each deal directory also carries a `hints.yaml` naming its executed (signed)
 copy — the minimal synthetic RTFs have no signature blocks for the engine's

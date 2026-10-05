@@ -19,8 +19,10 @@ standard-form.rtf        -- AlphaCorp's canonical NDA template
 corpus/                  -- six fictional negotiations (four on our paper, two
                              on counterparty paper)
 canned-verdicts.jsonl    -- pre-computed judge verdicts (classification,
-                             deviation, provenance, scope) for every item the
+                             provenance, scope) for every item the
                              deterministic pipeline can't resolve on its own
+                             (deviation is never judged by default -- it is
+                             the deterministic standard check)
 posture-answers.json     -- the six-question GC-interview answers used to
                              author posture.system_prompt
 playbook.opf.json        -- the derived, worked playbook: populated
@@ -40,8 +42,13 @@ which lacked the notice obligation the signed copy restores) counted as a
 refused ask; our own standard clauses struck before signing (standard of care,
 governing law and venue in `beta-industries`, confidentiality of
 discussions and breach notice in `gamma-holdings`) counted as concessions --
-those deals are conceded, not held, in `stance_detail` -- never as signed
-and never as rejected asks; a populated
+those deals count in `stance_detail`'s `of` but never in its `held`, which
+counts only deals that signed our standard text -- never as signed and never
+as rejected asks; no judged deviation or risk verdict anywhere (every
+observation's `deviation` is the deterministic standard check, so every
+`historical_stance` is `no_signal` and `stance_detail` reads
+`{held: deals that signed our standard, of: all deals, basis: "all"}` --
+the consumer model does the judging); a populated
 `posture.system_prompt` from a
 six-question GC interview, and three signed `floor.invariants`: two
 auto-promoted from the interview's "sacred clauses" answer (exclusions from
@@ -122,8 +129,9 @@ used to derive the committed `playbook.opf.json` above: a CI-reproducible
 fixture can't depend on a headless-incompatible agent loop, and template
 mode's deterministic classifier already resolves the great majority of
 clauses on its own (`canned-verdicts.jsonl` covers only what's left:
-classification/deviation/provenance/scope items the deterministic pass
-can't call on its own).
+classification/provenance/scope items the deterministic pass can't call on
+its own -- deviation needs no verdicts at all: it is the deterministic
+standard check described above).
 
 The bare stub-judge run above is what `tests/test_nda_smoke.py`
 (`@pytest.mark.smoke`, also runnable via `make smoke-nda`) exercises:

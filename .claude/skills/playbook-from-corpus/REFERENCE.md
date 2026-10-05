@@ -60,6 +60,15 @@ read it once and keep it at hand).
 
 ### Deviation assessment (`kind: deviation`)
 
+**Opt-in only.** A default `playbook judge` round never queues a deviation
+item: every clause's deviation is the deterministic standard check (its text
+matches our template clause → `none`, otherwise `substantive`,
+`basis: "deterministic"`), and the plan prints `deviation: 0 pending`. The
+consumer (the review model) does the judging; the playbook supplies
+precedent. Everything below applies only when the operator opted in to the
+advisory judged layer with `--with-deviation-judge` on BOTH `playbook judge`
+and `playbook mine`.
+
 **Input fields:** `hunk` (a `[BEFORE]`/`[AFTER]` version-to-version diff of
 the clause), `our_standard` (our template language for this clause type —
 empty string when no baseline template is configured), plus traceability
