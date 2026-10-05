@@ -1887,6 +1887,179 @@ def test_whole_multi_node_standard_reworded_in_one_node_is_our_language() -> Non
     assert [o.outcome for o in obs] == [OUTCOME_CONCEDED_BEFORE_SIGNING]
 
 
+_ASSIGN_STD = (
+    "Neither party may assign this Agreement, except to an Affiliate, without "
+    "the prior written consent of the other party, and any attempted "
+    "assignment in breach of this Section is void and of no effect as to an "
+    "assignee."
+)
+_TRADE_SECRET_STD = (
+    "Trade secrets of the Disclosing Party remain protected for as long as "
+    "they remain trade secrets under applicable law, notwithstanding the "
+    "expiry or termination of this Agreement for any reason whatsoever."
+)
+
+
+@pytest.mark.parametrize(
+    ("tid", "standard", "struck"),
+    [
+        # Negation flip: "Neither" -> "Either".
+        ("assignment", _ASSIGN_STD, _ASSIGN_STD.replace("Neither", "Either", 1)),
+        # Deleted carve-out: the Affiliate exception struck from mid-clause.
+        (
+            "assignment",
+            _ASSIGN_STD,
+            _ASSIGN_STD.replace(", except to an Affiliate,", ""),
+        ),
+        # Protection negated: "remain protected" -> "are not protected".
+        (
+            "trade_secrets",
+            _TRADE_SECRET_STD,
+            _TRADE_SECRET_STD.replace("remain protected", "are not protected"),
+        ),
+    ],
+    ids=["negation-flip", "deleted-carve-out", "protection-negated"],
+)
+def test_struck_first_version_text_that_edits_our_clause_is_their_ask(
+    tid: str, standard: str, struck: str
+) -> None:
+    """Issue #229: the origin test is the exact standard check #220 put on
+    the consumer path, not the order-blind token Jaccard it retired. A first
+    draft that negates our clause or deletes its carve-out, struck before
+    signing in favour of our standard, is THEIR refused ask — never our
+    concession — even though the old 0.92 Jaccard called it our language."""
+    from playbook_engine.deviation_classifier import (  # noqa: PLC0415
+        REWORDED_EQUIVALENT_THRESHOLD,
+        _text_jaccard,
+    )
+
+    # The case this test exists for: the retired similarity bar absorbed it.
+    assert _text_jaccard(struck, standard) >= REWORDED_EQUIVALENT_THRESHOLD
+    signed = _added_row(tid, standard)
+    dropped: dict[str, int] = {}
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(_removed_row(tid, struck), _dr()), (signed, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        dropped=dropped,
+        standard_text_by_tid={tid: standard},
+    )
+    assert [(o.outcome, o.full_text) for o in obs] == [
+        ("proposed_then_reversed", struck),
+        ("signed", standard),
+    ]
+    assert dropped == {}
+
+
+_INSURANCE_NODES = [
+    "AlphaCorp shall maintain commercial general liability insurance.",
+    "AlphaCorp shall name the Customer as an additional insured on every "
+    "policy. AlphaCorp shall deliver a certificate of insurance on request.",
+]
+
+
+@pytest.mark.parametrize(
+    ("struck", "party_names", "expected"),
+    [
+        # One sentence of the second node, verbatim: a fragment of our
+        # standard, so its removal is our concession.
+        (
+            "AlphaCorp shall name the Customer as an additional insured on every policy.",
+            (),
+            OUTCOME_CONCEDED_BEFORE_SIGNING,
+        ),
+        # A run straddling the node boundary is still one contiguous
+        # fragment of the standard (nodes joined in document order).
+        (
+            "AlphaCorp shall maintain commercial general liability insurance. "
+            "AlphaCorp shall name the Customer as an additional insured on every policy.",
+            (),
+            OUTCOME_CONCEDED_BEFORE_SIGNING,
+        ),
+        # The deal names the party differently: party names are neutralized
+        # in the fragment test exactly as in the exact check ...
+        (
+            "Beta Supplies LLC shall name the Customer as an additional insured on every policy.",
+            ("AlphaCorp", "Beta Supplies LLC"),
+            OUTCOME_CONCEDED_BEFORE_SIGNING,
+        ),
+        # ... and only for KNOWN party names.
+        (
+            "Beta Supplies LLC shall name the Customer as an additional insured on every policy.",
+            (),
+            "proposed_then_reversed",
+        ),
+        # A fragment must sit on word boundaries of the standard: "polic"
+        # is not a fragment of "policy".
+        (
+            "AlphaCorp shall name the Customer as an additional insured on every polic",
+            (),
+            "proposed_then_reversed",
+        ),
+        # A fragment with a negator inserted is not contained in the standard.
+        (
+            "AlphaCorp shall not name the Customer as an additional insured on every policy.",
+            (),
+            "proposed_then_reversed",
+        ),
+    ],
+    ids=[
+        "one-sentence-of-node-2",
+        "run-across-node-boundary",
+        "known-party-name-neutralized",
+        "unknown-party-name-not-neutralized",
+        "partial-word-is-not-a-fragment",
+        "inserted-negator",
+    ],
+)
+def test_fragment_of_a_two_node_standard_is_our_language(
+    struck: str, party_names: tuple[str, ...], expected: str
+) -> None:
+    """Issue #229: the containment rule for a fragment of a multi-node
+    standard survives the switch to the exact check, and runs on
+    ``normalize_for_standard`` output (same party names) so party names are
+    handled exactly as in ``is_standard_text``."""
+    kept = _terminal_cd("insurance", "2", "Customer may request proof of coverage.", (0, 40))
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        [(_removed_row("insurance", struck), _dr()), (kept, _dr())],
+        [],
+        ordinal_by_vid=_ORDINALS,
+        standard_text_by_tid={"insurance": _INSURANCE_NODES},
+        party_names=party_names,
+    )
+    assert [(o.outcome, o.full_text) for o in obs] == [
+        (expected, struck),
+        ("signed", "Customer may request proof of coverage."),
+    ]
+
+
+def test_whole_standard_with_other_party_names_is_our_language() -> None:
+    """Issue #229: the exact branch of the origin test neutralizes known
+    party names exactly as the consumer-path ``standard`` fact does."""
+    std = "AlphaCorp shall keep the Confidential Information of the other party secret."
+    struck = "Beta Supplies LLC shall keep the Confidential Information of the other party secret."
+    for party_names, expected in (
+        (("AlphaCorp", "Beta Supplies LLC"), OUTCOME_CONCEDED_BEFORE_SIGNING),
+        ((), "proposed_then_reversed"),
+    ):
+        obs = build_observations(
+            "doc1",
+            3,
+            "our_paper",
+            [(_removed_row("confidentiality", struck), _dr())],
+            [],
+            standard_text_by_tid={"confidentiality": std},
+            party_names=party_names,
+        )
+        assert [o.outcome for o in obs] == [expected]
+
+
 def test_reversals_sharing_a_path_from_different_drafts_are_each_emitted() -> None:
     """Two distinct proposals reversed out of the same (taxonomy_id, path) in
     different drafts are separate evidence: both are emitted, each with its
