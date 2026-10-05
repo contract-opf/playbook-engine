@@ -24,7 +24,12 @@ from playbook_engine.floor_candidates import (
 )
 from playbook_engine.inspection_report import build_inspection_report, write_inspection_report
 from playbook_engine.pipeline import PipelineError, mine_corpus, project_playbook
-from playbook_engine.playbook_assembler import AssemblyError, write_playbook
+from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
+from playbook_engine.playbook_assembler import (
+    EMITTABLE_OPF_VERSIONS,
+    AssemblyError,
+    write_playbook,
+)
 from playbook_engine.posture import (
     INTERVIEW_QUESTIONS,
     PostureError,
@@ -735,7 +740,10 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     "obs_index",
     type=int,
     required=True,
-    help="Index into that clause's observed_positions.",
+    help=(
+        "Index into that clause's observed_positions (OPF 0.2/0.3), or into its "
+        "evidence.precedent records (OPF 0.4)."
+    ),
 )
 @click.option(
     "--corpus-dir",
@@ -1464,7 +1472,19 @@ def mine_cmd(
 @click.option(
     "--config", "config_path", type=click.Path(exists=True, path_type=Path), required=True
 )
-def project_cmd(out_dir: Path, config_path: Path) -> None:
+@click.option(
+    "--opf-version",
+    "opf_version",
+    type=click.Choice(list(EMITTABLE_OPF_VERSIONS)),
+    default=DEFAULT_OPF_VERSION,
+    show_default=True,
+    help=(
+        "OPF version to emit. 0.4 is the verdict-free per-deal precedent record "
+        "(digest_version 3); 0.3 keeps the previous evidence shape (digest_version 2) "
+        "for one release."
+    ),
+)
+def project_cmd(out_dir: Path, config_path: Path, opf_version: str) -> None:
     """Project the observation store in OUT_DIR into a playbook (L5 only).
 
     Reads ``observations.jsonl`` and ``corpus_manifest.json`` from OUT_DIR
@@ -1500,6 +1520,7 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
             out_dir=out_dir_resolved,
             config=cfg,
             taxonomy=taxonomy,
+            opf_version=opf_version,
             progress=click.echo,
         )
     except (PipelineError, AssemblyError) as exc:
@@ -3218,9 +3239,10 @@ def report_cmd(out_dir: Path, report_path: Path | None) -> None:
 def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
     """Emit the compact model-facing digest of OUT_DIR/playbook.opf.json.
 
-    An OPF 0.3 playbook already carries the digest as its top-level `digest`
-    section — this command extracts it to a standalone sidecar (and derives
-    it on the fly for a pre-0.3 document). The sidecar is what a consuming
+    An OPF 0.3/0.4 playbook already carries the digest as its top-level
+    `digest` section (digest_version 2 for 0.3, 3 for 0.4) — this command
+    extracts it to a standalone sidecar (and derives it on the fly for a
+    pre-0.3 document). The sidecar is what a consuming
     review application feeds a model as the system-prompt projection; the
     full playbook stays on disk for example_ref drill-down.
     """
@@ -3253,7 +3275,8 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
 
     token_est = digest_token_estimate(digest)
     click.secho(f"OK  {dest}", fg="green")
-    click.echo(f"  clauses: {digest.get('clause_count', 0)}  ~{token_est:,} tokens (chars/4)")
+    n_clauses = digest.get("clause_count", len(digest.get("clauses") or []))
+    click.echo(f"  clauses: {n_clauses}  ~{token_est:,} tokens (chars/4)")
     if token_est > 40_000:
         click.secho(
             "  WARNING: digest exceeds the ~40K-token target — consumers may "

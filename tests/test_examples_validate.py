@@ -27,6 +27,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
+from playbook_engine.digest import build_digest
 from playbook_engine.validator import validate_document
 
 ROOT = Path(__file__).parent.parent
@@ -131,13 +132,26 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     invariants = doc["floor"].get("invariants", [])
     assert len(invariants) >= 2, "NDA example must demonstrate >=2 floor.invariants"
 
+    # Issue #223: the NDA example is the OPF 0.4 reference artifact — the
+    # verdict-free per-deal precedent record with a digest_version 3 digest.
+    assert doc["opf_version"] == "0.4"
+    assert doc["digest"]["digest_version"] == "3"
+    assert doc["digest"] == build_digest(doc), "NDA example digest is stale"
+    assert doc["digest"]["perspective"] == doc["perspective"]
+
     clauses = doc["evidence"]["clauses"]
+    precedent = doc["evidence"]["precedent"]
     assert len(clauses) >= 5, "NDA example must demonstrate real clause coverage"
-    assert any(
-        obs.get("full_text") for clause in clauses for obs in clause.get("observed_positions", [])
-    ), "NDA example must demonstrate full_text on at least one observation"
-    assert any(clause.get("negotiation_trail") for clause in clauses), (
-        "NDA example must demonstrate a negotiation_trail (§3.5.3)"
+    assert any(p.get("signed_text") for p in precedent), (
+        "NDA example must demonstrate signed text on at least one precedent"
+    )
+    assert any(p["rounds"] >= 1 for p in precedent), (
+        "NDA example must demonstrate a clause that moved across rounds"
+    )
+    # Our standard struck before signing is a precedent with an opening text
+    # and no refused ask for it (issue #216's origin rule).
+    assert any(p["opening_text"] for p in precedent), (
+        "NDA example must demonstrate our standard struck before signing"
     )
 
     # The corpus was deliberately built with >=3 versions on one deal so a
@@ -145,13 +159,9 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     # issue's sequencing-note comment on the reversal_detector's >=3-version
     # requirement) — assert it actually fired rather than trusting the
     # corpus shape alone.
-    reversed_obs = [
-        obs
-        for clause in clauses
-        for obs in clause.get("observed_positions", [])
-        if obs.get("outcome") == "proposed_then_reversed"
-    ]
-    assert reversed_obs, "NDA example must demonstrate at least one proposed_then_reversed clause"
+    assert any(p["refused_asks"] for p in precedent), (
+        "NDA example must demonstrate at least one refused ask"
+    )
 
     identity = doc.get("identity", {})
     assert identity.get("content_hash") == content_hash(doc), (
@@ -164,30 +174,23 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     )
 
 
-def test_nda_example_confidence_counts_consistent() -> None:
-    """Same guard as `test_v02_example_confidence_counts_consistent`, for
-    the NDA example: `confidence.n_our_paper` / `n_counterparty_paper` must
-    equal the number of distinct deals of each provenance in
-    `observed_positions` (issue #216: the deal is the unit of precedent, so a
-    deal's signed row and its reversal rows count once)."""
+def test_nda_example_precedent_counts_consistent() -> None:
+    """OPF 0.4 successor of the confidence-count guard (issue #223): each
+    clause's n_* counts equal what its precedent implies, every count is
+    distinct deals (issue #216), and there is one precedent per (deal,
+    clause)."""
+    from playbook_engine.opf_accessors import perspective_party
+    from playbook_engine.precedent import clause_counts
+
     doc = _load(NDA_PLAYBOOK)
+    precedent = doc["evidence"]["precedent"]
+    pairs = [(p["document_id"], p["taxonomy_id"]) for p in precedent]
+    assert len(pairs) == len(set(pairs))
     for clause in doc["evidence"]["clauses"]:
-        confidence = clause["summary"]["confidence"]
-        observed = clause.get("observed_positions", [])
-
-        def _deals(provenance: str, observed: list = observed) -> int:
-            return len(
-                {
-                    o["example_ref"]["document_id"]
-                    for o in observed
-                    if o.get("provenance") == provenance
-                }
-            )
-
-        n_ours = _deals("our_paper")
-        n_theirs = _deals("counterparty_paper")
-        assert confidence.get("n_our_paper") == n_ours, clause["id"]
-        assert confidence.get("n_counterparty_paper") == n_theirs, clause["id"]
+        expected = clause_counts(clause["taxonomy_id"], precedent, party=perspective_party(doc))
+        assert {k: clause[k] for k in expected} == expected, clause["id"]
+        deals = {p["document_id"] for p in precedent if p["taxonomy_id"] == clause["taxonomy_id"]}
+        assert clause["n_deals"] == len(deals), clause["id"]
 
 
 @pytest.mark.parametrize("path", EXAMPLE_PATHS, ids=lambda p: p.name)

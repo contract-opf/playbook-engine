@@ -409,10 +409,30 @@ def test_golden_inspection_report_renderable(tmp_path: Path) -> None:
 
 
 def test_golden_playbook_opf_version(tmp_path: Path) -> None:
-    """Compiled playbook has opf_version='0.2'."""
+    """Compiled playbook has opf_version='0.4' (issue #223) and a precedent
+    record whose every deal is a corpus document."""
     corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
     playbook = _run_pipeline(corpus_dir, config_path, out_dir)
-    assert playbook["opf_version"] == "0.3"
+    assert playbook["opf_version"] == "0.4"
+    corpus_ids = {d["document_id"] for d in playbook["corpus"]["documents"]}
+    precedent = playbook["evidence"]["precedent"]
+    assert precedent
+    assert {p["document_id"] for p in precedent} <= corpus_ids
+    # The deal is the unit of precedent: one record per (deal, clause).
+    pairs = [(p["document_id"], p["taxonomy_id"]) for p in precedent]
+    assert len(pairs) == len(set(pairs))
+
+
+def test_golden_precedent_moves_on_multi_round_deal(tmp_path: Path) -> None:
+    """OPF 0.4: deal-alpha's per-round diffs (round_moves.jsonl) surface as
+    precedent ``rounds``/``moved`` — derived, never fabricated."""
+    corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
+    playbook = _run_pipeline(corpus_dir, config_path, out_dir)
+    alpha = [p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal-alpha"]
+    assert alpha
+    assert any(p["rounds"] >= 1 and p["moved"] for p in alpha)
+    for p in playbook["evidence"]["precedent"]:
+        assert p["rounds"] == 0 or p["moved"]
 
 
 def test_golden_playbook_agreement_type(tmp_path: Path) -> None:
@@ -453,7 +473,10 @@ def test_golden_negotiation_dynamics(tmp_path: Path) -> None:
     dynamics are derived, never fabricated).
     """
     corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
-    playbook = _run_pipeline(corpus_dir, config_path, out_dir)
+    # stance_detail / negotiation_trail are the OPF 0.3 shape (kept for one
+    # release, issue #223) — the 0.4 analogue is
+    # test_golden_precedent_moves_on_multi_round_deal.
+    playbook = _run_pipeline(corpus_dir, config_path, out_dir, opf_version="0.3")
 
     assert (out_dir / "round_moves.jsonl").exists(), "L4 must persist round moves"
 

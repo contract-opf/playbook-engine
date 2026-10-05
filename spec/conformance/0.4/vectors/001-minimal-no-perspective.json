@@ -1,0 +1,62 @@
+{
+  "name": "minimal-no-perspective",
+  "description": "Smallest well-formed OPF 0.4 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null.",
+  "opf_version": "0.4",
+  "engine_version": "1.0.0",
+  "digest_version": "3",
+  "input": {
+    "opf_version": "0.4",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": true
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "evidence": {
+      "clauses": [],
+      "precedent": []
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clauses\":[],\"precedent\":[]},\"floor\":{},\"opf_version\":\"0.4\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:b581f4bd1f42bf74f0796d1c51b74c1056292e099842e1fef7e306f97bdcb2d5",
+    "section_digests": {
+      "evidence": "sha256:c9b0d9988d2d3c85da7f8ebf4092a729cf801cdd6cd9151ce0b71140d8b12029",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "3",
+      "perspective": null,
+      "agreement_type": {
+        "id": "conformance-fixture",
+        "name": "Conformance Fixture Agreement"
+      },
+      "corpus": {
+        "n_deals": 0,
+        "n_signed": 0,
+        "first_signed": null,
+        "last_signed": null
+      },
+      "clauses": []
+    }
+  }
+}

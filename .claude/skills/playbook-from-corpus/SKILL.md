@@ -911,8 +911,14 @@ make docker-run CORPUS=./corpus OUT=./out \
   deterministic standard check (its text matches our template clause →
   `none`, otherwise `substantive`), `judge`/`--plan-only` report
   `deviation: 0 pending`, and `project` reads no stance, tolerance or
-  fallback out of it (`historical_stance: no_signal`, `stance_detail` =
-  deals that signed our standard, of all deals). Do not route the human
+  fallback out of it. By default `project` emits OPF 0.4 (issue #223): no
+  stance at all — `evidence.precedent` holds one verdict-free record per
+  (deal, clause) (what the deal signed, whether that is our standard, whether
+  the clause moved, the asks refused before signing), and each clause carries
+  distinct-deal counts (`n_deals`, `n_signed_standard`, `n_variants`,
+  `n_refused`). `project --opf-version 0.3` keeps the 0.3 shape for one
+  release (`historical_stance: no_signal`, `stance_detail` = deals that
+  signed our standard, of all deals). Do not route the human
   through deviation judging. **Opt-in only**, as an advisory layer for
   Posture/Floor work: pass `--with-deviation-judge` to BOTH `playbook judge`
   and `playbook mine` on this `$OUT`; then classify each deviation item as
@@ -1335,9 +1341,10 @@ host — the container has no browser), plus the digest sidecar:
   items, comment boxes, Export-feedback button. Share with reviewers doing the
   correction pass. This is the only view that accepts `--alias-map`.
 - `$OUT/playbook.opf.html` — the **packaged internal/stakeholder playbook**
-  (OPF 0.3). One file containing: the full readable document (stance chips,
-  preferred variations, acceptable concessions, unacceptable asks, exemplar
-  forms; empty Posture/Floor labelled pending), a digest summary, and the
+  (OPF 0.4 by default). One file containing: the full readable document
+  (per clause, the deals that signed our standard, then the signed variants
+  and refused asks, each with its distinct-deal count; empty Posture/Floor
+  labelled pending), a digest summary, and the
   CANONICAL OPF JSON plus digest embedded verbatim in
   `<script type="application/json">` blocks (ids `opf-canonical`/`opf-digest`).
   Takes no `--alias-map` by design — it embeds the canonical JSON, so
@@ -1353,10 +1360,13 @@ host — the container has no browser), plus the digest sidecar:
   on its own — use Step 11 (`publish`), which adds a hard, list-independent
   backstop.
 - `$OUT/playbook.digest.json` — the **model-facing digest** standalone
-  (`playbook digest`): per-clause stances, preferred variations verbatim,
-  concession/unacceptable summaries, frequency-banded deduplicated exemplar
-  forms with `example_ref` drill-down. Target ~40K tokens; the command warns
-  if it exceeds that.
+  (`playbook digest`): for a 0.4 playbook (`digest_version` 3), per clause
+  our standard, the signed variants and refused asks grouped by exact
+  normalization with distinct-deal counts and citations, and no stance or
+  verdict. Target ~40K tokens; the command warns if it exceeds that. A
+  playbook projected with `--opf-version 0.3` keeps the 0.3 bundle and
+  digest (stance chips, preferred variations, concession/unacceptable
+  summaries, frequency-banded exemplar forms).
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
 disk** — the bundle contains it, never replaces it. A consumer extracts the

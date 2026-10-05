@@ -42,6 +42,7 @@ from playbook_engine.inspection_report import (
 from playbook_engine.opf_accessors import (
     clause_confidence,
     clause_stance,
+    is_precedent_shape,
     playbook_clause_library,
     playbook_clauses,
 )
@@ -499,7 +500,9 @@ def _build_semantic_coverage(
     clauses: list[dict[str, Any]] = []
     if playbook:
         clauses = playbook_clauses(playbook)
-        for clause in clauses:
+        # OPF 0.4 (issue #223) carries no stance at all — a histogram of
+        # "unknown" would read as a defect, so it is simply not drawn.
+        for clause in [] if is_precedent_shape(playbook) else clauses:
             if not isinstance(clause, dict):
                 continue
             position = clause_stance(clause)
@@ -1335,7 +1338,9 @@ def _build_artifacts(out_dir: Path, playbook: dict[str, Any] | None) -> dict[str
     return {
         "opf_version": (playbook or {}).get("opf_version"),
         "digest_present": bool(digest),
-        "digest_clause_count": digest.get("clause_count"),
+        # digest_version 3 (OPF 0.4) has no clause_count key; its clause
+        # list length is the same number.
+        "digest_clause_count": digest.get("clause_count", len(digest.get("clauses") or [])),
         "digest_token_estimate": token_estimate,
         "files": {
             name: (out_dir / name).exists()

@@ -42,6 +42,10 @@ format-version bump (a new `opf_version` or a new `DIGEST_VERSION`) gets a
 **new, separately-stamped** vector set alongside the old one, not an
 overwrite — exactly like a schema file itself.
 
+**OPF 0.4 / digest_version 3** (issue #223) has its own, separately stamped
+set under [`0.4/`](0.4/README.md) — its own `manifest.json` and `vectors/`.
+Nothing in this directory's 0.3 set changed when it was added.
+
 **One recorded exception:** on 2026-09-25 the owner authorized digest v2's
 `n` to change in place to count distinct deals (issue #216). The affected
 `expected.digest` values and vector 013's input were regenerated under the

@@ -177,7 +177,10 @@ from playbook_engine.opf_accessors import (
     clause_confidence,
     clause_is_thin,
     clause_stance,
+    is_precedent_shape,
+    perspective_party,
     playbook_clauses,
+    playbook_precedent,
 )
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.rubric import RubricStamp, rubric_version
@@ -259,11 +262,20 @@ def _build_index(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
     clauses = playbook_clauses(doc)
     # Sort clauses deterministically: by taxonomy_id then id
     sorted_clauses = sorted(clauses, key=lambda c: (c.get("taxonomy_id", ""), c.get("id", "")))
+    # OPF 0.4 (issue #223): no observed_positions — each clause item carries
+    # its grouped precedent (signed variants + refused asks) for display.
+    precedent = playbook_precedent(doc) if is_precedent_shape(doc) else None
 
     index: list[tuple[str, str, dict[str, Any]]] = []
     for clause_num, clause in enumerate(sorted_clauses, start=1):
         cnum = f"C{clause_num}"
         clause_payload = {**clause, "_clause_id": clause.get("id"), "_clause_num": cnum}
+        if precedent is not None:
+            from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
+
+            clause_payload["_precedent_groups"] = clause_precedent_groups(
+                clause.get("taxonomy_id"), precedent, party=perspective_party(doc)
+            )
         index.append((cnum, "clause", clause_payload))
 
         obs_list = clause.get("observed_positions", [])
@@ -430,7 +442,13 @@ def _render_clause_section(
     """
     lines: list[str] = []
     title = html_lib.escape(clause.get("title", ""))
+    precedent_groups = clause.get("_precedent_groups")
     position = clause_stance(clause)
+    if isinstance(precedent_groups, dict):
+        # OPF 0.4 carries no stance (issue #223): show the fact instead.
+        position = (
+            f"{clause.get('n_signed_standard', 0)}/{clause.get('n_deals', 0)} signed standard"
+        )
     pos_color = _POSITION_COLORS.get(position, "#374151")
     confidence = clause_confidence(clause)
     conf_score = confidence.get("score")
@@ -501,6 +519,30 @@ def _render_clause_section(
         f"</select></label>"
         f"</div>"
     )
+
+    if isinstance(precedent_groups, dict):
+        for heading, key in (
+            ("Signed variants", "signed_variants"),
+            ("Refused asks", "refused_asks"),
+        ):
+            entries = precedent_groups.get(key) or []
+            if not entries:
+                continue
+            lines.append(f'<div class="observations"><strong>{heading}:</strong>')
+            for entry in entries:
+                citation = _citation_str(entry.get("ref"))
+                lines.append(
+                    f'<div class="observation">{html_lib.escape(str(entry.get("text", "")))} '
+                    f'<span class="prov-tag">{entry.get("n_deals", 0)} deal(s)</span>'
+                    + (
+                        f' <span class="citation-tag" title="{html_lib.escape(citation)}">'
+                        f"{html_lib.escape(citation)}</span>"
+                        if citation
+                        else ""
+                    )
+                    + "</div>"
+                )
+            lines.append("</div>")
 
     # Observations
     obs_list = clause.get("observed_positions", [])

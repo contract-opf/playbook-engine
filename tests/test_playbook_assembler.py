@@ -153,6 +153,7 @@ def _minimal_playbook(
     playbook_id: str | None = None,
     playbook_version: str | None = None,
     supersedes: str | None = None,
+    opf_version: str = "0.4",
 ) -> dict:
     """Helper: build and return a schema-valid playbook dict."""
     deal_obs = obs_list or [
@@ -182,6 +183,7 @@ def _minimal_playbook(
         playbook_id=playbook_id,
         playbook_version=playbook_version,
         supersedes=supersedes,
+        opf_version=opf_version,
     )
 
 
@@ -263,7 +265,15 @@ def test_assemble_top_level_keys() -> None:
 
 
 def test_assemble_opf_version() -> None:
-    assert _minimal_playbook()["opf_version"] == "0.3"
+    """Issue #223: 0.4 is the default; 0.3 is still emittable for one release;
+    anything else is refused before assembly."""
+    assert _minimal_playbook()["opf_version"] == "0.4"
+    pb_03 = _minimal_playbook(opf_version="0.3")
+    assert pb_03["opf_version"] == "0.3"
+    assert pb_03["digest"]["digest_version"] == "2"
+    assert validate_document(pb_03).ok
+    with pytest.raises(ValueError, match="cannot be emitted"):
+        _minimal_playbook(opf_version="0.2")
 
 
 def test_assemble_agreement_type_preserved() -> None:
@@ -292,19 +302,34 @@ def test_assemble_clauses_present() -> None:
 
 
 def test_assemble_clause_library_present() -> None:
-    pb = _minimal_playbook()
+    """OPF 0.3 carries a clause_library; OPF 0.4 replaces it with precedent."""
+    pb = _minimal_playbook(opf_version="0.3")
     assert "clause_library" in pb["evidence"]
     assert isinstance(pb["evidence"]["clause_library"], list)
+    pb_04 = _minimal_playbook()
+    assert set(pb_04["evidence"]) == {"clauses", "precedent"}
 
 
 def test_assemble_clauses_carry_historical_stance() -> None:
-    """OPF v0.2 (§3.5, §2.2): every clause's `summary` carries the
-    descriptive `historical_stance`, not v0.1's prescriptive `rollup.position`."""
-    pb = _minimal_playbook()
+    """OPF v0.2/0.3 (§3.5, §2.2): every clause's `summary` carries the
+    descriptive `historical_stance`, not v0.1's prescriptive `rollup.position`.
+    OPF 0.4 (issue #223) carries no stance at all — only counts."""
+    pb = _minimal_playbook(opf_version="0.3")
     for clause in pb["evidence"]["clauses"]:
         assert "summary" in clause
         assert "historical_stance" in clause["summary"]
         assert "rollup" not in clause
+    for clause in _minimal_playbook()["evidence"]["clauses"]:
+        assert set(clause) == {
+            "id",
+            "taxonomy_id",
+            "title",
+            "our_standard",
+            "n_deals",
+            "n_signed_standard",
+            "n_variants",
+            "n_refused",
+        }
 
 
 def test_assemble_posture_and_floor_empty_but_present() -> None:
@@ -671,7 +696,7 @@ def test_write_playbook_valid_json(tmp_path) -> None:
     out = tmp_path / "playbook.opf.json"
     write_playbook(playbook, out)
     parsed = json.loads(out.read_text())
-    assert parsed["opf_version"] == "0.3"
+    assert parsed["opf_version"] == "0.4"
 
 
 def test_write_playbook_atomic_no_tmp_left(tmp_path) -> None:
@@ -794,6 +819,13 @@ def test_version_ingest_schema_keys_matches_schema_0_3() -> None:
     )
 
 
+def test_version_ingest_schema_keys_matches_schema_0_4() -> None:
+    """The default emitted version (issue #223) enforces the same strip-list."""
+    assert (
+        _version_ingest_schema_properties("playbook.schema-0.4.json") == _VERSION_INGEST_SCHEMA_KEYS
+    )
+
+
 def test_version_ingest_schema_keys_matches_schema_0_2() -> None:
     """Same guard against spec/playbook.schema-0.2.json — identical shape to
     0.3 today, but assemble_playbook's whitelist isn't itself version-aware,
@@ -887,3 +919,208 @@ def test_assemble_playbook_strips_reason_and_still_validates() -> None:
     )
     assert published_ingest[0]["extractor"] == "legacy"
     assert published_ingest[1]["extractor"] == "docling"
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 precedent record (issue #223). Observations below are the shapes
+# observation_builder writes (one terminal signed/unsigned row per deal and
+# clause, proposed_then_reversed rows, conceded_before_signing rows, the
+# deterministic `standard` fact); RoundMove is what build_round_moves writes.
+# ---------------------------------------------------------------------------
+
+
+#: A clause text above MIN_OBSERVATION_TEXT_LEN (the default _obs text is a
+#: 24-char fragment the compiler quarantines).
+_LONG_STD = "Mutual indemnification for third-party claims."
+
+
+def _assemble_04(
+    observations: list[Observation],
+    docs: list[dict],
+    round_moves: list | None = None,
+) -> dict:
+    # The template's indemnification text IS _LONG_STD, so a row marked
+    # standard=True below is exactly what is_standard_text would compute.
+    template_obs = [
+        _obs(
+            "indemnification",
+            doc_id="template",
+            version="template",
+            clause_path="8",
+            text=_LONG_STD,
+        ),
+        _template_obs("governing_law", "12"),
+    ]
+    positions, _, _ = compile_clause_positions(observations, template_obs)
+    library, _ = compile_clause_library(observations)
+    return assemble_playbook(
+        agreement_type=_AGREEMENT_TYPE,
+        baseline=_BASELINE,
+        taxonomy=_TAXONOMY,
+        clause_positions=positions,
+        clause_library=library,
+        corpus_documents=docs,
+        generated_at=_GENERATED_AT,
+        observations=observations,
+        round_moves=round_moves,
+    )
+
+
+def _std(obs: Observation, standard: bool) -> Observation:
+    import dataclasses
+
+    return dataclasses.replace(obs, standard=standard)
+
+
+def test_v04_one_precedent_per_deal_and_clause_with_facts_only() -> None:
+    from playbook_engine.observation_builder import RoundMove
+
+    observations = [
+        _std(_obs("indemnification", text=_LONG_STD, basis="deterministic"), True),
+        _std(
+            _obs(
+                "indemnification",
+                doc_id="deal_002",
+                text="Supplier indemnifies only for gross negligence.",
+                basis="deterministic",
+            ),
+            False,
+        ),
+        _std(
+            _obs(
+                "indemnification",
+                doc_id="deal_002",
+                outcome="proposed_then_reversed",
+                text="Supplier indemnifies nobody for anything at all.",
+                version="v2",
+                basis="deterministic",
+            ),
+            False,
+        ),
+        _std(
+            _obs(
+                "governing_law",
+                doc_id="deal_003",
+                outcome="unsigned",
+                clause_path="12",
+                text="Delaware law governs this agreement.",
+                basis="deterministic",
+            ),
+            False,
+        ),
+    ]
+    docs = [_corpus_doc("deal_001"), _corpus_doc("deal_002"), _corpus_doc("deal_003")]
+    docs[2]["signed_version"] = None
+    docs[1]["provenance_is_ambiguous"] = True
+    moves = [
+        RoundMove(
+            document_id="deal_002",
+            round=1,
+            taxonomy_id="indemnification",
+            moved_by="counterparty",
+            change_summary="Clause modified",
+            citation=ObservationCitation(
+                document_id="deal_002", version=2, clause_path="8", char_span=None
+            ),
+        ),
+        RoundMove(
+            document_id="deal_002",
+            round=2,
+            taxonomy_id="indemnification",
+            moved_by="us",
+            change_summary="Clause modified",
+            citation=ObservationCitation(
+                document_id="deal_002", version=3, clause_path="8", char_span=None
+            ),
+        ),
+    ]
+    pb = _assemble_04(observations, docs, round_moves=moves)
+    assert validate_document(pb).ok
+    by_key = {(p["document_id"], p["taxonomy_id"]): p for p in pb["evidence"]["precedent"]}
+    assert set(by_key) == {
+        ("deal_001", "indemnification"),
+        ("deal_002", "indemnification"),
+        ("deal_003", "governing_law"),
+    }
+    d1 = by_key[("deal_001", "indemnification")]
+    assert d1["standard"] is True and d1["moved"] is False and d1["rounds"] == 0
+    d2 = by_key[("deal_002", "indemnification")]
+    assert d2["standard"] is False and d2["rounds"] == 2 and d2["moved"] is True
+    assert [a["round"] for a in d2["refused_asks"]] == [1]  # cited v2 -> round 1
+    assert d2["paper"] == "unknown" and d2["paper_basis"] == "ambiguous_detection"
+    d3 = by_key[("deal_003", "governing_law")]
+    assert d3["signed"] is False and d3["signed_text"]["text"].startswith("Delaware")
+
+    clauses = {c["taxonomy_id"]: c for c in pb["evidence"]["clauses"]}
+    assert clauses["indemnification"] == {
+        **clauses["indemnification"],
+        "n_deals": 2,
+        "n_signed_standard": 1,
+        "n_variants": 1,
+        "n_refused": 1,
+    }
+    # The unsigned deal counts as a deal but never as a signed variant.
+    assert (clauses["governing_law"]["n_deals"], clauses["governing_law"]["n_variants"]) == (1, 0)
+    assert "x_judgments" not in pb
+
+
+def test_v04_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
+    observations = [_std(_obs("indemnification", text=_LONG_STD, basis="deterministic"), True)]
+    a = _assemble_04(observations, [_corpus_doc("deal_001")])
+    b = _assemble_04(observations, [_corpus_doc("deal_001")])
+    assert [p["id"] for p in a["evidence"]["precedent"]] == [
+        p["id"] for p in b["evidence"]["precedent"]
+    ]
+    assert a["identity"]["content_hash"] == b["identity"]["content_hash"]
+
+
+def test_v04_judged_verdicts_go_to_x_judgments_never_into_precedent() -> None:
+    """An opt-in judged run (basis "judge", what a real deviation judge's
+    verdict carries) keeps its verdicts — under x_judgments, keyed by
+    precedent id. A stub/needs_review row is not a judgment."""
+    observations = [
+        _std(
+            _obs(
+                "indemnification",
+                deviation="substantive",
+                risk_delta=_WORSE_MINOR,
+                text="Supplier indemnifies only for gross negligence.",
+                basis="judge",
+            ),
+            False,
+        ),
+        _std(
+            _obs(
+                "governing_law",
+                clause_path="12",
+                text="Delaware law governs this agreement.",
+                basis="needs_review",
+            ),
+            False,
+        ),
+    ]
+    pb = _assemble_04(observations, [_corpus_doc("deal_001")])
+    assert validate_document(pb).ok
+    ids = {p["taxonomy_id"]: p["id"] for p in pb["evidence"]["precedent"]}
+    assert pb["x_judgments"] == [
+        {
+            "precedent_id": ids["indemnification"],
+            "deviation": "substantive",
+            "risk_delta": {"direction": "worse", "magnitude": "minor"},
+            "basis": "judge",
+        }
+    ]
+    for record in pb["evidence"]["precedent"]:
+        assert "deviation" not in record and "risk_delta" not in record
+    assert "deviation" not in json.dumps(pb["digest"])
+
+
+def test_v04_fragment_rows_never_become_precedent() -> None:
+    """Sub-sentence fragments are excluded exactly as the 0.3 compiler
+    excludes them (MIN_OBSERVATION_TEXT_LEN)."""
+    observations = [
+        _std(_obs("indemnification", text=_LONG_STD, basis="deterministic"), True),
+        _std(_obs("governing_law", clause_path="12", text="1 6", basis="deterministic"), False),
+    ]
+    pb = _assemble_04(observations, [_corpus_doc("deal_001")])
+    assert {p["taxonomy_id"] for p in pb["evidence"]["precedent"]} == {"indemnification"}

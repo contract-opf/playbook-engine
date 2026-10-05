@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from playbook_engine.opf_accessors import playbook_clause_library, playbook_clauses
+from playbook_engine.precedent import refresh_derived
 
 _log = logging.getLogger(__name__)
 
@@ -154,6 +155,8 @@ def _extract_text_samples(
       - ``curation.pins[].comment``
       - ``corpus.documents[].title``
       - ``baseline.template_ref.title`` / ``.source``
+      - OPF 0.4 ``evidence.precedent[].signed_text.text`` /
+        ``.opening_text.text`` / ``.refused_asks[].text`` (issue #223)
 
     Every surface no-ops cleanly when absent (optional sections, or a v0.1
     fixture / pre-#177 store with none of the newer fields) — there is no
@@ -265,6 +268,32 @@ def _extract_text_samples(
             samples.append(TextSample(path=path, text=text))
             locations[path] = _corpus_document_title_setter(di)
 
+    # OPF 0.4 precedent texts (issue #223): every signed/opening text and
+    # every refused ask is clause language exactly as residue-prone as an
+    # observation's full_text. The digest is NOT sampled — it is re-derived
+    # from these (rewritten) texts by _apply_rewrites, never edited itself.
+    evidence = doc.get("evidence")
+    precedent = evidence.get("precedent") if isinstance(evidence, dict) else None
+    for pi, record in enumerate(precedent if isinstance(precedent, list) else []):
+        if not isinstance(record, dict):
+            continue
+        record_tag = f"{pi}:{record.get('id', pi)}"
+        for key in ("signed_text", "opening_text"):
+            entry = record.get(key)
+            text = entry.get("text", "") if isinstance(entry, dict) else ""
+            if not text:
+                continue
+            path = f"precedent[{record_tag}].{key}.text"
+            samples.append(TextSample(path=path, text=text))
+            locations[path] = _precedent_text_setter(pi, key)
+        for ai, ask in enumerate(record.get("refused_asks") or []):
+            text = ask.get("text", "") if isinstance(ask, dict) else ""
+            if not text:
+                continue
+            path = f"precedent[{record_tag}].refused_asks[{ai}].text"
+            samples.append(TextSample(path=path, text=text))
+            locations[path] = _refused_ask_setter(pi, ai)
+
     baseline = doc.get("baseline")
     if isinstance(baseline, dict):
         template_ref = baseline.get("template_ref")
@@ -338,6 +367,20 @@ def _corpus_document_title_setter(di: int) -> _Setter:
     return setter
 
 
+def _precedent_text_setter(pi: int, key: str) -> _Setter:
+    def setter(target: dict[str, Any], text: str) -> None:
+        target["evidence"]["precedent"][pi][key]["text"] = text
+
+    return setter
+
+
+def _refused_ask_setter(pi: int, ai: int) -> _Setter:
+    def setter(target: dict[str, Any], text: str) -> None:
+        target["evidence"]["precedent"][pi]["refused_asks"][ai]["text"] = text
+
+    return setter
+
+
 def _template_ref_setter(field_name: str) -> _Setter:
     def setter(target: dict[str, Any], text: str) -> None:
         target["baseline"]["template_ref"][field_name] = text
@@ -377,6 +420,10 @@ def _apply_rewrites(
             exported_clauses[ci][container][idx][field_name] = rewritten_text
         else:
             loc(exported, rewritten_text)
+    # OPF 0.4: precedent ids, clause counts and the digest are functions of
+    # the (now rewritten) text — re-derive them so the digest never ships a
+    # stale copy of pre-rewrite text (issue #223). No-op before 0.4.
+    refresh_derived(exported)
     return exported
 
 

@@ -517,19 +517,39 @@ def test_project_corpus_stats_correct(tmp_path: Path) -> None:
 
 
 def test_project_playbook_opf_version(tmp_path: Path) -> None:
-    """Projected playbook has opf_version='0.3'."""
+    """Projected playbook has opf_version='0.4' by default (issue #223), and
+    ``--opf-version 0.3`` keeps the 0.3 shape for one release."""
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
     runner.invoke(
         cli,
         ["mine", str(corpus_dir), "--config", str(config_path), "--out", str(out_dir)],
     )
-    runner.invoke(
+    result = runner.invoke(
         cli,
         ["project", str(out_dir), "--config", str(config_path)],
     )
+    assert result.exit_code == 0, result.output
+    pb = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert pb["opf_version"] == "0.4"
+    assert pb["digest"]["digest_version"] == "3"
+    assert "precedent" in pb["evidence"]
+
+    result = runner.invoke(
+        cli,
+        ["project", str(out_dir), "--config", str(config_path), "--opf-version", "0.3"],
+    )
+    assert result.exit_code == 0, result.output
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
     assert pb["opf_version"] == "0.3"
+    assert pb["digest"]["digest_version"] == "2"
+    assert "precedent" not in pb["evidence"]
+
+    result = runner.invoke(
+        cli,
+        ["project", str(out_dir), "--config", str(config_path), "--opf-version", "0.2"],
+    )
+    assert result.exit_code != 0
 
 
 def test_compile_is_unknown_command() -> None:

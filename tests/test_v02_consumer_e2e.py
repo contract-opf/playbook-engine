@@ -70,7 +70,9 @@ def _write_rtf(path: Path, body: str) -> None:
     path.write_text(_RTF_PROLOGUE + body + _RTF_EPILOGUE, encoding="utf-8")
 
 
-def _compile_real_playbook(tmp_path: Path) -> Path:
+def _compile_real_playbook(
+    tmp_path: Path, *, opf_version: str = "0.4", signed: bool = False
+) -> Path:
     """Run the real mine → project pipeline; return the ``out`` dir holding the
     compiled ``playbook.opf.json`` (a genuine OPF v0.2 document)."""
     corpus_dir = tmp_path / "corpus"
@@ -78,6 +80,9 @@ def _compile_real_playbook(tmp_path: Path) -> Path:
     deal_dir.mkdir(parents=True)
     _write_rtf(deal_dir / "v1.rtf", _CORPUS_BODY_V1)
     _write_rtf(deal_dir / "v2.rtf", _CORPUS_BODY_V2)
+    if signed:
+        # The same hints.yaml route a user takes to name the executed copy.
+        (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
 
     template_dir = tmp_path / "template"
     template_dir.mkdir()
@@ -102,7 +107,7 @@ def _compile_real_playbook(tmp_path: Path) -> Path:
 
     # No judges passed — the CLI-default (fully deterministic) path.
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version=opf_version)
     return out_dir
 
 
@@ -113,7 +118,9 @@ def test_real_compile_emits_v02_with_evidence_clauses(tmp_path: Path) -> None:
     out_dir = _compile_real_playbook(tmp_path)
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
-    assert doc["opf_version"] == "0.3"
+    # Issue #223: the default compile is OPF 0.4 (evidence.clauses + precedent).
+    assert doc["opf_version"] == "0.4"
+    assert doc["evidence"]["precedent"], "compiled 0.4 playbook must carry precedent"
     assert doc["evidence"]["clauses"], "compiled v0.2 playbook must have evidence.clauses"
     # The legacy top-level key must NOT exist — proves the regression is real:
     # a consumer reading doc["clauses"] would get nothing.
@@ -122,9 +129,11 @@ def test_real_compile_emits_v02_with_evidence_clauses(tmp_path: Path) -> None:
 
 
 def test_report_reads_real_v02_playbook(tmp_path: Path) -> None:
-    """``playbook report`` against a real compiled (v0.2) playbook surfaces its
-    clauses — the stance histogram and clause count are populated, not empty."""
-    out_dir = _compile_real_playbook(tmp_path)
+    """``playbook report`` against a real compiled (v0.3) playbook surfaces its
+    clauses — the stance histogram and clause count are populated, not empty.
+    (The 0.4 report, which has no stance to histogram, is pinned by
+    test_report_reads_real_v04_playbook.)"""
+    out_dir = _compile_real_playbook(tmp_path, opf_version="0.3")
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
     n_clauses = len(doc["evidence"]["clauses"])
 
@@ -144,6 +153,23 @@ def test_report_reads_real_v02_playbook(tmp_path: Path) -> None:
     assert "Rollup-position histogram" in report
 
 
+def test_report_reads_real_v04_playbook(tmp_path: Path) -> None:
+    """Issue #223: ``playbook report`` on a real OPF 0.4 compile counts its
+    clauses and its digest's clauses, and draws no stance histogram (0.4
+    carries no stance — a histogram of "unknown" would read as a defect)."""
+    out_dir = _compile_real_playbook(tmp_path)
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    n_clauses = len(doc["evidence"]["clauses"])
+
+    data = build_after_action_data(out_dir)
+    assert data["semantic_coverage"]["total_clauses_in_playbook"] == n_clauses
+    assert data["semantic_coverage"]["rollup_position_histogram"] == {}
+    assert data["artifacts"]["digest_clause_count"] == n_clauses
+    report = build_after_action_report(out_dir)
+    assert "Rollup-position histogram" not in report
+    assert f"{n_clauses} clauses" in report
+
+
 def test_view_render_reads_real_v02_playbook(tmp_path: Path) -> None:
     """``playbook view render`` against a real compiled (v0.2) playbook emits
     clause cards with their titles — not an empty review surface."""
@@ -158,3 +184,29 @@ def test_view_render_reads_real_v02_playbook(tmp_path: Path) -> None:
         assert title in html, f"clause title {title!r} missing from rendered viewer HTML"
     # C1 numbering proves at least one clause card was rendered (empty index → no C1).
     assert "C1" in html
+
+
+def test_view_render_and_prompt_read_real_v04_precedent(tmp_path: Path) -> None:
+    """Issue #223: the review viewer, the readable bundle and render-prompt show
+    a real 0.4 compile's signed variants (here the Delaware governing-law
+    text the deal signed instead of our New York standard) — not an empty
+    clause card."""
+    from playbook_engine.document_renderer import render_bundle_html
+    from playbook_engine.prompt_renderer import render_prompt
+
+    out_dir = _compile_real_playbook(tmp_path, signed=True)
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    signed = [
+        p
+        for p in doc["evidence"]["precedent"]
+        if p["taxonomy_id"] == "governing_law" and p["signed_text"]
+    ]
+    assert signed and signed[0]["signed"] is True
+    assert "Delaware" in signed[0]["signed_text"]["text"], "premise: the deal signed Delaware"
+
+    assert "Delaware" in render_review_html(out_dir)
+    assert "Delaware" in render_bundle_html(out_dir)
+    prompt = render_prompt(doc)
+    assert "Non-standard language we have signed" in prompt
+    assert "Delaware" in prompt
+    assert "historical stance could not be determined" not in prompt

@@ -84,18 +84,29 @@ def _make_corpus(tmp_path: Path) -> tuple[Path, Path]:
     return corpus_dir, config_path
 
 
-def _compile(corpus_dir: Path, config_path: Path, out_dir: Path) -> dict[str, Any]:
+def _compile(
+    corpus_dir: Path, config_path: Path, out_dir: Path, *, opf_version: str = "0.4"
+) -> dict[str, Any]:
     cfg = load_config(config_path)
     taxonomy = load_taxonomy(cfg.taxonomy_path)
-    compile_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+    compile_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        opf_version=opf_version,
+    )
     return json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, Any], Path]:
+    """An OPF 0.3 compile: these tests index observed_positions directly (the
+    0.3 shape, kept for one release); the 0.4 precedent path is covered by
+    test_resolve_citation_roundtrip_opf_04 below."""
     tmp_path = tmp_path_factory.mktemp("citation-resolution")
     corpus_dir, config_path = _make_corpus(tmp_path)
-    playbook = _compile(corpus_dir, config_path, tmp_path / "out")
+    playbook = _compile(corpus_dir, config_path, tmp_path / "out", opf_version="0.3")
     playbook_path = tmp_path / "out" / "playbook.opf.json"
     return corpus_dir, playbook, playbook_path
 
@@ -146,6 +157,29 @@ def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path])
     # citation_resolver's module docstring) — resolve_citation() must
     # default to None rather than crash or fabricate a value.
     assert resolved.page is None
+
+
+def test_resolve_citation_roundtrip_opf_04(tmp_path: Path) -> None:
+    """OPF 0.4 (issue #223): --obs indexes the clause's precedent records, and
+    precedent 0 resolves to the hash-verified file its signed_text cites."""
+    corpus_dir, config_path = _make_corpus(tmp_path)
+    playbook = _compile(corpus_dir, config_path, tmp_path / "out")
+    assert playbook["opf_version"] == "0.4"
+    clause = playbook["evidence"]["clauses"][0]
+    records = [
+        p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == clause["taxonomy_id"]
+    ]
+    assert records, "the first clause has no precedent"
+    ref = (records[0]["signed_text"] or records[0]["opening_text"])["ref"]
+
+    resolved = resolve_citation(playbook, clause["id"], 0, corpus_dir)
+
+    assert resolved.document_id == ref["document_id"]
+    assert resolved.clause_path == ref["clause_path"]
+    actual = "sha256:" + hashlib.sha256(resolved.file_path.read_bytes()).hexdigest()
+    assert actual == resolved.sha256
+    with pytest.raises(CitationResolutionError, match="out of range"):
+        resolve_citation(playbook, clause["id"], len(records), corpus_dir)
 
 
 def test_resolve_citation_tamper_fails(

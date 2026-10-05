@@ -107,6 +107,7 @@ from playbook_engine.observation_builder import (
     write_round_moves_jsonl,
 )
 from playbook_engine.pdf_ingester import ingest_pdf
+from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
 from playbook_engine.playbook_assembler import assemble_playbook, write_playbook
 from playbook_engine.provenance_detector import ProvenanceJudge, ProvenanceResult, detect_provenance
 from playbook_engine.reversal_detector import detect_reversals
@@ -3915,6 +3916,7 @@ def project_playbook(
     taxonomy: Taxonomy,
     *,
     coherence_judge: CoherenceJudge | None = None,
+    opf_version: str = DEFAULT_OPF_VERSION,
     progress: Callable[[str], None] = lambda _: None,
 ) -> dict[str, Any]:
     """Run L5 only — read the observation store and write ``playbook.opf.json``.
@@ -3942,6 +3944,8 @@ def project_playbook(
         taxonomy:        Loaded taxonomy object.
         coherence_judge: L5 coherence judge; defaults to None (coherence check skipped).
                          When set, flags are written to ``{out_dir}/coherence_flags.json``.
+        opf_version:     OPF version to emit — ``"0.4"`` (the default, issue
+                         #223) or ``"0.3"`` (kept for one release).
         progress:        Callable receiving progress message strings.
 
     Returns:
@@ -4135,6 +4139,8 @@ def project_playbook(
         existing_curation=existing_curation,
         existing_posture=existing_posture,
         existing_floor=existing_floor,
+        round_moves=round_moves,
+        opf_version=opf_version,
     )
 
     write_playbook(playbook, out_file)
@@ -4174,6 +4180,7 @@ def compile_corpus(
     refresh_extraction: bool = False,
     entity_registry_path: Path | None = None,
     stop_after: str | None = None,
+    opf_version: str = DEFAULT_OPF_VERSION,
     progress: Callable[[str], None] = lambda _: None,
 ) -> dict[str, Any]:
     """Compile a corpus directory into a validated OPF playbook.
@@ -4227,6 +4234,9 @@ def compile_corpus(
                               and return a status dict instead of the playbook.
                               ``playbook.opf.json`` is NOT written.
                               Supported values: ``"intermediates"``.
+        opf_version:          OPF version to emit (``"0.4"`` default, or
+                              ``"0.3"`` for one release) — see
+                              :func:`project_playbook`.
         progress:             Callable receiving progress message strings.
 
     Returns:
@@ -4294,5 +4304,6 @@ def compile_corpus(
         config=config,
         taxonomy=taxonomy,
         coherence_judge=coherence_judge,
+        opf_version=opf_version,
         progress=progress,
     )

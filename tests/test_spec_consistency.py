@@ -254,6 +254,31 @@ def test_spec_changelog_pins_conformance_vectors() -> None:
     )
 
 
+def _conformance_fixture_digest_v04() -> str:
+    """The same single-sha256 pin as :func:`_conformance_fixture_digest`, over
+    the separately stamped OPF 0.4 set (spec/conformance/0.4/manifest.json +
+    vectors/*.json, issue #223). The 0.3 set's pin above is unchanged by it."""
+    import hashlib
+
+    conformance_dir = ROOT / "spec" / "conformance" / "0.4"
+    hasher = hashlib.sha256()
+    hasher.update((conformance_dir / "manifest.json").read_bytes())
+    for vector_file in sorted((conformance_dir / "vectors").glob("*.json")):
+        hasher.update(vector_file.read_bytes())
+    return hasher.hexdigest()
+
+
+def test_spec_changelog_pins_v04_conformance_vectors() -> None:
+    """The OPF 0.4 conformance set is pinned in spec/CHANGELOG.md exactly like
+    the 0.3 set: any edit fails CI until the changelog records it."""
+    changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
+    digest = _conformance_fixture_digest_v04()
+    assert digest in changelog, (
+        f"spec/conformance/0.4/ changed (sha256 {digest}) but spec/CHANGELOG.md "
+        "was not updated — record the new digest in the Current-pins table."
+    )
+
+
 def test_spec_changelog_states_current_digest_version() -> None:
     """The changelog's stated DIGEST_VERSION must match the code, so a digest
     shape/semantics change cannot ship without the changelog noticing."""

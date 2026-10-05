@@ -1245,3 +1245,91 @@ def test_scrub_publication_noise_does_not_exempt_sha256_label_prefix() -> None:
     # the scrub wholesale and passes through byte-identical.
     bare_hash = f"sha256:{_FAKE_HASH}"
     assert _scrub_publication_noise({"a": bare_hash})["a"] == bare_hash
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 (issue #223): the digest is a function of the document — it copies
+# perspective and summarizes precedent text — so publish must re-derive it
+# (and the text-hashed precedent ids) from the transformed document. Input:
+# the real compiled NDA example (`playbook project` output).
+# ---------------------------------------------------------------------------
+
+
+def _nda_04() -> dict[str, Any]:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json"
+    doc: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["opf_version"] == "0.4"
+    return doc
+
+
+def test_publish_v04_rederives_digest_so_real_party_never_survives_in_it() -> None:
+    from playbook_engine.digest import build_digest
+
+    doc = _nda_04()
+    real_party = doc["perspective"]["party"]
+    assert doc["digest"]["perspective"]["party"] == real_party, "premise: digest copies party"
+
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-10-05T00:00:00Z",
+    )
+    published = report.doc
+    assert published["perspective"]["party"] == DEFAULT_PARTY_LABEL
+    assert published["digest"]["perspective"]["party"] == DEFAULT_PARTY_LABEL
+    assert published["digest"] == build_digest(published)
+    result = validate_document(published)
+    assert result.ok, [str(e) for e in result.errors if e.blocking]
+
+
+def test_publish_v04_redact_term_rederives_precedent_ids_and_digest() -> None:
+    """A redact term that rewrites signed text changes what precedent ids
+    hash and what the digest summarizes — both are re-derived, so the
+    published document still validates and the term is gone from the
+    digest too."""
+    from playbook_engine.digest import build_digest
+
+    doc = _nda_04()
+    before_ids = [p["id"] for p in doc["evidence"]["precedent"]]
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-10-05T00:00:00Z",
+        redact_terms=["Wilmington"],
+    )
+    published = report.doc
+    assert "Wilmington" not in str(published)
+    assert [p["id"] for p in published["evidence"]["precedent"]] != before_ids
+    assert published["digest"] == build_digest(published)
+    assert validate_document(published).ok
+
+
+def test_publish_v04_coarsens_signed_at() -> None:
+    """``signed_at`` is OPTIONAL and the reference compiler never emits it
+    (no signing date is extracted from the corpus) — this models a
+    third-party 0.4 producer that does, whose exact dates publish must
+    coarsen to quarters like ``observed_at``."""
+    from playbook_engine.digest import build_digest
+
+    doc = _nda_04()
+    doc["evidence"]["precedent"][0]["signed_at"] = "2025-05-17"
+    doc["digest"] = build_digest(doc)
+    report = publish_playbook(
+        doc,
+        redaction_judge=_CleanRedactionJudge(),
+        verify_judge=_CleanVerifyJudge(),
+        known_entity_names=[],
+        published_at="2026-10-05T00:00:00Z",
+    )
+    published = report.doc
+    assert published["evidence"]["precedent"][0]["signed_at"] == "2025-Q2"
+    assert "2025-05-17" not in str(published)
+    assert published["digest"]["corpus"]["last_signed"] == "2025-Q2"
+    assert validate_document(published).ok
