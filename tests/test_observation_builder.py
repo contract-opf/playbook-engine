@@ -17,6 +17,7 @@ from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.entity_registry import EntityRegistry, pseudonymize_text
 from playbook_engine.observation_builder import (
     DROPPED_ORIGIN_UNDETERMINED,
+    DROPPED_REFUSED_UNSIGNED,
     DROPPED_STANDARD_REMOVED_UNSIGNED,
     DROPPED_SURVIVES_IN_TERMINAL,
     OUTCOME_CONCEDED_BEFORE_SIGNING,
@@ -175,11 +176,13 @@ def test_build_observations_unsigned_when_no_signed_copy() -> None:
     assert obs[0].outcome == "unsigned"
 
 
-def test_build_observations_no_signed_copy_reversed_clause_unaffected() -> None:
-    # Reversal history is independent of whether the final draft was ever
-    # executed: a reversed clause keeps its label even with has_signed_copy=False,
-    # but a non-reversed clause in the same unsigned trail must not read "signed".
+def test_build_observations_no_signed_copy_drops_reversals() -> None:
+    # Issue #221: with no detected signed copy the terminal is only the last
+    # draft, so a reversal passed in is not a refused ask — no
+    # proposed_then_reversed observation, counted under
+    # DROPPED_REFUSED_UNSIGNED — and no clause reads "signed".
     diffs = [(_cd("ind", path="1"), _dr()), (_cd("gov", path="2"), _dr())]
+    dropped: dict[str, int] = {}
     obs = build_observations(
         "doc1",
         "v2",
@@ -187,13 +190,20 @@ def test_build_observations_no_signed_copy_reversed_clause_unaffected() -> None:
         diffs,
         [_reversal("ind", clause_path="1")],
         has_signed_copy=False,
+        dropped=dropped,
     )
     outcomes = sorted((o.taxonomy_id, o.outcome) for o in obs)
     assert outcomes == [
         ("gov", "unsigned"),  # no signed copy detected
-        ("ind", "proposed_then_reversed"),  # reversal history holds regardless
         ("ind", "unsigned"),
     ]
+    assert dropped == {DROPPED_REFUSED_UNSIGNED: 1}
+
+    # Control: the same reversal against a signed terminal is a refused ask.
+    signed = build_observations(
+        "doc1", "v2", "our_paper", diffs, [_reversal("ind", clause_path="1")]
+    )
+    assert ("ind", "proposed_then_reversed") in [(o.taxonomy_id, o.outcome) for o in signed]
 
 
 def test_build_observations_has_signed_copy_defaults_true() -> None:
@@ -1442,14 +1452,15 @@ def test_our_standard_clause_struck_outright_is_our_concession() -> None:
     ]
 
 
-def test_unsigned_deal_removed_rows_never_concede_but_refusals_hold() -> None:
+def test_unsigned_deal_removed_rows_never_concede_nor_refuse() -> None:
     """Issue #216 + #83: with no detected executed copy (has_signed_copy=
     False) a deal is never evidence of a concession. Our standard language
     struck is dropped and counted under DROPPED_STANDARD_REMOVED_UNSIGNED —
     never conceded_before_signing, whether struck outright or replaced.
-    Their (non-standard) language struck stays proposed_then_reversed: like
-    a ReversalRecord, a refusal is within-trail history that holds whether
-    or not the final draft was executed. Terminal rows are "unsigned"."""
+    Issue #221: nor of a refused ask — their (non-standard) language struck
+    is dropped and counted under DROPPED_REFUSED_UNSIGNED, never
+    proposed_then_reversed (the terminal is only the last draft). Terminal
+    rows are "unsigned"."""
     ours_struck = _removed_row("non_solicit", _STD["non_solicit"], path="8")
     ours_replaced = _removed_row("governing_law", _STD["governing_law"], path="9")
     theirs_struck = _removed_row("ind", "Beta shall indemnify Alpha for all losses.", path="7")
@@ -1473,11 +1484,10 @@ def test_unsigned_deal_removed_rows_never_concede_but_refusals_hold() -> None:
             standard_text_by_tid=_STD,
         )
         assert [(o.taxonomy_id, o.outcome, o.citation.version) for o in obs] == [
-            ("ind", "proposed_then_reversed", 1),
             ("governing_law", "unsigned", 3),
         ]
         assert not [o for o in obs if o.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING]
-        assert dropped == {DROPPED_STANDARD_REMOVED_UNSIGNED: 2}
+        assert dropped == {DROPPED_STANDARD_REMOVED_UNSIGNED: 2, DROPPED_REFUSED_UNSIGNED: 1}
 
 
 def test_standard_node_split_from_a_longer_standard_is_our_language() -> None:

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.segmentation_grounding import Block, SegNode, ground_segmentation
@@ -26,6 +28,7 @@ from playbook_engine.signed_detector import (
     _count_by_lines,
     _node_subtree_text,
     _signature_nodes,
+    _signature_value_kind,
     detect_signed,
     strip_signature_block,
 )
@@ -1399,3 +1402,158 @@ def test_strip_synthetic_zero_node_of_heading_less_document(tmp_path: Path) -> N
     stripped.validate(full_text=normalized)
     for residue in _SIG_RESIDUE:
         assert residue not in json.dumps(stripped.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# Placeholder-aware signature values (issue #221)
+#
+# An unsigned template's signature block carries placeholders, not
+# signatures. "By: [Name]" / "By: Name:" used to count as filled, so two such
+# lines read as dual_signatures at 0.90 — the unsigned template became the
+# signed terminal and its clauses signed precedent.
+# ---------------------------------------------------------------------------
+
+
+def test_count_by_lines_bracketed_placeholders_are_blank() -> None:
+    assert _count_by_lines("By: [Name]\nTitle: [Title]\nBy: [Name]") == (0, 2)
+
+
+def test_count_by_lines_label_residue_is_blank() -> None:
+    """A flattened 'By: Name:' line — the By: field itself is empty."""
+    assert _count_by_lines("By: Name:\nBy: Name: Title:") == (0, 2)
+
+
+def test_count_by_lines_pipe_flattened_placeholders_are_blank() -> None:
+    assert _count_by_lines("ALICE CORP | BETA LTD | By: [Name] | By: <Signature>") == (0, 2)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "[Name]",
+        "[Name of Authorized Signatory]",
+        "<Signature>",
+        "{Signatory}",
+        "Name:",
+        "Name: Title:",
+        "____ Name: Dana Reyes",
+        "Its:",
+        "Date:",
+        "X",
+        "J.",
+        "/ /",
+    ],
+)
+def test_signature_value_kind_blank(value: str) -> None:
+    assert _signature_value_kind(value) == "blank"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Authorized Signatory", "Authorised Representative", "/s/ Authorized Signatory"],
+)
+def test_signature_value_kind_placeholder_like(value: str) -> None:
+    assert _signature_value_kind(value) == "placeholder"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Dana Reyes", "Dana Reyes Title: CEO", "/s/ Dana Reyes", "Al Wu", "Morgan Ellery, CEO"],
+)
+def test_signature_value_kind_filled(value: str) -> None:
+    assert _signature_value_kind(value) == "filled"
+
+
+def test_bracketed_placeholder_template_is_not_signed() -> None:
+    tree = _tree(
+        _node("1", "Obligations", "Party A shall deliver."),
+        _node(
+            "9",
+            "Signatures",
+            "By: [Name]\nTitle: [Title]\nBy: [Name]\nTitle: [Title]",
+        ),
+    )
+    result = detect_signed(tree)
+    assert result.signed is False
+    assert result.basis == "blank_signature_blocks"
+
+
+def test_label_residue_template_is_not_signed() -> None:
+    tree = _tree(
+        _node("1", "Obligations", "Party A shall deliver."),
+        _node("9", "Signatures", "By: Name:\nBy: Name:"),
+    )
+    result = detect_signed(tree)
+    assert result.signed is False
+    assert result.basis == "blank_signature_blocks"
+
+
+def test_placeholder_like_dual_values_are_withheld_not_signed() -> None:
+    """Two caption-only values used to be dual_signatures at 0.90: now never
+    signed on that evidence, and below the threshold so it escalates."""
+    tree = _tree(
+        _node("1", "Obligations", "Party A shall deliver."),
+        _node("9", "Signatures", "By: Authorized Signatory\nBy: Authorized Signatory"),
+    )
+    result = detect_signed(tree)
+    assert result.signed is False
+    assert result.basis == "blank_signature_blocks"
+    assert result.confidence < AMBIGUITY_THRESHOLD
+
+
+def test_placeholder_like_dual_values_escalate_to_signed_judge() -> None:
+    tree = _tree(
+        _node("1", "Obligations", "Party A shall deliver."),
+        _node("9", "Signatures", "By: Authorized Signatory\nBy: Authorized Signatory"),
+    )
+    verdict = SignedStatus(signed=False, basis="llm", confidence=0.9)
+    judge = _RecordingJudge(verdict)
+
+    result = detect_signed(tree, signed_judge=judge)
+
+    assert len(judge.calls) == 1
+    assert "Authorized Signatory" in judge.calls[0]
+    assert result is verdict
+
+
+def test_one_real_signature_plus_placeholder_is_single_not_dual() -> None:
+    tree = _tree(
+        _node("9", "Signatures", "By: Dana Reyes\nBy: Authorized Signatory"),
+    )
+    result = detect_signed(tree)
+    assert result.signed is True
+    assert result.basis == "single_signature"
+
+
+def test_slash_s_placeholders_are_not_electronic_signatures() -> None:
+    """'/s/ [Name]' in an unexecuted form is a placeholder, localized or not."""
+    in_section = _tree(_node("9", "Signatures", "/s/ [Name]\n/s/ [Name]"))
+    assert detect_signed(in_section).signed is False
+
+    no_section = _tree(
+        _node("1", "Obligations", "Party A shall deliver."),
+        _node("2", "Form of Notice", "/s/ [Name]\n/s/ [Name]"),
+    )
+    result = detect_signed(no_section)
+    assert result.signed is False
+    assert result.basis == "no_signature_section"
+
+
+def test_ingested_placeholder_trailer_is_not_signed(tmp_path: Path) -> None:
+    """The real RTF ingester's absorbed-trailer shape with placeholder By: lines."""
+    path = _trailer_rtf(
+        tmp_path,
+        _WITNESS_LINE + r"AlphaCorp Holdings, Inc.\par "
+        r"By: [Name]\par "
+        r"Title: [Title]\par "
+        r"Beta Industries, LLC\par "
+        r"By: Name:\par "
+        r"Title: \par ",
+    )
+    tree = ingest_rtf(path, "doc", "v1").tree
+    _assert_trailer_was_absorbed(tree)
+
+    result = detect_signed(tree)
+
+    assert result.signed is False, f"unsigned template read as signed: {result}"
+    assert result.basis == "blank_signature_blocks"

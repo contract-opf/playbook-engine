@@ -2220,3 +2220,248 @@ def test_scanned_pdf_on_deterministic_path_fails_loud_naming_docker(tmp_path: Pa
     assert rows["v1"]["status"] == "failed"
     assert rows["v1"]["error"] == "NoOCRRuntimeError"
     assert rows["v2"]["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Issue #221: no refused asks without a signed anchor; document timestamps
+# seed the version order.
+# ---------------------------------------------------------------------------
+
+
+def _affiliation_config(root: Path, template_path: Path | None = None) -> Path:
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)} if template_path is not None else {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = root / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    return config_path
+
+
+@pytest.mark.parametrize("signed", [False, True])
+def test_unsigned_deal_striking_their_language_records_no_refused_ask(
+    tmp_path: Path, signed: bool
+) -> None:
+    """v1's Insurance clause is NOT our standard (the template's differs) and
+    is struck in v2. In a deal with a detected executed copy that is their
+    refused ask; with no signed copy, v2 is only the later draft, so no
+    proposed_then_reversed observation is written (counted instead) and the
+    OPF 0.4 precedent carries no refused_asks for the unsigned deal."""
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+    _write_rtf(deal_dir / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+    if signed:
+        (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, rf"1. Insurance\par {_TEMPLATE_INSURANCE_OTHER}\par ")
+    config = load_config(_affiliation_config(tmp_path, template_path))
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    out_dir = tmp_path / "out"
+
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    refused = [o for o in observations if o["outcome"] == "proposed_then_reversed"]
+    playbook = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.4"
+    )
+    precedent = [p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal-001"]
+    if signed:
+        assert [d["signed_version"] for d in manifest] == [2]
+        assert [o["taxonomy_id"] for o in refused] == ["insurance"], (
+            "control: the same strike in a signed deal is their refused ask"
+        )
+        assert [p["refused_asks"] != [] for p in precedent if p["taxonomy_id"] == "insurance"] == [
+            True
+        ]
+    else:
+        assert [d["signed_version"] for d in manifest] == [None], "premise: unsigned"
+        assert refused == []
+        assert [d["dropped_observations"] for d in manifest] == [{"refused_ask_no_signed_copy": 1}]
+        assert playbook["corpus"]["stats"]["dropped_observations"]["by_reason"] == {
+            "refused_ask_no_signed_copy": 1
+        }
+        assert all(p["signed"] is False and p["refused_asks"] == [] for p in precedent)
+        assert [c["n_refused"] for c in playbook["evidence"]["clauses"] if c["n_refused"]] == []
+
+
+# Three drafts whose content-derived chain is v1 -> v2 -> v3: v2 adds a
+# phrase to Indemnification (one node) plus three other edits, v3 drops that
+# phrase again and makes three further edits. Against a signed v3 the dropped
+# phrase is a reversal; with no signed copy it is just the later draft.
+_THREE_DRAFT_CLAUSES = [
+    (
+        "Indemnification",
+        "Alpha Corp shall indemnify Beta University against third-party claims "
+        "arising from the placement programme.",
+    ),
+    ("Governing Law", "This agreement is governed by the laws of the State of California."),
+    ("Term", "This agreement commences on the date of execution and continues for one year."),
+    ("Confidentiality", "Each party shall keep the other party's information confidential."),
+    ("Notices", "Notices shall be given in writing to the addresses stated above."),
+    ("Assignment", "Neither party may assign this agreement without prior written consent."),
+    ("Insurance", "Alpha Corp shall maintain commercial general liability insurance."),
+]
+
+
+def _three_draft_body(edits: dict[int, str]) -> str:
+    parts = []
+    for i, (heading, text) in enumerate(_THREE_DRAFT_CLAUSES, start=1):
+        parts.append(rf"{i}. {heading}\par {edits.get(i, text)}\par ")
+    return "".join(parts)
+
+
+_DRAFT_INSERT = (
+    "Alpha Corp shall indemnify Beta University against third-party claims "
+    "arising from the placement programme, including consequential damages and legal fees."
+)
+_V2_EDITS = {
+    1: _DRAFT_INSERT,
+    2: "This agreement is governed by the laws of the State of New York.",
+    4: "Each party shall keep the other party's information confidential for five years.",
+    5: "Notices shall be given by email to the addresses stated in the schedule.",
+}
+_V3_EDITS = {
+    2: _V2_EDITS[2],
+    4: _V2_EDITS[4],
+    5: _V2_EDITS[5],
+    3: "This agreement commences on the date of execution and continues for three years.",
+    6: "Either party may assign this agreement to an affiliate on written notice.",
+    7: "Alpha Corp shall maintain professional liability insurance of two million dollars.",
+}
+
+
+@pytest.mark.parametrize("signed", [False, True])
+def test_reversal_detection_needs_a_signed_anchor(tmp_path: Path, signed: bool) -> None:
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", _three_draft_body({}))
+    _write_rtf(deal_dir / "v2.rtf", _three_draft_body(_V2_EDITS))
+    _write_rtf(deal_dir / "v3.rtf", _three_draft_body(_V3_EDITS))
+    if signed:
+        (deal_dir / "hints.yaml").write_text("signed_version: v3.rtf\n", encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(_affiliation_config(tmp_path)),
+        taxonomy=load_taxonomy(_TAXONOMY_PATH),
+        out_dir=out_dir,
+    )
+
+    trail = json.loads((out_dir / "trail" / "deal-001.json").read_text(encoding="utf-8"))
+    assert trail["ordered_versions"] == ["v1", "v2", "v3"], "premise: content-derived chain"
+    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    observations = [json.loads(line) for line in obs_lines if line.strip()]
+    refused = [o for o in observations if o["outcome"] == "proposed_then_reversed"]
+    if signed:
+        assert trail["signed_version"] == "v3"
+        assert [r["version_inserted"] for r in trail["reversals"]] == ["v2"], (
+            "control: against a signed v3 the dropped phrase is a reversal"
+        )
+        assert refused, "control: the reversal becomes a refused-ask observation"
+    else:
+        assert trail["signed_version"] is None, "premise: no signed copy detected"
+        assert trail["reversals"] == []
+        assert refused == []
+
+
+def _dated_docx(path: Path, body: list[tuple[str, str]], modified: str) -> Path:
+    import datetime
+
+    doc = Document()
+    for heading, text in body:
+        doc.add_heading(heading, level=1)
+        doc.add_paragraph(text)
+    doc.core_properties.modified = datetime.datetime.fromisoformat(modified)
+    doc.save(str(path))
+    return path
+
+
+def test_document_timestamps_set_unsigned_chain_direction(tmp_path: Path) -> None:
+    """Two unsigned DOCX drafts are a symmetric edit distance apart; their own
+    core.xml dates (b older than a) now decide the direction instead of the
+    lexicographic tie-break, and the trail records the timestamps it used. A
+    hints.yaml timestamp still overrides the document's own."""
+    body = [(h, t) for h, t in _THREE_DRAFT_CLAUSES[:3]]
+    edited = [(h, _V3_EDITS.get(i, t)) for i, (h, t) in enumerate(body, start=1)]
+
+    def mine(root: Path, hints: str | None) -> dict:
+        deal_dir = root / "corpus" / "deal-001"
+        deal_dir.mkdir(parents=True)
+        _dated_docx(deal_dir / "a.docx", edited, "2025-05-01T12:00:00")
+        _dated_docx(deal_dir / "b.docx", body, "2025-02-01T12:00:00")
+        if hints is not None:
+            (deal_dir / "hints.yaml").write_text(hints, encoding="utf-8")
+        mine_corpus(
+            corpus_dir=root / "corpus",
+            config=load_config(_affiliation_config(root)),
+            taxonomy=load_taxonomy(_TAXONOMY_PATH),
+            out_dir=root / "out",
+        )
+        return json.loads((root / "out" / "trail" / "deal-001.json").read_text(encoding="utf-8"))
+
+    trail = mine(tmp_path / "dated", None)
+    assert trail["signed_version"] is None, "premise: unsigned deal"
+    assert trail["ordered_versions"] == ["b", "a"]
+    assert trail["basis"] == "hints"
+    assert trail["version_timestamps"] == {
+        "a": "2025-05-01T12:00:00Z",
+        "b": "2025-02-01T12:00:00Z",
+    }
+
+    overridden = mine(tmp_path / "hinted", "timestamps:\n  a: '2025-01-01'\n  b: '2025-06-01'\n")
+    assert overridden["ordered_versions"] == ["a", "b"]
+
+
+def test_project_drops_refused_asks_of_unsigned_deal_from_pre_221_store(tmp_path: Path) -> None:
+    """``project`` over an observations.jsonl mined before issue #221 — when
+    an unsigned deal's struck non-standard clause was still written as
+    proposed_then_reversed — must not publish it: a ``signed: false``
+    precedent record carries no refused_asks. The pre-#221 row is recreated
+    from the signed control's mine (same files, same struck clause)."""
+
+    def mine(root: Path, signed: bool):
+        deal_dir = root / "corpus" / "deal-001"
+        deal_dir.mkdir(parents=True)
+        _write_rtf(deal_dir / "v1.rtf", _REMOVED_CLAUSE_V1_BODY)
+        _write_rtf(deal_dir / "v2.rtf", _REMOVED_CLAUSE_V2_BODY)
+        if signed:
+            (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+        template_path = root / "template.rtf"
+        _write_rtf(template_path, rf"1. Insurance\par {_TEMPLATE_INSURANCE_OTHER}\par ")
+        config = load_config(_affiliation_config(root, template_path))
+        taxonomy = load_taxonomy(_TAXONOMY_PATH)
+        mine_corpus(
+            corpus_dir=root / "corpus", config=config, taxonomy=taxonomy, out_dir=root / "out"
+        )
+        return config, taxonomy, root / "out"
+
+    _, _, signed_out = mine(tmp_path / "signed", True)
+    config, taxonomy, out_dir = mine(tmp_path / "unsigned", False)
+    signed_rows = (signed_out / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    old_rows = [
+        line for line in signed_rows if json.loads(line)["outcome"] == "proposed_then_reversed"
+    ]
+    assert len(old_rows) == 1, "premise: the signed control has one refused ask"
+    with (out_dir / "observations.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(old_rows[0] + "\n")
+
+    playbook = project_playbook(
+        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.4"
+    )
+
+    deal = [p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal-001"]
+    assert all(p["signed"] is False for p in deal), "premise: deal-001 is unsigned"
+    assert [p for p in deal if p["refused_asks"]] == []
+    assert [c["n_refused"] for c in playbook["evidence"]["clauses"] if c["n_refused"]] == []

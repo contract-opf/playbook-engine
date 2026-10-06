@@ -8,12 +8,14 @@ Party names use fictional identifiers only ("Alice Corp", "Beta Ltd",
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
 import pytest
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
+from playbook_engine.extraction import _iso_utc, _parse_pdf_date, document_timestamp
 from playbook_engine.signed_detector import SignedStatus
 from playbook_engine.version_orderer import (
     EXHAUSTIVE_THRESHOLD,
@@ -1116,3 +1118,171 @@ def test_trail_judge_called_on_fork_shape() -> None:
     # Shape must be non-linear (fork or gap) AND judge must have been called.
     assert result.shape in ("fork", "gap"), f"Expected non-linear shape, got {result.shape!r}"
     assert call_log == ["called"], "Judge was not called on non-linear chain"
+
+
+# ---------------------------------------------------------------------------
+# Document timestamps seed ordering (issue #221)
+#
+# extraction.document_timestamp reads each version's own dates (DOCX
+# core.xml modified/created + the latest tracked-change w:date, PDF
+# /ModDate); the pipeline seeds VersionInput.timestamp with it so an
+# unsigned deal's chain direction is no longer a lexicographic tie-break.
+# ---------------------------------------------------------------------------
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _docx_with_dates(
+    path: Path,
+    *,
+    modified: datetime.datetime | None,
+    created: datetime.datetime | None = None,
+    tracked_date: str | None = None,
+) -> Path:
+    from docx import Document
+    from lxml import etree
+
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    p = doc.add_paragraph()
+    p.add_run("Party A shall provide services.")
+    if tracked_date is not None:
+        ins = etree.SubElement(p._p, f"{{{_W_NS}}}ins")
+        ins.set(f"{{{_W_NS}}}id", "1")
+        ins.set(f"{{{_W_NS}}}author", "Alice")
+        ins.set(f"{{{_W_NS}}}date", tracked_date)
+        run = etree.SubElement(ins, f"{{{_W_NS}}}r")
+        etree.SubElement(run, f"{{{_W_NS}}}t").text = " promptly"
+    core = doc.core_properties
+    for name, value in (("created", created), ("modified", modified)):
+        if value is not None:
+            setattr(core, name, value)
+        else:
+            # python-docx's template ships a created/modified stamp; None
+            # means "this document carries none", so drop the element.
+            for el in core._element.findall(f"{{http://purl.org/dc/terms/}}{name}"):
+                core._element.remove(el)
+    doc.save(str(path))
+    return path
+
+
+def test_document_timestamp_docx_core_modified(tmp_path: Path) -> None:
+    path = _docx_with_dates(
+        tmp_path / "v1.docx",
+        modified=datetime.datetime(2025, 3, 4, 10, 30, 0),
+        created=datetime.datetime(2025, 1, 1),
+    )
+    assert document_timestamp(path) == "2025-03-04T10:30:00Z"
+
+
+def test_document_timestamp_docx_created_when_no_modified(tmp_path: Path) -> None:
+    path = _docx_with_dates(
+        tmp_path / "v1.docx", modified=None, created=datetime.datetime(2025, 1, 2, 9, 0, 0)
+    )
+    assert document_timestamp(path) == "2025-01-02T09:00:00Z"
+
+
+def test_document_timestamp_docx_latest_tracked_change_date_wins(tmp_path: Path) -> None:
+    """A redline dated after the core.xml stamp is the later authorship
+    evidence — read from the version's own TrackedChanges side-channel."""
+    from playbook_engine.extraction import extract_tracked_changes
+
+    path = _docx_with_dates(
+        tmp_path / "v1.docx",
+        modified=datetime.datetime(2025, 3, 1),
+        tracked_date="2025-03-15T08:00:00Z",
+    )
+    tracked = extract_tracked_changes(path)
+    assert tracked is not None and tracked.changes, "fixture premise: one tracked change"
+    assert document_timestamp(path) == "2025-03-01T00:00:00Z"
+    assert document_timestamp(path, tracked) == "2025-03-15T08:00:00Z"
+
+
+def test_document_timestamp_docx_without_core_properties_is_none() -> None:
+    """A package with no core-properties part carries no date. python-docx
+    would fabricate one stamped "now" — reading it would make the order
+    depend on when ``mine`` ran. The committed canary DOCX has no core.xml."""
+    path = (
+        Path(__file__).parent.parent
+        / "examples"
+        / "canary"
+        / "corpus"
+        / "halcyon-freight"
+        / "v1.docx"
+    )
+    import zipfile
+
+    assert "docProps/core.xml" not in zipfile.ZipFile(path).namelist(), "fixture premise"
+    assert document_timestamp(path) is None
+
+
+def test_document_timestamp_ignores_pre_1980_defaults(tmp_path: Path) -> None:
+    path = _docx_with_dates(tmp_path / "v1.docx", modified=datetime.datetime(1601, 1, 1))
+    assert document_timestamp(path) is None
+
+
+def test_document_timestamp_rtf_and_unreadable_are_none(tmp_path: Path) -> None:
+    rtf = tmp_path / "v1.rtf"
+    rtf.write_text(r"{\rtf1\ansi Body.\par}", encoding="utf-8")
+    assert document_timestamp(rtf) is None
+    broken = tmp_path / "v2.docx"
+    broken.write_bytes(b"not a zip")
+    assert document_timestamp(broken) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("D:20250304103000Z", "2025-03-04T10:30:00Z"),
+        ("D:20250304103000+02'00'", "2025-03-04T08:30:00Z"),
+        ("D:20250304", "2025-03-04T00:00:00Z"),
+        ("garbage", None),
+        (None, None),
+    ],
+)
+def test_parse_pdf_mod_date(raw: str | None, expected: str | None) -> None:
+    assert _iso_utc(_parse_pdf_date(raw)) == expected
+
+
+def test_document_timestamp_pdf_mod_date(tmp_path: Path) -> None:
+    """A PDF's /ModDate is read through pdfplumber's info dictionary."""
+    path = tmp_path / "v1.pdf"
+    path.write_bytes(
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+        b"3 0 obj<</ModDate(D:20250304103000Z)/CreationDate(D:20240101000000Z)>>endobj\n"
+        b"trailer<</Root 1 0 R/Info 3 0 R>>\n%%EOF\n"
+    )
+    assert document_timestamp(path) == "2025-03-04T10:30:00Z"
+
+
+def test_document_timestamps_order_unsigned_two_version_deal(tmp_path: Path) -> None:
+    """The motivating case: two unsigned drafts are a symmetric edit distance
+    apart, so without timestamps the chain direction is the lexicographic
+    tie-break (a → b). The documents' own dates say b came first."""
+    newer = _docx_with_dates(tmp_path / "a.docx", modified=datetime.datetime(2025, 5, 1))
+    older = _docx_with_dates(tmp_path / "b.docx", modified=datetime.datetime(2025, 2, 1))
+    texts = {"a": _V2_TEXT, "b": _V1_TEXT}
+
+    untimed = order_versions([_vi(vid, texts[vid]) for vid in ("a", "b")])
+    assert untimed.ordered_ids == ("a", "b"), "premise: lexicographic tie-break"
+
+    timed = order_versions(
+        [
+            _vi("a", texts["a"], timestamp=document_timestamp(newer)),
+            _vi("b", texts["b"], timestamp=document_timestamp(older)),
+        ]
+    )
+    assert timed.ordered_ids == ("b", "a")
+    assert timed.basis == "hints"
+
+
+def test_hints_yaml_timestamps_override_document_timestamps() -> None:
+    """A lawyer's hints.yaml timestamp outranks the document's own, per version."""
+    versions = [
+        _vi("a", _V2_TEXT, timestamp="2025-05-01T00:00:00Z"),
+        _vi("b", _V1_TEXT, timestamp="2025-02-01T00:00:00Z"),
+    ]
+    assert order_versions(versions).ordered_ids == ("b", "a")
+    hints = Hints(timestamps={"a": "2025-01-01", "b": "2025-06-01"})
+    assert order_versions(versions, hints).ordered_ids == ("a", "b")

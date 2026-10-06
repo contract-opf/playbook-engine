@@ -19,9 +19,13 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - out-of-scope docs are RETAINED in corpus[] with in_scope:false + rationale
                                      │
   L2  STRUCTURE THE TRAIL   (deterministic + light LLM arbitration)
-        - signed detection: signature blocks, e-sign certs, digital-sig objects
+        - signed detection: signature blocks, e-sign certs, digital-sig objects;
+          template placeholders ("By: [Name]", "By: Name:", "By: Authorized
+          Signatory") never count as signed
         - version ordering: edit-distance chain anchored at the signed terminal;
-          seeded by timestamps/filename dates WHEN trustworthy; NOT dependent on
+          ties seeded by each version's own document timestamp (DOCX core.xml
+          modified/created + latest tracked-change w:date, PDF /ModDate), which
+          hints.yaml timestamps override per version; NOT dependent on
           status labels (general-purpose: corpora may lack them)
         - provenance detection: our_paper vs counterparty_paper
                                      │
@@ -33,6 +37,8 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - consecutive diffs (vᵢ→vᵢ₊₁) = negotiation moves
         - net diff (template/first → signed) = durable outcome
         - REVERSAL detection: inserted-then-removed-before-signing = proposed_then_reversed
+          (only in a deal with a detected signed copy — with none, the last
+          draft is not a signed terminal and no refused ask is recorded)
         - DEFAULT (the consumer path): no deviation judge. Each observation carries
           two deterministic facts — `standard` (its normalized text equals, or
           token-Jaccard near-equals at the documented threshold, the template
@@ -56,8 +62,10 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
               stance_detail and the position; never a rejected/refused ask) —
               only in a deal with a detected executed copy; in an unsigned
               deal it is dropped and counted, never a concession
-            · non-standard (their) language struck → proposed_then_reversed
-              (in an unsigned deal too: like any reversal, within-trail history)
+            · non-standard (their) language struck → proposed_then_reversed —
+              only in a deal with a detected executed copy; in an unsigned
+              deal it is dropped and counted (refused_ask_no_signed_copy), so
+              an unsigned deal's precedent records carry no refused_asks
             · no standard to compare against → dropped and counted
                                      │
   L5  COMPILE PLAYBOOK      aggregate observations → OPF (deterministic assembly)
