@@ -10,6 +10,32 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **A docling timeout recovered by a fallback is no longer cached; OCR-
+  recovered text has its own reason (issue #231).** When docling times out
+  on a version and the legacy fallback (pdfplumber for PDF, pandoc for RTF,
+  python-docx for DOCX) or the `ocrmypdf` pass then recovers its text, that
+  text is used for the run but stored in neither the extraction cache nor
+  the per-deal L1-L4 stage cache, so the next `mine` retries docling on the
+  version instead of leaving one legacy-extracted version among docling
+  siblings for good (a mixed-extractor trail, the source of #122's alignment
+  artifacts). A fallback after a docling crash, and a docling result the
+  normalized-DOCX retry produced after a timeout, are cached as before.
+  `version_ingest[].reason` and the published `x_ingest_reason` gain the
+  value `ocr-recovered` for text recovered by the `ocrmypdf` pass;
+  `backend-error` now means only a fallback that read the file's own text
+  layer. `ocr-recovered` counts against `extraction.max_fallback` and in the
+  `mine` fallback tally, and the inspection report flags it. The extraction
+  cache format moves to 5: only stored `backend-error` fallbacks are
+  re-extracted once (each may have been a timeout recovery or an OCR
+  recovery), and `_VERSION_INGEST_REASON_VERSION` moves to 5.
+  Also from #218, not noted at the time: on the deterministic segmenter, a
+  scanned PDF (no text layer) used as `baseline.template` now raises
+  `NoOCRRuntimeError` during template ingest. `mine` does not abort: it
+  prints `WARNING: could not ingest template: ...` with the OCR remedy and
+  runs WITHOUT a template (emergent mode, no "template standards" line).
+  Before #218 such a template ingested as an empty tree and the run
+  reported 0 template standards without saying why.
+
 - **Signed anchors and version order from the documents themselves (issue
   #221).** Placeholder signature lines never count as signed: a `By:` value
   that is a bracketed placeholder (`[Name]`, `<Signature>`), `Name:`/

@@ -71,8 +71,9 @@ docling vs. legacy adapters:
   deliberately declared ``extractor: legacy`` are three very different
   situations that used to be indistinguishable downstream. :class:`ExtractorLabel`
   (returned in place of the old plain string — issue #81) carries a
-  structured ``reason`` — ``"env-missing" | "backend-error" | "declared" |
-  None`` — so ``corpus_manifest.json``'s ``version_ingest``,
+  structured ``reason`` — ``"env-missing" | "backend-error" |
+  "ocr-recovered" | "declared" | None`` (``"ocr-recovered"`` added by issue
+  #231) — so ``corpus_manifest.json``'s ``version_ingest``,
   ``config.extraction.max_fallback``'s budget, and the ``mine``
   CLI summary can all tell these apart instead of collapsing to one
   ambiguous ``"legacy"``.
@@ -133,6 +134,15 @@ closed-enum ``reason`` (:data:`FAILURE_TIMEOUT` / :data:`FAILURE_NO_TEXT`), and
 a no-text result after any timeout is never negative-cached, so the next run
 retries it. The legacy environment gets neither (it stays deterministic and
 container-free) but its no-text message for a PDF names the Docker runtime.
+
+Timeout recoveries (issue #231): a fallback that DID recover text after a
+docling (or ocrmypdf) timeout is returned for this run but cached nowhere —
+not in the :class:`ExtractionCache`, and (via
+:attr:`ExtractorLabel.timed_out`) not in the pipeline's per-deal stage cache
+either — so the next run retries docling instead of pinning the trail as
+mixed-extractor. Text the ocrmypdf path recovered carries
+``reason="ocr-recovered"``, distinct from a born-digital
+``"backend-error"`` fallback.
 
 ``ExtractionCache`` (issue #132): extraction (especially docling OCR over a
 scanned PDF) is the single most expensive step in the LLM-segmentation path —
@@ -403,6 +413,47 @@ def _affected_by_pdf_ocr_retry(value: CacheValue, context: Context) -> bool | No
     return context.get("suffix") == ".pdf" and context.get("extractor_env") == "docling"
 
 
+def _affected_by_timeout_fallback_rule(value: CacheValue, context: Context) -> bool | None:
+    """v4 -> v5 (issue #231): ``True`` only for the stored docling->legacy
+    fallback SUCCESSES whose correct entry this change could alter.
+
+    #231 stopped caching a fallback that recovered text after a docling
+    timeout (the next run must retry docling), and gave text recovered by the
+    ocrmypdf second OCR path its own reason, ``"ocr-recovered"``, instead of
+    ``"backend-error"``. A pre-#231 ``"backend-error"`` success cannot say
+    which of three things it was — a fallback after a docling crash (still
+    correct), a fallback after a docling TIMEOUT (must not have been cached:
+    docling may well succeed now, and keeping it pins the trail as
+    mixed-extractor forever), or an ocrmypdf recovery (now labelled
+    differently) — so every such entry is retried once. On a crash the retry
+    reaches the same fallback and re-caches it under the new format.
+
+    Affected, i.e. invalidated:
+      - a SUCCESS with ``extractor="legacy"`` and ``reason="backend-error"``.
+
+    Unaffected, i.e. kept:
+      - every docling SUCCESS (docling ran clean — no timeout, no fallback).
+      - a legacy SUCCESS with ``reason`` "declared"/"env-missing" (docling was
+        never attempted, so it never timed out).
+      - every FAILURE entry (a timeout was already never negative-cached
+        after #218, and the #218 rung retried every older docling PDF
+        failure).
+
+    Undecidable (``None`` -> invalidated conservatively): a legacy SUCCESS
+    with no ``reason`` recorded — not a shape put() or the #81 migration can
+    produce, so a hand-edited or foreign entry.
+    """
+    del context
+    if "error" in value:
+        return False
+    if value.get("extractor") != "legacy":
+        return False
+    reason = value.get("reason", _UNSET)
+    if reason is _UNSET:
+        return None
+    return bool(reason == "backend-error")
+
+
 #: The extraction cache's format ladder, oldest bump first. The head rung's
 #: version is the format entries are written under today.
 _EXTRACTION_CACHE_FORMAT_LADDER: tuple[CacheFormatStep, ...] = (
@@ -432,6 +483,15 @@ _EXTRACTION_CACHE_FORMAT_LADDER: tuple[CacheFormatStep, ...] = (
             "ocrmypdf before it is negative-cached, and timeouts are never cached"
         ),
         affects=_affected_by_pdf_ocr_retry,
+    ),
+    CacheFormatStep(
+        version="5",
+        issue="#231",
+        summary=(
+            "a fallback that recovered text after a docling timeout is never "
+            "cached, and ocrmypdf-recovered text is labelled 'ocr-recovered'"
+        ),
+        affects=_affected_by_timeout_fallback_rule,
     ),
 )
 
@@ -512,14 +572,31 @@ class ExtractorLabel(str):
               - ``"backend-error"``: docling was attempted (on PATH, or
                 declared) and raised on THIS file — a live per-file recovery
                 fallback.
+              - ``"ocr-recovered"``: docling was attempted and yielded no
+                text for a PDF, pdfplumber found no text layer, and the
+                ``ocrmypdf`` second OCR path (issue #218) recovered the text
+                (issue #231) — an OCR-recovered scan, as opposed to a
+                ``"backend-error"`` fallback that read a born-digital text
+                layer. Also a live per-file recovery fallback.
               - ``"declared"``: config explicitly set
                 ``extraction.extractor: legacy`` — a deliberate choice, not
                 a degradation.
               - ``None``: ``extractor == "docling"`` — no fallback happened.
         fallback_from: ``"docling"`` when this is a live ``"backend-error"``
-            fallback; ``None`` otherwise (including for ``"env-missing"``/
-            ``"declared"`` — docling was never attempted in either case, so
-            there is nothing it fell back FROM).
+            or ``"ocr-recovered"`` fallback; ``None`` otherwise (including
+            for ``"env-missing"``/``"declared"`` — docling was never
+            attempted in either case, so there is nothing it fell back FROM).
+        timed_out: ``True`` when a docling or ocrmypdf subprocess hit its
+            wall-clock cap during THIS call and a fallback then produced the
+            text (issue #231). Such a result is for this run only: a timeout
+            is a property of the run (load, a cold model download, a
+            too-tight cap), not of the bytes, so :func:`extract_blocks` does
+            not store it in the :class:`ExtractionCache` and the pipeline
+            keeps the deal out of its L1-L4 stage cache — the next run
+            retries docling instead of pinning the trail as mixed-extractor.
+            ``False`` for every other result, including every cache hit
+            (such a result is never cached). IN-MEMORY ONLY, never
+            persisted.
         detail: ``str(exc)`` from the docling failure that triggered a
             ``"backend-error"`` fallback, or ``None``. **IN-MEMORY / LOGGING
             ONLY**: it embeds the absolute source path, which embeds the
@@ -533,6 +610,7 @@ class ExtractorLabel(str):
     reason: str | None
     fallback_from: str | None
     detail: str | None
+    timed_out: bool
 
     def __new__(
         cls,
@@ -541,11 +619,13 @@ class ExtractorLabel(str):
         reason: str | None = None,
         fallback_from: str | None = None,
         detail: str | None = None,
+        timed_out: bool = False,
     ) -> ExtractorLabel:
         obj = super().__new__(cls, extractor)
         obj.reason = reason
         obj.fallback_from = fallback_from
         obj.detail = detail
+        obj.timed_out = timed_out
         return obj
 
     @property
@@ -1176,7 +1256,14 @@ def extract_blocks(
             # still allows this same PER-FILE fallback (the corpus-wide
             # availability precondition above is a separate, one-time
             # concern — see _resolve_extractor_env).
-            retried_lines = _retry_docling_on_normalized_docx(path) if suffix == ".docx" else None
+            retried_lines: list[tuple[str, int]] | None = None
+            if suffix == ".docx":
+                # The retry is itself a docling subprocess that can hit the
+                # wall-clock cap; it swallows that, so it reports it back here
+                # (issue #231) — a crash on the original followed by a timeout
+                # on the normalized copy must not cache the legacy fallback.
+                retried_lines, retry_timed_out = _retry_docling_on_normalized_docx(path)
+                timed_out = timed_out or retry_timed_out
             if retried_lines is not None:
                 lines = retried_lines
             else:
@@ -1229,9 +1316,11 @@ def extract_blocks(
             # The text came from ocrmypdf + pdfplumber, not docling: label it
             # as a live per-file docling fallback so it is visible in
             # version_ingest and counted against extraction.max_fallback,
-            # exactly like any other docling->legacy recovery.
+            # exactly like any other docling->legacy recovery — but with its
+            # own reason (issue #231), so x_ingest_reason can tell an
+            # OCR-recovered scan from a born-digital text-layer fallback.
             resolved = "legacy"
-            reason = "backend-error"
+            reason = "ocr-recovered"
             fallback_from = "docling"
             # IN-MEMORY ONLY (see ExtractorLabel.detail): embeds the path.
             detail = f"docling yielded no text for {path}; recovered via ocrmypdf"
@@ -1298,9 +1387,30 @@ def extract_blocks(
 
     canonical_text, blocks = _build_stream(lines)
 
-    label = ExtractorLabel(resolved, reason=reason, fallback_from=fallback_from, detail=detail)
+    # Issue #231: a fallback that recovered text after a timeout is returned
+    # for THIS run but never cached. The timeout says something about the
+    # run, not the bytes the cache key hashes; storing the fallback's legacy
+    # output would stop every later run from retrying docling and pin the
+    # trail as mixed-extractor for good (the #122 alignment artifacts). A
+    # timeout followed by a docling-structured recovery (the normalized-DOCX
+    # retry) is real docling output and is cached as usual.
+    fallback_after_timeout = timed_out and resolved == "legacy"
+    label = ExtractorLabel(
+        resolved,
+        reason=reason,
+        fallback_from=fallback_from,
+        detail=detail,
+        timed_out=fallback_after_timeout,
+    )
 
-    if cache is not None:
+    if fallback_after_timeout:
+        _log.warning(
+            "extract_blocks: %s recovered via the %s fallback after a timeout — "
+            "not cached, the next run will retry docling",
+            path,
+            reason,
+        )
+    elif cache is not None:
         cache.put(path, canonical_text, blocks, label, environment=environment)
 
     return canonical_text, blocks, label
@@ -1363,7 +1473,9 @@ def _extract_docling_lines(path: Path) -> list[tuple[str, int]]:
         return _parse_markdown_lines(markdown)
 
 
-def _retry_docling_on_normalized_docx(path: Path) -> list[tuple[str, int]] | None:
+def _retry_docling_on_normalized_docx(
+    path: Path,
+) -> tuple[list[tuple[str, int]] | None, bool]:
     """Retry docling once on a pre-normalized copy of a DOCX that just failed it.
 
     docling 2.x's DOCX backend crashes on tracked-changes/comment nodes
@@ -1385,21 +1497,26 @@ def _retry_docling_on_normalized_docx(path: Path) -> list[tuple[str, int]] | Non
     proactive detection would pay a normalization cost on every DOCX just to
     save that one wasted round-trip on the minority that fail.
 
-    Returns the extracted lines on success, or ``None`` if normalization or
-    the retry itself failed for any reason — a plain DOCX with nothing to
-    normalize will fail identically on both attempts and correctly fall
-    through to ``None`` here, so the caller's existing legacy fallback is
-    unchanged for that case. Deliberately broad ``except Exception`` (not
-    just :class:`ExtractionError`): normalizing an unparseable/corrupt DOCX
-    can raise a python-docx/lxml error that isn't an ``ExtractionError`` at
-    all, and any such failure must still fall through to the legacy adapter
-    rather than propagate and mask the original docling failure. The temp
-    file is always cleaned up before returning, in either outcome.
+    Returns ``(lines, timed_out)``: the extracted lines on success, or
+    ``None`` if normalization or the retry itself failed for any reason — a
+    plain DOCX with nothing to normalize will fail identically on both
+    attempts and correctly fall through to ``None`` here, so the caller's
+    existing legacy fallback is unchanged for that case. ``timed_out`` is
+    ``True`` only when the retry's docling subprocess hit its wall-clock cap
+    (an :class:`ExtractionError` with ``reason=FAILURE_TIMEOUT``); the caller
+    ORs it into its own timeout flag so a legacy fallback after a retry
+    timeout is never cached (issue #231). Deliberately broad
+    ``except Exception`` (not just :class:`ExtractionError`): normalizing an
+    unparseable/corrupt DOCX can raise a python-docx/lxml error that isn't an
+    ``ExtractionError`` at all, and any such failure must still fall through
+    to the legacy adapter rather than propagate and mask the original docling
+    failure. The temp file is always cleaned up before returning, in either
+    outcome.
     """
     normalized_path: Path | None = None
     try:
         normalized_path = normalize_tracked_docx(path)
-        return _extract_docling_lines(normalized_path)
+        return _extract_docling_lines(normalized_path), False
     except Exception as exc:  # noqa: BLE001 — any failure here just means "no recovery"
         _log.warning(
             "extract_blocks: docling retry on normalized copy of %s failed (%s); "
@@ -1407,7 +1524,8 @@ def _retry_docling_on_normalized_docx(path: Path) -> list[tuple[str, int]] | Non
             path,
             exc,
         )
-        return None
+        timed_out = isinstance(exc, ExtractionError) and exc.reason == FAILURE_TIMEOUT
+        return None, timed_out
     finally:
         if normalized_path is not None:
             normalized_path.unlink(missing_ok=True)

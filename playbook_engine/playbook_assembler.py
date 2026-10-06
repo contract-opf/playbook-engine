@@ -201,7 +201,8 @@ def _sanitize_corpus_documents_for_schema(
       same order — index-aligned rather than keyed by version label, so it
       carries nothing ``publisher.py``'s version-label scrub would have to
       rewrite. Values are closed enums: the ``ExtractorLabel`` reasons
-      (``"env-missing"``, ``"backend-error"``, ``"declared"``) for a mined
+      (``"env-missing"``, ``"backend-error"``, ``"ocr-recovered"``,
+      ``"declared"``) for a mined
       version, the ``ExtractionError`` reasons (``"timeout"``, ``"no-text"``)
       for a failed one, or ``null``.
     """

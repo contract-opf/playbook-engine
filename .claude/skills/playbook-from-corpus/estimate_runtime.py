@@ -77,7 +77,12 @@ import sys
 # #218: a docling-environment PDF with no text now gets an ocrmypdf retry
 # before it is negative-cached, and timeouts are never cached). Same lockstep
 # rationale as above.
-_EXTRACTION_CACHE_FORMAT_VERSION = "4"
+#
+# Bumped to "5" alongside extraction._EXTRACTION_CACHE_FORMAT_VERSION (issue
+# #231: a fallback that recovered text after a docling timeout is never
+# cached, and ocrmypdf-recovered text is labelled "ocr-recovered"). Same
+# lockstep rationale as above.
+_EXTRACTION_CACHE_FORMAT_VERSION = "5"
 
 # Per-version wall-clock (seconds), docling on CPU. Born-digital = model
 # cold-load + convert; scanned = the same plus RapidOCR over page images,

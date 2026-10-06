@@ -107,7 +107,8 @@ Config schema (YAML):
                                       # (default) for unbounded. The max number
                                       # of per-file extraction degradations
                                       # (version_ingest[].reason in
-                                      # "env-missing"/"backend-error" — never
+                                      # "env-missing"/"backend-error"/
+                                      # "ocr-recovered" — never
                                       # "declared", a deliberate choice, not a
                                       # degradation) a run tolerates before
                                       # mine_corpus raises PipelineError naming
@@ -273,7 +274,7 @@ class ExtractionConfig:
     extractor: str = "auto"  # "docling" | "legacy" | "auto"
     # None means unbounded (today's behavior — no cap on per-file
     # docling->legacy fallbacks). Otherwise, the max number of env-missing/
-    # backend-error extraction degradations (never "declared" — a
+    # backend-error/ocr-recovered extraction degradations (never "declared" — a
     # deliberate config choice, not a degradation) a run tolerates before
     # pipeline.mine_corpus raises PipelineError naming the offending
     # (document_id, version, reason) tuples (issue #81; see

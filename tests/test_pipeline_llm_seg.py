@@ -54,6 +54,7 @@ from playbook_engine.config import load_config
 from playbook_engine.docx_ingester import TextUnit, TrackedChange, TrackedChanges
 from playbook_engine.entity_registry import EntityRegistry
 from playbook_engine.extraction import ExtractionCache, ExtractorLabel, extract_blocks
+from playbook_engine.llm_segmenter import SegmentationLLMError
 from playbook_engine.llm_segmenter_batch import (
     NormalizeTrailError,
     NormalizeTrailResult,
@@ -2799,6 +2800,13 @@ def test_pre_81_extraction_cache_entry_is_migrated_and_counted_as_a_fallback(
     survive into the manifest, and the cache reports one migration and zero
     invalidations.
 
+    Issue #231 changed the last part: its rung retries every stored
+    ``backend-error`` success once (a pre-#231 one may have been a docling
+    TIMEOUT recovery, which must not be replayed), so this entry is now
+    re-extracted — through the real docling-crash fallback, which records
+    ``backend-error`` again. The outcome this test exists for (never
+    ``reason=None``; max_fallback=0 raises) is unchanged.
+
     Seeds a pre-#81-shaped entry (``extractor="legacy"``, no
     reason/fallback_from/detail keys — as a real pre-#81 build would have
     written for a file that fell back under a docling-available environment)
@@ -2872,14 +2880,12 @@ def test_pre_81_extraction_cache_entry_is_migrated_and_counted_as_a_fallback(
     ingest = manifest[0]["version_ingest"][0]
     assert ingest["extractor"] == "legacy"
     assert ingest["reason"] == "backend-error", (
-        "a pre-#81 extraction_cache.jsonl entry must never be replayed as reason=None — "
-        "the #81 ladder rung reconstructs the fallback it actually recorded"
+        "a pre-#81 extraction_cache.jsonl entry must never be replayed as reason=None"
     )
-    assert extraction_cache.migrated_count == 1, (
-        "the entry's blocks were still correct, so the reason must have been recovered by "
-        "migration rather than by re-extracting the file"
-    )
-    assert extraction_cache.invalidated_count == 0
+    # issue #231: the #81 rung still reconstructs "backend-error", and the
+    # #231 rung then retries that stored fallback once.
+    assert extraction_cache.migrated_count == 0
+    assert extraction_cache.invalidated_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -3915,5 +3921,157 @@ def test_installing_ocrmypdf_between_mines_gives_the_scan_its_second_ocr_pass(
     assert (rows[1]["status"], rows[1]["extractor"], rows[1]["reason"]) == (
         "ok",
         "legacy",
-        "backend-error",
+        # issue #231: OCR-recovered text is told apart from a born-digital
+        # text-layer fallback ("backend-error").
+        "ocr-recovered",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue #231: a version whose docling attempt TIMED OUT but whose text the
+# legacy fallback (pdfplumber) recovered is used for the run that recovered
+# it, but cached in neither layer — the next DEFAULT mine retries docling on
+# it instead of pinning the trail as mixed-extractor forever. Real producers:
+# mine_corpus -> extract_blocks -> _run_docling (subprocess faked) ->
+# pdfplumber on a real born-digital fpdf2 PDF; pandoc for the RTF versions.
+# ---------------------------------------------------------------------------
+
+
+def _born_digital_pdf(dest: Path, lines: list[str]) -> None:
+    fpdf = pytest.importorskip("fpdf")
+    pdf = fpdf.FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    for line in lines:
+        pdf.cell(0, 10, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(str(dest))
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_docling_timeout_recovered_by_pdfplumber_is_retried_with_docling_next_mine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """deal-001: v1.rtf docling ok, v2.pdf docling TIMEOUT that pdfplumber
+    recovers. deal-002: one clean version (the control proving the stage
+    cache is live). Run 1 mines v2.pdf as a legacy/backend-error fallback;
+    run 2 (a default mine, both caches warm) must run docling on v2.pdf again
+    while deal-002 is a stage-cache hit that runs docling zero times."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    _born_digital_pdf(
+        deal_dir / "v2.pdf",
+        ["1. Indemnification", "Alpha Corp shall indemnify Beta University."],
+    )
+    control_dir = corpus_dir / "deal-002"
+    control_dir.mkdir()
+    _write_rtf(control_dir / "v1.rtf", _V1_BODY.replace("California", "Oregon"))
+
+    targets: list[str] = []
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd, _w=extraction.shutil.which: (
+            "/usr/bin/docling" if cmd == "docling" else None if cmd == "ocrmypdf" else _w(cmd)
+        ),
+    )
+    # ok_names covers both RTFs; every other docling call (v2.pdf) times out.
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_double(targets, ok_names={"v1.rtf"}))
+    cache = ExtractionCache(out_dir / "extraction_cache.jsonl")
+
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert targets.count("deal-001/v2.pdf") == 1
+    assert "deal-002/v1.rtf" in targets
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = {d["document_id"]: d for d in manifest}["deal-001"]["version_ingest"]
+    assert [(r["status"], r["extractor"], r["reason"]) for r in rows] == [
+        ("ok", "docling", None),
+        ("ok", "legacy", "backend-error"),
+    ]
+    assert cache.get(deal_dir / "v2.pdf", extractor="docling") is None, (
+        "the timeout recovery must not reach the extraction cache"
+    )
+    assert cache.get(deal_dir / "v1.rtf", extractor="docling") is not None
+
+    targets.clear()
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert targets.count("deal-001/v2.pdf") == 1, (
+        "docling must be re-attempted on the timed-out version on the next default mine"
+    )
+    assert "deal-001/v1.rtf" not in targets, "v1.rtf's clean docling result IS cached"
+    assert not any(t.startswith("deal-002/") for t in targets), (
+        "control: a clean deal IS stage-cached, so the stage cache really was live"
+    )
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_timeout_recovery_whose_segmentation_fails_is_not_stage_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failed-row branch of the same rule: pdfplumber recovered v2.pdf
+    after a docling timeout, then LLM segmentation of the recovered text
+    raised SegmentationLLMError (a malformed model response), so the version
+    is recorded "failed" by the generic except branch. _compute_doc_result
+    never bound its own extractor_label (_llm_segment_file raised), so the
+    timed-out flag must reach it on the exception — the deal must not be
+    stage-cached, and the next default mine re-runs docling on v2.pdf.
+    deal-002 is the control proving the stage cache is live."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    _born_digital_pdf(
+        deal_dir / "v2.pdf",
+        ["1. Indemnification", "Alpha Corp shall hold Beta University harmless."],
+    )
+    control_dir = corpus_dir / "deal-002"
+    control_dir.mkdir()
+    _write_rtf(control_dir / "v1.rtf", _V1_BODY.replace("California", "Oregon"))
+
+    targets: list[str] = []
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd, _w=extraction.shutil.which: (
+            "/usr/bin/docling" if cmd == "docling" else None if cmd == "ocrmypdf" else _w(cmd)
+        ),
+    )
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_double(targets, ok_names={"v1.rtf"}))
+
+    def segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+        # Only v2.pdf's recovered text carries this sentence.
+        if "hold Beta University harmless" in canonical_text:
+            raise SegmentationLLMError("simulated malformed model response")
+        return _fake_segment_fn(canonical_text, blocks)
+
+    cache = ExtractionCache(out_dir / "extraction_cache.jsonl")
+
+    def mine() -> None:
+        mine_corpus(
+            corpus_dir=corpus_dir,
+            config=load_config(config_path),
+            taxonomy=load_taxonomy(_TAXONOMY_PATH),
+            out_dir=out_dir,
+            use_llm_segmentation=True,
+            llm_segment_fn=segment_fn,
+            progress=lambda _line: None,
+            extraction_cache=cache,
+        )
+
+    mine()
+    assert targets.count("deal-001/v2.pdf") == 1
+    assert "deal-002/v1.rtf" in targets
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = {d["document_id"]: d for d in manifest}["deal-001"]["version_ingest"]
+    assert [(r["status"], r["error"]) for r in rows] == [
+        ("ok", None),
+        ("failed", "SegmentationLLMError"),
+    ]
+    assert cache.get(deal_dir / "v2.pdf", extractor="docling") is None
+
+    targets.clear()
+    mine()
+    assert targets.count("deal-001/v2.pdf") == 1, (
+        "docling must be re-attempted on the timed-out version on the next default mine, "
+        "even though segmentation of its recovered text failed"
+    )
+    assert not any(t.startswith("deal-002/") for t in targets), (
+        "control: a clean deal IS stage-cached, so the stage cache really was live"
     )
