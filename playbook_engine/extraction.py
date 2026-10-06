@@ -124,6 +124,16 @@ Not in scope (see issue #78): OCR toggling for scanned PDFs (docling's OCR
 is enabled in a later slice) and Dockerfile packaging of the ``docling``
 binary (separate issue) — this module only shells out to it when present.
 
+Second OCR path and timeouts (issue #218): under a docling environment a PDF
+that still has no text after docling and the pdfplumber fallback is run
+through ``ocrmypdf --skip-text`` (tesseract, shipped in the same Docker
+image) and re-extracted before it is recorded as failed — see
+:func:`_retry_pdf_via_ocrmypdf`. :class:`ExtractionError` carries a
+closed-enum ``reason`` (:data:`FAILURE_TIMEOUT` / :data:`FAILURE_NO_TEXT`), and
+a no-text result after any timeout is never negative-cached, so the next run
+retries it. The legacy environment gets neither (it stays deterministic and
+container-free) but its no-text message for a PDF names the Docker runtime.
+
 ``ExtractionCache`` (issue #132): extraction (especially docling OCR over a
 scanned PDF) is the single most expensive step in the LLM-segmentation path —
 far more expensive than the LLM segmentation call itself, which
@@ -360,6 +370,36 @@ def _affected_by_normalized_docx_retry(value: CacheValue, context: Context) -> b
     return bool(reason == "backend-error")
 
 
+def _affected_by_pdf_ocr_retry(value: CacheValue, context: Context) -> bool | None:
+    """v3 -> v4 (issue #218): ``True`` only for the negative-cache entries a
+    second OCR path, or the never-cache-a-timeout rule, could change.
+
+    #218 made a PDF that yields no text under a docling environment retry once
+    through ``ocrmypdf --skip-text`` + pdfplumber (see
+    :func:`_retry_pdf_via_ocrmypdf`) before it is recorded as failed, and
+    stopped negative-caching timeouts altogether. A pre-#218 failure entry
+    cannot say whether it was a timeout (the stored value never carried a
+    reason) and was written by a run that had no second OCR path — so a
+    docling-environment PDF failure is exactly the entry that must be retried.
+    This is the case the real reference corpus hit: two scanned intermediate
+    drafts negative-cached "no text" and no re-run ever looked at them again.
+
+    Affected, i.e. invalidated:
+      - a PDF FAILURE entry under a ``"docling"`` environment.
+
+    Unaffected, i.e. kept:
+      - every SUCCESS entry (the retry only runs when there was no text).
+      - anything that is not a PDF (the retry is PDF-only; a DOCX/RTF that a
+        docling timeout pushed to the legacy adapter reads its text layer
+        deterministically, so its failure could not depend on the timeout).
+      - a failure under a ``"legacy"`` environment (no docling, so no timeout
+        and no OCR retry — the legacy path is kept deterministic).
+    """
+    if "error" not in value:
+        return False
+    return context.get("suffix") == ".pdf" and context.get("extractor_env") == "docling"
+
+
 #: The extraction cache's format ladder, oldest bump first. The head rung's
 #: version is the format entries are written under today.
 _EXTRACTION_CACHE_FORMAT_LADDER: tuple[CacheFormatStep, ...] = (
@@ -381,6 +421,15 @@ _EXTRACTION_CACHE_FORMAT_LADDER: tuple[CacheFormatStep, ...] = (
         ),
         affects=_affected_by_normalized_docx_retry,
     ),
+    CacheFormatStep(
+        version="4",
+        issue="#218",
+        summary=(
+            "a docling-environment PDF that yields no text is retried through "
+            "ocrmypdf before it is negative-cached, and timeouts are never cached"
+        ),
+        affects=_affected_by_pdf_ocr_retry,
+    ),
 )
 
 #: The format version entries are written under today — derived from the
@@ -401,13 +450,35 @@ _EXTRACTION_CACHE_STALE_VERSIONS: tuple[str, ...] = tuple(
 # ---------------------------------------------------------------------------
 
 
+#: :attr:`ExtractionError.reason` for a document that yielded no text after
+#: every extraction path this environment offers (issue #218). Negative-cached.
+FAILURE_NO_TEXT = "no-text"
+
+#: :attr:`ExtractionError.reason` for an extraction that hit a wall-clock cap
+#: (docling or ocrmypdf) and then yielded no text (issue #218). A timeout is
+#: a property of the RUN (machine load, a cold model download), not of the
+#: file's bytes, so it is NEVER negative-cached — the next run retries.
+FAILURE_TIMEOUT = "timeout"
+
+
 class ExtractionError(Exception):
     """Raised when a document cannot be extracted into a block stream.
 
     Covers unsupported file extensions, a missing ``pandoc``/``docling``
     binary, and extraction that yields no usable text (e.g. an empty/blank
     source or a failed/empty docling conversion).
+
+    ``reason`` (issue #218) is a closed enum safe to persist (it never embeds
+    a path or counterparty name, unlike ``str(exc)``): :data:`FAILURE_TIMEOUT`
+    when a docling/ocrmypdf subprocess hit its wall-clock cap,
+    :data:`FAILURE_NO_TEXT` when the document yielded no text after every
+    path was tried, or ``None`` for any other failure (bad extension, missing
+    binary, a crashed conversion that a fallback may still recover).
     """
+
+    def __init__(self, message: str = "", *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +571,20 @@ def detect_extractor(path: Path) -> str:
     visible via a suppressed ``logging.info`` line).
     """
     return "docling" if shutil.which("docling") is not None else "legacy"
+
+
+def ocrmypdf_available() -> bool:
+    """Whether the ``ocrmypdf`` second OCR path (issue #218) is on ``PATH``.
+
+    The single PATH check behind three things that must agree: whether
+    :func:`extract_blocks` can run :func:`_retry_pdf_via_ocrmypdf`, whether a
+    docling-environment PDF failure recorded WITHOUT that path still counts
+    once it appears (:meth:`ExtractionCache.get_failure`), and the per-deal
+    L1-L4 stage-cache config fingerprint (pipeline.mine_corpus), which must
+    bust when ocrmypdf is installed or removed exactly as it does for
+    :func:`detect_extractor`'s answer.
+    """
+    return shutil.which("ocrmypdf") is not None
 
 
 #: Valid values for ``extraction.extractor`` (config.py) / ``extract_blocks``'s
@@ -913,9 +998,24 @@ class ExtractionCache:
             return None
         if cached.get("extractor") != resolved:
             return None
+        if cached.get("ocrmypdf") is False and ocrmypdf_available():
+            # Issue #218: this failure was recorded when the second OCR path
+            # was NOT on PATH, so ocrmypdf never looked at the file. The key
+            # (bytes, format, environment) cannot see that, so the value
+            # carries it: now that ocrmypdf is present, the failure is no
+            # longer evidence the file is unreadable — ignore it and let the
+            # fresh attempt (and its own put/put_failure) replace it.
+            return None
         return str(cached["error"])
 
-    def put_failure(self, path: Path, message: str, extractor: str) -> None:
+    def put_failure(
+        self,
+        path: Path,
+        message: str,
+        extractor: str,
+        *,
+        ocrmypdf: bool | None = None,
+    ) -> None:
         """Store a failure marker for *path*'s current content (see get_failure).
 
         ``extractor`` here is the environment that FAILED — used for BOTH
@@ -926,11 +1026,17 @@ class ExtractionCache:
         negative-cache under the DOCLING environment, or every subsequent
         docling-environment lookup would miss and re-burn the full OCR
         timeout instead of hitting this negative cache).
+
+        ``ocrmypdf`` (issue #218): for a failure the ocrmypdf second OCR path
+        could have changed (a docling-environment PDF), whether that path was
+        on ``PATH`` for this attempt. Stored only when not ``None``; an entry
+        recorded with ``False`` stops counting in :meth:`get_failure` once
+        ocrmypdf is installed, so the file gets its second OCR pass.
         """
-        self._store.put(
-            _extraction_cache_payload(path, extractor),
-            {"error": message, "extractor": extractor},
-        )
+        value: dict[str, Any] = {"error": message, "extractor": extractor}
+        if ocrmypdf is not None:
+            value["ocrmypdf"] = ocrmypdf
+        self._store.put(_extraction_cache_payload(path, extractor), value)
 
 
 def extract_blocks(
@@ -1013,7 +1119,11 @@ def extract_blocks(
             path, extractor=environment, declared_extractor=extractor
         )
         if cached_failure is not None:
-            raise ExtractionError(f"{cached_failure} (cached failure — same extractor)")
+            # Only a no-text failure is ever negative-cached (timeouts never
+            # are — issue #218), so a replayed failure carries that reason.
+            raise ExtractionError(
+                f"{cached_failure} (cached failure — same extractor)", reason=FAILURE_NO_TEXT
+            )
 
     resolved = environment
     # Structured reason for why LEGACY ran, if it did (issue #81) — None
@@ -1022,11 +1132,19 @@ def extract_blocks(
     reason: str | None = None
     fallback_from: str | None = None
     detail: str | None = None
+    # Whether any subprocess in this attempt hit its wall-clock cap (issue
+    # #218). A no-text result after a timeout is never negative-cached.
+    timed_out = False
+    # Whether the ocrmypdf second OCR path could run for this attempt —
+    # recorded on a docling-environment PDF failure (issue #218) and left
+    # None for every failure that path could not have changed.
+    ocrmypdf_on_path: bool | None = None
     if resolved == "docling":
         _log.info("extract_blocks: using docling for %s", path)
         try:
             lines = _extract_docling_lines(path)
         except ExtractionError as exc:
+            timed_out = exc.reason == FAILURE_TIMEOUT
             # docling's per-format backends can fail on inputs the legacy
             # adapters handle fine — notably docling 2.x's DOCX backend raises
             # on tracked-changes/comment nodes (``etree.QName`` on a comment
@@ -1087,8 +1205,56 @@ def extract_blocks(
         # unavailable) or resolves to "docling", never reaching this branch.
         reason = "declared" if extractor == "legacy" else "env-missing"
 
+    if not lines and suffix == ".pdf" and environment == "docling":
+        # Second OCR path (issue #218). docling's own OCR produced nothing
+        # (empty/image-only Markdown, a crash, or a timeout) and pdfplumber
+        # found no text layer — before recording this version as failed, try
+        # ocrmypdf (tesseract), which ships in the same Docker image, and
+        # re-extract its output with pdfplumber. Scoped to the docling
+        # environment on purpose: the legacy environment stays a
+        # deterministic, container-free path whose output depends only on the
+        # bytes (see _resolve_extractor_env), and ocrmypdf is only guaranteed
+        # present where docling is (the Dockerfile installs both).
+        ocrmypdf_on_path = ocrmypdf_available()
+        try:
+            ocr_lines = _retry_pdf_via_ocrmypdf(path)
+        except ExtractionError as exc:
+            timed_out = timed_out or exc.reason == FAILURE_TIMEOUT
+            ocr_lines = []
+        if ocr_lines:
+            lines = ocr_lines
+            # The text came from ocrmypdf + pdfplumber, not docling: label it
+            # as a live per-file docling fallback so it is visible in
+            # version_ingest and counted against extraction.max_fallback,
+            # exactly like any other docling->legacy recovery.
+            resolved = "legacy"
+            reason = "backend-error"
+            fallback_from = "docling"
+            # IN-MEMORY ONLY (see ExtractorLabel.detail): embeds the path.
+            detail = f"docling yielded no text for {path}; recovered via ocrmypdf"
+
+    if not lines and timed_out:
+        # Never negative-cache a timeout (issue #218): it says something
+        # about this RUN (load, a cold model download, a too-tight cap), not
+        # about the file's bytes, and caching it would stop every later run
+        # from ever retrying — the failure mode behind two permanently-lost
+        # drafts on the reference corpus.
+        raise ExtractionError(
+            f"extraction timed out and yielded no text: {path} "
+            "(not cached — the next run will retry)",
+            reason=FAILURE_TIMEOUT,
+        )
+
     if not lines:
         message = f"extraction yielded no text: {path}"
+        if suffix == ".pdf" and environment == "legacy":
+            # Fail loud about WHY (issue #218): the legacy environment has no
+            # OCR at all, so a scanned PDF can never yield text here.
+            message += (
+                " — this looks like a scanned PDF with no text layer, and the "
+                "legacy extractor has no OCR; re-run in the Docker runtime "
+                "(make docker-run), which ships docling OCR and ocrmypdf"
+            )
         # Negative-cache the full failed attempt (docling OCR can burn its
         # whole per-file timeout) so later pipeline commands fail fast
         # instead of re-attempting per round — see get_failure for the
@@ -1115,12 +1281,17 @@ def extract_blocks(
         # the contrary. A refresh with no pre-existing success (first
         # attempt, or a prior same-key failure) still negative-caches as
         # before.
+        #
+        # ``ocrmypdf`` (issue #218): a docling-environment PDF failure records
+        # whether the second OCR path was on PATH, so installing ocrmypdf
+        # later (as `playbook doctor` advises) retries the file instead of
+        # replaying a failure ocrmypdf never had a chance to change.
         if cache is not None and not (
             refresh
             and cache.get(path, extractor=environment, declared_extractor=extractor) is not None
         ):
-            cache.put_failure(path, message, environment)
-        raise ExtractionError(message)
+            cache.put_failure(path, message, environment, ocrmypdf=ocrmypdf_on_path)
+        raise ExtractionError(message, reason=FAILURE_NO_TEXT)
 
     canonical_text, blocks = _build_stream(lines)
 
@@ -1239,6 +1410,77 @@ def _retry_docling_on_normalized_docx(path: Path) -> list[tuple[str, int]] | Non
             normalized_path.unlink(missing_ok=True)
 
 
+# Per-file wall-clock cap on the ocrmypdf second-OCR pass (issue #218) —
+# same reasoning and budget as _DOCLING_TIMEOUT_S below.
+_OCRMYPDF_TIMEOUT_S = 600
+
+# tesseract language for the ocrmypdf pass. Mirrors _DOCLING_OCR_LANG (both
+# name English as "eng"); change the two together per corpus language.
+_OCRMYPDF_LANG = "eng"
+
+
+def _retry_pdf_via_ocrmypdf(path: Path) -> list[tuple[str, int]]:
+    """Second OCR path for a PDF docling could not read (issue #218).
+
+    Runs ``ocrmypdf --skip-text`` (tesseract; pages that already carry text
+    are left alone) into a temp PDF and re-extracts that with pdfplumber via
+    :func:`_extract_pdf_lines`, so page numbers survive. Returns the extracted
+    lines — empty when ocrmypdf is not on ``PATH``, fails, or still finds no
+    text; a logged, non-fatal outcome, since the caller then records the
+    version as failed exactly as before this path existed.
+
+    Raises:
+        ExtractionError: with ``reason=FAILURE_TIMEOUT`` when ocrmypdf hits
+            :data:`_OCRMYPDF_TIMEOUT_S`, so the caller can keep a timeout out
+            of the negative cache.
+    """
+    if not ocrmypdf_available():
+        _log.warning(
+            "extract_blocks: %s yielded no text and ocrmypdf is not on PATH — "
+            "no second OCR path available (the Docker runtime ships it)",
+            path,
+        )
+        return []
+    with tempfile.TemporaryDirectory(prefix="ocrmypdf-") as tmpdir:
+        ocr_pdf = Path(tmpdir) / "ocr.pdf"
+        try:
+            subprocess.run(
+                [
+                    "ocrmypdf",
+                    "--skip-text",
+                    "--language",
+                    _OCRMYPDF_LANG,
+                    # Plain PDF output: skips the PDF/A (ghostscript) pass,
+                    # which adds time and can fail on its own; only the text
+                    # layer matters here.
+                    "--output-type",
+                    "pdf",
+                    "--quiet",
+                    str(path),
+                    str(ocr_pdf),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=_OCRMYPDF_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ExtractionError(
+                f"ocrmypdf timed out after {_OCRMYPDF_TIMEOUT_S}s on {path}",
+                reason=FAILURE_TIMEOUT,
+            ) from exc
+        except (subprocess.CalledProcessError, OSError) as exc:
+            _log.warning("extract_blocks: ocrmypdf failed on %s (%s)", path, exc)
+            return []
+        if not ocr_pdf.is_file():
+            return []
+        try:
+            return _extract_pdf_lines(ocr_pdf)
+        except ExtractionError as exc:
+            _log.warning("extract_blocks: cannot read ocrmypdf output for %s (%s)", path, exc)
+            return []
+
+
 # OCR language passed to ``docling convert --ocr-lang``. English by default;
 # docling's own default is Chinese, which corrupts Latin-script scans.
 _DOCLING_OCR_LANG = "eng"
@@ -1287,7 +1529,8 @@ def _run_docling(path: Path, outdir: Path) -> str:
         )
     except subprocess.TimeoutExpired as exc:
         raise ExtractionError(
-            f"docling timed out after {_DOCLING_TIMEOUT_S}s converting {path}"
+            f"docling timed out after {_DOCLING_TIMEOUT_S}s converting {path}",
+            reason=FAILURE_TIMEOUT,
         ) from exc
     except subprocess.CalledProcessError as exc:
         raise ExtractionError(f"docling failed to convert {path}: {exc.stderr.strip()}") from exc

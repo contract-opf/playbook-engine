@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -181,6 +182,38 @@ class TestArtifactStoreGetOrCompute:
         assert store.get_or_compute("key-x", dict) == {"a": 1}
         assert store.get_or_compute("key-y", dict) == {"b": 2}
 
+    def test_cacheable_false_returns_value_without_persisting(self, tmp_path: Path) -> None:
+        """Issue #218: a result that reflects the run, not the key's inputs (a
+        timed-out version), is returned but never stored, so the next call
+        recomputes. ``cacheable`` is asked AFTER compute_fn runs."""
+        cache_dir = tmp_path / ".cache"
+        store = ArtifactStore(cache_dir)
+        calls: list[int] = []
+        timed_out: list[str] = []
+
+        def _fn() -> dict[str, int] | None:
+            calls.append(1)
+            timed_out.append("v2")
+            return None
+
+        def _cacheable() -> bool:
+            return not timed_out
+
+        assert store.get_or_compute("k", _fn, cacheable=_cacheable) is None
+        timed_out.clear()
+        assert store.get_or_compute("k", _fn, cacheable=_cacheable) is None
+        assert len(calls) == 2
+        assert store.miss_count == 2 and store.hit_count == 0
+        # ...and nothing reached disk for a fresh process to replay.
+        assert ArtifactStore(cache_dir).get_or_compute("k", lambda: {"fresh": 1}) == {"fresh": 1}
+
+    def test_cacheable_true_persists_as_before(self, tmp_path: Path) -> None:
+        store = ArtifactStore(tmp_path / ".cache")
+        store.get_or_compute("k", lambda: {"v": 1}, cacheable=lambda: True)
+        calls: list[int] = []
+        assert store.get_or_compute("k", lambda: calls.append(1) or {}) == {"v": 1}
+        assert calls == []
+
 
 class TestArtifactStoreIndex:
     """AC-cache-4: index.json persists key→path mappings."""
@@ -331,12 +364,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         # First run — primes the cache.
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
@@ -367,12 +402,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -395,9 +432,11 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             compute_calls.append(key)
-            return original_get_or_compute(self, key, compute_fn)
+            return original_get_or_compute(self, key, compute_fn, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir, no_cache=True)
@@ -428,12 +467,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -460,12 +501,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -492,12 +535,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -536,12 +581,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -587,12 +634,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir)
@@ -618,12 +667,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with patch.object(ArtifactStore, "get_or_compute", _tracking_get_or_compute):
             self._run_mine(corpus_dir, config_path, out_dir, normalize_trail_across_versions=True)
@@ -646,12 +697,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with (
             patch.object(pipeline_module, "PROMPT_VERSION", "v2-bumped"),
@@ -675,12 +728,14 @@ class TestPipelineIncrementality:
         compute_calls: list[str] = []
         original_get_or_compute = ArtifactStore.get_or_compute
 
-        def _tracking_get_or_compute(self: ArtifactStore, key: str, compute_fn: object) -> object:
+        def _tracking_get_or_compute(
+            self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
+        ) -> object:
             def _counted(*args: object, **kwargs: object) -> object:
                 compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
-            return original_get_or_compute(self, key, _counted)
+            return original_get_or_compute(self, key, _counted, **kwargs)
 
         with (
             patch.object(pipeline_module, "SCHEMA_HASH", "deadbeef-bumped"),

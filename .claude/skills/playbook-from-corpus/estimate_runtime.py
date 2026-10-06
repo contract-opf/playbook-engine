@@ -72,7 +72,12 @@ import sys
 # correct output for the SAME file/environment changed). Same rationale as
 # the #81 bump above: without moving in lockstep, this probe would keep
 # matching pre-#84 keys the real engine no longer does.
-_EXTRACTION_CACHE_FORMAT_VERSION = "3"
+#
+# Bumped to "4" alongside extraction._EXTRACTION_CACHE_FORMAT_VERSION (issue
+# #218: a docling-environment PDF with no text now gets an ocrmypdf retry
+# before it is negative-cached, and timeouts are never cached). Same lockstep
+# rationale as above.
+_EXTRACTION_CACHE_FORMAT_VERSION = "4"
 
 # Per-version wall-clock (seconds), docling on CPU. Born-digital = model
 # cold-load + convert; scanned = the same plus RapidOCR over page images,

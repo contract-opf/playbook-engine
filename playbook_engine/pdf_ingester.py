@@ -8,7 +8,14 @@ Extraction strategy (in order):
      is called.  The adapter is injected at call time so callers can plug in
      Textract, Azure Document Intelligence, or a local engine (Tesseract via
      pytesseract) without changing this module.  A ``NullOCRAdapter`` is
-     provided for testing and as a no-op placeholder.
+     provided as the no-OCR placeholder, and it is what the deterministic
+     segmenter uses in EVERY runtime (``_ingest_file_tracked`` passes no
+     adapter) — Docker included.  It never silently degrades: a PDF with no
+     usable text layer under ``NullOCRAdapter`` raises
+     :class:`NoOCRRuntimeError` instead of returning an empty tree (issue
+     #218).  OCR (docling plus ocrmypdf) only runs on the ``extract_blocks``
+     path: the Docker runtime with ``segmentation.agent: true`` or
+     ``segmentation.llm: true``.
 
 Structure detection:
   PDF text carries no style metadata, so clause structure is detected
@@ -112,6 +119,21 @@ class PdfIngesterError(ValueError):
     """Raised on unrecoverable parse failures."""
 
 
+class NoOCRRuntimeError(PdfIngesterError):
+    """A PDF has no usable text layer and this ingest path has no OCR (issue #218).
+
+    ``NullOCRAdapter`` is the deterministic segmenter's adapter in every
+    runtime, so this is raised in Docker too; the message points at the
+    ``extract_blocks`` path (``segmentation.agent``/``segmentation.llm``),
+    the only one that runs docling OCR and ocrmypdf.
+
+    Raised instead of returning an empty tree, which used to be the only
+    signal (``MIN_TEXT_CHARS`` was the sole tripwire). A subclass of
+    :class:`PdfIngesterError` so every existing per-version failure handler
+    still catches it; the pipeline records only the exception type name.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -131,6 +153,12 @@ def ingest_pdf(
         version:      Version label.
         ocr_adapter:  OCR back-end for scanned/image PDFs.  Defaults to
                       ``NullOCRAdapter`` when omitted.
+
+    Raises:
+        PdfIngesterError:  the file is missing or cannot be opened.
+        NoOCRRuntimeError: the PDF has fewer than ``MIN_TEXT_CHARS`` characters
+                           of text layer and *ocr_adapter* is (or defaults to)
+                           ``NullOCRAdapter`` — see issue #218.
     """
     if not path.is_file():
         raise PdfIngesterError(f"PDF file not found: {path}")
@@ -181,6 +209,22 @@ def _extract_text(path: Path, ocr_adapter: OCRAdapter) -> tuple[str, str, float]
 
     if len(text.strip()) >= MIN_TEXT_CHARS:
         return text, "text-layer", 1.0
+
+    if isinstance(ocr_adapter, NullOCRAdapter):
+        # Fail loud (issue #218): NullOCRAdapter can only ever return "", so
+        # continuing would hand back an empty tree for what is almost always
+        # a scanned PDF. NullOCRAdapter is the deterministic segmenter's
+        # adapter in EVERY runtime (Docker included), so the fix is a
+        # different ingest path, not a different runtime alone.
+        raise NoOCRRuntimeError(
+            f"{path.name} has no usable text layer (fewer than {MIN_TEXT_CHARS} "
+            "characters) — it is probably a scanned PDF, and the deterministic "
+            "segmenter has no OCR in any runtime, Docker included. OCR (docling "
+            "plus ocrmypdf) only runs on the extract_blocks path: run the corpus "
+            "in the Docker runtime (make docker-build && make docker-run) with "
+            "segmentation.agent: true in config.yaml (no API key needed) or "
+            "segmentation.llm: true, or pass a real OCRAdapter to ingest_pdf."
+        )
 
     # Sparse or no text layer — fall back to OCR
     ocr_text, ocr_conf = ocr_adapter.extract_text(path)

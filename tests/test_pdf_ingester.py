@@ -22,6 +22,8 @@ except ImportError:
     _FPDF_AVAILABLE = False
 
 from playbook_engine.pdf_ingester import (
+    MIN_TEXT_CHARS,
+    NoOCRRuntimeError,
     NullOCRAdapter,
     OCRAdapter,
     PdfIngesterError,
@@ -317,7 +319,9 @@ def test_ingest_source_file_recorded(tmp_path: Path) -> None:
 
 
 def test_ingest_version_recorded(tmp_path: Path) -> None:
-    pdf_path = _make_pdf(paragraphs=["1. Terms", "Body."], tmp_path=tmp_path)
+    # Enough text to clear MIN_TEXT_CHARS — below it, the no-OCR runtime now
+    # raises (issue #218) rather than returning an empty tree.
+    pdf_path = _make_pdf(paragraphs=["1. Terms", "Body of the terms clause."], tmp_path=tmp_path)
     result = ingest_pdf(pdf_path, "doc-006", "draft-3")
     assert result.tree.version == "draft-3"
 
@@ -378,12 +382,61 @@ def test_image_pdf_ocr_produces_clause_tree(tmp_path: Path) -> None:
     )
 
 
-def test_no_ocr_adapter_defaults_to_null(tmp_path: Path) -> None:
-    """When ocr_adapter=None and text layer is empty, result uses OCR with confidence=0."""
+def test_no_ocr_adapter_fails_loud_on_scanned_pdf(tmp_path: Path) -> None:
+    """Issue #218: ocr_adapter=None defaults to NullOCRAdapter, which can only
+    ever return "" — a PDF with no text layer must raise a clear error naming
+    the Docker runtime instead of silently yielding an empty OCR result."""
+    pdf_path = _make_image_pdf(tmp_path, name="scan-003.pdf")
+    with pytest.raises(NoOCRRuntimeError, match="Docker runtime") as exc_info:
+        ingest_pdf(pdf_path, "scan-003", "v1")
+    message = str(exc_info.value)
+    assert "scan-003.pdf" in message
+    assert "no OCR in any runtime" in message
+    # Still a PdfIngesterError, so every existing per-version handler catches it.
+    assert isinstance(exc_info.value, PdfIngesterError)
+
+
+def test_no_ocr_message_names_the_segmentation_setting_not_just_docker(tmp_path: Path) -> None:
+    """NullOCRAdapter is the deterministic segmenter's adapter in EVERY
+    runtime — Docker included — so "run it in Docker" alone would just raise
+    this again there. The message must say OCR only runs on the
+    extract_blocks path and name the segmentation settings that reach it."""
+    pdf_path = _make_image_pdf(tmp_path, name="scan-007.pdf")
+    with pytest.raises(NoOCRRuntimeError) as exc_info:
+        ingest_pdf(pdf_path, "scan-007", "v1")
+    message = str(exc_info.value)
+    assert "deterministic segmenter has no OCR in any runtime, Docker included" in message
+    assert "extract_blocks path" in message
+    assert "docling plus ocrmypdf" in message
+    assert "segmentation.agent: true" in message
+    assert "no API key needed" in message
+    assert "segmentation.llm: true" in message
+
+
+def test_explicit_null_ocr_adapter_also_fails_loud(tmp_path: Path) -> None:
     pdf_path = _make_image_pdf(tmp_path)
-    result = ingest_pdf(pdf_path, "scan-003", "v1")
-    assert result.method == "ocr"
-    assert result.confidence == 0.0
+    with pytest.raises(NoOCRRuntimeError, match="Docker runtime"):
+        ingest_pdf(pdf_path, "scan-005", "v1", ocr_adapter=NullOCRAdapter())
+
+
+def test_sparse_text_layer_below_threshold_fails_loud_without_ocr(tmp_path: Path) -> None:
+    """The tripwire is MIN_TEXT_CHARS, not "zero text": a scan whose only text
+    layer is a stray page stamp still has no usable text."""
+    stamp = "Page 1"
+    assert len(stamp) < MIN_TEXT_CHARS
+    pdf_path = _make_pdf(paragraphs=[stamp], tmp_path=tmp_path)
+    with pytest.raises(NoOCRRuntimeError):
+        ingest_pdf(pdf_path, "scan-006", "v1")
+
+
+def test_text_layer_at_threshold_needs_no_ocr(tmp_path: Path) -> None:
+    """A born-digital PDF with enough text never touches the OCR path, so the
+    missing OCR engine is irrelevant and no error is raised."""
+    body = "Party A shall deliver the goods."
+    assert len(body) >= MIN_TEXT_CHARS
+    pdf_path = _make_pdf(paragraphs=[body], tmp_path=tmp_path)
+    result = ingest_pdf(pdf_path, "digital-001", "v1")
+    assert result.method == "text-layer"
 
 
 def test_ocr_adapter_called_with_correct_path(tmp_path: Path) -> None:
@@ -454,11 +507,21 @@ def test_char_span_start_lt_end(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_empty_pdf_produces_empty_tree(tmp_path: Path) -> None:
-    """An empty PDF (no text) with NullOCRAdapter should yield an empty tree."""
+def test_empty_pdf_with_null_ocr_raises_instead_of_empty_tree(tmp_path: Path) -> None:
+    """An empty PDF (no text) with NullOCRAdapter used to yield an empty tree
+    silently; since issue #218 it raises."""
     pdf_path = _make_image_pdf(tmp_path)
-    result = ingest_pdf(pdf_path, "empty-001", "v1")
-    # NullOCRAdapter returns "" so no nodes should be produced
+    with pytest.raises(NoOCRRuntimeError):
+        ingest_pdf(pdf_path, "empty-001", "v1")
+
+
+def test_empty_ocr_result_from_a_real_adapter_yields_empty_tree(tmp_path: Path) -> None:
+    """A REAL adapter that ran and found nothing is not a missing runtime: the
+    empty tree is returned and the pipeline's empty-tree guard (issue #82)
+    records the version as failed."""
+    pdf_path = _make_image_pdf(tmp_path)
+    result = ingest_pdf(pdf_path, "empty-002", "v1", ocr_adapter=_FakeOCRAdapter("", 0.1))
+    assert result.method == "ocr"
     assert result.tree.nodes == []
 
 

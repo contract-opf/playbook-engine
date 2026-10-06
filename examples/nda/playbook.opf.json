@@ -3986,7 +3986,8 @@
             "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       },
       {
         "document_id": "delta-ventures",
@@ -4024,7 +4025,8 @@
             "sha256": "sha256:78b60f1c67bfa02587eba740f15251d67e47b051ee64624781a34804f98a505b",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       },
       {
         "document_id": "epsilon-systems",
@@ -4073,7 +4075,8 @@
             "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       },
       {
         "document_id": "gamma-holdings",
@@ -4122,7 +4125,8 @@
             "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       },
       {
         "document_id": "theta-logistics",
@@ -4160,7 +4164,8 @@
             "sha256": "sha256:262350199981d164c6255d524956a4f6ae26923fa016d1d4c2199fc7c5f5c9c7",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       },
       {
         "document_id": "zeta-diagnostics",
@@ -4209,7 +4214,8 @@
             "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d",
             "media_type": "application/rtf"
           }
-        ]
+        ],
+        "x_mixed_extractors": false
       }
     ],
     "stats": {
@@ -5239,7 +5245,7 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:44c0c19fc4e9172a1ba133d25e979b361744909addc57b080e47a92d1ae8cb6e",
+    "content_hash": "sha256:1bcc7bbb31de1212ff26a65c09e8111ba208b0a1687dbf236d2083446d5d3d84",
     "section_digests": {
       "evidence": "sha256:26b75c9202d40ff4c67b39588973d04280031677e56a462e1ffb682e771391f1",
       "posture": "sha256:f4ff35bd5b08a4fbed4ba3ac5546d4c6bad73e3909442bb3789f4f62263c3873",

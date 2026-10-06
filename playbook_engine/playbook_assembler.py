@@ -149,6 +149,27 @@ def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[s
     }
 
 
+def _has_mixed_extractors(version_ingest: list[Any]) -> bool:
+    """``True`` when this deal's successfully-ingested versions were produced by
+    more than one extractor (issue #218).
+
+    Counts the distinct non-null ``extractor`` labels across ``status == "ok"``
+    entries only: a failed version contributed no text, so it cannot skew how
+    the surviving versions' clauses align. On the LLM/agent path the labels
+    are ``"docling"``/``"legacy"`` (a docling->legacy fallback on some drafts
+    is the mechanism behind #122's partition artifacts); on the deterministic
+    path they are the file suffix, so a trail mixing DOCX drafts with a PDF
+    signed copy is — truthfully — mixed there too, since each format has its
+    own structure detector.
+    """
+    extractors = {
+        vi.get("extractor")
+        for vi in version_ingest
+        if isinstance(vi, dict) and vi.get("status") == "ok" and vi.get("extractor")
+    }
+    return len(extractors) > 1
+
+
 def _sanitize_corpus_documents_for_schema(
     corpus_documents: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -159,8 +180,27 @@ def _sanitize_corpus_documents_for_schema(
     #216). Every other field on each document dict (and every other key on
     each ``version_ingest`` entry within ``_VERSION_INGEST_SCHEMA_KEYS``)
     passes through unchanged — only ``version_ingest`` entries are rebuilt,
-    and only to drop keys outside the whitelist; nothing else this
-    function's caller relies on is touched.
+    and only to drop keys outside the whitelist.
+
+    Two document-level ``x_`` extensions are added, computed from the
+    UNSTRIPPED entries, so a consumer can see which trails mixed extractors
+    (issue #218) without the per-version ``reason`` that every published
+    schema's ``version_ingest.items`` (``additionalProperties: false``, no
+    ``x_`` pattern — 0.2, 0.3 and 0.4 alike) cannot carry. Both go under the
+    ``^x_`` pattern ``corpus.documents.items`` already sanctions in every
+    version, so no published schema changes; a future format version is
+    where they would become first-class fields:
+
+    - ``x_mixed_extractors`` (bool, always present when ``version_ingest`` is
+      a list): see :func:`_has_mixed_extractors`.
+    - ``x_ingest_reason`` (list, present only when at least one version has a
+      non-null reason): ``version_ingest[i].reason`` for every *i*, in the
+      same order — index-aligned rather than keyed by version label, so it
+      carries nothing ``publisher.py``'s version-label scrub would have to
+      rewrite. Values are closed enums: the ``ExtractorLabel`` reasons
+      (``"env-missing"``, ``"backend-error"``, ``"declared"``) for a mined
+      version, the ``ExtractionError`` reasons (``"timeout"``, ``"no-text"``)
+      for a failed one, or ``null``.
     """
     sanitized: list[dict[str, Any]] = []
     for doc in corpus_documents:
@@ -171,6 +211,10 @@ def _sanitize_corpus_documents_for_schema(
             sanitized.append(doc)
             continue
         new_doc = dict(doc)
+        new_doc["x_mixed_extractors"] = _has_mixed_extractors(version_ingest)
+        reasons = [vi.get("reason") if isinstance(vi, dict) else None for vi in version_ingest]
+        if any(r is not None for r in reasons):
+            new_doc["x_ingest_reason"] = reasons
         new_doc["version_ingest"] = [
             (
                 {k: v for k, v in vi.items() if k in _VERSION_INGEST_SCHEMA_KEYS}

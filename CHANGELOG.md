@@ -10,6 +10,27 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Extraction reliability on scanned and slow documents (issue #218).** On
+  the `extract_blocks` path (docling environment), a PDF that docling and
+  pdfplumber return no text for gets a second OCR pass through
+  `ocrmypdf --skip-text` (tesseract, already in the Docker image) before it
+  is recorded as failed. A failure now carries a closed-enum reason
+  (`timeout` or `no-text`) in `version_ingest[].reason`. A timeout is never
+  cached, neither in the extraction cache nor in the per-deal L1-L4 stage
+  cache (`out/.cache`), so the next `mine` retries it; a docling-environment
+  no-text failure recorded while `ocrmypdf` was absent stops counting once
+  it is installed, and `ocrmypdf` availability is part of the stage-cache
+  fingerprint. The deterministic segmenter, which has no OCR in any runtime,
+  now raises `NoOCRRuntimeError` on a PDF with no text layer instead of
+  returning an empty tree, and the message names `segmentation.agent: true`
+  / `segmentation.llm: true` on the Docker runtime. The published
+  `corpus.documents[]` gains two `x_` extensions (no schema file changes):
+  `x_mixed_extractors` (the deal's ingested versions came through more than
+  one extractor) and `x_ingest_reason` (per-version reasons, index-aligned
+  with `version_ingest`). `playbook doctor` lists `ocrmypdf`. The extraction
+  cache format moves to 4 (only docling-environment PDF failures are
+  invalidated) and `_VERSION_INGEST_REASON_VERSION` to 4.
+
 - **The origin test for text removed before signing is the exact standard
   check (issue #229).** Whether a first-draft clause struck before signing
   was our standard language (our concession, `conceded_before_signing`) or
