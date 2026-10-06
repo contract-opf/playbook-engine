@@ -244,7 +244,7 @@ def test_find_precedent_refused_returns_asks_with_their_record() -> None:
     # A clause with no refused asks yields none.
     nda = _load(_NDA)
     assert find_precedent(nda, "governing_law", refused=True) == []
-    assert len(find_precedent(nda, "compelled_disclosure", refused=True)) == 1
+    assert len(find_precedent(nda, "residuals", refused=True)) == 1
 
 
 def test_find_precedent_limit_clause_id_and_errors() -> None:

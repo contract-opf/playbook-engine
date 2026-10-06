@@ -279,7 +279,15 @@ _MEDIA_TYPES: dict[str, str] = {
 # "x_alignment_confidence". A warm cache would otherwise replay the old
 # position-zipped alignments, subset-rule reversals and unclassified
 # children forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 13
+#
+# v14 (issue #232): a move row the global move phase chained from a later
+# draft onwards is now extended backwards, by the bucket path's bind rule, to
+# an earlier draft's unmatched copy of the clause, so a clause edited in an
+# early round and then carried into the signed copy is one modified row
+# instead of a removed + added pair. Alignments, diffs, reversals and
+# observations change for identical source content; a warm cache would
+# otherwise replay the old fabricated concessions and refused asks forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 14
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage

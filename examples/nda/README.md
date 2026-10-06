@@ -47,13 +47,9 @@ normalization, never a judged verdict), whether the clause moved, and the
 asks refused before signing. It demonstrates a real refused ask from a
 proposed-then-reversed round-trip (a `residuals` clause inserted in v2 of the
 three-version `zeta-diagnostics` deal and struck again before signing -- the
-reversal detector needs >=3 versions on a deal to observe this);
-non-standard language struck before signing (the `epsilon-systems` first
-draft's compelled-disclosure clause, which lacked the notice obligation the
-signed copy restores) as a refused ask; our own standard clauses struck
-before signing (standard of care, governing law and venue in
-`beta-industries`, confidentiality of discussions and breach notice in
-`gamma-holdings`) as precedents whose `opening_text` is our standard and
+reversal detector needs >=3 versions on a deal to observe this); our own
+standard clauses struck before signing (standard of care and venue in
+`beta-industries`) as precedents whose `opening_text` is our standard and
 whose `standard` is false -- our concession, never a refused ask; and no
 stance, risk or deviation verdict anywhere (the consumer model does the
 judging; each clause's `n_signed_standard` of `n_deals` is the fact it reads).
@@ -67,20 +63,27 @@ $50,000 liability cap that appears in three of the six deals, introduced by
 the counterparty in two of them). `playbook project --opf-version 0.3` still
 projects the same store into the previous (0.3) shape for one release.
 `corpus.stats.dropped_observations` counts removed text that yields no
-precedent. One of `zeta-diagnostics`' three is its first draft's
-unclassified exclusions paragraph, dropped as `removed_origin_undetermined`
-(an unclassified clause has no standard to test its origin against). Before
-issue #222 the aligner paired that paragraph with the signed draft's
-unrelated compelled-disclosure paragraph and diffed the two as one
-"modified" clause. That mispairing is gone, but the paragraph is still
-stranded -- incorrect behaviour tracked in issue #232 (move rows are never
-extended backwards by bind similarity). The global move phase first
-matches the second and signed drafts' identical exclusions paragraphs into
-one row (`content_exact`), which takes them out of the bucket path, so the
-bucket path has nothing left to bind the first draft's paragraph to,
-although its text matches the second draft's copy (Jaccard 0.79). The deal
-therefore still shows a same-deal removed/added pair with identical opening
-text in its first round.
+precedent.
+A clause edited in an early round and then carried unchanged into the
+signed copy is one `modified` clause (issue #232). The global move phase
+chains the identical later copies into one row first, and that row is then
+extended backwards, one draft at a time, under the bucket path's bind rule.
+Before #232 the earlier copies were left with nothing to bind to, and the
+deal showed a same-deal removed/added pair. Six clauses in this corpus are
+now one row each. Five were edited in the first round: governing law in
+`beta-industries` (Delaware to New York); confidentiality of discussions
+and breach notice in `gamma-holdings`; the `epsilon-systems` first draft's
+compelled-disclosure clause, which lacked the notice proviso the later
+drafts add; and the `zeta-diagnostics` first draft's unclassified
+exclusions paragraph (Jaccard 0.79 to the second draft's copy). The sixth
+is `beta-industries`' survival period: three years, then five, then three
+again. The removed/added pair had turned the opening text into a fabricated
+concession (`beta-industries` governing law, `gamma-holdings`), a
+fabricated refused ask (`epsilon-systems`), or a dropped observation
+(`removed_origin_undetermined` in `zeta-diagnostics`, `survives_in_terminal`
+in `beta-industries`). The four precedents that changed now have `rounds` 1
+and `opening_text` null, because the store records an opening text only
+for a clause struck before signing.
 Below the 0.70 Jaccard threshold the aligner binds two drafts only as a
 localized edit: Jaccard of at least 0.5 and exactly one contiguous edit span.
 `beta-industries`' second draft struck the independent-development exclusion
