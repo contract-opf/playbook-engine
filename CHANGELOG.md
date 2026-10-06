@@ -10,6 +10,26 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Signed anchors and version order from the documents themselves (issue
+  #221).** Placeholder signature lines never count as signed: a `By:` value
+  that is a bracketed placeholder (`[Name]`, `<Signature>`), `Name:`/
+  `Title:`/`Date:` label residue, or has no run of two or more letters is
+  blank, and `/s/ [Name]` is not an electronic signature. A section whose
+  only filled values are generic captions (`By: Authorized Signatory`) is no
+  longer `dual_signatures` at 0.90: it reads as not signed at 0.60 and
+  escalates to a wired `signed_judge`. Each version's own timestamp (DOCX
+  core-properties `modified`/`created` and the latest tracked-change
+  `w:date`; PDF `/ModDate`) now seeds `order_versions`, so an unsigned
+  deal's chain direction is no longer a lexicographic tie-break; `hints.yaml`
+  timestamps still override per version, and the trail records
+  `version_timestamps`. A deal with no detected signed copy gets no
+  reversal detection and no `proposed_then_reversed` observations (counted
+  under `dropped_observations` reason `refused_ask_no_signed_copy`), so its
+  OPF 0.4 precedent records (`signed: false`) carry no `refused_asks`; the
+  per-clause count of unsigned deals is what `evidence.precedent[].signed`
+  already implies. No schema change. The L1-L4 stage cache moves to
+  `_DEVIATION_VS_TEMPLATE_VERSION` 12.
+
 - **Extraction reliability on scanned and slow documents (issue #218).** On
   the `extract_blocks` path (docling environment), a PDF that docling and
   pdfplumber return no text for gets a second OCR pass through

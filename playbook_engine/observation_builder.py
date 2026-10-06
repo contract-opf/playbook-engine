@@ -7,11 +7,12 @@ precedent (issue #216): each document contributes exactly one terminal
 version's own text, plus one ``proposed_then_reversed`` row per reversal.
 A clause removed before signing (no terminal slot) is classified by the
 ORIGIN of its text: our standard language struck is one
-``conceded_before_signing`` row (only when the deal has a detected
-executed copy), non-standard language struck is one
-``proposed_then_reversed`` row, and removed text that survives in the
-terminal, whose origin is undetermined, or that is our standard in a deal
-with no detected executed copy produces no row at all — it is counted in
+``conceded_before_signing`` row, non-standard language struck is one
+``proposed_then_reversed`` row — both only when the deal has a detected
+executed copy (issue #221: an unsigned deal records no refused asks) — and
+removed text that survives in the terminal, whose origin is undetermined,
+or that would be a concession or refused ask in a deal with no detected
+executed copy produces no row at all — it is counted in
 ``corpus.stats.dropped_observations``. See ``build_observations``.
 
 Each observation captures:
@@ -29,7 +30,8 @@ Each observation captures:
     otherwise
   - Provenance: whose paper the document is on (OPF §2.2)
   - Outcome: "signed", "unsigned", "proposed_then_reversed" (from reversal
-    detector, or a non-standard clause removed before signing), or
+    detector, or a non-standard clause removed before signing — a deal with
+    a detected executed copy only, issue #221), or
     "conceded_before_signing" (our standard language removed before signing
     in a deal with a detected executed copy; engine-internal, never an OPF
     outcome). A terminal row is "unsigned" when no version was detected as
@@ -744,6 +746,18 @@ DROPPED_ORIGIN_UNDETERMINED = "removed_origin_undetermined"
 #: here (surfaced in ``corpus.stats.dropped_observations``).
 DROPPED_STANDARD_REMOVED_UNSIGNED = "removed_standard_no_signed_copy"
 
+#: ``dropped`` counter key (issue #221): a would-be refused ask — a removed
+#: row whose text is NON-standard (their) language, or a ``ReversalRecord``
+#: passed in — in a deal with no detected executed copy
+#: (``has_signed_copy=False``). With no signed terminal the "last" version is
+#: only the last draft of a content-derived (for an unsigned deal often
+#: tie-broken) order, so "proposed, then struck before signing" is not
+#: established: an unsigned two-draft deal would otherwise report "we refused
+#: X" where X was simply the later draft. It produces no observation — an
+#: unsigned deal's precedent records carry no ``refused_asks`` — and is
+#: counted here (surfaced in ``corpus.stats.dropped_observations``).
+DROPPED_REFUSED_UNSIGNED = "refused_ask_no_signed_copy"
+
 #: Outcome of a removed-before-signing row whose text is OUR standard
 #: language (issue #216, owner decision 2026-09-13 (b): a provision's origin
 #: decides, never the deal's paper side). Striking our own standard before
@@ -990,9 +1004,12 @@ def build_observations(
       ``DROPPED_STANDARD_REMOVED_UNSIGNED``: a deal never shown to be
       executed is never evidence of a concession;
     - non-standard (counterparty-originated) language →
-      ``"proposed_then_reversed"``: their refused ask. Like a
-      ``ReversalRecord`` this is within-trail negotiation history, so it
-      holds whether or not the deal has a detected executed copy;
+      ``"proposed_then_reversed"``: their refused ask — but only when
+      *has_signed_copy*. In a deal with no detected executed copy (issue
+      #221) there is no signed terminal to have been refused before, so it
+      produces no observation and is counted in *dropped* under
+      ``DROPPED_REFUSED_UNSIGNED`` (as is every *reversals* record passed
+      for such a deal);
     - no standard to compare against (unclassified, or no standard text for
       the taxonomy_id) → no observation, counted in *dropped* under
       ``DROPPED_ORIGIN_UNDETERMINED``.
@@ -1043,14 +1060,15 @@ def build_observations(
                                   no observation and is counted under
                                   ``DROPPED_STANDARD_REMOVED_UNSIGNED``, so
                                   such a deal never contributes accepted or
-                                  conceded evidence. Reversals, and removed
-                                  non-standard (their) language, keep
-                                  ``"proposed_then_reversed"`` regardless —
-                                  that label describes within-trail
-                                  negotiation history (something was
-                                  proposed, then struck by a later draft),
-                                  which holds independent of whether the
-                                  final draft was ever executed.
+                                  conceded evidence. Nor refused-ask evidence
+                                  (issue #221): reversals and removed
+                                  non-standard (their) language produce no
+                                  ``"proposed_then_reversed"`` observation and
+                                  are counted under
+                                  ``DROPPED_REFUSED_UNSIGNED`` — with no
+                                  signed terminal, "struck before signing" is
+                                  not established (the last draft of an
+                                  unsigned deal is not an executed copy).
         attributions:               Per-diff tracked-changes attribution (issue #88),
                                   in the same order as ``deviation_results`` — see
                                   ``playbook_engine.tracked_changes_overlay``. Each
@@ -1115,8 +1133,9 @@ def build_observations(
         dropped:                    Optional counter, incremented per dropped
                                   row by reason (see
                                   ``DROPPED_SURVIVES_IN_TERMINAL``,
-                                  ``DROPPED_ORIGIN_UNDETERMINED`` and
-                                  ``DROPPED_STANDARD_REMOVED_UNSIGNED``).
+                                  ``DROPPED_ORIGIN_UNDETERMINED``,
+                                  ``DROPPED_STANDARD_REMOVED_UNSIGNED`` and
+                                  ``DROPPED_REFUSED_UNSIGNED``).
         standard_text_by_tid:       Our standard (template) clause text per
                                   taxonomy_id — the origin reference for a
                                   clause removed before signing (issue
@@ -1339,9 +1358,15 @@ def build_observations(
             removed_outcome = OUTCOME_CONCEDED_BEFORE_SIGNING
             removed_standard = True
         else:
-            # Their (non-standard) language struck is their refused ask —
-            # within-trail negotiation history, so, like a ReversalRecord,
-            # it holds whether or not the deal was executed.
+            if not has_signed_copy:
+                # Issue #221: no detected executed copy — the terminal is
+                # only the last draft, so "struck before signing" is not
+                # established. Never a refused ask; counted.
+                if dropped is not None:
+                    dropped[DROPPED_REFUSED_UNSIGNED] = dropped.get(DROPPED_REFUSED_UNSIGNED, 0) + 1
+                continue
+            # Their (non-standard) language struck before signing is their
+            # refused ask.
             removed_outcome = "proposed_then_reversed"
             removed_standard = False
         clause_path = clause_diff.clause_path_before or "?"
@@ -1462,12 +1487,21 @@ def build_observations(
     # Only a true duplicate record (same clause, draft AND proposed text) is
     # skipped: two proposals from different drafts that share a path number
     # are distinct evidence, each emitted with its own proposed text.
+    #
+    # Issue #221: a deal with no detected executed copy has no signed
+    # terminal for a proposal to have been reversed out of — its reversals
+    # (the pipeline already skips detecting them) produce no observation and
+    # are counted under DROPPED_REFUSED_UNSIGNED.
     emitted_reversals: set[tuple[str | None, str, str, str]] = set()
     for r in reversals:
         key = (r.taxonomy_id, r.clause_path, r.version_inserted, r.proposed_text)
         if key in emitted_reversals:
             continue
         emitted_reversals.add(key)
+        if not has_signed_copy:
+            if dropped is not None:
+                dropped[DROPPED_REFUSED_UNSIGNED] = dropped.get(DROPPED_REFUSED_UNSIGNED, 0) + 1
+            continue
         reversal_standard = _standard_fact(r.proposed_text, r.taxonomy_id)
 
         observations.append(

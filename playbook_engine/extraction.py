@@ -189,18 +189,21 @@ Callers thread their own distinct signal sourced from the operator's actual
 
 from __future__ import annotations
 
+import datetime
 import difflib
 import logging
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pdfplumber
 from docx import Document
+from docx.oxml.parser import parse_xml
 
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.artifact_store import _sha256_file
@@ -1804,6 +1807,160 @@ def extract_docx_units_and_tracked_changes(
 _LEADING_LIST_MARKER_RE = re.compile(r"^(?:[-*+]|\d+(?:\.\d+)*[.):]?)\s+")
 _ALIGN_PUNCT_RE = re.compile(r"[^\w\s]")
 _ALIGN_WS_RE = re.compile(r"\s+")
+
+
+# ---------------------------------------------------------------------------
+# Document timestamps (issue #221) — version-ordering tie-break evidence
+# ---------------------------------------------------------------------------
+
+#: Dates before this are format defaults or corrupt metadata (e.g. the
+#: 1601/1899/1904 epochs some producers write), never authorship evidence.
+_MIN_TIMESTAMP_YEAR = 1980
+
+#: PDF date string (PDF 32000-1 §7.9.4): ``D:YYYYMMDDHHmmSSOHH'mm'``, every
+#: component after the year optional.
+_PDF_DATE_RE = re.compile(
+    r"^\s*(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?"
+    r"\s*(?:(Z)|([+-])(\d{2})'?(\d{2})?'?)?"
+)
+
+
+def _iso_utc(dt: datetime.datetime | None) -> str | None:
+    """``dt`` as ``YYYY-MM-DDTHH:MM:SSZ`` (naive = UTC), or ``None`` when
+    absent or before :data:`_MIN_TIMESTAMP_YEAR`."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.UTC)
+    dt = dt.astimezone(datetime.UTC)
+    if dt.year < _MIN_TIMESTAMP_YEAR:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+_CORE_PROPS_REL = (
+    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
+)
+_DCTERMS_NS = "http://purl.org/dc/terms/"
+
+
+def _docx_core_dates(path: Path) -> tuple[datetime.datetime | None, datetime.datetime | None]:
+    """``(modified, created)`` from the DOCX package's own core-properties part.
+
+    Read straight from the zip, never through ``python-docx``'s
+    ``core_properties``: for a package with NO core-properties part,
+    python-docx fabricates a default one stamped with the current wall-clock
+    time, which would turn "this document carries no date" into "it was
+    written just now" (and make ordering depend on when ``mine`` ran).
+    Parsed with python-docx's own hardened parser (no entity resolution).
+    """
+    with zipfile.ZipFile(path) as zf:
+        names = set(zf.namelist())
+        part = None
+        if "_rels/.rels" in names:
+            rels = parse_xml(zf.read("_rels/.rels"))
+            for rel in rels:
+                if rel.get("Type") == _CORE_PROPS_REL and rel.get("Target"):
+                    part = rel.get("Target", "").lstrip("/")
+                    break
+        if part is None or part not in names:
+            return None, None
+        core = parse_xml(zf.read(part))
+
+    def _date(tag: str) -> datetime.datetime | None:
+        el = core.find(f"{{{_DCTERMS_NS}}}{tag}")
+        return _parse_w_date(el.text) if el is not None else None
+
+    return _date("modified"), _date("created")
+
+
+def _parse_w_date(value: str | None) -> datetime.datetime | None:
+    """Parse a W3CDTF/ISO 8601 date (a tracked-change ``w:date``, a
+    core.xml ``dcterms:modified``), usually ``...Z``."""
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _parse_pdf_date(value: Any) -> datetime.datetime | None:
+    """Parse a PDF ``/ModDate``/``/CreationDate`` string; ``None`` if malformed."""
+    if not isinstance(value, str):
+        return None
+    m = _PDF_DATE_RE.match(value)
+    if m is None:
+        return None
+    year, month, day, hour, minute, second, zulu, sign, tz_h, tz_m = m.groups()
+    try:
+        tz = datetime.UTC
+        if sign:
+            offset = datetime.timedelta(hours=int(tz_h), minutes=int(tz_m or 0))
+            tz = datetime.timezone(offset if sign == "+" else -offset)
+        return datetime.datetime(
+            int(year),
+            int(month or 1),
+            int(day or 1),
+            int(hour or 0),
+            int(minute or 0),
+            int(second or 0),
+            tzinfo=tz,
+        )
+    except ValueError:
+        return None
+
+
+def document_timestamp(path: Path, tracked: TrackedChanges | None = None) -> str | None:
+    """The version's own authorship timestamp, or ``None`` (issue #221).
+
+    Seeds ``version_orderer.VersionInput.timestamp`` so a document's own
+    dates — not only a hand-written ``hints.yaml`` — break equal-cost
+    ordering ties (for an unsigned deal the chain direction is otherwise a
+    lexicographic tie-break). Sources, by format:
+
+    - DOCX: the later of the core-properties part's (``docProps/core.xml``)
+      ``dcterms:modified`` (``created`` when ``modified`` is absent; nothing
+      when the package has no core-properties part) and the latest
+      tracked-change ``w:date`` in *tracked* (the version's own
+      ``TrackedChanges`` side-channel, already parsed by the caller; ``None``
+      skips it).
+    - PDF: the info dictionary's ``/ModDate`` (``/CreationDate`` when absent).
+    - RTF and anything else: ``None``.
+
+    Returned as ``YYYY-MM-DDTHH:MM:SSZ`` (UTC) so values from different
+    sources compare correctly as strings (``version_orderer._hint_score``
+    compares them lexicographically). Dates before 1980 are format defaults,
+    not evidence, and are ignored. Filename dates are never read here: a
+    lawyer's ``hints.yaml`` ``timestamps`` still override these per version
+    (``version_orderer._merge_hints``).
+
+    Never raises — a missing or unreadable metadata stream yields ``None``
+    (weak tie-break evidence, not an ingest failure).
+    """
+    ext = path.suffix.lower()
+    candidates: list[str] = []
+    try:
+        if ext == ".docx":
+            modified, created = _docx_core_dates(path)
+            core = _iso_utc(modified) or _iso_utc(created)
+            if core is not None:
+                candidates.append(core)
+            for change in tracked.changes if tracked is not None else []:
+                stamp = _iso_utc(_parse_w_date(change.date))
+                if stamp is not None:
+                    candidates.append(stamp)
+        elif ext == ".pdf":
+            with pdfplumber.open(str(path)) as pdf:
+                meta = pdf.metadata or {}
+            stamp = _iso_utc(_parse_pdf_date(meta.get("ModDate"))) or _iso_utc(
+                _parse_pdf_date(meta.get("CreationDate"))
+            )
+            if stamp is not None:
+                candidates.append(stamp)
+    except Exception:  # noqa: BLE001 - timestamp evidence must never fail an ingest
+        _log.debug("document_timestamp: no readable metadata in %s", path.name)
+    return max(candidates) if candidates else None
 
 
 def _normalize_unit_for_alignment(text: str) -> str:

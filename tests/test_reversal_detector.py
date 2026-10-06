@@ -375,3 +375,36 @@ def test_reversal_none_taxonomy_id_no_cross_contamination() -> None:
     reversed_paths = {r.clause_path for r in reversals}
     assert "1" in reversed_paths, "clause '1' (None tid) should be flagged"
     assert "2" not in reversed_paths, "clause '2' (None tid) must NOT be cross-contaminated"
+
+
+# ---------------------------------------------------------------------------
+# No signed terminal → no reversals (issue #221)
+# ---------------------------------------------------------------------------
+
+
+def _planted_insert_then_revert():
+    original = "Alice Corp shall indemnify Beta Ltd for all losses."
+    v1 = [_cc("1", "ind", original)]
+    v2 = [
+        _cc(
+            "1",
+            "ind",
+            "Alice Corp shall indemnify Beta Ltd for all losses, including consequential damages.",
+        )
+    ]
+    v3 = [_cc("1", "ind", original)]
+    return _doc_diff([("v1", v1), ("v2", v2), ("v3", v3)])
+
+
+def test_reversal_skipped_without_signed_copy() -> None:
+    """The planted insert-then-revert is a reversal only against a SIGNED
+    terminal: with no detected signed copy the last version is just the last
+    draft, so nothing is reported as refused before signing."""
+    doc = _planted_insert_then_revert()
+    assert detect_reversals(doc, has_signed_copy=True), "fixture premise: a reversal exists"
+    assert detect_reversals(doc, has_signed_copy=False) == []
+
+
+def test_reversal_has_signed_copy_defaults_true() -> None:
+    doc = _planted_insert_then_revert()
+    assert detect_reversals(doc) == detect_reversals(doc, has_signed_copy=True)

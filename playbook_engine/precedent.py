@@ -312,7 +312,8 @@ def build_precedent_evidence(
       clause changed (``round_moves``); ``moved``: it changed, was struck,
       or carried a refused ask.
     - ``refused_asks``: every ``proposed_then_reversed`` row — text proposed
-      and then struck before signing — with its round and citation.
+      and then struck before signing — with its round and citation; always
+      empty when ``signed`` is false (issue #221).
 
     ``signed_at`` is never set: the reference compiler extracts no signing
     date and never fabricates one (OPF-SPEC §3.5.4), so the digest's
@@ -359,10 +360,16 @@ def build_precedent_evidence(
         # row is written per struck node, so a deal that struck two nodes of
         # a multi-node standard has two rows and both texts belong here.
         conceded = [o for o in rows if o.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING]
-        refused = [o for o in rows if o.outcome == _REFUSED_OUTCOME]
+        corpus_doc = docs_by_id.get(document_id)
+        signed = _is_signed_deal(corpus_doc, terminal, rows)
+        # Issue #221: a deal with no detected executed copy records no
+        # refused asks — with no signed terminal, "struck before signing" is
+        # not established. observation_builder no longer writes such rows;
+        # this also keeps an observations.jsonl mined before the fix from
+        # reintroducing them at project time.
+        refused = [o for o in rows if o.outcome == _REFUSED_OUTCOME] if signed else []
         if terminal is None and not conceded and not refused:
             continue
-        corpus_doc = docs_by_id.get(document_id)
         paper, paper_basis, paper_confidence = _paper(corpus_doc, rows)
         signed_text = _text_entry(terminal) if terminal is not None else None
         refused_asks = sorted(
@@ -390,7 +397,7 @@ def build_precedent_evidence(
                 "paper": paper,
                 "paper_basis": paper_basis,
                 "paper_confidence": paper_confidence,
-                "signed": _is_signed_deal(corpus_doc, terminal, rows),
+                "signed": signed,
                 "rounds": n_rounds,
                 "signed_text": signed_text,
                 "opening_text": _joined_text_entry(conceded),

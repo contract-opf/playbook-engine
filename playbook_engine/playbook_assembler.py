@@ -122,9 +122,12 @@ def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[s
     never counts here),
     ``DROPPED_ORIGIN_UNDETERMINED`` (a clause removed before signing whose
     origin — our standard or their ask — cannot be determined because there
-    is no standard text for it) and ``DROPPED_STANDARD_REMOVED_UNSIGNED``
+    is no standard text for it), ``DROPPED_STANDARD_REMOVED_UNSIGNED``
     (our standard language removed in a deal with no detected executed
-    copy — never counted as a concession, issue #83).
+    copy — never counted as a concession, issue #83) and
+    ``DROPPED_REFUSED_UNSIGNED`` (non-standard language removed, or a
+    reversal, in a deal with no detected executed copy — never counted as a
+    refused ask, issue #221).
     """
     by_reason: dict[str, int] = {}
     by_document: dict[str, int] = {}
@@ -449,8 +452,9 @@ def assemble_playbook(
         # no signed slot that survives in the signed version, text removed
         # before signing whose origin cannot be determined, or our standard
         # removed from a deal with no detected signed copy
-        # (removed_standard_no_signed_copy) — are counted, never dropped
-        # silently.
+        # (removed_standard_no_signed_copy), or a would-be refused ask in
+        # such a deal (refused_ask_no_signed_copy, issue #221) — are counted,
+        # never dropped silently.
         stats["dropped_observations"] = dropped_stats
 
     # --- compiler metadata ---

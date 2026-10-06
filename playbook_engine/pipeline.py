@@ -70,6 +70,7 @@ from playbook_engine.extraction import (
     ExtractorLabel,
     bridge_tracked_change_spans,
     detect_extractor,
+    document_timestamp,
     extract_blocks,
     extract_docx_units_and_tracked_changes,
     ocrmypdf_available,
@@ -244,7 +245,17 @@ _MEDIA_TYPES: dict[str, str] = {
 # dropped to 0.70, template similarity now compares node fingerprints, and
 # corpus_doc provenance is written through two_valued_side. A warm cache
 # would otherwise replay the old relabelled side (and no paper_basis) forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 11
+#
+# v12 (issue #221): placeholder signature lines ("By: [Name]", "By: Name:",
+# "By: Authorized Signatory") no longer count as signed, so a deal's signed
+# anchor (trail signed_version, corpus_doc signed_version, every observation's
+# outcome) can change; each version's own document timestamp now seeds
+# order_versions (the trail gained "version_timestamps" and an unsigned deal's
+# chain direction can change); and a deal with no detected signed copy gets
+# no reversals and no proposed_then_reversed observations (counted under
+# dropped_observations "refused_ask_no_signed_copy"). A warm cache would
+# otherwise replay the old signed anchors, orderings and refused asks forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 12
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1560,8 +1571,9 @@ def _pseudonymize_trail(
     the same way ``version_ingest``/``signed_version`` are for the manifest.
     ``reversals`` entries (``ReversalRecord.to_dict()``) carry the same raw
     version stems in ``version_inserted``/``version_removed`` plus raw clause
-    text in ``proposed_text`` — both are aliased too, so no raw counterparty
-    name survives anywhere in the trail body.
+    text in ``proposed_text`` — both are aliased too, as are the keys of
+    ``version_timestamps`` (issue #221, raw version stems), so no raw
+    counterparty name survives anywhere in the trail body.
 
     *version_alias_map* (issue #143): the SAME document's exact raw-stem ->
     ordinal-label map (see :func:`_build_version_alias_map`), built by the
@@ -1617,6 +1629,12 @@ def _pseudonymize_trail(
             else r
             for r in new["reversals"]
         ]
+    if isinstance(new.get("version_timestamps"), dict):
+        # Issue #221: keyed by the same raw version stems.
+        new["version_timestamps"] = {
+            _alias_version_field(v, known_entities, registry, version_alias_map): ts
+            for v, ts in new["version_timestamps"].items()
+        }
     return new
 
 
@@ -2172,6 +2190,11 @@ def _compute_doc_result(
     # dict.get(vid)-returns-None affair for RTF/PDF versions and any DOCX
     # python-docx cannot open (issue #88).
     tracked_by_vid: dict[str, TrackedChanges | None] = {}
+    # Per-version authorship timestamp (issue #221) — DOCX core.xml
+    # modified/created and the latest tracked-change w:date, PDF /ModDate —
+    # seeding VersionInput.timestamp so a document's own dates break
+    # equal-cost ordering ties. None for RTF or when no metadata is readable.
+    timestamp_by_vid: dict[str, str | None] = {}
     # Per-version ingest status (issue #89): every version FILE FOUND gets an
     # entry here, "ok" or "failed" — this is what lets corpus_manifest.json
     # distinguish "versions found" from "versions actually mined" instead of
@@ -2281,6 +2304,7 @@ def _compute_doc_result(
             # the L2 detectors that need the block (see unstripped_trees).
             unstripped_trees[vid] = tree
             tree, signature_block = strip_signature_block(tree)
+            timestamp_by_vid[vid] = document_timestamp(vf, tracked_by_vid.get(vid))
 
             # issue #139: do NOT write to normalized/ here — that used to
             # write raw, pre-pseudonymization content under the RAW doc_id,
@@ -2516,7 +2540,9 @@ def _compute_doc_result(
         # was cut from version_trees' clause text.
         ss = detect_signed(unstripped_trees[vid], signed_judge=signed_judge)
         signed_status_by_vid[vid] = ss
-        version_inputs.append(VersionInput(version_id=vid, tree=tree, signed=ss))
+        version_inputs.append(
+            VersionInput(version_id=vid, tree=tree, signed=ss, timestamp=timestamp_by_vid.get(vid))
+        )
     # hints.yaml is optional (Hints.load returns empty Hints for a missing
     # file) but a malformed one raises HintsError, which propagates uncaught
     # out of this function exactly like SegmentationQAError above — the
@@ -2614,6 +2640,10 @@ def _compute_doc_result(
         # permanently 0 regardless of what detect_reversals actually found).
         "reversals": [],
         **version_order.to_dict(),
+        # Issue #221: each mined version's own authorship timestamp (null when
+        # it carries none) — the evidence order_versions tie-broke with,
+        # alongside any hints.yaml timestamps (which override per version).
+        "version_timestamps": {vid: timestamp_by_vid.get(vid) for vid in version_trees},
     }
 
     # L3: Classify each version. LLM-segmented versions already carry their
@@ -2673,7 +2703,14 @@ def _compute_doc_result(
         classified_versions = [(vid, classified_by_version[vid]) for vid in ordered_ids]
         alignments = align_versions(classified_versions, alignment_judge=alignment_judge)
         doc_diff = diff_aligned(alignments, ordered_ids)
-        reversals = detect_reversals(doc_diff)
+        # Issue #221: reversals need a signed terminal — with no detected
+        # signed copy, ordered_ids[-1] is only the last draft (for an
+        # unsigned deal often a tie-broken chain direction), so text absent
+        # from it was never "refused before signing". The same gate
+        # build_observations receives below.
+        reversals = detect_reversals(
+            doc_diff, has_signed_copy=has_signed_copy and ordered_ids[-1] == signed_vid
+        )
         # Negotiation dynamics (issue #177): surface the per-round diffs as
         # RoundMove records instead of discarding them — these become each
         # ClausePosition's negotiation_trail at L5.

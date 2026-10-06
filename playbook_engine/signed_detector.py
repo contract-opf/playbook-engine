@@ -16,9 +16,19 @@ Detection heuristics (applied in priority order):
 7. No signature section found → *not* signed.
 
 A "filled" signature block is one where a ``By:`` line is followed by a value
-that contains at least one letter (i.e. not blank, not underscores/dashes
-only).  Template placeholders such as ``By: _____________________`` are treated
-as blank (unsigned).
+that is not a template placeholder (issue #221).  A value is *blank* when,
+after dropping bracketed placeholders (``[Name]``, ``<Signature>``,
+``{Signatory}``, ``«Name»``) and any ``Name:``/``Title:``/``Date:``/``Its:``/
+``Signature:`` label residue (a flattened ``By: Name:`` line), no run of two
+or more letters is left — so ``By: _____``, ``By: [Name]``, ``By: Name:`` and
+``By: X`` are all blank (unsigned).  A value whose every word is generic
+signature-block vocabulary (``By: Authorized Signatory``) is
+*placeholder-like*: it never counts toward a signature on its own.  When the
+only filled values in the section are placeholder-like (the case that used to
+read as ``dual_signatures`` at 0.90), the result is withheld as ambiguous
+(``blank_signature_blocks`` at 0.60, not signed) and escalates to the
+``signed_judge``.  ``/s/`` markers are filtered the same way (``/s/ [Name]``
+is not an electronic signature).
 
 Confidence levels:
 - ≥ 0.90  high — docusign_cert, or a dual-signature block localized to a
@@ -136,8 +146,63 @@ _SIG_HEADING = re.compile(
 # into an adjacent cell's text.
 _BY_LINE = re.compile(r"(?:^[ \t]*|\|\s*)By\s*:\s*([^|\r\n]*)", re.IGNORECASE | re.MULTILINE)
 
-# Blank / template placeholder value on a "By:" line.
+# Blank / template placeholder value on a "By:" line: underscores, dashes
+# and whitespace only. ``_is_blank_value`` widens this (issue #221) to
+# bracketed placeholders, label residue and values with no letter-run.
 _BLANK_VALUE = re.compile(r"^[_ \t\-–—]*$")
+
+# A bracketed template placeholder: "[Name]", "<Signature>", "{Signatory}",
+# "«Name»". An unclosed bracket runs to the end of the value ("[Name" when a
+# capture stopped at the closing bracket).
+_BRACKETED = re.compile(r"\[[^\]]*\]?|<[^>]*>?|\{[^}]*\}?|«[^»]*»?")
+
+# Signature-field label residue inside a "By:" value — a flattened
+# "By: Name: Title:" line, or "By: ____ Name: Alice Smith". Everything from
+# the first label on belongs to the NEXT field, never to the By: value.
+_LABEL_RESIDUE = re.compile(
+    r"(?<![^\W\d_])(?:print(?:ed)?\s+name|name|title|date|its|signature)\s*:.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# A run of two or more letters — a value without one ("X", "J.", "/ /") is
+# not a signature.
+_LETTER_RUN = re.compile(r"[^\W\d_]{2,}")
+
+# Generic signature-block vocabulary. A value made only of these words
+# ("Authorized Signatory", "Signature of Authorized Representative") is a
+# printed caption, not a signature — placeholder-like (issue #221).
+_PLACEHOLDER_WORDS = frozenset(
+    {
+        "authorized",
+        "authorised",
+        "signatory",
+        "signature",
+        "signer",
+        "sign",
+        "here",
+        "representative",
+        "officer",
+        "name",
+        "title",
+        "print",
+        "printed",
+        "type",
+        "typed",
+        "insert",
+        "party",
+        "company",
+        "counterparty",
+        "duly",
+        "its",
+        "of",
+        "the",
+        "and",
+        "by",
+        "for",
+        "on",
+        "behalf",
+    }
+)
 
 # Electronic /s/ signature.
 _SLASH_S = re.compile(r"/s/\s+(\S[\w ,.\-]{0,80})")
@@ -260,7 +325,7 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
         # execution page.  This is the same discount the _ESIGN_PLATFORM
         # fallback already takes.  A lone unlocalized marker lands under
         # AMBIGUITY_THRESHOLD so it escalates instead of asserting.
-        slash_s_count = len(_SLASH_S.findall(full_text))
+        slash_s_count = _count_slash_s(full_text)
         if slash_s_count >= 2:
             return SignedStatus(signed=True, basis="dual_signatures", confidence=0.85)
         if slash_s_count == 1:
@@ -282,11 +347,11 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
     sig_nodes = [node for node, _provenance in sig_matches]
     sig_text = "\n".join(_node_subtree_text(n) for n in sig_nodes)
 
-    # Count filled and blank "By:" lines.
-    filled_count, blank_count = _count_by_lines(sig_text)
+    # Count filled, placeholder-like and blank "By:" lines (issue #221).
+    filled_count, placeholder_count, blank_count = _classify_by_lines(sig_text)
 
-    # Count /s/ markers.
-    slash_s_count = len(_SLASH_S.findall(sig_text))
+    # Count /s/ markers carrying a real name.
+    slash_s_count = _count_slash_s(sig_text)
 
     total_sig_count = filled_count + slash_s_count
 
@@ -296,6 +361,17 @@ def detect_signed(tree: ClauseTree, *, signed_judge: SignedJudge | None = None) 
         return SignedStatus(signed=True, basis="single_signature", confidence=0.75)
     if slash_s_count == 1:
         return SignedStatus(signed=True, basis="electronic_signature", confidence=0.80)
+
+    # Issue #221: the only "filled" values are placeholder-like captions
+    # ("By: Authorized Signatory" twice used to read as dual_signatures at
+    # 0.90 — an unsigned template becoming the signed terminal). Never
+    # signed on that evidence: withheld as ambiguous and escalated, so a
+    # wired signed_judge reads the section; without one it stays unsigned.
+    if placeholder_count > 0:
+        result = SignedStatus(signed=False, basis="blank_signature_blocks", confidence=0.60)
+        if signed_judge is not None and result.confidence < AMBIGUITY_THRESHOLD:
+            return signed_judge.judge(sig_text)
+        return result
 
     # Signature section found but no filled blocks.
     if blank_count > 0:
@@ -391,21 +467,68 @@ def _signature_nodes(tree: ClauseTree) -> list[tuple[ClauseNode, Literal["headin
     return result
 
 
+def _signature_value_kind(value: str) -> Literal["blank", "placeholder", "filled"]:
+    """Classify the value of a ``By:`` (or ``/s/``) signature field (issue #221).
+
+    - ``"blank"``: empty, underscores/dashes only, or — once bracketed
+      placeholders (``[Name]``, ``<Signature>``) and ``Name:``/``Title:``/
+      ``Date:``/``Its:``/``Signature:`` label residue are dropped — no run of
+      two or more letters is left (``By: [Name]``, ``By: Name:``, ``By: X``).
+    - ``"placeholder"``: letters remain, but every word of two or more
+      letters is generic signature-block vocabulary
+      (``By: Authorized Signatory``) — a printed caption, not a signature.
+    - ``"filled"``: anything else.
+    """
+    value = value.strip()
+    if not value or _BLANK_VALUE.match(value):
+        return "blank"
+    value = _LABEL_RESIDUE.sub("", value)
+    value = _BRACKETED.sub(" ", value)
+    if not _LETTER_RUN.search(value):
+        return "blank"
+    words = [w.lower() for w in _LETTER_RUN.findall(value)]
+    if all(w in _PLACEHOLDER_WORDS for w in words):
+        return "placeholder"
+    return "filled"
+
+
 def _count_by_lines(text: str) -> tuple[int, int]:
     """Return (filled_count, blank_count) for 'By:' lines in *text*.
 
-    Filled: the value after 'By:' contains at least one letter.
-    Blank:  the value is empty, underscores, dashes, or whitespace only.
+    Filled: the value after 'By:' is not a template placeholder — see
+            :func:`_signature_value_kind`. Placeholder-like values
+            (``By: Authorized Signatory``) count as filled here; use
+            :func:`_classify_by_lines` to tell them apart.
+    Blank:  the value is empty, underscores/dashes, a bracketed placeholder,
+            label residue, or has no run of two or more letters.
     """
-    filled = 0
-    blank = 0
+    filled, placeholder, blank = _classify_by_lines(text)
+    return filled + placeholder, blank
+
+
+def _classify_by_lines(text: str) -> tuple[int, int, int]:
+    """Return (filled, placeholder_like, blank) counts for 'By:' lines in *text*."""
+    counts = {"filled": 0, "placeholder": 0, "blank": 0}
     for m in _BY_LINE.finditer(text):
-        value = m.group(1).strip()
-        if not value or _BLANK_VALUE.match(value):
-            blank += 1
-        else:
-            filled += 1
-    return filled, blank
+        counts[_signature_value_kind(m.group(1))] += 1
+    return counts["filled"], counts["placeholder"], counts["blank"]
+
+
+def _count_slash_s(text: str) -> int:
+    """Count ``/s/`` electronic signatures in *text* whose name is real.
+
+    ``/s/ [Name]`` or ``/s/ ________`` in an unexecuted form is a placeholder
+    (issue #221): the value — the rest of the line after the marker — must
+    classify as ``"filled"`` to count.
+    """
+    count = 0
+    for m in _SLASH_S.finditer(text):
+        end = text.find("\n", m.start(1))
+        rest = text[m.start(1) : end if end != -1 else len(text)]
+        rest = rest.split("|", 1)[0]
+        if _signature_value_kind(rest) == "filled":
+            count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------

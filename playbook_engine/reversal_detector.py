@@ -90,8 +90,10 @@ class ReversalRecord:
                            two clauses sharing a ``taxonomy_id`` (or both
                            ``None``) cannot cross-contaminate outcomes.
         version_inserted:  Version in which the proposed text first appeared.
-        version_removed:   The signed terminal (last version) — the proposal
-                           is confirmed absent from the executed text.
+        version_removed:   The signed terminal (last version, a detected signed
+                           copy — see ``detect_reversals``' ``has_signed_copy``)
+                           — the proposal is confirmed absent from the
+                           executed text.
         proposed_text:     The word tokens that were proposed then reversed.
         char_span:         ``ClauseNode.char_span`` of ``clause_path`` in
                            ``version_inserted`` (issue #108), or ``None`` when
@@ -124,17 +126,28 @@ class ReversalRecord:
 # ---------------------------------------------------------------------------
 
 
-def detect_reversals(doc_diff: DocumentDiff) -> list[ReversalRecord]:
+def detect_reversals(
+    doc_diff: DocumentDiff, *, has_signed_copy: bool = True
+) -> list[ReversalRecord]:
     """Detect text spans inserted in a draft but absent from the signed terminal.
 
     Args:
-        doc_diff: ``DocumentDiff`` produced by ``diff_aligned()``.
+        doc_diff:        ``DocumentDiff`` produced by ``diff_aligned()``.
+        has_signed_copy: Whether the last version of ``doc_diff.version_order``
+                         is a DETECTED signed copy (``VersionOrder.signed_id``
+                         anchors the chain there). When False (issue #221)
+                         there is no signed terminal — the last version is
+                         only the last draft in a content-derived (for an
+                         unsigned deal, often tie-broken) order — so text
+                         absent from it was not "refused before signing" and
+                         no reversal is reported: ``[]``.
 
     Returns:
         One ``ReversalRecord`` per distinct reversal event.  Empty list if no
-        reversals are found or if there are no consecutive diffs.
+        reversals are found, if there are no consecutive diffs, or if the deal
+        has no detected signed copy.
     """
-    if not doc_diff.consecutive:
+    if not has_signed_copy or not doc_diff.consecutive:
         return []
 
     signed_version = doc_diff.version_order[-1]
