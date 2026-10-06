@@ -10,6 +10,7 @@ All corpus content is read from caller-supplied paths at runtime.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime
 import json
@@ -21,11 +22,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from playbook_engine.agent_judge import PendingQueue, VerdictStore
 from playbook_engine.artifact_store import (
     ArtifactStore,
     _sha256_file,
     make_config_fingerprint,
     make_doc_key,
+    make_stage_key,
+    write_text_if_changed,
 )
 from playbook_engine.canonicalize import file_sha256
 from playbook_engine.clause_aligner import AlignmentJudge, align_versions
@@ -106,14 +110,14 @@ from playbook_engine.observation_builder import (
     RoundMove,
     build_observations,
     build_round_moves,
+    observations_jsonl_text,
     read_observations_jsonl,
     read_round_moves_jsonl,
     round_move_from_dict,
+    round_moves_jsonl_text,
     summarize_clause_text,
     truncate_move_summaries,
     truncate_search_snippets,
-    write_observations_jsonl,
-    write_round_moves_jsonl,
 )
 from playbook_engine.pdf_ingester import ingest_pdf
 from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
@@ -131,6 +135,7 @@ from playbook_engine.provenance_detector import (
 )
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
+from playbook_engine.rubric import RubricPolicy, current_versions
 from playbook_engine.run_manifest import read_deviation_mode, record_deviation_mode
 from playbook_engine.scope_gate import (
     ScopeDecision,
@@ -335,6 +340,32 @@ _VERSION_INGEST_REASON_VERSION = 5
 # signature-block text into normalized/ and every citation.
 _NORMALIZED_TREES_CACHE_VERSION = 2
 
+# Layered stage cache (issue #219). L1 (ingest + segment) is cached PER
+# VERSION FILE under stage "l1", keyed by the file's name + content and only
+# the configuration that changes L1 output; L2-L4 is cached per document
+# under stage "l2-l4", keyed by the L1 records it consumed plus everything
+# else (template, taxonomy, judges, thresholds). A taxonomy or template edit
+# therefore replays every L1 tree and recomputes only classification onward.
+# Bump _L1_RECORD_VERSION whenever _l1_version_record's output changes for
+# identical inputs (L2-L4 changes keep using _DEVIATION_VS_TEMPLATE_VERSION
+# and the other per-result versions above).
+_L1_STAGE = "l1"
+_L2_L4_STAGE = "l2-l4"
+_L1_RECORD_VERSION = 1
+# Where a cached record keeps the store entries it was built from, as
+# ``{key: fingerprint}`` (issue #219) — an L1 record the segmentation-store
+# entries it was grounded from, an L2-L4 result the judge verdicts it replayed.
+# A replay re-checks every one against the store and recomputes on any change.
+_L1_DEPS_KEY = "segmentation_deps"
+_VERDICT_DEPS_KEY = "verdict_deps"
+# Rubric tally an L2-L4 result made when computed, replayed into the run's
+# RubricPolicy on a cache hit so the stale/legacy report stays complete.
+_RUBRIC_COUNTS_KEY = "rubric_counts"
+# Set (to True) on an L1 record whose text a fallback recovered after a
+# docling timeout (issue #231): such a record is never stage-cached, and its
+# deal is never L2-L4-cached either.
+_L1_TIMED_OUT_KEY = "timed_out"
+
 # version_ingest[].reason values that represent a real DEGRADATION — the
 # legacy adapter ran because docling was unavailable or crashed on this
 # file, not because it was deliberately declared (issue #81). This is
@@ -434,6 +465,15 @@ class _NullDeviationJudge:
             )
             for _ in items
         ]
+
+
+def _distinct(items: Iterable[Any]) -> list[Any]:
+    """*items* with repeats (by identity) dropped, first-seen order kept."""
+    out: list[Any] = []
+    for item in items:
+        if not any(item is seen for seen in out):
+            out.append(item)
+    return out
 
 
 def _judge_identity(judge: Any) -> str:
@@ -1412,14 +1452,16 @@ def _classification_confidence_for_diff(
     return conf_by_version_path.get(vid, {}).get(path)
 
 
+def _json_text(data: Any) -> str:
+    """The exact text :func:`_atomic_json_write` writes for *data*."""
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
 def _atomic_json_write(data: Any, path: Path) -> None:
     """Atomically write *data* as JSON to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    tmp.write_text(_json_text(data), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -2045,6 +2087,418 @@ def _build_quarantine_corpus_doc(
     }
 
 
+# Signature of the L1 cache hook _collect_l1 takes (issue #219): given a
+# version file and the closure that computes its L1 record, return the record
+# — from mine_corpus's per-version stage cache, or by calling the closure.
+L1Fetch = Callable[[Path, Callable[[], dict[str, Any]]], dict[str, Any]]
+
+
+@dataclass
+class _L1State:
+    """Everything L1 (ingest + segment, per version) hands to L2-L4 (issue #219).
+
+    Built by :func:`_collect_l1` from one JSON record per version — fresh or
+    replayed from the per-version stage cache, the SAME record either way, so
+    a warm run and a cold run feed L2-L4 identical inputs.
+    ``l1_fingerprint`` digests every version's source sha256 plus its record
+    (or its failure entry) and keys the per-document L2-L4 layer: an L1
+    recompute that reproduces the same records from the same bytes still
+    replays L2-L4, but a bytes-only change misses it (the cached result embeds
+    each version's sha256).
+    """
+
+    version_trees: dict[str, ClauseTree] = dataclasses.field(default_factory=dict)
+    version_tree_dicts: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    unstripped_trees: dict[str, ClauseTree] = dataclasses.field(default_factory=dict)
+    llm_taxonomy_by_path: dict[str, dict[str, str | None]] = dataclasses.field(default_factory=dict)
+    tracked_by_vid: dict[str, TrackedChanges | None] = dataclasses.field(default_factory=dict)
+    timestamp_by_vid: dict[str, str | None] = dataclasses.field(default_factory=dict)
+    version_ingest: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    sha256_by_vid: dict[str, str] = dataclasses.field(default_factory=dict)
+    media_type_by_vid: dict[str, str] = dataclasses.field(default_factory=dict)
+    l1_fingerprint: str = ""
+
+
+def _l1_version_record(
+    vf: Path,
+    doc_id: str,
+    vid: str,
+    *,
+    config: EngineConfig,
+    taxonomy_ids: list[str],
+    progress: Callable[[str], None],
+    label_out: list[ExtractorLabel],
+    use_llm_segmentation: bool = False,
+    llm_segment_fn: SegmentFn | None = None,
+    batch_seg_nodes: dict[str, list[SegNode]] | None = None,
+    batch_extractions: dict[str, _BatchExtraction] | None = None,
+    segmentation_cache: SegmentationVerdictCache | None = None,
+    extraction_cache: ExtractionCache | None = None,
+    refresh_extraction: bool = False,
+) -> dict[str, Any]:
+    """L1 for ONE version file → a JSON-serialisable record (issue #219).
+
+    The record is what the per-version stage cache stores: the UNSTRIPPED
+    clause tree (signature-block stripping is cheap and re-run by
+    :func:`_collect_l1` on every replay), the LLM path's per-clause taxonomy
+    assignments, the tracked-changes side channel, the version's authorship
+    timestamp and the extractor that produced the text. It depends only on
+    the source file and the segmentation/extraction configuration — never on
+    the taxonomy's wording, the template or the judges — which is what lets a
+    change to any of those replay L1 and recompute only L2-L4.
+
+    Raises on any per-version failure (an empty tree from a non-empty file
+    included); nothing is cached for a failed version. *label_out* receives
+    the resolved extractor label as soon as one exists, so the caller's
+    failure record still names the extractor.
+    """
+    tax_by_path: dict[str, str | None] | None = None
+    if use_llm_segmentation and batch_seg_nodes is not None and vid in batch_seg_nodes:
+        extraction = (batch_extractions or {})[vid]
+        tree, tax_by_path = _ground_batch_result(
+            doc_id, vid, extraction, batch_seg_nodes[vid], taxonomy_ids
+        )
+        extractor_label = extraction.extractor_label
+        label_out.append(extractor_label)
+        tracked, units = _llm_tracked_changes(vf, progress)
+        # extraction.blocks (issue #118) is the SAME batch-pre-pass
+        # extraction that produced this version's tree — no second
+        # extract_blocks call needed on this branch, unlike the
+        # synchronous one below.
+        tracked = _bridge_tracked_changes_if_needed(
+            tracked, units, extraction.blocks, extractor_label
+        )
+    elif use_llm_segmentation:
+        tree, tax_by_path, extractor_label = _llm_segment_file(
+            vf,
+            doc_id,
+            vid,
+            taxonomy_ids,
+            llm_segment_fn,
+            segmentation_cache,
+            model=config.segmentation.model,
+            extraction_cache=extraction_cache,
+            refresh_extraction=refresh_extraction,
+            extractor=config.extraction.extractor,
+        )
+        label_out.append(extractor_label)
+        tracked, units = _llm_tracked_changes(vf, progress)
+        # Bridge (issue #118) only when actually needed: a non-legacy
+        # extractor AND at least one change carries a char_span worth
+        # translating. Most DOCX versions carry no tracked changes at
+        # all, so this re-extraction is the exception, not the rule
+        # (see _extract_blocks_for_bridge's cache-hit note).
+        bridge_blocks: list[Block] | None = None
+        if (
+            tracked is not None
+            and any(c.char_span is not None for c in tracked.changes)
+            and extractor_label is not None
+            and extractor_label != "legacy"
+        ):
+            bridge_blocks = _extract_blocks_for_bridge(
+                vf, extraction_cache, False, config.extraction.extractor
+            )
+        tracked = _bridge_tracked_changes_if_needed(tracked, units, bridge_blocks, extractor_label)
+    else:
+        raw_tree, tracked = _ingest_file_tracked(vf, doc_id, vid)
+        tree = segment(raw_tree)
+
+    if not list(tree.all_nodes()) and vf.stat().st_size > 0:
+        # An empty ClauseTree from a non-empty source file is an
+        # ingest FAILURE, not a success — e.g. a scanned/image PDF on
+        # the deterministic path (pdf_ingester.NullOCRAdapter; no OCR
+        # is wired) silently yields zero clauses with no error (issue
+        # #82). Treating that as success would let this version enter
+        # version_trees and become `first_tree` below, which the
+        # scope gate misreads as `deterministic_empty` ("this
+        # agreement is out of scope") — one unreadable scan would
+        # knock the whole negotiation trail out of the corpus. Raise
+        # here so it is recorded per-version exactly like any other
+        # extraction failure (_collect_l1's `except Exception` clause)
+        # and never reaches the scope gate as the representative
+        # version.
+        raise ValueError(
+            "ingest produced an empty clause tree from a non-empty "
+            "source file — treating as an extraction failure"
+        )
+
+    label = label_out[-1] if label_out else None
+    record: dict[str, Any] = {
+        "tree": tree.to_dict(),
+        "tax_by_path": tax_by_path,
+        "tracked": tracked.to_dict() if tracked is not None else None,
+        "timestamp": document_timestamp(vf, tracked),
+        # The extractor version_ingest records: the file suffix on the
+        # deterministic path, the REAL resolved label on the LLM path
+        # (issue #81/#129). Only the closed-enum ``reason`` travels — never
+        # ExtractorLabel.detail, which embeds the absolute source path.
+        "extractor": label.extractor if label is not None else vf.suffix.lower().lstrip("."),
+        "reason": label.reason if label is not None else None,
+    }
+    if label is not None and label.timed_out:
+        # Issue #231: this version's text came from a fallback after a
+        # docling timeout — a property of THIS run, not of the source bytes.
+        # The flag keeps the record out of the per-version stage cache (see
+        # mine_corpus's _make_l1_fetch) and the deal out of the L2-L4 cache
+        # (_collect_l1 reports the version as timed out), so the next run
+        # retries docling instead of replaying the legacy extraction. Set
+        # only when true, so an ordinary record's shape is unchanged.
+        record[_L1_TIMED_OUT_KEY] = True
+    return record
+
+
+def _collect_l1(
+    doc_id: str,
+    version_files: list[Path],
+    *,
+    config: EngineConfig,
+    taxonomy_ids: list[str],
+    progress: Callable[[str], None],
+    timed_out_versions: list[str] | None = None,
+    fetch_l1: L1Fetch | None = None,
+    **l1_kwargs: Any,
+) -> _L1State:
+    """Run (or replay) L1 for every version of one document (issue #219).
+
+    *fetch_l1*, when given, is the per-version stage-cache hook (see
+    :data:`L1Fetch`); without it every version is computed. Per-version
+    failure handling is unchanged from before the L1/L2-L4 split: a
+    ``SegmentationQAError`` propagates (the document is quarantined) carrying
+    a partial corpus_doc snapshot; any other exception records a failed
+    ``version_ingest`` entry and the version is skipped.
+    """
+    state = _L1State()
+    fingerprint_parts: list[dict[str, Any]] = []
+    for vf in version_files:
+        vid = vf.stem
+        state.sha256_by_vid[vid] = file_sha256(vf)
+        state.media_type_by_vid[vid] = _MEDIA_TYPES.get(
+            vf.suffix.lower(), "application/octet-stream"
+        )
+        # Per-version extractor recorded in version_ingest/corpus_manifest.json
+        # (issue #129). The deterministic path always uses the file suffix
+        # (unchanged). The LLM-segmentation path (sync, batch pre-pass, or a
+        # segmentation-cache hit — all funnel through extraction.extract_blocks)
+        # gets the REAL label extract_blocks/_llm_segment_file/
+        # _ground_batch_result resolved (issue #81) — the record carries it,
+        # and label_out has it for a failure that happens after it resolved.
+        # `extractor` starts as the deterministic-path default so the
+        # except-Exception branch below still has a sane fallback value for a
+        # version whose LLM-path resolution never got far enough to produce a
+        # real label (e.g. extract_blocks itself raised).
+        extractor = vf.suffix.lower().lstrip(".")
+        label_out: list[ExtractorLabel] = []
+
+        def _compute(
+            _vf: Path = vf, _vid: str = vid, _label_out: list[ExtractorLabel] = label_out
+        ) -> dict[str, Any]:
+            return _l1_version_record(
+                _vf,
+                doc_id,
+                _vid,
+                config=config,
+                taxonomy_ids=taxonomy_ids,
+                progress=progress,
+                label_out=_label_out,
+                **l1_kwargs,
+            )
+
+        try:
+            record = fetch_l1(vf, _compute) if fetch_l1 is not None else _compute()
+            tree = ClauseTree.from_dict(record["tree"])
+            if record.get("tax_by_path") is not None:
+                state.llm_taxonomy_by_path[vid] = record["tax_by_path"]
+            state.tracked_by_vid[vid] = (
+                TrackedChanges.from_dict(record["tracked"])
+                if record.get("tracked") is not None
+                else None
+            )
+
+            # issue #217: cut the signature block (IN WITNESS WHEREOF,
+            # By:/Name:/Title:, signatory names) out of the last clause's
+            # text — it is not clause language, and signatories' names are a
+            # pseudonymization residue path. The unstripped tree is kept for
+            # the L2 detectors that need the block (see unstripped_trees).
+            state.unstripped_trees[vid] = tree
+            tree, signature_block = strip_signature_block(tree)
+            state.timestamp_by_vid[vid] = record.get("timestamp")
+
+            # issue #139: do NOT write to normalized/ here — that used to
+            # write raw, pre-pseudonymization content under the RAW doc_id,
+            # mid-loop, so a run with known_entities configured left the raw
+            # counterparty name in both the directory name and every node's
+            # text forever (never stale-cleared, never rewritten on a
+            # stage-cache hit — see the born-safe pseudonymization pass
+            # below and mine_corpus's "Materialise normalized/ clause trees
+            # now" comment, which mirrors trail/'s treatment). Only the
+            # serialised dict is captured here, into the cacheable result.
+            state.version_tree_dicts[vid] = tree.to_dict()
+            state.version_trees[vid] = tree
+            state.version_ingest[vid] = {
+                "status": "ok",
+                "error": None,
+                "extractor": record["extractor"],
+                # None on the deterministic path (never a fallback) and
+                # whenever docling ran clean with no degradation — see
+                # ExtractorLabel.reason (issue #81).
+                "reason": record.get("reason"),
+                # issue #217: where the stripped signature block sat in this
+                # version's normalized text ([start, end) — same coordinates
+                # as ClauseNode.char_span), or None when no block was found
+                # (or its offsets could not be related to the tree). Engine-
+                # internal: corpus_manifest.json carries it; the frozen
+                # OPF 0.3 schema's version_ingest (additionalProperties:
+                # false) does not, so playbook_assembler's
+                # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
+                # playbook.
+                "signature_block_span": (
+                    list(signature_block.char_span)
+                    if signature_block is not None and signature_block.char_span is not None
+                    else None
+                ),
+            }
+            fingerprint_parts.append(
+                {
+                    "name": vf.name,
+                    # The source bytes' content address: L2-L4 copies it into
+                    # corpus_doc["version_files"][].sha256 (OPF §4), so a
+                    # bytes-only change that leaves the L1 record identical
+                    # must still miss L2-L4.
+                    "sha256": state.sha256_by_vid[vid],
+                    "record": {k: v for k, v in record.items() if k != _L1_DEPS_KEY},
+                }
+            )
+            if timed_out_versions is not None and record.get(_L1_TIMED_OUT_KEY):
+                # Issue #231: this version's text came from a fallback after
+                # a docling timeout. ExtractionCache already refused to store
+                # it and the L1 layer refuses too; storing the deal result
+                # would replay the legacy extraction one layer up and the
+                # next run would never retry docling — pinning the trail as
+                # mixed-extractor.
+                timed_out_versions.append(vid)
+        except SegmentationQAError as exc:
+            # Fail loud, by design: a QA-gate failure on the LLM path must
+            # never be swallowed into a per-file warning + skipped version —
+            # that would silently drop a version rather than flag the
+            # document for review (see llm_segmentation_stage.segment_to_tree
+            # and segmentation_qa.segment_verify_repair). It propagates out of
+            # this per-document function so the corpus loop can quarantine THIS
+            # document (recorded in quarantine.json) without aborting the whole
+            # run — see mine_corpus's ``quarantined`` handling. Every other
+            # exception below (extraction/ingest failure, malformed source)
+            # keeps the pre-existing "skip this one version file" behavior.
+            #
+            # issue #83: record THIS version's failure into version_ingest —
+            # same shape as the "ok" row above and the generic-failure row
+            # below — so the extractor that produced the failing stream isn't
+            # erased. That alone is not enough for it to reach
+            # corpus_manifest.json: this function's own locals (including
+            # version_ingest) are discarded the instant this exception
+            # unwinds past its caller, so a PARTIAL corpus_doc snapshot
+            # (however far L1 got — this vid's failure, every earlier vid's
+            # "ok" row, every later vid's not-yet-attempted default) is built
+            # now and attached to the exception for mine_corpus's quarantine
+            # handler to append to corpus_documents (see
+            # SegmentationQAError.partial_corpus_doc and
+            # _build_quarantine_corpus_doc). The document is still
+            # quarantined — this restores audit visibility, it does not
+            # change the fail-loud contract above. ``str(exc)`` is safe to
+            # persist unbounded for THIS class's own coverage/reconstruction/
+            # tree/taxonomy gates (proven at their own source to carry only
+            # gate names, node/clause identifiers, and OFFSETS/LENGTHS — see
+            # that class's docstring) — but NOT yet for the grounding gate:
+            # this ``except`` also catches a ``GroundingError`` wrapped
+            # verbatim (segmentation_qa.py's ``run_gates``/
+            # ``segment_verify_repair``, e.g. ``f"grounding gate: {exc}"``),
+            # whose own 8 raise sites (segmentation_grounding.py:158,160,
+            # 162,169,179,181,191,203) interpolate the model's own
+            # unconstrained ``node_id``/``start_block_id``/``end_block_id``/
+            # ``parent_id`` (no enum/pattern in llm_segmenter.py's schema,
+            # unlike ``taxonomy_id``). That gap is real and open — reported,
+            # not fixed, in issue #98's rescope comment, which records the
+            # verified line list for its own follow-up ticket (not yet
+            # filed); this diff does not close it.
+            extractor_label = label_out[-1] if label_out else None
+            if extractor_label is not None:
+                extractor = extractor_label.extractor
+            state.version_ingest[vid] = {
+                "status": "failed",
+                "error": str(exc),
+                "extractor": extractor,
+                "reason": extractor_label.reason if extractor_label is not None else None,
+            }
+            exc.partial_corpus_doc = _build_quarantine_corpus_doc(
+                doc_id,
+                version_files,
+                state.version_ingest,
+                state.sha256_by_vid,
+                state.media_type_by_vid,
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001
+            progress(f"    WARNING: {vf.name}: {exc}")
+            extractor_label = label_out[-1] if label_out else None
+            if extractor_label is not None:
+                extractor = extractor_label.extractor
+            state.version_ingest[vid] = {
+                "status": "failed",
+                # NEVER str(exc) here (issue #98) — this is a catch-all for
+                # every OTHER exception extraction/ingest can raise (the
+                # SegmentationQAError branch above is handled separately —
+                # see its own comment above for exactly what is, and is NOT,
+                # proven safe to persist there; the grounding gate it can
+                # wrap is a known-open gap, not a proven-safe sibling):
+                # ExtractionError/DocxIngesterError/PdfIngesterError/
+                # RtfIngesterError messages routinely embed the absolute source
+                # path (extraction.py's own "file not found: {path}"/
+                # "extraction yielded no text: {path}"/docling messages
+                # interpolate it directly; python-docx's PackageNotFoundError
+                # does too, confirmed empirically), and SegmentationLLMError can
+                # embed a JSON-parse snippet of the model's own response. None
+                # of that is provably structural, so only the exception TYPE is
+                # safe to persist. This field is not a diagnostic sink:
+                # version_ingest[].error is schema-sanctioned straight into the
+                # PUBLISHED playbook.opf.json (_VERSION_INGEST_SCHEMA_KEYS,
+                # playbook_assembler.py), and is echoed verbatim by
+                # inspection_report.py's _version_ingest_review_flags and
+                # aar.py's needs-attention section — one unsafe write here
+                # leaks through all three persisted artifacts at once.
+                "error": type(exc).__name__,
+                "extractor": extractor,
+                "reason": (
+                    extractor_label.reason
+                    if extractor_label is not None
+                    # issue #218: a closed enum ("timeout" | "no-text" |
+                    # None), never text from the message — safe to persist
+                    # for the same reason "error" above is only a type name.
+                    else (exc.reason if isinstance(exc, ExtractionError) else None)
+                ),
+            }
+            fingerprint_parts.append(
+                {
+                    "name": vf.name,
+                    "sha256": state.sha256_by_vid[vid],
+                    "failed": state.version_ingest[vid],
+                }
+            )
+            # Issue #231: extraction recovered this version after a timeout,
+            # then segmentation raised. label_out is empty in that case
+            # (_llm_segment_file raised before returning the label), so read
+            # the label segment_to_tree carried out on the exception — the
+            # recovery is run-only and must keep the deal out of the stage
+            # cache exactly like a plain timeout.
+            recovered_label = (
+                extractor_label if extractor_label is not None else extractor_label_of(exc)
+            )
+            if timed_out_versions is not None and (
+                state.version_ingest[vid]["reason"] == FAILURE_TIMEOUT
+                or (recovered_label is not None and recovered_label.timed_out)
+            ):
+                timed_out_versions.append(vid)
+    state.l1_fingerprint = make_config_fingerprint(fingerprint_parts)
+    return state
+
+
 def _compute_doc_result(
     doc_id: str,
     doc_dir: Path,
@@ -2186,300 +2640,86 @@ def _compute_doc_result(
     becoming ``first_tree`` and being misclassified by the scope gate as
     ``deterministic_empty`` (issue #82).
     """
-    # L1: Ingest + segment each version
-    version_trees: dict[str, ClauseTree] = {}
-    # Serialised trees for the cacheable result (issue #139) — see this
-    # function's docstring's "version_trees" key and mine_corpus's
-    # "Materialise normalized/ clause trees now" comment.
-    version_tree_dicts: dict[str, dict[str, Any]] = {}
-    # Each version's tree BEFORE signature-block stripping (issue #217).
-    # version_trees (and everything that reads node text as clause language
-    # — classification, diffs, observations, normalized/) get the stripped
-    # tree; the signature block is exactly the evidence signed-copy
-    # detection reads and a place party names live, so detect_signed, the
-    # our-party alias scan and provenance detection read these instead.
-    unstripped_trees: dict[str, ClauseTree] = {}
-    llm_taxonomy_by_path: dict[str, dict[str, str | None]] = {}
-    # Populated on every branch below — the deterministic DOCX path gets it
-    # "for free" from _ingest_file_tracked, and both LLM-segmentation
-    # branches independently re-parse the ORIGINAL source file via
-    # _llm_tracked_changes/extract_tracked_changes (issue #85). Still a plain
-    # dict.get(vid)-returns-None affair for RTF/PDF versions and any DOCX
-    # python-docx cannot open (issue #88).
-    tracked_by_vid: dict[str, TrackedChanges | None] = {}
-    # Per-version authorship timestamp (issue #221) — DOCX core.xml
-    # modified/created and the latest tracked-change w:date, PDF /ModDate —
-    # seeding VersionInput.timestamp so a document's own dates break
-    # equal-cost ordering ties. None for RTF or when no metadata is readable.
-    timestamp_by_vid: dict[str, str | None] = {}
-    # Per-version ingest status (issue #89): every version FILE FOUND gets an
-    # entry here, "ok" or "failed" — this is what lets corpus_manifest.json
-    # distinguish "versions found" from "versions actually mined" instead of
-    # letting a failed version disappear after nothing but a scrolled-past
-    # progress-line WARNING (see corpus_doc["version_ingest"] below).
-    version_ingest: dict[str, dict[str, Any]] = {}
-    # Per-version content addresses (issue #185, OPF §4): sha256 of the
-    # SOURCE file bytes, computed here where the file is being read anyway,
-    # so a consumer holding the corpus can verify it has the cited document.
-    sha256_by_vid: dict[str, str] = {}
-    media_type_by_vid: dict[str, str] = {}
     taxonomy_ids = [e.id for e in taxonomy.classifier_entries()]
-    for vf in version_files:
-        vid = vf.stem
-        sha256_by_vid[vid] = file_sha256(vf)
-        media_type_by_vid[vid] = _MEDIA_TYPES.get(vf.suffix.lower(), "application/octet-stream")
-        # Per-version extractor recorded in version_ingest/corpus_manifest.json
-        # (issue #129). The deterministic path always uses the file suffix
-        # (unchanged). The LLM-segmentation path (sync, batch pre-pass, or a
-        # segmentation-cache hit — all funnel through extraction.extract_blocks)
-        # gets the REAL label extract_blocks/_llm_segment_file/
-        # _ground_batch_result resolved (issue #81) — set in the try block
-        # below as soon as one is available. `extractor`/`extractor_label`
-        # start as the deterministic-path default so the except-Exception
-        # branch below still has a sane fallback value for a version whose
-        # LLM-path resolution never got far enough to produce a real label
-        # (e.g. extract_blocks itself raised).
-        extractor = vf.suffix.lower().lstrip(".")
-        extractor_label: ExtractorLabel | None = None
-        try:
-            if use_llm_segmentation and batch_seg_nodes is not None and vid in batch_seg_nodes:
-                extraction = (batch_extractions or {})[vid]
-                tree, tax_by_path = _ground_batch_result(
-                    doc_id, vid, extraction, batch_seg_nodes[vid], taxonomy_ids
-                )
-                llm_taxonomy_by_path[vid] = tax_by_path
-                extractor_label = extraction.extractor_label
-                tracked, units = _llm_tracked_changes(vf, progress)
-                # extraction.blocks (issue #118) is the SAME batch-pre-pass
-                # extraction that produced this version's tree — no second
-                # extract_blocks call needed on this branch, unlike the
-                # synchronous one below.
-                tracked_by_vid[vid] = _bridge_tracked_changes_if_needed(
-                    tracked, units, extraction.blocks, extractor_label
-                )
-            elif use_llm_segmentation:
-                tree, tax_by_path, extractor_label = _llm_segment_file(
-                    vf,
-                    doc_id,
-                    vid,
-                    taxonomy_ids,
-                    llm_segment_fn,
-                    segmentation_cache,
-                    model=config.segmentation.model,
-                    extraction_cache=extraction_cache,
-                    refresh_extraction=refresh_extraction,
-                    extractor=config.extraction.extractor,
-                )
-                llm_taxonomy_by_path[vid] = tax_by_path
-                tracked, units = _llm_tracked_changes(vf, progress)
-                # Bridge (issue #118) only when actually needed: a non-legacy
-                # extractor AND at least one change carries a char_span worth
-                # translating. Most DOCX versions carry no tracked changes at
-                # all, so this re-extraction is the exception, not the rule
-                # (see _extract_blocks_for_bridge's cache-hit note).
-                bridge_blocks: list[Block] | None = None
-                if (
-                    tracked is not None
-                    and any(c.char_span is not None for c in tracked.changes)
-                    and extractor_label is not None
-                    and extractor_label != "legacy"
-                ):
-                    bridge_blocks = _extract_blocks_for_bridge(
-                        vf, extraction_cache, False, config.extraction.extractor
-                    )
-                tracked_by_vid[vid] = _bridge_tracked_changes_if_needed(
-                    tracked, units, bridge_blocks, extractor_label
-                )
-            else:
-                raw_tree, tracked = _ingest_file_tracked(vf, doc_id, vid)
-                tree = segment(raw_tree)
-                tracked_by_vid[vid] = tracked
+    l1 = _collect_l1(
+        doc_id,
+        version_files,
+        config=config,
+        taxonomy_ids=taxonomy_ids,
+        progress=progress,
+        timed_out_versions=timed_out_versions,
+        use_llm_segmentation=use_llm_segmentation,
+        llm_segment_fn=llm_segment_fn,
+        batch_seg_nodes=batch_seg_nodes,
+        batch_extractions=batch_extractions,
+        segmentation_cache=segmentation_cache,
+        extraction_cache=extraction_cache,
+        refresh_extraction=refresh_extraction,
+    )
+    return _compute_doc_from_l1(
+        doc_id,
+        doc_dir,
+        version_files,
+        l1,
+        config,
+        taxonomy,
+        template_tree,
+        template_std_by_tid,
+        _scope_judge,
+        _cls_judge,
+        _dev_judge,
+        alignment_judge,
+        trail_judge,
+        progress,
+        signed_judge=signed_judge,
+        provenance_judge=provenance_judge,
+        use_llm_segmentation=use_llm_segmentation,
+        normalize_trail_across_versions=normalize_trail_across_versions,
+        normalize_trail_fn=normalize_trail_fn,
+        template_std_nodes_by_tid=template_std_nodes_by_tid,
+    )
 
-            if not list(tree.all_nodes()) and vf.stat().st_size > 0:
-                # An empty ClauseTree from a non-empty source file is an
-                # ingest FAILURE, not a success — e.g. a scanned/image PDF on
-                # the deterministic path (pdf_ingester.NullOCRAdapter; no OCR
-                # is wired) silently yields zero clauses with no error (issue
-                # #82). Treating that as success would let this version enter
-                # version_trees and become `first_tree` below, which the
-                # scope gate misreads as `deterministic_empty` ("this
-                # agreement is out of scope") — one unreadable scan would
-                # knock the whole negotiation trail out of the corpus. Raise
-                # here so it is recorded per-version exactly like any other
-                # extraction failure (the `except Exception` clause below)
-                # and never reaches the scope gate as the representative
-                # version.
-                raise ValueError(
-                    "ingest produced an empty clause tree from a non-empty "
-                    "source file — treating as an extraction failure"
-                )
 
-            # issue #217: cut the signature block (IN WITNESS WHEREOF,
-            # By:/Name:/Title:, signatory names) out of the last clause's
-            # text — it is not clause language, and signatories' names are a
-            # pseudonymization residue path. The unstripped tree is kept for
-            # the L2 detectors that need the block (see unstripped_trees).
-            unstripped_trees[vid] = tree
-            tree, signature_block = strip_signature_block(tree)
-            timestamp_by_vid[vid] = document_timestamp(vf, tracked_by_vid.get(vid))
+def _compute_doc_from_l1(
+    doc_id: str,
+    doc_dir: Path,
+    version_files: list[Path],
+    l1: _L1State,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    template_tree: ClauseTree | None,
+    template_std_by_tid: dict[str, str],
+    _scope_judge: ScopeJudge,
+    _cls_judge: ClassificationJudge,
+    _dev_judge: DeviationJudge | None,
+    alignment_judge: AlignmentJudge | None,
+    trail_judge: TrailJudge | None,
+    progress: Callable[[str], None],
+    signed_judge: SignedJudge | None = None,
+    provenance_judge: ProvenanceJudge | None = None,
+    use_llm_segmentation: bool = False,
+    normalize_trail_across_versions: bool = False,
+    normalize_trail_fn: NormalizeTrailFn | None = None,
+    template_std_nodes_by_tid: dict[str, list[str]] | None = None,
+) -> dict[str, Any] | None:
+    """L2-L4 for one document from its L1 state (issue #219).
 
-            # issue #139: do NOT write to normalized/ here — that used to
-            # write raw, pre-pseudonymization content under the RAW doc_id,
-            # mid-loop, so a run with known_entities configured left the raw
-            # counterparty name in both the directory name and every node's
-            # text forever (never stale-cleared, never rewritten on a
-            # stage-cache hit — see the born-safe pseudonymization pass
-            # below and mine_corpus's "Materialise normalized/ clause trees
-            # now" comment, which mirrors trail/'s treatment). Only the
-            # serialised dict is captured here, into the cacheable result.
-            version_tree_dicts[vid] = tree.to_dict()
-            version_trees[vid] = tree
-            if extractor_label is not None:
-                extractor = extractor_label.extractor
-            version_ingest[vid] = {
-                "status": "ok",
-                "error": None,
-                "extractor": extractor,
-                # None on the deterministic path (never a fallback) and
-                # whenever docling ran clean with no degradation — see
-                # ExtractorLabel.reason (issue #81).
-                "reason": extractor_label.reason if extractor_label is not None else None,
-                # issue #217: where the stripped signature block sat in this
-                # version's normalized text ([start, end) — same coordinates
-                # as ClauseNode.char_span), or None when no block was found
-                # (or its offsets could not be related to the tree). Engine-
-                # internal: corpus_manifest.json carries it; the frozen
-                # OPF 0.3 schema's version_ingest (additionalProperties:
-                # false) does not, so playbook_assembler's
-                # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
-                # playbook.
-                "signature_block_span": (
-                    list(signature_block.char_span)
-                    if signature_block is not None and signature_block.char_span is not None
-                    else None
-                ),
-            }
-            if (
-                timed_out_versions is not None
-                and extractor_label is not None
-                and extractor_label.timed_out
-            ):
-                # Issue #231: this version's text came from a fallback after
-                # a docling timeout. ExtractionCache already refused to store
-                # it; storing the deal result here would replay the legacy
-                # extraction one layer up and the next run would never retry
-                # docling — pinning the trail as mixed-extractor.
-                timed_out_versions.append(vid)
-        except SegmentationQAError as exc:
-            # Fail loud, by design: a QA-gate failure on the LLM path must
-            # never be swallowed into a per-file warning + skipped version —
-            # that would silently drop a version rather than flag the
-            # document for review (see llm_segmentation_stage.segment_to_tree
-            # and segmentation_qa.segment_verify_repair). It propagates out of
-            # this per-document function so the corpus loop can quarantine THIS
-            # document (recorded in quarantine.json) without aborting the whole
-            # run — see mine_corpus's ``quarantined`` handling. Every other
-            # exception below (extraction/ingest failure, malformed source)
-            # keeps the pre-existing "skip this one version file" behavior.
-            #
-            # issue #83: record THIS version's failure into version_ingest —
-            # same shape as the "ok" row above and the generic-failure row
-            # below — so the extractor that produced the failing stream isn't
-            # erased. That alone is not enough for it to reach
-            # corpus_manifest.json: this function's own locals (including
-            # version_ingest) are discarded the instant this exception
-            # unwinds past its caller, so a PARTIAL corpus_doc snapshot
-            # (however far L1 got — this vid's failure, every earlier vid's
-            # "ok" row, every later vid's not-yet-attempted default) is built
-            # now and attached to the exception for mine_corpus's quarantine
-            # handler to append to corpus_documents (see
-            # SegmentationQAError.partial_corpus_doc and
-            # _build_quarantine_corpus_doc). The document is still
-            # quarantined — this restores audit visibility, it does not
-            # change the fail-loud contract above. ``str(exc)`` is safe to
-            # persist unbounded for THIS class's own coverage/reconstruction/
-            # tree/taxonomy gates (proven at their own source to carry only
-            # gate names, node/clause identifiers, and OFFSETS/LENGTHS — see
-            # that class's docstring) — but NOT yet for the grounding gate:
-            # this ``except`` also catches a ``GroundingError`` wrapped
-            # verbatim (segmentation_qa.py's ``run_gates``/
-            # ``segment_verify_repair``, e.g. ``f"grounding gate: {exc}"``),
-            # whose own 8 raise sites (segmentation_grounding.py:158,160,
-            # 162,169,179,181,191,203) interpolate the model's own
-            # unconstrained ``node_id``/``start_block_id``/``end_block_id``/
-            # ``parent_id`` (no enum/pattern in llm_segmenter.py's schema,
-            # unlike ``taxonomy_id``). That gap is real and open — reported,
-            # not fixed, in issue #98's rescope comment, which records the
-            # verified line list for its own follow-up ticket (not yet
-            # filed); this diff does not close it.
-            if extractor_label is not None:
-                extractor = extractor_label.extractor
-            version_ingest[vid] = {
-                "status": "failed",
-                "error": str(exc),
-                "extractor": extractor,
-                "reason": extractor_label.reason if extractor_label is not None else None,
-            }
-            exc.partial_corpus_doc = _build_quarantine_corpus_doc(
-                doc_id,
-                version_files,
-                version_ingest,
-                sha256_by_vid,
-                media_type_by_vid,
-            )
-            raise
-        except Exception as exc:  # noqa: BLE001
-            progress(f"    WARNING: {vf.name}: {exc}")
-            if extractor_label is not None:
-                extractor = extractor_label.extractor
-            version_ingest[vid] = {
-                "status": "failed",
-                # NEVER str(exc) here (issue #98) — this is a catch-all for
-                # every OTHER exception extraction/ingest can raise (the
-                # SegmentationQAError branch above is handled separately —
-                # see its own comment above for exactly what is, and is NOT,
-                # proven safe to persist there; the grounding gate it can
-                # wrap is a known-open gap, not a proven-safe sibling):
-                # ExtractionError/DocxIngesterError/PdfIngesterError/
-                # RtfIngesterError messages routinely embed the absolute source
-                # path (extraction.py's own "file not found: {path}"/
-                # "extraction yielded no text: {path}"/docling messages
-                # interpolate it directly; python-docx's PackageNotFoundError
-                # does too, confirmed empirically), and SegmentationLLMError can
-                # embed a JSON-parse snippet of the model's own response. None
-                # of that is provably structural, so only the exception TYPE is
-                # safe to persist. This field is not a diagnostic sink:
-                # version_ingest[].error is schema-sanctioned straight into the
-                # PUBLISHED playbook.opf.json (_VERSION_INGEST_SCHEMA_KEYS,
-                # playbook_assembler.py), and is echoed verbatim by
-                # inspection_report.py's _version_ingest_review_flags and
-                # aar.py's needs-attention section — one unsafe write here
-                # leaks through all three persisted artifacts at once.
-                "error": type(exc).__name__,
-                "extractor": extractor,
-                "reason": (
-                    extractor_label.reason
-                    if extractor_label is not None
-                    # issue #218: a closed enum ("timeout" | "no-text" |
-                    # None), never text from the message — safe to persist
-                    # for the same reason "error" above is only a type name.
-                    else (exc.reason if isinstance(exc, ExtractionError) else None)
-                ),
-            }
-            # Issue #231: extraction recovered this version after a timeout,
-            # then segmentation raised. extractor_label is never bound here
-            # in that case (_llm_segment_file raised before returning it), so
-            # read the label segment_to_tree carried out on the exception —
-            # the recovery is run-only and must keep the deal out of the
-            # stage cache exactly like a plain timeout.
-            recovered_label = (
-                extractor_label if extractor_label is not None else extractor_label_of(exc)
-            )
-            if timed_out_versions is not None and (
-                version_ingest[vid]["reason"] == FAILURE_TIMEOUT
-                or (recovered_label is not None and recovered_label.timed_out)
-            ):
-                timed_out_versions.append(vid)
+    The second half of :func:`_compute_doc_result` (see there for the
+    returned dict): cross-version normalization, scope gate, signed/version
+    order/provenance (L2), classification (L3), diff/reversals/deviations
+    (L4). ``mine_corpus`` caches its result per document under a key built
+    from ``l1.l1_fingerprint``.
+    """
+    version_trees = l1.version_trees
+    version_tree_dicts = l1.version_tree_dicts
+    unstripped_trees = l1.unstripped_trees
+    llm_taxonomy_by_path = l1.llm_taxonomy_by_path
+    tracked_by_vid = l1.tracked_by_vid
+    timestamp_by_vid = l1.timestamp_by_vid
+    version_ingest = l1.version_ingest
+    sha256_by_vid = l1.sha256_by_vid
+    media_type_by_vid = l1.media_type_by_vid
+    taxonomy_ids = [e.id for e in taxonomy.classifier_entries()]
 
     if not version_trees:
         progress(f"  {doc_id}: all ingests failed — skipping")
@@ -2949,6 +3189,8 @@ def mine_corpus(
     refresh_extraction: bool = False,
     entity_registry_path: Path | None = None,
     progress: Callable[[str], None] = lambda _: None,
+    cache_dir: Path | None = None,
+    force_rewrite: bool = False,
 ) -> None:
     """Run L1–L4 (ingest → scope → classify → diff/deviation) and write the observation store.
 
@@ -2984,6 +3226,18 @@ def mine_corpus(
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).
         provenance_judge:     L2 provenance judge; defaults to None (deterministic only).
         no_cache:             If True, skip the cache and force a full recompute.
+                              Store-backed judges (``agent_judge.StoreBacked*``)
+                              no longer need it (issue #219): each cached
+                              L2-L4 result records the verdict keys it replayed
+                              and is recomputed when any of them changed, and a
+                              result that queued anything is never cached.
+        cache_dir:            Where the stage cache lives; defaults to
+                              ``out_dir/.cache``. ``judge --plan-only`` mines
+                              into a temp out-dir but reads the real out-dir's
+                              cache through this (issue #219).
+        force_rewrite:        Rewrite every intermediate even when its content
+                              is unchanged. By default (issue #219) a file whose
+                              bytes would not change is left untouched.
         use_llm_segmentation: If True, L1 segments every document version via
                               :func:`~playbook_engine.llm_segmentation_stage.segment_to_tree`
                               instead of the deterministic
@@ -3077,11 +3331,11 @@ def mine_corpus(
                               LLM segmentation call) and independent of
                               ``no_cache`` (which controls the separate L1-L4
                               ``ArtifactStore``/``JudgmentCache`` stage
-                              cache) — deliberately so: ``playbook judge``
-                              forces ``no_cache=True`` to avoid replaying
-                              stale ``needs_review`` sentinels from the
-                              store-backed judges, but that must not also
-                              force every judge round to re-extract/re-OCR
+                              cache) — deliberately so: an operator
+                              ``--no-cache`` (and, before issue #219, the
+                              ``no_cache=True`` that ``playbook judge``'s
+                              store-backed judges used to force) must not
+                              also force every round to re-extract/re-OCR
                               every version of every agreement from scratch
                               (issue #132). Defaults to None (no caching —
                               every run re-extracts). See
@@ -3094,15 +3348,15 @@ def mine_corpus(
                               — while writes still happen, leaving a fresh,
                               correct cache behind for subsequent runs
                               (issue #78). Deliberately a SEPARATE signal
-                              from ``no_cache`` above: the judge path forces
-                              ``no_cache=True`` without wanting to force
-                              re-extraction (that would re-burn docling OCR
-                              timeouts every round — issue #132), so this
-                              must be threaded independently. ``cli.py``'s
-                              ``mine`` command sources it from the
-                              operator's own ``--no-cache`` flag (captured
-                              before any store-backed-judge override of
-                              ``no_cache`` itself); ``playbook judge`` never
+                              from ``no_cache`` above: the judge path used
+                              to force ``no_cache=True`` (until issue #219
+                              left the stage cache on under store-backed
+                              judges) without wanting to force re-extraction
+                              (that would re-burn docling OCR timeouts every
+                              round — issue #132), so this is threaded
+                              independently. ``cli.py``'s ``mine`` command
+                              sources it from the operator's own
+                              ``--no-cache`` flag; ``playbook judge`` never
                               sets it. Ignored when ``extraction_cache`` is
                               None. Defaults to False.
         entity_registry_path: Path to the persisted entity->alias registry
@@ -3157,7 +3411,39 @@ def mine_corpus(
     manifest_path = out_dir / "corpus_manifest.json"
 
     # Content-addressed stage cache — disabled when no_cache=True.
-    store: ArtifactStore | None = None if no_cache else ArtifactStore(out_dir / ".cache")
+    stage_cache_dir = cache_dir if cache_dir is not None else out_dir / ".cache"
+    store: ArtifactStore | None = None if no_cache else ArtifactStore(stage_cache_dir)
+
+    # Store-backed judges (issue #219). Their VerdictStore is the verdict
+    # cache: it is the authoritative record of every verdict, rubric stamp and
+    # all. The stage cache stays ON under them — each cached L2-L4 result
+    # records the verdict keys it replayed (VerdictStore.capture_lookups) and
+    # is refused on replay when any of those verdicts changed, and a result
+    # whose compute queued anything (PendingQueue.capture_adds — a miss, a
+    # stale rubric, a malformed stored verdict) is never cached at all, so a
+    # replayed document never hides a pending item from the round's queue.
+    raw_judges: list[Any] = [_scope_judge, _cls_judge, _dev_judge, provenance_judge]
+    verdict_stores: list[VerdictStore] = _distinct(
+        getattr(j, "store", None)
+        for j in raw_judges
+        if isinstance(getattr(j, "store", None), VerdictStore)
+    )
+    pending_queues: list[PendingQueue] = _distinct(
+        getattr(j, "pending", None)
+        for j in raw_judges
+        if isinstance(getattr(j, "pending", None), PendingQueue)
+    )
+    rubric_policies: list[RubricPolicy] = _distinct(
+        getattr(j, "rubric", None)
+        for j in raw_judges
+        if isinstance(getattr(j, "rubric", None), RubricPolicy)
+    )
+    segmentation_store = (
+        segmentation_cache.verdict_store if segmentation_cache is not None else None
+    )
+
+    def _store_backed(judge: Any) -> bool:
+        return isinstance(getattr(judge, "store", None), VerdictStore)
 
     # Judgment verdict cache — wraps the inline judges with batching + content-addressed
     # caching so identical clause payloads are judged once per corpus (issue #62).
@@ -3166,14 +3452,22 @@ def mine_corpus(
     # When no_cache=True the verdict cache is skipped entirely (same flag that
     # disables the #61 stage cache).  This guarantees that "force a full recompute"
     # means a full recompute — no stale verdict hits from a previous run.
+    #
+    # Never around a store-backed judge (issue #219): this cache would answer
+    # in its place, so a verdict later overwritten (judge-apply) or re-stamped
+    # (judge-migrate) in the VerdictStore would keep replaying the old answer,
+    # a stale-rubric verdict would never be re-queued, and the lookup the
+    # stage cache's dependency check rests on would never happen.
     if not no_cache:
         verdict_cache = JudgmentCache(
-            out_dir / ".cache" / "verdicts.jsonl",
+            stage_cache_dir / "verdicts.jsonl",
             model_id=judge_identity,
         )
-        _scope_judge = BatchedScopeJudge(delegate=_scope_judge, cache=verdict_cache)
-        _cls_judge = BatchedClassificationJudge(delegate=_cls_judge, cache=verdict_cache)
-        if _dev_judge is not None:
+        if not _store_backed(_scope_judge):
+            _scope_judge = BatchedScopeJudge(delegate=_scope_judge, cache=verdict_cache)
+        if not _store_backed(_cls_judge):
+            _cls_judge = BatchedClassificationJudge(delegate=_cls_judge, cache=verdict_cache)
+        if _dev_judge is not None and not _store_backed(_dev_judge):
             _dev_judge = BatchedDeviationJudge(delegate=_dev_judge, cache=verdict_cache)
 
     # Config fingerprint prep: hash the template file's *content* (not its
@@ -3297,29 +3591,14 @@ def mine_corpus(
     # template_content_hash is identical — so store.get_or_compute recomputes
     # every per-doc result against the real standards instead of replaying
     # the template-less cached ones verbatim, forever.
-    config_fp = make_config_fingerprint(
+    # L1 fingerprint (issue #219): ONLY what changes a version's L1 record
+    # (_l1_version_record) for identical source bytes — the extraction
+    # environment and the segmentation path/model/prompt. The template, the
+    # taxonomy wording, the judges and the thresholds are deliberately absent:
+    # they act at L2-L4, so changing one replays every L1 tree.
+    l1_config_fp = make_config_fingerprint(
         {
-            "agreement_type_id": config.agreement_type.id,
-            "provenance_aliases": sorted(config.provenance.our_party_aliases),
-            # Issue #220: known_entities are neutralized by the deterministic
-            # standard check (_standard_party_names), so they change L4's
-            # standard/deviation output for identical source content.
-            "standard_party_names": sorted(config.provenance.known_entities),
-            # Issue #119: our_authors feeds party_side_for_author exactly like
-            # our_party_aliases does (proposed_by/moved_by) — a config change
-            # here must bust the per-doc cache the same way an alias change
-            # does, or a stale "unknown" persists after the corpus's true
-            # author list is filled in.
-            "provenance_authors": sorted(config.provenance.our_authors),
-            "template_content_hash": template_content_hash,
-            "template_tree_present": template_tree is not None,
-            "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),
-            # Issue #216: the origin reference build_observations classifies
-            # removed-before-signing text against — every template node per
-            # taxonomy_id, so a change to any later node busts the cache too.
-            "template_origin_standards": make_config_fingerprint(
-                sorted(template_std_nodes_by_tid.items())
-            ),
+            "l1_record_version": _L1_RECORD_VERSION,
             # Which extractor produced the source text changes L1 ingest
             # output for byte-identical source files — legacy
             # (pdfplumber/python-docx/pandoc) has no OCR and can garble
@@ -3352,20 +3631,12 @@ def mine_corpus(
             # installing or removing it must bust every per-doc entry the
             # same way "extractor_env" does for docling itself.
             "ocrmypdf_available": ocrmypdf_available(),
-            # Switching segmentation paths changes L1 output for identical
-            # source files — must bust the cache, not replay a stale tree
-            # segmented (and classified) the other way.
             "use_llm_segmentation": use_llm_segmentation,
             # The batch path has no repair loop (see _ground_batch_result), so
             # the same source content can in principle segment differently
             # under batch vs. synchronous LLM calls — never replay one path's
             # stage-cached tree as if it were the other's.
             "use_batch_segmentation": use_batch_segmentation,
-            # Toggling cross-version taxonomy normalization changes the L1
-            # output for every version of every multi-version agreement — a
-            # prior run's un-normalized cached trees must not be replayed
-            # silently once this is switched on (issue #90).
-            "normalize_trail_across_versions": normalize_trail_across_versions,
             # The segmenter's model id, prompt version, output schema shape,
             # and effort each change what L1 produces for identical source
             # content. These are read from the same module-level constants
@@ -3377,6 +3648,58 @@ def mine_corpus(
             "segmentation_prompt_version": PROMPT_VERSION,
             "segmentation_schema_hash": SCHEMA_HASH,
             "segmentation_effort": DEFAULT_EFFORT,
+            # The LLM path classifies in the same pass as it segments, against
+            # the classifier-eligible taxonomy ids — so on that path (only)
+            # the id set is an L1 input too.
+            "llm_taxonomy_ids": (
+                sorted(e.id for e in taxonomy.classifier_entries())
+                if use_llm_segmentation
+                else None
+            ),
+            # version_ingest's "reason" travels in the L1 record.
+            "version_ingest_reason_version": _VERSION_INGEST_REASON_VERSION,
+        }
+    )
+
+    l2_config_fp = make_config_fingerprint(
+        {
+            "agreement_type_id": config.agreement_type.id,
+            # The scope gate judges against the whole agreement-type
+            # definition, not only its id (issue #219).
+            "agreement_type": {
+                "name": config.agreement_type.name,
+                "description": config.agreement_type.description,
+                "aliases": sorted(config.agreement_type.aliases),
+            },
+            "provenance_aliases": sorted(config.provenance.our_party_aliases),
+            # Issue #220: known_entities are neutralized by the deterministic
+            # standard check (_standard_party_names), so they change L4's
+            # standard/deviation output for identical source content.
+            "standard_party_names": sorted(config.provenance.known_entities),
+            # Issue #119: our_authors feeds party_side_for_author exactly like
+            # our_party_aliases does (proposed_by/moved_by) — a config change
+            # here must bust the per-doc cache the same way an alias change
+            # does, or a stale "unknown" persists after the corpus's true
+            # author list is filled in.
+            "provenance_authors": sorted(config.provenance.our_authors),
+            "template_content_hash": template_content_hash,
+            "template_tree_present": template_tree is not None,
+            "template_standards": make_config_fingerprint(sorted(template_std_by_tid.items())),
+            # Issue #216: the origin reference build_observations classifies
+            # removed-before-signing text against — every template node per
+            # taxonomy_id, so a change to any later node busts the cache too.
+            "template_origin_standards": make_config_fingerprint(
+                sorted(template_std_nodes_by_tid.items())
+            ),
+            # Switching segmentation paths also switches L3 (the LLM path's
+            # own per-clause taxonomy vs classify_tree) — an L2-L4 input too,
+            # not only an L1 one.
+            "use_llm_segmentation": use_llm_segmentation,
+            # Toggling cross-version taxonomy normalization changes the L1
+            # output for every version of every multi-version agreement — a
+            # prior run's un-normalized cached trees must not be replayed
+            # silently once this is switched on (issue #90).
+            "normalize_trail_across_versions": normalize_trail_across_versions,
             # Producer-configurable classification bands (issue #168) change
             # which clauses classify_tree auto-classifies, escalates to the
             # judge, or auto-unclassifies for identical source content — a
@@ -3395,12 +3718,31 @@ def mine_corpus(
             # loop would never even reach the judges (let alone the verdict
             # cache) to notice the identity changed (issue #102).
             "judge_identity": judge_identity,
-            # Taxonomy content feeds classification and the segmentation
-            # taxonomy gate; editing the taxonomy file must bust the per-doc
-            # stage cache rather than replay results classified against the
-            # old entries (the judges' own verdict keys already include
-            # taxonomy_ids — this closes the same hole for the L1-L4 layer).
+            # Taxonomy content feeds classification; editing the taxonomy file
+            # must bust the L2-L4 cache rather than replay results classified
+            # against the old entries (the judges' own verdict keys already
+            # include taxonomy_ids — this closes the same hole for the stage
+            # cache). This entry list alone missed ``status`` (issue #219):
+            # retiring an entry (status: inactive) removes it from what a
+            # clause may be classified into while its id/label/description
+            # stay put. "rubric_versions" below closes that: its classify
+            # version is built from rubric.taxonomy_digest — the digest of
+            # exactly the classifier-eligible (active/custom) surface — so a
+            # status flip moves it.
             "taxonomy_entries": sorted((e.id, e.label, e.description) for e in taxonomy.entries),
+            # The rubric in force for every judge kind: the taxonomy digest
+            # above (classify), the agreement-type definition (scope) and the
+            # answer enums and prompt versions (all kinds). Under store-backed
+            # judges a moved rubric re-queues a stored verdict, so a result
+            # replayed across a rubric change would be wrong; the staleness
+            # policy (--accept-stale / --strict-rubric) decides the same thing
+            # and is not in the verdict store either.
+            "rubric_versions": current_versions(
+                taxonomy=taxonomy, agreement_type=config.agreement_type
+            ),
+            "rubric_policies": [
+                [policy.strict_legacy, policy.accept_stale] for policy in rubric_policies
+            ],
             # Deviation assessment now diffs "unchanged" clauses (including
             # every clause of a single-version document) against the
             # canonical template rather than hardcoding deviation="none"
@@ -3481,6 +3823,75 @@ def mine_corpus(
         )
 
     # -------------------------------------------------------------------
+    # Layered stage-cache helpers (issue #219)
+    # -------------------------------------------------------------------
+    def _l1_key(doc_id: str, vf: Path) -> str:
+        return make_doc_key(doc_id, [vf], l1_config_fp, _L1_STAGE)
+
+    def _l1_record_current(record: Any) -> bool:
+        """A cached L1 record replays only while every segmentation-store
+        entry it was grounded from still holds what it held then."""
+        deps = record.get(_L1_DEPS_KEY) if isinstance(record, dict) else None
+        if deps is None:
+            return False
+        if not deps:
+            return True
+        if segmentation_store is None:
+            return False
+        return all(segmentation_store.fingerprint(k) == fp for k, fp in deps.items())
+
+    def _verdicts_current(result: Any) -> bool:
+        """A cached L2-L4 result replays only while every stored verdict it was
+        built from is unchanged — overwritten (judge-apply), re-stamped
+        (judge-migrate) or removed each force a recompute."""
+        if result is None:
+            return True  # no version ingested: no judge was ever asked
+        deps = result.get(_VERDICT_DEPS_KEY) if isinstance(result, dict) else None
+        if deps is None or len(deps) != len(verdict_stores):
+            return False
+        return all(
+            st.fingerprint(k) == fp
+            for st, st_deps in zip(verdict_stores, deps, strict=True)
+            for k, fp in st_deps.items()
+        )
+
+    def _make_l1_fetch(doc_id: str) -> L1Fetch:
+        assert store is not None
+        stage_store = store
+
+        def _fetch(vf: Path, compute: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+            unresolved = [False]
+            timed_out = [False]
+
+            def _compute() -> dict[str, Any]:
+                if segmentation_store is None:
+                    record = compute()
+                    timed_out[0] = bool(record.get(_L1_TIMED_OUT_KEY))
+                    return {**record, _L1_DEPS_KEY: {}}
+                with segmentation_store.capture_lookups() as seen:
+                    record = compute()
+                timed_out[0] = bool(record.get(_L1_TIMED_OUT_KEY))
+                deps = {k: segmentation_store.fingerprint(k) for k in sorted(seen)}
+                unresolved[0] = any(fp is None for fp in deps.values())
+                return {**record, _L1_DEPS_KEY: deps}
+
+            def _cacheable() -> bool:
+                # Never cache an unresolved segmentation lookup, nor (issue
+                # #231) text a fallback recovered after a docling timeout.
+                return not unresolved[0] and not timed_out[0]
+
+            record: dict[str, Any] = stage_store.get_or_compute(
+                _l1_key(doc_id, vf),
+                _compute,
+                cacheable=_cacheable,
+                is_valid=_l1_record_current,
+                stage=_L1_STAGE,
+            )
+            return record
+
+        return _fetch
+
+    # -------------------------------------------------------------------
     # Batch-segmentation pre-pass (opt-in, issue #76): extract every
     # document version up front and segment the whole corpus in one
     # Message Batches call, before the per-document loop below. Only
@@ -3499,31 +3910,32 @@ def mine_corpus(
             version_files = _discover_versions(doc_dir)
             if not version_files:
                 continue
-            # Issue #92: a document whose L1-L4 stage cache is already warm
-            # will be replayed verbatim by store.get_or_compute in the
-            # per-document loop below — it never looks at
-            # batch_seg_nodes_by_doc/batch_extractions_by_doc for a cache
-            # hit. Extracting and submitting such a document to the (paid)
-            # batch here is pure waste: at 40x3 scale, a re-run where only
-            # one document changed would otherwise re-extract and
-            # re-segment all 120 versions. The cache key inputs (file
-            # hashes, config fingerprint, hints) are all available before
-            # extraction, so compute it and skip the pre-pass for cache
-            # hits entirely.
-            if store is not None:
-                hints_path = doc_dir / "hints.yaml"
-                doc_cache_key = make_doc_key(
-                    doc_dir.name, version_files, config_fp, "l1-l4", hints_path
-                )
-                if store.contains(doc_cache_key):
-                    skipped_cache_hit_docs += 1
-                    continue
-            doc_versions[doc_dir.name] = {vf.stem: vf for vf in version_files}
+            # Issue #92: a version whose L1 stage cache is already warm will
+            # be replayed by store.get_or_compute in the per-document loop
+            # below — it never looks at batch_seg_nodes_by_doc/
+            # batch_extractions_by_doc for a cache hit. Extracting and
+            # submitting such a version to the (paid) batch here is pure
+            # waste: at 40x3 scale, a re-run where only one document changed
+            # would otherwise re-extract and re-segment all 120 versions. The
+            # L1 key inputs (file name + content, L1 fingerprint) are all
+            # available before extraction, so check each version and leave
+            # the cache hits out (issue #219: per version, not per document —
+            # L1 is cached per version now).
+            uncached = {
+                vf.stem: vf
+                for vf in version_files
+                if store is None
+                or not store.contains(_l1_key(doc_dir.name, vf), is_valid=_l1_record_current)
+            }
+            if not uncached:
+                skipped_cache_hit_docs += 1
+                continue
+            doc_versions[doc_dir.name] = uncached
 
         if skipped_cache_hit_docs:
             progress(
                 f"  batch pre-pass: skipping {skipped_cache_hit_docs} document(s) "
-                "already satisfied by the L1-L4 stage cache"
+                "already satisfied by the L1 stage cache"
             )
 
         taxonomy_ids = [e.id for e in taxonomy.classifier_entries()]
@@ -3555,94 +3967,122 @@ def mine_corpus(
         doc_batch_extractions: dict[str, _BatchExtraction] | None,
         timed_out_versions: list[str],
     ) -> Any:
-        """Compute one document's L1–L4 result, via the stage cache when present.
+        """Compute one document's L1–L4 result, via the layered stage cache when present.
 
-        *timed_out_versions* collects every version whose extraction timed
-        out (issue #218); a result with any is returned but never stored.
+        L1 runs (or replays) per version through the "l1" layer, then L2-L4
+        runs (or replays) per document through the "l2-l4" layer, keyed by
+        the L1 records it consumes (issue #219). *timed_out_versions*
+        collects every version whose extraction timed out (issue #218); a
+        result with any is returned but never stored.
         """
-        if store is not None:
-            hints_path = doc_dir / "hints.yaml"
-            cache_key = make_doc_key(doc_id, version_files, config_fp, "l1-l4", hints_path)
-
-            def _compute(
-                _doc_id: str = doc_id,
-                _doc_dir: Path = doc_dir,
-                _vfs: list[Path] = version_files,
-                _batch_seg_nodes: dict[str, list[SegNode]] | None = doc_batch_seg_nodes,
-                _batch_extractions: dict[str, _BatchExtraction] | None = doc_batch_extractions,
-                _timed_out: list[str] = timed_out_versions,
-            ) -> Any:
-                return _compute_doc_result(
-                    _doc_id,
-                    _doc_dir,
-                    _vfs,
-                    out_dir,
-                    config,
-                    taxonomy,
-                    template_tree,
-                    template_std_by_tid,
-                    _scope_judge,
-                    _cls_judge,
-                    _dev_judge,
-                    alignment_judge,
-                    trail_judge,
-                    progress,
-                    signed_judge=signed_judge,
-                    provenance_judge=provenance_judge,
-                    use_llm_segmentation=use_llm_segmentation,
-                    llm_segment_fn=llm_segment_fn,
-                    normalize_trail_across_versions=normalize_trail_across_versions,
-                    normalize_trail_fn=normalize_trail_fn,
-                    batch_seg_nodes=_batch_seg_nodes,
-                    batch_extractions=_batch_extractions,
-                    segmentation_cache=segmentation_cache,
-                    extraction_cache=extraction_cache,
-                    refresh_extraction=refresh_extraction,
-                    template_std_nodes_by_tid=template_std_nodes_by_tid,
-                    timed_out_versions=_timed_out,
-                )
-
-            # Never cache a deal with a timed-out version (issue #218) —
-            # neither a partial result nor the all-failed None, nor (issue
-            # #231) a result holding a version a fallback recovered after a
-            # timeout. The
-            # ExtractionCache already refuses to negative-cache the timeout;
-            # storing the per-deal result here would replay it one layer up
-            # and the next run would never retry the version.
-            def _cacheable(_timed_out: list[str] = timed_out_versions) -> bool:
-                return not _timed_out
-
-            return store.get_or_compute(cache_key, _compute, cacheable=_cacheable)
-
-        return _compute_doc_result(
+        l1 = _collect_l1(
             doc_id,
-            doc_dir,
             version_files,
-            out_dir,
-            config,
-            taxonomy,
-            template_tree,
-            template_std_by_tid,
-            _scope_judge,
-            _cls_judge,
-            _dev_judge,
-            alignment_judge,
-            trail_judge,
-            progress,
-            signed_judge=signed_judge,
-            provenance_judge=provenance_judge,
+            config=config,
+            taxonomy_ids=[e.id for e in taxonomy.classifier_entries()],
+            progress=progress,
+            timed_out_versions=timed_out_versions,
+            fetch_l1=_make_l1_fetch(doc_id) if store is not None else None,
             use_llm_segmentation=use_llm_segmentation,
             llm_segment_fn=llm_segment_fn,
-            normalize_trail_across_versions=normalize_trail_across_versions,
-            normalize_trail_fn=normalize_trail_fn,
             batch_seg_nodes=doc_batch_seg_nodes,
             batch_extractions=doc_batch_extractions,
             segmentation_cache=segmentation_cache,
             extraction_cache=extraction_cache,
             refresh_extraction=refresh_extraction,
-            template_std_nodes_by_tid=template_std_nodes_by_tid,
-            timed_out_versions=timed_out_versions,
         )
+
+        def _compute_l2_l4(_l1: _L1State = l1) -> Any:
+            return _compute_doc_from_l1(
+                doc_id,
+                doc_dir,
+                version_files,
+                _l1,
+                config,
+                taxonomy,
+                template_tree,
+                template_std_by_tid,
+                _scope_judge,
+                _cls_judge,
+                _dev_judge,
+                alignment_judge,
+                trail_judge,
+                progress,
+                signed_judge=signed_judge,
+                provenance_judge=provenance_judge,
+                use_llm_segmentation=use_llm_segmentation,
+                normalize_trail_across_versions=normalize_trail_across_versions,
+                normalize_trail_fn=normalize_trail_fn,
+                template_std_nodes_by_tid=template_std_nodes_by_tid,
+            )
+
+        if store is None:
+            return _compute_l2_l4()
+
+        computed = [False]
+        unresolved = [False]
+
+        def _compute_recorded() -> Any:
+            """L2-L4, recording the stored verdicts it read (issue #219)."""
+            computed[0] = True
+            before = [dict(policy.counts) for policy in rubric_policies]
+            with contextlib.ExitStack() as stack:
+                seen = [stack.enter_context(st.capture_lookups()) for st in verdict_stores]
+                queued = [stack.enter_context(q.capture_adds()) for q in pending_queues]
+                result = _compute_l2_l4()
+            if result is None:
+                return None
+            deps = [
+                {k: st.fingerprint(k) for k in sorted(keys)}
+                for st, keys in zip(verdict_stores, seen, strict=True)
+            ]
+            # Anything queued — a missing verdict, a stale rubric, a malformed
+            # stored row — means this result carries needs_review sentinels:
+            # never cache it, so the next run recomputes it and re-queues the
+            # item into that round's (freshly reset) pending queue.
+            unresolved[0] = any(queued) or any(
+                fp is None for st_deps in deps for fp in st_deps.values()
+            )
+            result[_VERDICT_DEPS_KEY] = deps
+            result[_RUBRIC_COUNTS_KEY] = [
+                sorted(
+                    [kind, state, n - b.get((kind, state), 0)]
+                    for (kind, state), n in policy.counts.items()
+                    if n - b.get((kind, state), 0)
+                )
+                for policy, b in zip(rubric_policies, before, strict=True)
+            ]
+            return result
+
+        # Never cache a deal with a timed-out version (issue #218) —
+        # neither a partial result nor the all-failed None, nor (issue #231)
+        # a result holding a version a fallback recovered after a timeout. The
+        # ExtractionCache already refuses to negative-cache the timeout;
+        # storing the per-deal result here would replay it one layer up
+        # and the next run would never retry the version.
+        def _cacheable(_timed_out: list[str] = timed_out_versions) -> bool:
+            return not _timed_out and not unresolved[0]
+
+        cache_key = make_stage_key(
+            doc_id, _L2_L4_STAGE, l1.l1_fingerprint, l2_config_fp, doc_dir / "hints.yaml"
+        )
+        result = store.get_or_compute(
+            cache_key,
+            _compute_recorded,
+            cacheable=_cacheable,
+            is_valid=_verdicts_current,
+            stage=_L2_L4_STAGE,
+        )
+        if not computed[0] and isinstance(result, dict):
+            # A replayed result never consulted the judges, so feed its
+            # recorded rubric tally back in — the stale/legacy report after
+            # the run must not depend on which documents were cache hits.
+            for policy, counts in zip(
+                rubric_policies, result.get(_RUBRIC_COUNTS_KEY) or [], strict=False
+            ):
+                for kind, state, n in counts:
+                    policy.counts[(kind, state)] = policy.counts.get((kind, state), 0) + n
+        return result
 
     # Documents whose LLM segmentation/normalization failed a fail-loud QA gate,
     # or whose hints.yaml is malformed (HintsError — see version_orderer.Hints.load).
@@ -3973,8 +4413,18 @@ def mine_corpus(
     # a run BEFORE known_entities was configured survives beside the
     # born-safe aliased file written by a later run, leaking the raw name in
     # both filename and content.
-    for stale_trail in trail_dir.glob("*.json"):
-        stale_trail.unlink()
+    #
+    # Issue #219: only an unchanged trail is left untouched — a warm run no
+    # longer rewrites (and re-timestamps) every file; --force-rewrite rewrites
+    # them all. Every target path is planned first, the stale-clear runs
+    # BEFORE the writes (as it always did) and removes every entry whose exact
+    # name this run will not write, then the writes run. Clearing first
+    # matters on a case-insensitive filesystem (macOS APFS): after a
+    # case-only rename (Delta-Ventures -> delta-ventures) the old-case entry
+    # IS the new file, so a clear that ran after the writes and compared
+    # names would unlink what was just written. Cleared first, the old-case
+    # name is removed and the write recreates the file under the new name.
+    planned_trails: dict[Path, str] = {}
     for raw_doc_id, trail in all_trails:
         if entity_registry is not None:
             trail = _pseudonymize_trail(
@@ -3984,7 +4434,12 @@ def mine_corpus(
                 version_alias_by_doc.get(raw_doc_id),
             )
         out_doc_id = trail.get("document_id") or raw_doc_id
-        _atomic_json_write(trail, trail_dir / f"{out_doc_id}.json")
+        planned_trails[trail_dir / f"{out_doc_id}.json"] = _json_text(trail)
+    for stale_trail in trail_dir.glob("*.json"):
+        if stale_trail not in planned_trails:
+            stale_trail.unlink()
+    for trail_path, trail_text in planned_trails.items():
+        write_text_if_changed(trail_path, trail_text, force=force_rewrite)
 
     # Materialise normalized/ clause trees now (issue #139): after the
     # pseudonymization pass, mirroring trail/'s treatment immediately above —
@@ -3994,11 +4449,14 @@ def mine_corpus(
     # or freshly computed this run — see _NORMALIZED_TREES_CACHE_VERSION).
     # Previously this was written raw, mid-loop, under doc_id — never
     # stale-cleared and never rewritten on a stage-cache hit (audit finding
-    # #48 / issue #139). rmtree (not a glob-unlink loop like trail/ above)
-    # because normalized/ nests a subdirectory per document.
+    # #48 / issue #139). Like trail/ (issue #219), every target is planned
+    # first, then every entry this run will not write (any file at any
+    # depth, plus any directory left empty) is cleared BEFORE the writes,
+    # and only changed trees are rewritten.
     normalized_dir = out_dir / "normalized"
-    if normalized_dir.exists():
+    if force_rewrite and normalized_dir.exists():
         shutil.rmtree(normalized_dir)
+    planned_trees: dict[Path, str] = {}
     for raw_doc_id, doc_version_trees in all_version_trees:
         for vid, tree_dict in doc_version_trees.items():
             if entity_registry is not None:
@@ -4019,9 +4477,18 @@ def mine_corpus(
             # path from `vid` would leak that name into the output filename
             # even though the directory (out_doc_id) was correctly aliased.
             out_version = tree_dict.get("version") or vid
-            ClauseTree.from_dict(tree_dict).write(
-                normalized_dir / out_doc_id / f"{out_version}.clauses.json"
-            )
+            tree_path = normalized_dir / out_doc_id / f"{out_version}.clauses.json"
+            planned_trees[tree_path] = ClauseTree.from_dict(tree_dict).to_json()
+    if normalized_dir.exists():
+        # Reverse-sorted, so a directory comes after everything inside it.
+        for entry in sorted(normalized_dir.rglob("*"), reverse=True):
+            if entry.is_dir():
+                if not any(entry.iterdir()):
+                    entry.rmdir()
+            elif entry not in planned_trees:
+                entry.unlink()
+    for tree_path, tree_text in planned_trees.items():
+        write_text_if_changed(tree_path, tree_text, force=force_rewrite)
 
     # Write intermediates
     #
@@ -4032,7 +4499,10 @@ def mine_corpus(
     # above, alongside the other post-pseudonymization artifacts) rather
     # than immediately after the per-document loop, so its document_id is
     # aliased exactly like corpus_manifest.json's — see the aliasing above.
-    _atomic_json_write(quarantined, out_dir / "quarantine.json")
+    #
+    # Issue #219: every artifact below is written only when its content
+    # changed (or under --force-rewrite) — see write_text_if_changed.
+    write_text_if_changed(out_dir / "quarantine.json", _json_text(quarantined), force=force_rewrite)
     #
     # search_snippet (issue #95) is truncated to its final short-phrase length
     # HERE — unconditionally, regardless of whether known_entities pseudonymization
@@ -4040,8 +4510,12 @@ def mine_corpus(
     # a known-entity name mid-word and defeat the whole-word alias match in
     # _pseudonymize_observations, leaking the fragment (same class of bug the
     # round_moves truncation below already guards against for change_summary).
-    scope_log.write(out_dir / "scope.json")
-    write_observations_jsonl(truncate_search_snippets(all_observations), obs_path)
+    write_text_if_changed(out_dir / "scope.json", scope_log.to_json_text(), force=force_rewrite)
+    write_text_if_changed(
+        obs_path,
+        observations_jsonl_text(truncate_search_snippets(all_observations)),
+        force=force_rewrite,
+    )
     # Issue #230: record the deviation mode this store was mined in, right
     # beside it, so project_playbook reads it back instead of inferring it
     # from row contents (an opt-in judged run whose every clause matched the
@@ -4054,15 +4528,32 @@ def mine_corpus(
     # Truncation runs strictly AFTER the aliasing above: slicing raw text
     # first can cut an entity name mid-word, and a cut name survives the
     # whole-word pseudonymization match (born-safe leak — review finding).
-    write_round_moves_jsonl(truncate_move_summaries(all_round_moves), out_dir / "round_moves.jsonl")
+    write_text_if_changed(
+        out_dir / "round_moves.jsonl",
+        round_moves_jsonl_text(truncate_move_summaries(all_round_moves)),
+        force=force_rewrite,
+    )
     # Persist template observations so project_playbook can read them without re-ingesting.
     template_obs_path = out_dir / "template_observations.jsonl"
-    write_observations_jsonl(truncate_search_snippets(t_observations), template_obs_path)
-    _atomic_json_write(corpus_documents, manifest_path)
+    write_text_if_changed(
+        template_obs_path,
+        observations_jsonl_text(truncate_search_snippets(t_observations)),
+        force=force_rewrite,
+    )
+    write_text_if_changed(manifest_path, _json_text(corpus_documents), force=force_rewrite)
     if store is not None:
+        # "cache hits=" counts DOCUMENTS (the per-document L2-L4 layer, the
+        # line's long-standing meaning); the layer line below breaks the
+        # stage cache down (issue #219).
+        l1_hits, l1_misses = store.stage_stats(_L1_STAGE)
+        doc_hits, doc_misses = store.stage_stats(_L2_L4_STAGE)
         progress(
             f"L1-L4 complete: {len(all_observations)} observations, {len(corpus_documents)} docs "
-            f"(cache hits={store.hit_count}, misses={store.miss_count})"
+            f"(cache hits={doc_hits}, misses={doc_misses})"
+        )
+        progress(
+            f"  stage cache: L1 (per version) hits {l1_hits}, misses {l1_misses}; "
+            f"L2-L4 (per document) hits {doc_hits}, misses {doc_misses}"
         )
     else:
         progress(

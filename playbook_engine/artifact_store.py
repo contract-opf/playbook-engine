@@ -24,7 +24,12 @@ from typing import Any
 
 # Bump this whenever a stage's compute logic changes in a way that should
 # invalidate all existing cached entries (e.g. bug-fix, schema change).
-_CACHE_FORMAT_VERSION = "1"
+#
+# "2" (issue #219): keys hash each version file's NAME, not its absolute path
+# (a moved corpus or a Docker-vs-host run now shares one cache), and the
+# per-document "l1-l4" blob is split into a per-version "l1" layer and a
+# per-document "l2-l4" layer keyed by the L1 outputs.
+_CACHE_FORMAT_VERSION = "2"
 
 
 def _sha256_file(path: Path) -> str:
@@ -51,20 +56,25 @@ def make_doc_key(
 
     The key encodes:
     - the document id and stage name
-    - SHA-256 of each version file's *content* (order-stable, lexicographic by path)
+    - each version file's *name* and the SHA-256 of its *content*
+      (order-stable, lexicographic by path)
     - a config fingerprint (caller-supplied JSON-serialisable digest)
     - SHA-256 of ``hints.yaml`` content when present (drives version ordering)
     - the global cache-format version sentinel
 
     Using content hashes (not mtime) means ``cp -p`` / ``rsync -a`` produce
     cache hits, while a content change under a preserved mtime produces a miss.
+    Only the file's *name* is hashed, never its absolute path (issue #219):
+    moving the corpus directory, or running the same corpus inside Docker and
+    on the host, must not invalidate anything. The name stays in the key
+    because it becomes the version id the stage output carries.
     """
     h = hashlib.sha256()
     h.update(_CACHE_FORMAT_VERSION.encode())
     h.update(doc_id.encode())
     h.update(stage.encode())
     for vf in sorted(version_files):
-        h.update(str(vf).encode())
+        h.update(vf.name.encode())
         h.update(_sha256_file(vf).encode())
     h.update(config_fingerprint.encode())
     # hints.yaml drives version ordering → must be part of the key.
@@ -76,9 +86,67 @@ def make_doc_key(
     return h.hexdigest()
 
 
+def make_stage_key(
+    doc_id: str,
+    stage: str,
+    inputs_fingerprint: str,
+    config_fingerprint: str,
+    hints_path: Path | None = None,
+) -> str:
+    """Key for a stage whose inputs are an EARLIER stage's outputs (issue #219).
+
+    ``make_doc_key`` hashes source files; a downstream layer (L2-L4) is keyed
+    instead by a fingerprint of the upstream layer's results
+    (*inputs_fingerprint*), so recomputing L1 to byte-identical output — a
+    changed extractor environment that reads the same text, say — still
+    replays L2-L4. ``hints.yaml`` is folded in exactly as ``make_doc_key``
+    does: it drives version ordering, which is L2.
+    """
+    h = hashlib.sha256()
+    h.update(_CACHE_FORMAT_VERSION.encode())
+    h.update(doc_id.encode())
+    h.update(stage.encode())
+    h.update(b"inputs:")
+    h.update(inputs_fingerprint.encode())
+    h.update(config_fingerprint.encode())
+    if hints_path is not None and hints_path.exists():
+        h.update(b"hints:")
+        h.update(_sha256_file(hints_path).encode())
+    else:
+        h.update(b"hints:absent")
+    return h.hexdigest()
+
+
 def make_config_fingerprint(data: Any) -> str:
     """Stable SHA-256 fingerprint for any JSON-serialisable *data*."""
     return _sha256_str(json.dumps(data, sort_keys=True, ensure_ascii=False))
+
+
+def write_text_if_changed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Atomically write *text* to *path* unless the file already holds it.
+
+    Issue #219: a warm run used to delete and rewrite every intermediate
+    (``observations.jsonl``, ``trail/``, ``normalized/``, …) even when nothing
+    changed, so every file's mtime moved and anything watching the out-dir
+    saw a full rewrite. Comparing content first keeps an unchanged file
+    untouched. *force* writes regardless (``mine --force-rewrite``).
+
+    Returns ``True`` when the file was written.
+    """
+    if not force and path.is_file():
+        try:
+            if path.read_text(encoding="utf-8") == text:
+                return False
+        except (OSError, UnicodeDecodeError):
+            pass  # unreadable: fall through and rewrite it
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+    return True
+
+
+_MISSING = object()
 
 
 class ArtifactStore:
@@ -101,6 +169,9 @@ class ArtifactStore:
         self._index: dict[str, str] = {}  # key -> relative path
         self._hits = 0
         self._misses = 0
+        # Per-stage (hits, misses) — issue #219: one store serves several
+        # layers (L1 per version, L2-L4 per document), each reported apart.
+        self._stage_counts: dict[str, list[int]] = {}
         self._load_index()
 
     # ------------------------------------------------------------------
@@ -117,12 +188,19 @@ class ArtifactStore:
         """Number of cache misses (recompute events) since this store was created."""
         return self._misses
 
+    def stage_stats(self, stage: str) -> tuple[int, int]:
+        """``(hits, misses)`` for lookups made with ``stage=`` *stage*."""
+        hits, misses = self._stage_counts.get(stage, [0, 0])
+        return hits, misses
+
     def get_or_compute(
         self,
         key: str,
         compute_fn: Any,
         *,
         cacheable: Callable[[], bool] | None = None,
+        is_valid: Callable[[Any], bool] | None = None,
+        stage: str | None = None,
     ) -> Any:
         """Return the cached value for *key*, or call *compute_fn()* and cache it.
 
@@ -134,20 +212,25 @@ class ArtifactStore:
         ``False`` returns the freshly computed value WITHOUT persisting it, so
         the next run recomputes. For a result that reflects this run rather
         than the key's inputs (e.g. a version whose extraction timed out).
+
+        *is_valid* (issue #219), when given, is asked about a cached value
+        BEFORE it is replayed; ``False`` treats the entry as a miss — the value
+        is recomputed and (subject to *cacheable*) overwritten. For a result
+        whose validity rests on state outside the key, e.g. the stored judge
+        verdicts a document's classifications were replayed from.
+
+        *stage* only labels the lookup for :meth:`stage_stats`.
         """
-        if key in self._index:
-            artifact_path = self._cache_dir / self._index[key]
-            if artifact_path.exists():
-                try:
-                    value = json.loads(artifact_path.read_text(encoding="utf-8"))
-                    self._hits += 1
-                    return value
-                except Exception:  # noqa: BLE001 — corrupt entry: recompute
-                    pass
+        cached = self._read(key)
+        if cached is not _MISSING and (is_valid is None or is_valid(cached)):
+            self._hits += 1
+            self._count(stage, hit=True)
+            return cached
 
         # Cache miss — recompute and persist.
         value = compute_fn()
         self._misses += 1
+        self._count(stage, hit=False)
         if cacheable is not None and not cacheable():
             return value
         self._persist(key, value)
@@ -159,7 +242,7 @@ class ArtifactStore:
             del self._index[key]
             self._flush_index()
 
-    def contains(self, key: str) -> bool:
+    def contains(self, key: str, *, is_valid: Callable[[Any], bool] | None = None) -> bool:
         """Return True if *key* already has a cached artifact on disk.
 
         A pure peek — does not call ``compute_fn``, does not affect
@@ -168,14 +251,38 @@ class ArtifactStore:
         already stage-cached (issue #92: excluding cache-hit documents from
         the batch-segmentation pre-pass) should use this instead of
         ``get_or_compute`` with a dummy ``compute_fn``.
+
+        *is_valid* applies the same replay check :meth:`get_or_compute` would
+        (issue #219), so a peek never promises a hit the lookup then refuses.
         """
-        if key not in self._index:
-            return False
-        return (self._cache_dir / self._index[key]).exists()
+        if is_valid is None:
+            if key not in self._index:
+                return False
+            return (self._cache_dir / self._index[key]).exists()
+        cached = self._read(key)
+        return cached is not _MISSING and is_valid(cached)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _read(self, key: str) -> Any:
+        """The cached value for *key*, or ``_MISSING`` (absent or corrupt)."""
+        if key not in self._index:
+            return _MISSING
+        artifact_path = self._cache_dir / self._index[key]
+        if not artifact_path.exists():
+            return _MISSING
+        try:
+            return json.loads(artifact_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — corrupt entry: recompute
+            return _MISSING
+
+    def _count(self, stage: str | None, *, hit: bool) -> None:
+        if stage is None:
+            return
+        counts = self._stage_counts.setdefault(stage, [0, 0])
+        counts[0 if hit else 1] += 1
 
     def _persist(self, key: str, value: Any) -> None:
         self._cache_dir.mkdir(parents=True, exist_ok=True)

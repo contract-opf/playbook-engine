@@ -151,9 +151,9 @@ far more expensive than the LLM segmentation call itself, which
 independently. Before this, ``extract_blocks`` had no cache of its own, so
 any caller that (for good reason — see ``agent_judge.StoreBackedClassificationJudge``
 et al.) bypasses the pipeline's L1-L4 ``ArtifactStore``/``JudgmentCache``
-(``no_cache=True``, forced by ``playbook judge``'s store-backed judges to
-avoid replaying stale ``needs_review`` sentinels — see ``cli.py``'s
-``_verdict_store_kwargs``) also silently threw away every prior extraction,
+(``no_cache=True`` — until issue #219, forced by ``playbook judge``'s
+store-backed judges to avoid replaying stale ``needs_review`` sentinels) also
+silently threw away every prior extraction,
 re-running docling/pdfplumber/pandoc from scratch on every judge round over a
 real multi-hundred-version corpus. ``ExtractionCache`` is content-addressed
 on the source file's bytes and the current extractor environment (docling
@@ -188,9 +188,10 @@ since extraction is a pure function of (bytes, extractor environment), so it
 must not permanently clobber output already proven extractable), so the
 cache is left warm and correct for the *next* call.
 ``refresh`` is deliberately a plain parameter to ``extract_blocks`` — not
-tied to ``no_cache`` — because ``no_cache`` is also forced ``True`` by the
-judge wiring described above, and gating extraction refresh on that same
-boolean would defeat the judge-warm-cache guarantee this class exists for.
+tied to ``no_cache`` — because ``no_cache`` was also forced ``True`` by the
+judge wiring described above (before issue #219), and gating extraction
+refresh on that same boolean would defeat the judge-warm-cache guarantee this
+class exists for.
 Callers thread their own distinct signal sourced from the operator's actual
 ``--no-cache`` CLI flag (see ``pipeline.mine_corpus``'s
 ``refresh_extraction`` parameter) — never from a forced/internal
@@ -799,9 +800,9 @@ class ExtractionCache:
     independent of ``no_cache``, judge identity, or engine config, so a
     repeat ``playbook judge`` round can reuse a prior run's extracted
     blocks/clause trees for every version whose source file AND extractor
-    environment are unchanged, even though the L1-L4 ``ArtifactStore``/
-    ``JudgmentCache`` stage cache is deliberately bypassed for store-backed
-    judge runs (issue #132). A docling install/removal between rounds is
+    environment are unchanged, including any version whose L1 stage-cache
+    entry misses (issue #132; the stage cache itself stays on under
+    store-backed judges since issue #219). A docling install/removal between rounds is
     exactly the case that must NOT keep hitting — the environment component
     turns that into a clean miss instead of silently replaying stale output.
 

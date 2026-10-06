@@ -97,6 +97,16 @@ class SegmentationVerdictCache:
     def __init__(self, cache_path: Path) -> None:
         self._store = VerdictStore(cache_path)
 
+    @property
+    def verdict_store(self) -> VerdictStore:
+        """The underlying store — for lookup capture (issue #219).
+
+        ``mine_corpus`` records which segmentation entries a cached L1 result
+        was grounded from (:meth:`VerdictStore.capture_lookups`) so a later
+        ``segment-apply`` that replaces one is not shadowed by the stage cache.
+        """
+        return self._store
+
     def get(
         self,
         canonical_text: str,

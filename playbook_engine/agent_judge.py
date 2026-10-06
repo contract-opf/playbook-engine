@@ -66,6 +66,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -171,6 +173,8 @@ class VerdictStore:
     def __init__(self, store_path: Path) -> None:
         self._store_path = store_path
         self._store: dict[str, StoredVerdict] = {}  # key -> record
+        # Open lookup captures (issue #219) — see capture_lookups().
+        self._captures: list[set[str]] = []
         self._load()
 
     # ------------------------------------------------------------------
@@ -179,12 +183,49 @@ class VerdictStore:
 
     def get(self, payload: Any) -> dict[str, Any] | None:
         """Return the stored verdict dict for *payload*, or ``None`` on miss."""
-        record = self._store.get(_payload_key(payload))
+        record = self._lookup(_payload_key(payload))
         return record.verdict if record is not None else None
 
     def get_record(self, payload: Any) -> StoredVerdict | None:
         """Return the full stored record (verdict + rubric stamp), or ``None``."""
-        return self._store.get(_payload_key(payload))
+        return self._lookup(_payload_key(payload))
+
+    @contextmanager
+    def capture_lookups(self) -> Iterator[set[str]]:
+        """Collect every key looked up through ``get``/``get_record`` meanwhile.
+
+        Issue #219: the L1-L4 stage cache stays on under store-backed judges
+        by recording, with each cached document result, the verdict keys that
+        result was built from — then refusing to replay it when any of them
+        has since changed (see :meth:`fingerprint`). Nestable; a lookup is
+        recorded into every open capture.
+        """
+        seen: set[str] = set()
+        self._captures.append(seen)
+        try:
+            yield seen
+        finally:
+            self._captures.remove(seen)
+
+    def fingerprint(self, key: str) -> str | None:
+        """Opaque digest of what *key* currently holds — ``None`` when absent.
+
+        Covers the verdict AND its rubric stamp: a ``judge-apply`` that
+        overwrites a verdict, or a ``judge-migrate`` that re-stamps it, both
+        move it, so a cached result built on the old record is not replayed.
+        """
+        record = self._store.get(key)
+        if record is None:
+            return None
+        raw = json.dumps(
+            {
+                "verdict": record.verdict,
+                "rubric": record.rubric.to_dict() if record.rubric is not None else None,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     def put(
         self, payload: Any, verdict: dict[str, Any], *, rubric: RubricStamp | None = None
@@ -252,6 +293,11 @@ class VerdictStore:
     # Internal
     # ------------------------------------------------------------------
 
+    def _lookup(self, key: str) -> StoredVerdict | None:
+        for seen in self._captures:
+            seen.add(key)
+        return self._store.get(key)
+
     def _load(self) -> None:
         """Read the store file into memory (best-effort; corrupt lines skipped)."""
         if not self._store_path.exists():
@@ -304,6 +350,26 @@ class PendingQueue:
     def __init__(self, queue_path: Path) -> None:
         self._queue_path = queue_path
         self._seen_keys: set[str] = set()
+        # Open add captures (issue #219) — see capture_adds().
+        self._captures: list[set[str]] = []
+
+    @contextmanager
+    def capture_adds(self) -> Iterator[set[str]]:
+        """Collect the key of every ``add`` call meanwhile — deduplicated or not.
+
+        Issue #219: a document result that queued anything rests on an
+        unresolved verdict and must never be replayed from the stage cache —
+        replaying it would also drop its items from this round's queue. The
+        within-instance dedup in :meth:`add` is exactly why the attempt, not
+        the write, is what gets recorded: a second document asking the same
+        question is just as unresolved as the first.
+        """
+        seen: set[str] = set()
+        self._captures.append(seen)
+        try:
+            yield seen
+        finally:
+            self._captures.remove(seen)
 
     def add(self, key: str, kind: str, payload: Any, rubric_version: str | None = None) -> bool:
         """Append *payload* to the queue if *key* has not been seen before.
@@ -324,6 +390,8 @@ class PendingQueue:
             ``True`` if a new entry was written; ``False`` if *key* was already
             seen (deduplicated).
         """
+        for seen in self._captures:
+            seen.add(key)
         if key in self._seen_keys:
             return False
         self._seen_keys.add(key)

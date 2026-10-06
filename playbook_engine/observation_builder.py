@@ -663,13 +663,16 @@ def build_round_moves(
     return moves
 
 
+def round_moves_jsonl_text(moves: list[RoundMove]) -> str:
+    """The exact JSONL text :func:`write_round_moves_jsonl` writes."""
+    return "".join(json.dumps(move.to_dict(), ensure_ascii=False) + "\n" for move in moves)
+
+
 def write_round_moves_jsonl(moves: list[RoundMove], path: Path) -> None:
     """Write *moves* to *path* as JSONL, atomically (mirrors observations)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".jsonl.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        for move in moves:
-            f.write(json.dumps(move.to_dict(), ensure_ascii=False) + "\n")
+    tmp.write_text(round_moves_jsonl_text(moves), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -1577,9 +1580,14 @@ def write_observations_jsonl(observations: list[Observation], path: Path) -> Non
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".jsonl.tmp")
-    lines = [json.dumps(obs.to_dict(), ensure_ascii=False) for obs in observations]
-    tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    tmp.write_text(observations_jsonl_text(observations), encoding="utf-8")
     os.replace(tmp, path)
+
+
+def observations_jsonl_text(observations: list[Observation]) -> str:
+    """The exact JSONL text :func:`write_observations_jsonl` writes."""
+    lines = [json.dumps(obs.to_dict(), ensure_ascii=False) for obs in observations]
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def read_observations_jsonl(path: Path) -> list[dict[str, Any]]:
