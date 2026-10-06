@@ -1216,6 +1216,156 @@ def test_moved_clause_no_longer_floods_added_removed() -> None:
     assert kinds == {"unchanged"}, f"relocation produced artifacts: {kinds}"
 
 
+# ---------------------------------------------------------------------------
+# Backward extension of move rows (issue #232)
+# ---------------------------------------------------------------------------
+
+_TERM_FIVE = "The confidentiality obligations in this Agreement continue for five (5) years."
+_TERM_FOUR = "The confidentiality obligations in this Agreement continue for four (4) years."
+_TERM_THREE = "The confidentiality obligations in this Agreement continue for three (3) years."
+
+
+def _presence(row: ClauseAlignment) -> tuple[bool, ...]:
+    return tuple(s.clause is not None for s in row.slots)
+
+
+@pytest.mark.parametrize("tid", [None, "term"], ids=["unclassified", "classified"])
+def test_earlier_draft_joins_move_row_carried_into_signed_copy(tid: str | None) -> None:
+    """Issue #232: v1 "five (5) years" -> v2 "three (3) years" == v3. The move
+    phase chains v2 to v3 (identical text) and takes both out of the bucket
+    path; v1's copy must still join that row by bind similarity (here the
+    localized-edit rescue) — one ``modified`` row, never removed + added."""
+    from playbook_engine.reversal_detector import detect_reversals
+
+    jac, _, spans = _rescue_shape(_TERM_FIVE, _TERM_THREE)
+    assert jac < ALIGNMENT_AMBIGUITY_THRESHOLD and spans == 1, "fixture: a rescue-only pair"
+    v1 = [_cc("1", tid, _TERM_FIVE)]
+    v2 = [_cc("1", tid, _TERM_THREE)]
+    v3 = [_cc("1", tid, _TERM_THREE)]
+    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+    assert len(result) == 1
+    row = result[0]
+    assert [s.clause for s in row.slots] == [v1[0], v2[0], v3[0]]
+    assert row.taxonomy_id == tid
+    # Grown by bind similarity, so no longer a pure near-exact move row; the
+    # row's confidence is its worst link — the v1 -> v2 Jaccard.
+    assert row.match_basis == "content_jaccard"
+    assert all(s.alignment_confidence == pytest.approx(jac) for s in row.slots)
+
+    doc = diff_aligned(result, ["v1", "v2", "v3"])
+    assert [d.kind for d in doc.net.diffs] == ["modified"]
+    assert [[d.kind for d in c.diffs] for c in doc.consecutive] == [["modified"], ["unchanged"]]
+    # v1's text was the opening position, not a draft's proposal: no reversal.
+    assert detect_reversals(doc) == []
+
+
+def test_backward_extension_chains_across_successive_edits() -> None:
+    """Two successive round edits, then carried into the signed copy: v1
+    "five" -> v2 "four" -> v3 "three" == v4. The pass runs newest version
+    pair first, so the row extended to v2 is extended again to v1 — one row
+    across all four drafts (an oldest-first pass would strand v1)."""
+    assert _rescue_shape(_TERM_FIVE, _TERM_THREE)[0] < ALIGNMENT_AMBIGUITY_THRESHOLD
+    clauses = [_cc("1", "term", t) for t in (_TERM_FIVE, _TERM_FOUR, _TERM_THREE, _TERM_THREE)]
+    versions = [(f"v{i}", [c]) for i, c in enumerate(clauses, start=1)]
+    result = align_versions(versions)
+    assert len(result) == 1
+    assert [s.clause for s in result[0].slots] == clauses
+    doc = diff_aligned(result, [v for v, _ in versions])
+    assert [d.kind for d in doc.net.diffs] == ["modified"]
+
+
+def test_backward_extension_does_not_bind_unrelated_clause() -> None:
+    """The extension uses the bucket path's bind rule, not a looser one: the
+    assignment clause replaced by the (unrelated) publicity clause, which is
+    then carried into the signed copy, stays removed + added."""
+    v1 = [_cc("1", None, _ASSIGNMENT)]
+    v2 = [_cc("1", None, _PUBLICITY)]
+    v3 = [_cc("1", None, _PUBLICITY)]
+    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+    assert sorted(_presence(r) for r in result) == [(False, True, True), (True, False, False)]
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2", "v3"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def test_backward_extension_stays_within_the_taxonomy_bucket() -> None:
+    """A v1 clause is offered only to rows whose v2 member shares its
+    taxonomy_id — the bucket rule the bucket path applies."""
+    v1 = [_cc("1", "term", _TERM_FIVE)]
+    v2 = [_cc("1", "survival", _TERM_THREE)]
+    v3 = [_cc("1", "survival", _TERM_THREE)]
+    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+    assert sorted(_presence(r) for r in result) == [(False, True, True), (True, False, False)]
+
+
+def test_backward_extension_never_rebinds_a_matched_clause() -> None:
+    """v1's clause is already chained (v1 == v2 == v3) by the move phase; a
+    second row starting at v2 whose text is a localized edit of it must not
+    take it too. Every clause sits on exactly one row."""
+    v1 = [_cc("1", "term", _TERM_FIVE)]
+    v2 = [_cc("1", "term", _TERM_FIVE), _cc("2", "term", _TERM_THREE)]
+    v3 = [_cc("1", "term", _TERM_FIVE), _cc("2", "term", _TERM_THREE)]
+    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+    assert len(result) == 2
+    five_row = next(r for r in result if r.slots[2].clause is v3[0])
+    three_row = next(r for r in result if r.slots[2].clause is v3[1])
+    assert [s.clause for s in five_row.slots] == [v1[0], v2[0], v3[0]]
+    assert [s.clause for s in three_row.slots] == [None, v2[1], v3[1]]
+
+
+def test_backward_extension_leaves_a_better_free_partner_to_the_bucket_path() -> None:
+    """Competition for one v1 clause: the move row's v2 member X ("three")
+    is only a rescue partner (Jaccard 0.56), while the free v2 clause Y — v1
+    plus one word, too short for the move phase and dropped before signing
+    — is a primary partner (0.875). Jaccard-first ranking gives v1 to Y;
+    the row may not steal it."""
+    y_text = "The confidentiality obligations in this Agreement continue for five (5) full years."
+    assert _tokens_jaccard(_TERM_FIVE, y_text) >= ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert _tokens_jaccard(_TERM_FIVE, _TERM_THREE) < ALIGNMENT_AMBIGUITY_THRESHOLD
+    v1 = [_cc("1", "term", _TERM_FIVE)]
+    for x_first in (True, False):
+        x, y = _cc("1", "term", _TERM_THREE), _cc("2", "term", y_text)
+        v2 = [x, y] if x_first else [y, x]
+        v3 = [_cc("1", "term", _TERM_THREE)]
+        result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+        assert len(result) == 2
+        y_row = next(r for r in result if r.slots[1].clause is y)
+        x_row = next(r for r in result if r.slots[1].clause is x)
+        assert [s.clause for s in y_row.slots] == [v1[0], y, None]
+        assert [s.clause for s in x_row.slots] == [None, x, v3[0]]
+
+
+@pytest.mark.parametrize(
+    "weaker",
+    [
+        _TERM_FIVE,
+        "The confidentiality obligations in this Agreement continue for three (3) full calendar years.",
+    ],
+    ids=["rescue-vs-primary", "primary-vs-primary"],
+)
+def test_backward_extension_ranks_competing_earlier_clauses_by_jaccard(weaker: str) -> None:
+    """Two v1 clauses compete for one move row (v2 == v3). The higher-Jaccard
+    candidate joins the row whichever comes first in the document, and the
+    other is removed — whether the weaker one is a rescue partner (refused
+    as contested) or itself a primary partner (outranked)."""
+    stronger = (
+        "The confidentiality obligations in this Agreement continue for three (3) full years."
+    )
+    j_strong = _tokens_jaccard(stronger, _TERM_THREE)
+    j_weak = _tokens_jaccard(weaker, _TERM_THREE)
+    assert j_strong >= ALIGNMENT_AMBIGUITY_THRESHOLD and j_weak < j_strong
+    for weaker_first in (True, False):
+        a_weak, a_strong = _cc("1", "term", weaker), _cc("2", "term", stronger)
+        v1 = [a_weak, a_strong] if weaker_first else [a_strong, a_weak]
+        v2 = [_cc("1", "term", _TERM_THREE)]
+        v3 = [_cc("1", "term", _TERM_THREE)]
+        result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)])
+        assert len(result) == 2
+        row = next(r for r in result if r.slots[2].clause is v3[0])
+        assert [s.clause for s in row.slots] == [a_strong, v2[0], v3[0]]
+        other = next(r for r in result if r is not row)
+        assert [s.clause for s in other.slots] == [a_weak, None, None]
+
+
 def test_alignment_judge_split_emits_multiple_rows() -> None:
     """A judge resolving a multi-version bucket with a 2-row split must not
     collapse the pairings into one overwritten row, and must address the

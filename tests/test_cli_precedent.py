@@ -96,7 +96,7 @@ def test_precedent_with_no_filter_reproduces_the_sidecar_bytes() -> None:
 
 def test_precedent_by_id_and_refused() -> None:
     doc = _doc()
-    record = find_precedent(doc, "compelled_disclosure", refused=True)[0]
+    record = find_precedent(doc, "residuals", refused=True)[0]
     pid = record["precedent_id"]
 
     one = _invoke(["precedent", str(_NDA), "--id", pid, "--format", "jsonl"])
@@ -112,7 +112,7 @@ def test_precedent_by_id_and_refused() -> None:
             "precedent",
             str(_NDA),
             "--clause",
-            "compelled_disclosure",
+            "residuals",
             "--refused",
             "--format",
             "jsonl",

@@ -14,6 +14,12 @@ Algorithm (fully deterministic, no LLM):
    versions) aligns to itself instead of degenerating into a delete+add
    pair. Only substantial clauses participate (length/token minimums below);
    short boilerplate is left to the positional path.
+0b. **Backward extension** (issue #232): a move row that starts at a later
+   draft is offered, newest version pair first, the earlier draft's
+   unmatched same-taxonomy clauses under the bucket path's bind rule (step
+   3), so a clause edited in round one and carried unchanged into the
+   signed copy stays one row instead of a removed + added pair (see
+   :func:`_extend_moves_backward`).
 1. Group each remaining (unmatched) clause list by ``taxonomy_id``.
 2. Collect all taxonomy_ids in first-appearance order (v0 → v1 → ...).
 3. For each taxonomy_id bucket, align the per-version clause sequences by
@@ -218,6 +224,10 @@ class ClauseAlignment:
     ``"content_jaccard"`` for rows produced by the global move phase (the
     clause was matched by content anywhere in the document — a relocation or
     classification flap), ``None`` for rows from the positional bucket path.
+    A move row is ``"content_exact"`` only when every link is near-exact; a
+    row the backward extension (issue #232) grew by bind similarity is
+    ``"content_jaccard"``, and its ``alignment_confidence`` is its worst
+    link's Jaccard.
     """
 
     taxonomy_id: str | None
@@ -286,7 +296,12 @@ def align_versions(
     #    in the document, chain across versions, and take those rows out of
     #    the positional path entirely.
     full_lists = [clauses for _, clauses in classified_versions]
-    move_rows, matched_keys = _match_moves(version_ids, full_lists)
+    chains, matched_keys = _match_moves(full_lists)
+    # 0b. Backward extension (issue #232): an earlier draft's copy of a
+    #     clause the move phase chained only from a later draft onwards
+    #     joins that row by bind similarity instead of being stranded.
+    _extend_moves_backward(full_lists, chains, matched_keys)
+    move_rows = [_move_row(version_ids, full_lists, chain) for chain in chains]
 
     # 1. Build per-version groups over the REMAINDER only:
     #    {taxonomy_id: [ClassifiedClause, ...]}
@@ -333,15 +348,25 @@ def align_versions(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _MoveChain:
+    """One move row under construction: ``members`` maps each version index
+    to the index of its clause in that version (always a contiguous run of
+    versions); ``sims``/``bases`` record every link's similarity and basis."""
+
+    members: dict[int, int]
+    sims: list[float]
+    bases: list[str]
+
+
 def _match_moves(
-    version_ids: list[str],
     full_lists: list[list[ClassifiedClause]],
-) -> tuple[list[ClauseAlignment], set[tuple[int, int]]]:
+) -> tuple[list[_MoveChain], set[tuple[int, int]]]:
     """Global move-matching phase: pair clauses across adjacent versions by
     content similarity anywhere in the document, then chain the pairs across
-    versions into aligned rows.
+    versions into move rows.
 
-    Returns ``(move_rows, matched_keys)`` where ``matched_keys`` is the set of
+    Returns ``(chains, matched_keys)`` where ``matched_keys`` is the set of
     ``(version_index, clause_index)`` coordinates consumed by a move row —
     the positional path must skip exactly those clauses.
     """
@@ -358,7 +383,7 @@ def _match_moves(
     for i, pair_map in enumerate(links):
         incoming[i + 1].update(b for b, _, _ in pair_map.values())
 
-    move_rows: list[ClauseAlignment] = []
+    chains: list[_MoveChain] = []
     matched_keys: set[tuple[int, int]] = set()
     for vi in range(n_versions - 1):
         for ci in range(len(full_lists[vi])):
@@ -367,45 +392,124 @@ def _match_moves(
             if ci not in links[vi]:
                 continue  # no content match — positional path handles it
             # Follow the chain forward from (vi, ci).
-            chain: list[tuple[int, int]] = [(vi, ci)]
-            bases: list[str] = []
-            sims: list[float] = []
+            chain = _MoveChain(members={vi: ci}, sims=[], bases=[])
             v, c = vi, ci
             while v < n_versions - 1 and c in links[v]:
                 nxt, basis, sim = links[v][c]
-                bases.append(basis)
-                sims.append(sim)
-                chain.append((v + 1, nxt))
+                chain.bases.append(basis)
+                chain.sims.append(sim)
+                chain.members[v + 1] = nxt
                 v, c = v + 1, nxt
-            clause_by_version: dict[int, ClassifiedClause] = {
-                v_idx: full_lists[v_idx][c_idx] for v_idx, c_idx in chain
-            }
-            matched_keys.update(chain)
-            confidence = min(sims)
-            slots = tuple(
-                AlignmentSlot(
-                    version=version_ids[i],
-                    clause=clause_by_version.get(i),
-                    alignment_confidence=confidence if i in clause_by_version else None,
-                )
-                for i in range(n_versions)
-            )
-            # The row's taxonomy_id follows the latest version's classification
-            # (deviation-vs-template is assessed on the net/signed side).
-            last_clause = clause_by_version[max(clause_by_version)]
-            move_rows.append(
-                ClauseAlignment(
-                    taxonomy_id=last_clause.classification.taxonomy_id,
-                    slots=slots,
-                    match_basis=(
-                        "content_exact"
-                        if all(b == "content_exact" for b in bases)
-                        else "content_jaccard"
-                    ),
-                )
-            )
+            matched_keys.update(chain.members.items())
+            chains.append(chain)
 
-    return move_rows, matched_keys
+    return chains, matched_keys
+
+
+def _extend_moves_backward(
+    full_lists: list[list[ClassifiedClause]],
+    chains: list[_MoveChain],
+    matched_keys: set[tuple[int, int]],
+) -> None:
+    """Extend move rows backwards by bind similarity (issue #232).
+
+    The move phase links two drafts only at a near-exact or a
+    ``MOVE_JACCARD_THRESHOLD`` match, and it takes every clause it chains out
+    of the bucket path. When a clause is edited in round one and then carried
+    unchanged into the signed copy (v1 "five (5) years" → v2 "three (3)
+    years" == v3), the move phase chains v2 to v3 only, and v1's copy is
+    left with nothing to bind to: the deal shows a same-round removed + added
+    pair and a fabricated refused ask downstream.
+
+    For each adjacent version pair (v_i, v_i+1), NEWEST first, every clause
+    of v_i that no row holds is offered to the move rows that have a v_i+1
+    member but no v_i member — under the bucket path's own bind rule
+    (:func:`_bind_by_similarity`: Jaccard >= ``ALIGNMENT_AMBIGUITY_THRESHOLD``
+    or the localized-edit rescue, ranked Jaccard first). Offers stay within
+    one taxonomy bucket: a v_i clause is compared only with v_i+1 clauses of
+    its own ``taxonomy_id``. The free (unmatched) v_i+1 clauses of the bucket
+    compete in the same ranking, so a row never takes a clause whose better
+    partner is a free clause (that clause is left to the bucket path), and
+    they contest a rescue bind just as they do in the bucket path; only
+    binds that land on a move row are kept. Newest first, so a row extended to v_i can be extended
+    again to v_i-1 — a clause edited in two successive rounds and then
+    carried into the signed copy stays one row.
+
+    A clause already held by a row is never re-bound. A bound clause joins
+    the row (``matched_keys`` gains it, so the bucket path skips it) and its
+    Jaccard is recorded as a link of the row, so the row's
+    ``alignment_confidence`` is its worst link. The row's taxonomy_id still
+    follows its latest member, which an extension never changes.
+    """
+    for vi in range(len(full_lists) - 2, -1, -1):
+        nxt = vi + 1
+        # Move rows starting at v_i+1, keyed by their v_i+1 member's index.
+        chain_by_ci = {
+            chain.members[nxt]: chain
+            for chain in chains
+            if nxt in chain.members and vi not in chain.members
+        }
+        if not chain_by_ci:
+            continue
+        free_older = [ci for ci in range(len(full_lists[vi])) if (vi, ci) not in matched_keys]
+        if not free_older:
+            continue
+        free_newer = [ci for ci in range(len(full_lists[nxt])) if (nxt, ci) not in matched_keys]
+        # Bucket by taxonomy_id — clause and row member must share one.
+        targets_by_tid: dict[str | None, list[int]] = {}
+        for ci in sorted([*chain_by_ci, *free_newer]):
+            tid = full_lists[nxt][ci].classification.taxonomy_id
+            targets_by_tid.setdefault(tid, []).append(ci)
+        offers_by_tid: dict[str | None, list[int]] = {}
+        for ci in free_older:
+            tid = full_lists[vi][ci].classification.taxonomy_id
+            offers_by_tid.setdefault(tid, []).append(ci)
+        for tid, offers in offers_by_tid.items():
+            targets = targets_by_tid.get(tid, [])
+            if not any(t in chain_by_ci for t in targets):
+                continue
+            offer_tokens = [_clause_tokens(full_lists[vi][ci].node.text or "") for ci in offers]
+            target_tokens = [_clause_tokens(full_lists[nxt][t].node.text or "") for t in targets]
+            for oi, ti, sim in _bind_by_similarity(
+                offer_tokens, target_tokens, list(range(len(targets)))
+            ):
+                chain = chain_by_ci.get(targets[ti])
+                if chain is None:
+                    continue  # a free clause — the bucket path pairs it
+                chain.members[vi] = offers[oi]
+                chain.sims.append(sim)
+                chain.bases.append("bind_similarity")
+                matched_keys.add((vi, offers[oi]))
+
+
+def _move_row(
+    version_ids: list[str],
+    full_lists: list[list[ClassifiedClause]],
+    chain: _MoveChain,
+) -> ClauseAlignment:
+    """Build one move row's ``ClauseAlignment`` from its chain."""
+    clause_by_version: dict[int, ClassifiedClause] = {
+        v_idx: full_lists[v_idx][c_idx] for v_idx, c_idx in chain.members.items()
+    }
+    confidence = min(chain.sims)
+    slots = tuple(
+        AlignmentSlot(
+            version=version_ids[i],
+            clause=clause_by_version.get(i),
+            alignment_confidence=confidence if i in clause_by_version else None,
+        )
+        for i in range(len(version_ids))
+    )
+    # The row's taxonomy_id follows the latest version's classification
+    # (deviation-vs-template is assessed on the net/signed side).
+    last_clause = clause_by_version[max(clause_by_version)]
+    return ClauseAlignment(
+        taxonomy_id=last_clause.classification.taxonomy_id,
+        slots=slots,
+        match_basis=(
+            "content_exact" if all(b == "content_exact" for b in chain.bases) else "content_jaccard"
+        ),
+    )
 
 
 def _match_pair(

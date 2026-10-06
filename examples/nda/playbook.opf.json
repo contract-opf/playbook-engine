@@ -365,7 +365,7 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 1
+        "n_refused": 0
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -1131,18 +1131,7 @@
             ]
           }
         },
-        "opening_text": {
-          "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
-          "ref": {
-            "document_id": "beta-industries",
-            "version": 1,
-            "clause_path": "21",
-            "char_span": [
-              5547,
-              5680
-            ]
-          }
-        },
+        "opening_text": null,
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -2196,21 +2185,7 @@
         "opening_text": null,
         "standard": true,
         "moved": true,
-        "refused_asks": [
-          {
-            "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
-            "round": 0,
-            "ref": {
-              "document_id": "epsilon-systems",
-              "version": 1,
-              "clause_path": "7",
-              "char_span": [
-                1972,
-                2136
-              ]
-            }
-          }
-        ]
+        "refused_asks": []
       },
       {
         "id": "prec.bcbf29977979b7a9",
@@ -2883,18 +2858,7 @@
             ]
           }
         },
-        "opening_text": {
-          "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-          "ref": {
-            "document_id": "gamma-holdings",
-            "version": 1,
-            "clause_path": "17",
-            "char_span": [
-              4593,
-              4840
-            ]
-          }
-        },
+        "opening_text": null,
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3206,18 +3170,7 @@
             ]
           }
         },
-        "opening_text": {
-          "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-          "ref": {
-            "document_id": "gamma-holdings",
-            "version": 1,
-            "clause_path": "8",
-            "char_span": [
-              2254,
-              2491
-            ]
-          }
-        },
+        "opening_text": null,
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3882,7 +3835,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-06T07:55:57+00:00",
+      "generated_at": "2026-10-06T10:29:36+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -3915,7 +3868,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:6d82493e1fa31cba8827a8951ea6d80f546bf6c06b6ca53dd7cd16345b7d1f1c"
+      "grounded_in": "evidence@sha256:1808a71b3806ff38436d47dd84b43b6bd9025d375f901b6838319a5497988ad8"
     }
   },
   "floor": {
@@ -3935,7 +3888,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-06T07:55:57+00:00",
+        "x_signed_at": "2026-10-06T10:29:37+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -4295,15 +4248,15 @@
         ]
       },
       "dropped_observations": {
-        "count": 7,
+        "count": 5,
         "by_reason": {
-          "removed_origin_undetermined": 2,
-          "survives_in_terminal": 5
+          "removed_origin_undetermined": 1,
+          "survives_in_terminal": 4
         },
         "by_document": {
-          "beta-industries": 2,
+          "beta-industries": 1,
           "theta-logistics": 2,
-          "zeta-diagnostics": 3
+          "zeta-diagnostics": 2
         }
       }
     },
@@ -4314,12 +4267,12 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-06T07:55:57+00:00",
+    "generated_at": "2026-10-06T10:29:36+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:0cd173f36d934ee8f1eb281491cf920cd519e0889eb71524c5c4267b0da7927e",
+      "sha256": "sha256:55a7d1cfb78bb5f5fdf848dc1b08593e53030965cfdf52122b74c722c7a83db9",
       "records": 113
     }
   },
@@ -4401,26 +4354,9 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "signed_variants": [],
-        "refused_asks": [
-          {
-            "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
-            "n_deals": 1,
-            "ref": {
-              "document_id": "epsilon-systems",
-              "version": 1,
-              "clause_path": "7",
-              "char_span": [
-                1972,
-                2136
-              ]
-            },
-            "precedent_ids": [
-              "prec.ffa283342815c2f1"
-            ]
-          }
-        ],
+        "refused_asks": [],
         "n_variants_total": 0,
-        "n_refused_total": 1
+        "n_refused_total": 0
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -5282,11 +5218,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:8fe863af0733e1cb25eabe09b20d092f6a76e4ff294e279dbdacccf7e611f231",
+    "content_hash": "sha256:c5bb75a9354c1adb11e6b60741db8e0321d02a2a5c5d8b513dc83c32e6a35c81",
     "section_digests": {
-      "evidence": "sha256:6d82493e1fa31cba8827a8951ea6d80f546bf6c06b6ca53dd7cd16345b7d1f1c",
-      "posture": "sha256:22f5c0b461682195932d3249bd4a562b5d865f529208564588c99330042c46c6",
-      "floor": "sha256:a05838c288dcba9c481f2870721864b7839f2559a7d3120f87acc2e2610666bb",
+      "evidence": "sha256:1808a71b3806ff38436d47dd84b43b6bd9025d375f901b6838319a5497988ad8",
+      "posture": "sha256:98b14eb953004676a3e7d09ff1757e634ce343ef384da03bafe749ef245ec49e",
+      "floor": "sha256:b9bb76e45a28cf9c76b1cd864f570f11b8f5c8311efc6f79a86f540999b7f82e",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }

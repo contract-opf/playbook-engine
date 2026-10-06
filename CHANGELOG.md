@@ -10,6 +10,34 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **An earlier draft's copy of a clause joins the move row it belongs to
+  (issue #232).** The aligner's global move phase chains a clause across
+  drafts only at a near-exact or high-Jaccard match, and takes every clause
+  it chains out of the taxonomy-bucket path. A clause edited in round one and
+  then carried unchanged into the signed copy (v1 "five (5) years" → v2
+  "three (3) years" == v3) was therefore chained from v2 onwards only. v1's
+  copy had nothing left to bind to, and the deal showed a same-round
+  `removed` + `added` pair. Downstream, that pair turned the opening text
+  into a fabricated refused ask, or into a fabricated concession when it
+  was our standard. After the move phase, a backward pass now offers each
+  earlier draft's unmatched clauses to the move rows that start at the next
+  draft, within one taxonomy bucket and under the bucket path's own bind
+  rule (#222: Jaccard >= 0.70, or the localized-edit rescue, ranked Jaccard
+  first). The bucket's free clauses in the next draft compete in the same
+  ranking, so a row never takes a clause from a better partner. The pass
+  runs newest draft pair first, so a row can be extended one draft at a
+  time across several early edits. A clause a row already holds is never
+  re-bound, and the row keeps its taxonomy_id (its latest member's). An
+  extended row is `match_basis` "content_jaccard", and its
+  `alignment_confidence` is its worst link's Jaccard. In the NDA example,
+  six clauses become one row each. Four precedents change: governing law in
+  `beta-industries` and two `gamma-holdings` clauses lose a fabricated
+  concession, and `epsilon-systems`' compelled-disclosure clause loses a
+  fabricated refused ask. Each now has `rounds` 1 and `opening_text` null,
+  because the store records an opening text only for a clause struck before
+  signing. `corpus.stats.dropped_observations` falls from 7 to 5. The L1-L4
+  stage cache version (`_DEVIATION_VS_TEMPLATE_VERSION`) moves to 14.
+
 - **A docling timeout recovered by a fallback is no longer cached; OCR-
   recovered text has its own reason (issue #231).** When docling times out
   on a version and the legacy fallback (pdfplumber for PDF, pandoc for RTF,
