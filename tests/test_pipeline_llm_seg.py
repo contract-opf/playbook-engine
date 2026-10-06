@@ -3571,3 +3571,349 @@ def test_attribution_for_diff_prefers_direct_match_over_round_level_fallback() -
     assert result is not None
     assert result.author == "Alice"
     assert result.date == "2024-01-01"  # real match carries the real date, not None
+
+
+# ---------------------------------------------------------------------------
+# Issue #218: extraction reliability is visible end to end. A trail whose
+# versions came from different extractors (docling on one draft, a
+# docling->legacy fallback on another) and whose scanned middle draft timed
+# out must (a) record the failed version's closed-enum reason in
+# corpus_manifest.json, (b) leave no negative-cache entry for the timeout, and
+# (c) surface x_mixed_extractors / x_ingest_reason on the published document.
+#
+# Real producers throughout: mine_corpus -> extract_blocks -> _run_docling
+# (docling's subprocess is faked: Markdown for v1, TimeoutExpired otherwise),
+# the real pandoc RTF adapter for the fallback, real pdfplumber on a real
+# blank fpdf2 PDF for the scan, then project_playbook -> assemble_playbook.
+# ---------------------------------------------------------------------------
+
+
+def _blank_scan_pdf(dest: Path) -> None:
+    fpdf = pytest.importorskip("fpdf")
+    pdf = fpdf.FPDF()
+    pdf.add_page()
+    pdf.output(str(dest))
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_mixed_extractor_trail_and_timeout_reason_reach_the_playbook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    _blank_scan_pdf(deal_dir / "v2.pdf")  # the scanned middle draft
+    _write_rtf(deal_dir / "v3.rtf", _V2_BODY)  # the signed copy
+
+    real_run = subprocess.run
+    real_which = extraction.shutil.which
+    docling_targets: list[str] = []
+
+    def fake_which(cmd: str) -> str | None:
+        if cmd == "docling":
+            return "/usr/bin/docling"
+        if cmd == "ocrmypdf":
+            return None  # no second OCR path on this "host" — the timeout stands
+        return real_which(cmd)
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[0] != "docling":
+            return real_run(cmd, **kwargs)  # pandoc for the legacy RTF fallback
+        target = Path(cmd[2])
+        docling_targets.append(target.name)
+        if target.name != "v1.rtf":
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+        plain = real_run(
+            ["pandoc", str(target), "-t", "plain", "--wrap=none"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        paragraphs = [p.strip() for p in plain.splitlines() if p.strip()]
+        markdown = "\n\n".join(
+            f"# {p}" if p[:1].isdigit() and ". " in p[:4] else p for p in paragraphs
+        )
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        (outdir / f"{target.stem}.md").write_text(markdown + "\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(extraction.shutil, "which", fake_which)
+    monkeypatch.setattr(extraction.subprocess, "run", fake_run)
+
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    cache = ExtractionCache(out_dir / "extraction_cache.jsonl")
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+        extraction_cache=cache,
+    )
+    assert sorted(set(docling_targets)) == ["v1.rtf", "v2.pdf", "v3.rtf"]
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = manifest[0]["version_ingest"]
+    assert [(r["status"], r["extractor"], r["reason"]) for r in rows] == [
+        ("ok", "docling", None),
+        # A version whose extraction raised records the file suffix (no
+        # label was ever returned) — failed rows never count toward
+        # x_mixed_extractors, which reads status == "ok" rows only.
+        ("failed", "pdf", "timeout"),
+        ("ok", "legacy", "backend-error"),
+    ]
+    assert rows[1]["error"] == "ExtractionError", "only the type name is ever persisted"
+    assert cache.get_failure(deal_dir / "v2.pdf", extractor="docling") is None, (
+        "a timed-out version must not be negative-cached"
+    )
+
+    playbook = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    result = validate_document(playbook)
+    assert result.ok, [str(e) for e in result.errors if e.blocking]
+    doc = playbook["corpus"]["documents"][0]
+    assert doc["x_mixed_extractors"] is True
+    assert doc["x_ingest_reason"] == [None, "timeout", "backend-error"]
+    # The per-version reason still never enters version_ingest itself — the
+    # 0.3 schema's additionalProperties:false there has no x_ escape hatch.
+    assert all("reason" not in vi for vi in doc["version_ingest"])
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_single_extractor_trail_is_not_flagged_mixed(tmp_path: Path) -> None:
+    """The other branch: every version through the same extractor (legacy,
+    docling absent on this host) -> x_mixed_extractors is False, and the
+    env-missing reasons are still published."""
+    if extraction.shutil.which("docling") is not None:
+        pytest.skip("docling is installed; this test needs the legacy environment")
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=True)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+    playbook = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    doc = playbook["corpus"]["documents"][0]
+    assert doc["x_mixed_extractors"] is False
+    assert doc["x_ingest_reason"] == ["env-missing", "env-missing"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #218 fix round: "never cache a timeout" has to hold in the per-deal
+# L1-L4 ArtifactStore stage cache (out/.cache, live on a default
+# `playbook mine`) too, not only in the ExtractionCache — and a
+# docling-environment scan's failure must not outlive installing ocrmypdf.
+# Proven with back-to-back DEFAULT mine_corpus runs (no no_cache), real
+# extract_blocks/pdfplumber/pandoc, only the docling/ocrmypdf subprocesses
+# faked.
+# ---------------------------------------------------------------------------
+
+
+def _docling_double(
+    targets: list[str],
+    *,
+    ok_names: set[str],
+    ocrmypdf_calls: list[str] | None = None,
+    ocrmypdf_lines: list[str] | None = None,
+) -> Any:
+    """``subprocess.run`` double: docling renders *ok_names* (via real pandoc)
+    and times out on everything else; ocrmypdf (when on PATH) writes a real
+    text PDF carrying *ocrmypdf_lines*. Every other command runs for real."""
+    real_run = subprocess.run
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "ocrmypdf":
+            fpdf = pytest.importorskip("fpdf")
+            if ocrmypdf_calls is not None:
+                ocrmypdf_calls.append(Path(cmd[-2]).name)
+            pdf = fpdf.FPDF()
+            pdf.add_page()
+            pdf.set_font("Helvetica", size=10)
+            for line in ocrmypdf_lines or []:
+                pdf.cell(0, 10, line, new_x="LMARGIN", new_y="NEXT")
+            pdf.output(cmd[-1])
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[0] != "docling":
+            return real_run(cmd, **kwargs)
+        target = Path(cmd[2])
+        targets.append(f"{target.parent.name}/{target.name}")
+        if target.name not in ok_names:
+            if target.suffix == ".pdf" and "timeout" not in kwargs:
+                raise AssertionError("docling must run under a timeout")
+            if target.suffix == ".pdf" and ocrmypdf_lines is not None:
+                # "Scan" docling's own OCR cannot read: image-only Markdown.
+                outdir = Path(cmd[cmd.index("--output") + 1])
+                (outdir / f"{target.stem}.md").write_text("<!-- image -->\n", encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+        plain = real_run(
+            ["pandoc", str(target), "-t", "plain", "--wrap=none"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        paragraphs = [p.strip() for p in plain.splitlines() if p.strip()]
+        markdown = "\n\n".join(
+            f"# {p}" if p[:1].isdigit() and ". " in p[:4] else p for p in paragraphs
+        )
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        (outdir / f"{target.stem}.md").write_text(markdown + "\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    return fake_run
+
+
+def _mine_default(corpus_dir: Path, config_path: Path, out_dir: Path, **kwargs: Any) -> list[str]:
+    """One DEFAULT mine_corpus run (stage cache live); returns progress lines."""
+    lines: list[str] = []
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(config_path),
+        taxonomy=load_taxonomy(_TAXONOMY_PATH),
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+        progress=lines.append,
+        **kwargs,
+    )
+    return lines
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_deal_with_a_timed_out_version_is_not_stage_cached_and_retries_next_mine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """deal-001: v1.rtf ok, v2.pdf docling timeout, v3.rtf ok. deal-002: one
+    clean version (the control proving the stage cache is live). Two default
+    runs: docling must run on deal-001/v2.pdf AGAIN in run 2, while deal-002
+    is a stage-cache hit that runs docling zero times."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    _blank_scan_pdf(deal_dir / "v2.pdf")
+    _write_rtf(deal_dir / "v3.rtf", _V2_BODY)
+    control_dir = corpus_dir / "deal-002"
+    control_dir.mkdir()
+    # Bytes no deal-001 file shares, so an ExtractionCache hit on shared
+    # content cannot mask whether the STAGE cache replayed deal-002.
+    _write_rtf(control_dir / "v1.rtf", _V1_BODY.replace("California", "Oregon"))
+
+    targets: list[str] = []
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd, _w=extraction.shutil.which: (
+            "/usr/bin/docling" if cmd == "docling" else None if cmd == "ocrmypdf" else _w(cmd)
+        ),
+    )
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_double(targets, ok_names={"v1.rtf"}))
+    cache = ExtractionCache(out_dir / "extraction_cache.jsonl")
+
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert targets.count("deal-001/v2.pdf") >= 1
+    assert "deal-002/v1.rtf" in targets
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    by_id = {d["document_id"]: d for d in manifest}
+    rows = by_id["deal-001"]["version_ingest"]
+    assert (rows[1]["status"], rows[1]["reason"]) == ("failed", "timeout")
+
+    targets.clear()
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert targets.count("deal-001/v2.pdf") >= 1, (
+        "the timed-out version must be retried: its deal result was never stage-cached"
+    )
+    assert not any(t.startswith("deal-002/") for t in targets), (
+        "control: a clean deal IS stage-cached, so the stage cache really was live"
+    )
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = {d["document_id"]: d for d in manifest}["deal-001"]["version_ingest"]
+    assert (rows[1]["status"], rows[1]["reason"]) == ("failed", "timeout")
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_all_versions_timed_out_is_not_stage_cached_and_keeps_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The all-failed case: _compute_doc_result returns None. That None must
+    not be stored either, and the quarantine entry says it was a timeout."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    (deal_dir / "v1.rtf").unlink()
+    _blank_scan_pdf(deal_dir / "v1.pdf")
+
+    targets: list[str] = []
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd, _w=extraction.shutil.which: (
+            "/usr/bin/docling" if cmd == "docling" else None if cmd == "ocrmypdf" else _w(cmd)
+        ),
+    )
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_double(targets, ok_names=set()))
+
+    for _run in range(2):
+        targets.clear()
+        _mine_default(corpus_dir, config_path, out_dir)
+        assert targets == ["deal-001/v1.pdf"], "docling must be retried on every run"
+        quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
+        entries = quarantine if isinstance(quarantine, list) else quarantine["quarantined"]
+        assert len(entries) == 1
+        reason = entries[0]["reason"]
+        assert "all versions failed extraction/ingest" in reason
+        assert "timeout" in reason
+
+
+@pytest.mark.skipif(not extraction.shutil.which("pandoc"), reason="pandoc not installed")
+def test_installing_ocrmypdf_between_mines_gives_the_scan_its_second_ocr_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run 1 (docling, no ocrmypdf): the scan fails no-text and is cached in
+    BOTH layers. Run 2 (ocrmypdf now installed): the stage-cache fingerprint
+    busts, the extraction cache's failure stops counting, ocrmypdf runs and
+    the version is recovered."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
+    deal_dir = corpus_dir / "deal-001"
+    _blank_scan_pdf(deal_dir / "v2.pdf")
+
+    on_path = {"docling"}
+    monkeypatch.setattr(
+        extraction.shutil,
+        "which",
+        lambda cmd, _w=extraction.shutil.which: (
+            f"/usr/bin/{cmd}" if cmd in on_path else None if cmd == "ocrmypdf" else _w(cmd)
+        ),
+    )
+    targets: list[str] = []
+    ocr_calls: list[str] = []
+    monkeypatch.setattr(
+        extraction.subprocess,
+        "run",
+        _docling_double(
+            targets,
+            ok_names={"v1.rtf"},
+            ocrmypdf_calls=ocr_calls,
+            ocrmypdf_lines=["1. Indemnification", "Alpha Corp shall indemnify Beta University."],
+        ),
+    )
+    cache = ExtractionCache(out_dir / "extraction_cache.jsonl")
+
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert ocr_calls == []
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = manifest[0]["version_ingest"]
+    assert (rows[1]["status"], rows[1]["reason"]) == ("failed", "no-text")
+
+    on_path.add("ocrmypdf")
+    _mine_default(corpus_dir, config_path, out_dir, extraction_cache=cache)
+    assert ocr_calls == ["v2.pdf"], "ocrmypdf must get its pass once it is installed"
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = manifest[0]["version_ingest"]
+    assert (rows[1]["status"], rows[1]["extractor"], rows[1]["reason"]) == (
+        "ok",
+        "legacy",
+        "backend-error",
+    )

@@ -64,12 +64,15 @@ from playbook_engine.entity_registry import (
     write_holdout_map,
 )
 from playbook_engine.extraction import (
+    FAILURE_TIMEOUT,
     ExtractionCache,
+    ExtractionError,
     ExtractorLabel,
     bridge_tracked_change_spans,
     detect_extractor,
     extract_blocks,
     extract_docx_units_and_tracked_changes,
+    ocrmypdf_available,
 )
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
@@ -258,7 +261,15 @@ _DEVIATION_VS_TEMPLATE_VERSION = 10
 # "signature_block_span" — and the per-doc result's trees/observations now
 # have the signature block cut out of the last clause's text. A warm entry
 # from before this carries neither.
-_VERSION_INGEST_REASON_VERSION = 3
+#
+# v4 (issue #218): a FAILED version_ingest row now records the extraction
+# failure's closed-enum reason ("timeout" | "no-text" — ExtractionError.reason)
+# instead of always None, and a docling-environment PDF with no text gets an
+# ocrmypdf retry before it can fail at all. A warm out/.cache entry from
+# before this would replay reason=None for a timed-out version (so a consumer
+# could not tell "retry me" from "genuinely unreadable") and would never give
+# a scanned PDF its second OCR pass.
+_VERSION_INGEST_REASON_VERSION = 4
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_trees changes in a way that must invalidate a warm L1-L4 stage
@@ -2011,6 +2022,7 @@ def _compute_doc_result(
     extraction_cache: ExtractionCache | None = None,
     refresh_extraction: bool = False,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
+    timed_out_versions: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Compute L1–L4 for a single document; return a cacheable result dict or None on skip.
 
@@ -2049,6 +2061,13 @@ def _compute_doc_result(
       - ``scope_decision``: scope decision fields (for replaying into ScopeLog).
 
     Returns ``None`` if the document has no processable versions.
+
+    *timed_out_versions* (issue #218), when given, receives the version id of
+    every version whose extraction failed with reason ``"timeout"``. The
+    caller uses it to keep this result — including the all-failed ``None`` —
+    OUT of the L1-L4 stage cache: a timeout is a property of the run, not of
+    the source bytes the cache key hashes, so caching it would stop every
+    later run from retrying the version.
 
     Note: does NOT mutate any ``ScopeLog``; the caller is responsible for
     replaying ``scope_decision`` into the active log (both on cache hit and miss).
@@ -2369,8 +2388,17 @@ def _compute_doc_result(
                 # leaks through all three persisted artifacts at once.
                 "error": type(exc).__name__,
                 "extractor": extractor,
-                "reason": extractor_label.reason if extractor_label is not None else None,
+                "reason": (
+                    extractor_label.reason
+                    if extractor_label is not None
+                    # issue #218: a closed enum ("timeout" | "no-text" |
+                    # None), never text from the message — safe to persist
+                    # for the same reason "error" above is only a type name.
+                    else (exc.reason if isinstance(exc, ExtractionError) else None)
+                ),
             }
+            if timed_out_versions is not None and version_ingest[vid]["reason"] == FAILURE_TIMEOUT:
+                timed_out_versions.append(vid)
 
     if not version_trees:
         progress(f"  {doc_id}: all ingests failed — skipping")
@@ -3206,6 +3234,12 @@ def mine_corpus(
             # as any other fingerprint-field addition.
             "extractor_env": detect_extractor(corpus_dir),
             "declared_extractor": config.extraction.extractor,
+            # Issue #218: whether the ocrmypdf second OCR path is on PATH
+            # changes L1 output for a byte-identical scanned PDF under a
+            # docling environment (recovered text vs a failed version), so
+            # installing or removing it must bust every per-doc entry the
+            # same way "extractor_env" does for docling itself.
+            "ocrmypdf_available": ocrmypdf_available(),
             # Switching segmentation paths changes L1 output for identical
             # source files — must bust the cache, not replay a stale tree
             # segmented (and classified) the other way.
@@ -3407,8 +3441,13 @@ def mine_corpus(
         version_files: list[Path],
         doc_batch_seg_nodes: dict[str, list[SegNode]] | None,
         doc_batch_extractions: dict[str, _BatchExtraction] | None,
+        timed_out_versions: list[str],
     ) -> Any:
-        """Compute one document's L1–L4 result, via the stage cache when present."""
+        """Compute one document's L1–L4 result, via the stage cache when present.
+
+        *timed_out_versions* collects every version whose extraction timed
+        out (issue #218); a result with any is returned but never stored.
+        """
         if store is not None:
             hints_path = doc_dir / "hints.yaml"
             cache_key = make_doc_key(doc_id, version_files, config_fp, "l1-l4", hints_path)
@@ -3419,6 +3458,7 @@ def mine_corpus(
                 _vfs: list[Path] = version_files,
                 _batch_seg_nodes: dict[str, list[SegNode]] | None = doc_batch_seg_nodes,
                 _batch_extractions: dict[str, _BatchExtraction] | None = doc_batch_extractions,
+                _timed_out: list[str] = timed_out_versions,
             ) -> Any:
                 return _compute_doc_result(
                     _doc_id,
@@ -3447,9 +3487,18 @@ def mine_corpus(
                     extraction_cache=extraction_cache,
                     refresh_extraction=refresh_extraction,
                     template_std_nodes_by_tid=template_std_nodes_by_tid,
+                    timed_out_versions=_timed_out,
                 )
 
-            return store.get_or_compute(cache_key, _compute)
+            # Never cache a deal with a timed-out version (issue #218) —
+            # neither a partial result nor the all-failed None. The
+            # ExtractionCache already refuses to negative-cache the timeout;
+            # storing the per-deal result here would replay it one layer up
+            # and the next run would never retry the version.
+            def _cacheable(_timed_out: list[str] = timed_out_versions) -> bool:
+                return not _timed_out
+
+            return store.get_or_compute(cache_key, _compute, cacheable=_cacheable)
 
         return _compute_doc_result(
             doc_id,
@@ -3478,6 +3527,7 @@ def mine_corpus(
             extraction_cache=extraction_cache,
             refresh_extraction=refresh_extraction,
             template_std_nodes_by_tid=template_std_nodes_by_tid,
+            timed_out_versions=timed_out_versions,
         )
 
     # Documents whose LLM segmentation/normalization failed a fail-loud QA gate,
@@ -3513,9 +3563,15 @@ def mine_corpus(
         doc_batch_seg_nodes = batch_seg_nodes_by_doc.get(doc_id)
         doc_batch_extractions = batch_extractions_by_doc.get(doc_id)
 
+        doc_timed_out: list[str] = []
         try:
             result = _run_doc(
-                doc_id, doc_dir, version_files, doc_batch_seg_nodes, doc_batch_extractions
+                doc_id,
+                doc_dir,
+                version_files,
+                doc_batch_seg_nodes,
+                doc_batch_extractions,
+                doc_timed_out,
             )
         except (SegmentationQAError, NormalizeTrailError, HintsError) as exc:
             reason = f"{type(exc).__name__}: {exc}"
@@ -3550,6 +3606,12 @@ def mine_corpus(
             # `validate` would pass on a silently thinner playbook. Quarantine
             # it, same shape as the fail-loud QA-gate entries above.
             reason = "all versions failed extraction/ingest"
+            if doc_timed_out:
+                # Issue #218: keep the timeout visible — it is the one
+                # failure the next run retries (nothing was cached for it).
+                # A fixed string: never a path or name (quarantine.json is
+                # persisted).
+                reason += " (timeout: not cached, the next run will retry)"
             progress(f"    QUARANTINED {doc_id}: {reason}")
             quarantined.append({"document_id": doc_id, "reason": reason})
             continue

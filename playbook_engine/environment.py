@@ -77,6 +77,18 @@ EXTERNAL_TOOLS: tuple[ExternalTool, ...] = (
         expected_in_image=True,
     ),
     ExternalTool(
+        name="ocrmypdf",
+        purpose=(
+            "second OCR path (tesseract) for a scanned PDF that docling's own "
+            "OCR returned no text for (issue #218)"
+        ),
+        consequence=(
+            "a scanned PDF that docling cannot read is recorded as failed with no second attempt"
+        ),
+        install="run inside the project image (`make docker-build`), or `apt-get install ocrmypdf`",
+        expected_in_image=True,
+    ),
+    ExternalTool(
         name="pandoc",
         purpose="the legacy .rtf extractor's converter",
         consequence=(

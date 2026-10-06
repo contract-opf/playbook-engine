@@ -1041,14 +1041,20 @@ def test_extraction_cache_success_retried_under_better_extractor(
     assert legacy_hit[0] == legacy_canonical
 
 
-def test_docling_timeout_failure_negative_caches_under_docling_env(
+def _docling_env_only(cmd: str) -> str | None:
+    """``shutil.which`` double: docling is on PATH, ocrmypdf/pandoc are not."""
+    return "/usr/bin/docling" if cmd == "docling" else None
+
+
+def test_docling_no_text_failure_negative_caches_under_docling_env(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """A docling-environment failure must be cached AS a docling failure.
+    """A docling-environment NO-TEXT failure must be cached AS a docling failure.
 
     The docling→legacy fallback relabels the attempt "legacy" before the
     no-text raise; storing that label would make every docling-environment
-    lookup miss and re-burn the full OCR timeout each pipeline round.
+    lookup miss and re-run docling OCR each pipeline round. (A TIMEOUT is the
+    opposite case — never cached; see the next test.)
     """
     from playbook_engine import extraction as ext
 
@@ -1058,22 +1064,61 @@ def test_docling_timeout_failure_negative_caches_under_docling_env(
 
     docling_calls = {"n": 0}
 
-    def _docling_times_out(path):
+    def _docling_crashes(path):
         docling_calls["n"] += 1
-        raise ext.ExtractionError("docling timed out after 600s")
+        raise ext.ExtractionError("docling produced empty output")
 
-    monkeypatch.setattr(ext, "detect_extractor", lambda p: "docling")
-    monkeypatch.setattr(ext, "_extract_docling_lines", _docling_times_out)
+    monkeypatch.setattr(ext.shutil, "which", _docling_env_only)
+    monkeypatch.setattr(ext, "_extract_docling_lines", _docling_crashes)
     monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [])
 
-    with pytest.raises(ext.ExtractionError):
+    with pytest.raises(ext.ExtractionError) as first:
         ext.extract_blocks(pdf, cache=cache)
+    assert first.value.reason == ext.FAILURE_NO_TEXT
     assert docling_calls["n"] == 1
 
-    # Second call in the SAME docling environment: fail fast from the cache.
-    with pytest.raises(ext.ExtractionError, match="cached failure"):
+    # Second call in the SAME docling environment: fail fast from the cache,
+    # and the replayed failure carries the same closed-enum reason.
+    with pytest.raises(ext.ExtractionError, match="cached failure") as second:
         ext.extract_blocks(pdf, cache=cache)
+    assert second.value.reason == ext.FAILURE_NO_TEXT
     assert docling_calls["n"] == 1
+
+
+def test_docling_timeout_is_never_negative_cached(tmp_path: Path, monkeypatch) -> None:
+    """Issue #218: a docling TIMEOUT that ends in no text must not be
+    negative-cached — it is a property of the run, not the bytes, and caching
+    it stopped every later run from ever retrying the file. Drives the real
+    ``_run_docling`` (its ``subprocess.run`` raises ``TimeoutExpired``), so the
+    ``reason`` tag is the one production actually attaches."""
+    from playbook_engine import extraction as ext
+
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake scanned pdf")
+    cache = ext.ExtractionCache(tmp_path / "cache.jsonl")
+
+    docling_calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "docling", f"unexpected subprocess {cmd[0]!r}"
+        docling_calls.append(cmd)
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(ext.shutil, "which", _docling_env_only)
+    monkeypatch.setattr(ext.subprocess, "run", fake_run)
+    monkeypatch.setattr(ext, "_extract_legacy_lines", lambda p, s: [])
+
+    with pytest.raises(ext.ExtractionError, match="timed out") as first:
+        ext.extract_blocks(pdf, cache=cache)
+    assert first.value.reason == ext.FAILURE_TIMEOUT
+    assert len(docling_calls) == 1
+    assert cache.get_failure(pdf, extractor="docling") is None, "a timeout must not be cached"
+
+    # The next run retries docling instead of replaying a cached failure.
+    with pytest.raises(ext.ExtractionError, match="timed out") as second:
+        ext.extract_blocks(pdf, cache=cache)
+    assert "cached failure" not in str(second.value)
+    assert len(docling_calls) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -2002,13 +2047,14 @@ def test_84_rung_invalidates_a_docx_legacy_entry_with_no_recorded_reason(tmp_pat
 # --- Failure (negative-cache) entries follow the same ladder ---------------
 
 
-def test_pre_84_docx_failure_under_docling_is_retried_but_pdf_failure_is_kept(
+def test_pre_84_docx_failure_under_docling_is_retried_and_so_is_a_pdf_failure(
     tmp_path: Path,
 ) -> None:
     """A DOCX that negative-cached "no text" under a docling environment before
     the normalize-and-retry existed must be retried (the retry may now yield
-    text). A PDF failure cannot be changed by a DOCX-only retry, so it keeps
-    its negative cache instead of re-burning the full docling/OCR timeout."""
+    text). A format-2 PDF failure under docling survives the DOCX-only #84
+    rung but is then invalidated by the #218 rung: it was written before the
+    ocrmypdf second OCR path existed and may have been a timeout."""
     docx = _simple_docx(tmp_path)
     pdf = _fake_pdf(tmp_path)
 
@@ -2031,26 +2077,28 @@ def test_pre_84_docx_failure_under_docling_is_retried_but_pdf_failure_is_kept(
         extractor_env="docling",
         value={"error": "extraction yielded no text", "extractor": "docling"},
     )
-    assert pdf_cache.get_failure(pdf, extractor="docling") == "extraction yielded no text"
-    assert pdf_cache.invalidated_count == 0
+    assert pdf_cache.get_failure(pdf, extractor="docling") is None
+    assert pdf_cache.invalidated_count == 1
 
 
 def test_pre_81_failure_entry_migrates_unchanged(tmp_path: Path) -> None:
     """Failure entries never carried reason/fallback_from in either format, so
-    the #81 rung passes them through — a pre-#81 negative cache for a PDF is
-    still honored instead of costing a fresh (and still fruitless) OCR pass."""
+    the #81 rung passes them through — a pre-#81 negative cache for a PDF
+    under a LEGACY environment (no docling, so no timeout and no ocrmypdf
+    retry — every later rung leaves it alone too) is still honored instead of
+    costing a fresh, still fruitless, extraction."""
     pdf = _fake_pdf(tmp_path)
     cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
     _plant(
         cache,
         pdf,
         format_version="1",
-        extractor_env="docling",
-        value={"error": "extraction yielded no text", "extractor": "docling"},
+        extractor_env="legacy",
+        value={"error": "extraction yielded no text", "extractor": "legacy"},
     )
 
-    assert cache.get_failure(pdf, extractor="docling") == "extraction yielded no text"
-    assert cache.get(pdf, extractor="docling") is None, "a failure entry is not a success hit"
+    assert cache.get_failure(pdf, extractor="legacy") == "extraction yielded no text"
+    assert cache.get(pdf, extractor="legacy") is None, "a failure entry is not a success hit"
 
 
 # --- Mechanism-level guarantees --------------------------------------------
@@ -2112,15 +2160,15 @@ def test_a_discard_all_rung_still_invalidates_everything(
         (
             *extraction._EXTRACTION_CACHE_FORMAT_LADDER,
             extraction.CacheFormatStep(
-                version="4",
+                version="5",
                 issue="#999",
                 summary="hypothetical change that no predicate can scope",
                 discard_all=True,
             ),
         ),
     )
-    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_FORMAT_VERSION", "4")
-    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_STALE_VERSIONS", (superseded, "2", "1"))
+    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_FORMAT_VERSION", "5")
+    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_STALE_VERSIONS", (superseded, "3", "2", "1"))
 
     fresh = ExtractionCache(tmp_path / "extraction_cache.jsonl")
     assert fresh.get(path, extractor="docling") is None
@@ -2133,4 +2181,330 @@ def test_format_version_constant_tracks_the_ladder_head() -> None:
         extraction._EXTRACTION_CACHE_FORMAT_LADDER[-1].version
         == extraction._EXTRACTION_CACHE_FORMAT_VERSION
     )
-    assert extraction._EXTRACTION_CACHE_STALE_VERSIONS == ("2", "1")
+    assert extraction._EXTRACTION_CACHE_STALE_VERSIONS == ("3", "2", "1")
+
+
+# ---------------------------------------------------------------------------
+# Issue #218: second OCR path (ocrmypdf -> pdfplumber) for a docling-environment
+# PDF that yields no text, timeouts never negative-cached, and the legacy
+# environment failing loud about scanned PDFs.
+#
+# The inputs are REAL PDFs built with fpdf2: a blank page (no text layer —
+# what a scan looks like to pdfplumber, the real legacy producer) and a
+# born-digital page standing in for ocrmypdf's output. Only the two external
+# binaries (docling, ocrmypdf) are faked, at the subprocess seam.
+# ---------------------------------------------------------------------------
+
+_OCR_RECOVERED = "Alpha Corp shall keep all Confidential Information secret."
+
+
+def _blank_scan_pdf(tmp_path: Path, name: str = "scan.pdf") -> Path:
+    """A real PDF with no text layer (an empty page), as a scan looks to pdfplumber."""
+    pdf = FPDF()
+    pdf.add_page()
+    dest = tmp_path / name
+    pdf.output(str(dest))
+    return dest
+
+
+def _write_text_pdf(dest: Path, lines: list[str]) -> None:
+    """Write a born-digital PDF carrying *lines* — stands in for ocrmypdf output."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    for line in lines:
+        pdf.cell(0, 10, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(str(dest))
+
+
+def _which(*present: str):
+    def fake_which(cmd: str) -> str | None:
+        return f"/usr/bin/{cmd}" if cmd in present else None
+
+    return fake_which
+
+
+def _fake_binaries(
+    calls: list[list[str]],
+    *,
+    docling: str = "empty",
+    ocrmypdf: str = "recover",
+):
+    """``subprocess.run`` double for docling + ocrmypdf.
+
+    docling: "empty" writes image-placeholder-only Markdown (docling's real
+    output for a page its OCR could not read — parses to zero blocks);
+    "timeout" raises ``TimeoutExpired``.
+    ocrmypdf: "recover" writes a text PDF to the output path; "fail" exits 2;
+    "timeout" raises ``TimeoutExpired``.
+    """
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        if cmd[0] == "docling":
+            if docling == "timeout":
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+            target = Path(cmd[2])
+            outdir = Path(cmd[cmd.index("--output") + 1])
+            (outdir / f"{target.stem}.md").write_text("<!-- image -->\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[0] == "ocrmypdf":
+            if ocrmypdf == "timeout":
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+            if ocrmypdf == "fail":
+                raise subprocess.CalledProcessError(2, cmd, stderr="input file is not a PDF")
+            _write_text_pdf(Path(cmd[-1]), [_OCR_RECOVERED])
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected subprocess {cmd[0]!r}")
+
+    return fake_run
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_docling_no_text_pdf_is_recovered_via_ocrmypdf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling returns nothing usable and pdfplumber finds no text layer: the
+    ocrmypdf pass runs BEFORE the version is recorded as failed, and its
+    output is re-extracted by pdfplumber (page numbers intact). The result is
+    labeled a live docling fallback so it stays visible and budgeted."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls))
+
+    canonical, blocks, label = extract_blocks(pdf, cache=cache)
+
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"]
+    ocr_cmd = calls[1]
+    assert "--skip-text" in ocr_cmd
+    assert ocr_cmd[-2] == str(pdf), "ocrmypdf must read the original PDF"
+    assert Path(ocr_cmd[-1]) != pdf, "ocrmypdf must write a temp copy, never the source"
+    assert _OCR_RECOVERED in canonical
+    assert blocks[0].page == 1
+    _assert_round_trips(canonical, blocks)
+    assert label == "legacy"
+    assert label.reason == "backend-error"
+    assert label.fallback_from == "docling"
+
+    # The recovery is cached as a success: the next call runs nothing.
+    calls.clear()
+    assert extract_blocks(pdf, cache=cache)[0] == canonical
+    assert calls == []
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_ocrmypdf_failure_still_negative_caches_as_no_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the second OCR path also finds nothing (here ocrmypdf exits
+    non-zero), the version fails as "no-text" and IS negative-cached — only a
+    timeout escapes the cache."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls, ocrmypdf="fail"))
+
+    with pytest.raises(ExtractionError, match="yielded no text") as exc_info:
+        extract_blocks(pdf, cache=cache)
+    assert exc_info.value.reason == extraction.FAILURE_NO_TEXT
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"]
+    assert cache.get_failure(pdf, extractor="docling") is not None
+
+    calls.clear()
+    with pytest.raises(ExtractionError, match="cached failure"):
+        extract_blocks(pdf, cache=cache)
+    assert calls == []
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+@pytest.mark.parametrize(
+    ("docling_mode", "ocrmypdf_mode"),
+    [("empty", "timeout"), ("timeout", "fail"), ("timeout", "timeout")],
+)
+def test_any_timeout_in_the_attempt_is_never_negative_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, docling_mode: str, ocrmypdf_mode: str
+) -> None:
+    """A timeout in EITHER OCR subprocess, ending in no text, fails with
+    reason "timeout" and leaves no negative-cache entry, so the next run
+    retries the whole attempt."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    monkeypatch.setattr(
+        extraction.subprocess,
+        "run",
+        _fake_binaries(calls, docling=docling_mode, ocrmypdf=ocrmypdf_mode),
+    )
+
+    with pytest.raises(ExtractionError, match="timed out") as exc_info:
+        extract_blocks(pdf, cache=cache)
+    assert exc_info.value.reason == extraction.FAILURE_TIMEOUT
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"]
+    assert cache.get_failure(pdf, extractor="docling") is None
+
+    calls.clear()
+    with pytest.raises(ExtractionError, match="timed out"):
+        extract_blocks(pdf, cache=cache)
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"], "the next run must retry"
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_no_second_ocr_path_when_ocrmypdf_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling environment without ocrmypdf on PATH: nothing to retry with, so
+    the version fails as before (no subprocess attempted for ocrmypdf)."""
+    pdf = _blank_scan_pdf(tmp_path)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls))
+
+    with pytest.raises(ExtractionError, match="yielded no text") as exc_info:
+        extract_blocks(pdf)
+    assert exc_info.value.reason == extraction.FAILURE_NO_TEXT
+    assert [c[0] for c in calls] == ["docling"]
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+@pytest.mark.parametrize("declared", ["auto", "legacy"])
+def test_legacy_environment_never_runs_ocrmypdf_and_names_the_docker_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declared: str
+) -> None:
+    """The legacy environment stays a deterministic, container-free path: even
+    with ocrmypdf on PATH it is never invoked there. A scanned PDF fails loud
+    with a message naming the Docker runtime, and is negative-cached."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    # auto + no docling on PATH -> legacy; declared legacy -> legacy regardless.
+    monkeypatch.setattr(extraction.shutil, "which", _which("ocrmypdf"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls))
+
+    with pytest.raises(ExtractionError, match="Docker runtime") as exc_info:
+        extract_blocks(pdf, cache=cache, extractor=declared)
+    assert exc_info.value.reason == extraction.FAILURE_NO_TEXT
+    assert "yielded no text" in str(exc_info.value)
+    assert calls == []
+    assert cache.get_failure(pdf, extractor="legacy") is not None
+
+
+def test_218_rung_invalidates_only_docling_pdf_failures(tmp_path: Path) -> None:
+    """The #218 rung is scoped: a format-3 docling-environment PDF FAILURE is
+    retried (it predates the ocrmypdf path and may have been a timeout);
+    every entry the change cannot affect survives and hits."""
+    pdf = _fake_pdf(tmp_path)
+    docx = _simple_docx(tmp_path)
+    failure = {"error": "extraction yielded no text", "extractor": "docling"}
+
+    affected = ExtractionCache(tmp_path / "a.jsonl")
+    _plant(affected, pdf, format_version="3", extractor_env="docling", value=failure)
+    assert affected.get_failure(pdf, extractor="docling") is None
+    assert affected.invalidated_count == 1
+
+    legacy_pdf_failure = ExtractionCache(tmp_path / "b.jsonl")
+    _plant(
+        legacy_pdf_failure,
+        pdf,
+        format_version="3",
+        extractor_env="legacy",
+        value={"error": "extraction yielded no text", "extractor": "legacy"},
+    )
+    assert legacy_pdf_failure.get_failure(pdf, extractor="legacy") == "extraction yielded no text"
+
+    docx_failure = ExtractionCache(tmp_path / "c.jsonl")
+    _plant(docx_failure, docx, format_version="3", extractor_env="docling", value=failure)
+    assert docx_failure.get_failure(docx, extractor="docling") == "extraction yielded no text"
+
+    pdf_success = ExtractionCache(tmp_path / "d.jsonl")
+    _plant(
+        pdf_success,
+        pdf,
+        format_version="3",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling", reason=None, fallback_from=None),
+    )
+    hit = pdf_success.get(pdf, extractor="docling")
+    assert hit is not None and hit[0] == _PLANTED_TEXT
+
+    for cache in (legacy_pdf_failure, docx_failure, pdf_success):
+        assert cache.invalidated_count == 0
+        assert cache.migrated_count == 1
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_no_text_failure_recorded_without_ocrmypdf_is_retried_once_it_is_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The negative-cache key (bytes, format, environment) cannot see whether
+    ocrmypdf was on PATH, so the stored failure records it. While ocrmypdf
+    stays absent the failure still replays (no re-burning docling OCR); once
+    it is installed — as `playbook doctor` advises — the failure stops
+    counting and the file gets its second OCR pass."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls))
+
+    # Run 1: docling only — no second OCR path, fails no-text and is cached.
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    with pytest.raises(ExtractionError, match="yielded no text"):
+        extract_blocks(pdf, cache=cache)
+    assert [c[0] for c in calls] == ["docling"]
+    assert cache.get_failure(pdf, extractor="docling") is not None
+
+    # Same host again: the failure still replays, nothing re-runs.
+    calls.clear()
+    with pytest.raises(ExtractionError, match="cached failure"):
+        extract_blocks(pdf, cache=cache)
+    assert calls == []
+
+    # Run 2: ocrmypdf now installed — the failure no longer counts.
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    assert cache.get_failure(pdf, extractor="docling") is None
+    calls.clear()
+    canonical, _blocks, label = extract_blocks(pdf, cache=cache)
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"]
+    assert _OCR_RECOVERED in canonical
+    assert label.fallback_from == "docling"
+
+    # ...and the recovery replaced the stale failure with a success.
+    calls.clear()
+    assert extract_blocks(pdf, cache=cache)[0] == canonical
+    assert calls == []
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_no_text_failure_recorded_with_ocrmypdf_present_keeps_its_negative_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other side of the rule: a failure ocrmypdf already had its chance
+    at is real evidence, and keeps replaying with ocrmypdf still on PATH."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls, ocrmypdf="fail"))
+
+    with pytest.raises(ExtractionError, match="yielded no text"):
+        extract_blocks(pdf, cache=cache)
+    assert cache.get_failure(pdf, extractor="docling") is not None
+    calls.clear()
+    with pytest.raises(ExtractionError, match="cached failure"):
+        extract_blocks(pdf, cache=cache)
+    assert calls == []
+
+
+def test_ocrmypdf_flag_is_only_recorded_for_failures_it_could_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """put_failure stores the ocrmypdf flag only when given; a legacy or
+    non-PDF failure (flag omitted) keeps replaying whatever is on PATH."""
+    pdf = _fake_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    cache.put_failure(pdf, "extraction yielded no text", "legacy")
+    monkeypatch.setattr(extraction.shutil, "which", _which("ocrmypdf"))
+    assert cache.get_failure(pdf, extractor="legacy") == "extraction yielded no text"

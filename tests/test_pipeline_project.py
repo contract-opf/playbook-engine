@@ -2163,3 +2163,60 @@ def test_two_struck_nodes_of_multi_node_standard_both_reach_opening_text(
         assert record["signed_text"]["text"] == _MULTI_NODE_INSURANCE_A
         assert record["refused_asks"] == []
         assert record["standard"] is False and record["moved"] is True
+
+
+# ---------------------------------------------------------------------------
+# Issue #218: on the deterministic (venv) path there is no OCR at all. A
+# scanned PDF version must fail LOUD — a per-version WARNING naming the Docker
+# runtime and a NoOCRRuntimeError row — instead of the silent empty tree the
+# #82 guard above used to be the only backstop for.
+# ---------------------------------------------------------------------------
+
+
+def test_scanned_pdf_on_deterministic_path_fails_loud_naming_docker(tmp_path: Path) -> None:
+    fpdf = pytest.importorskip("fpdf")
+
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    scan = fpdf.FPDF()
+    scan.add_page()  # no text layer — what a scan looks like to pdfplumber
+    scan.output(str(deal_dir / "v1.pdf"))
+    _write_rtf(deal_dir / "v2.rtf", _CORPUS_BODY)
+
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    progress_lines: list[str] = []
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=load_config(config_path),
+        taxonomy=load_taxonomy(_TAXONOMY_PATH),
+        out_dir=out_dir,
+        progress=progress_lines.append,
+    )
+
+    warnings = [line for line in progress_lines if "v1.pdf" in line and "WARNING" in line]
+    assert warnings, f"expected a per-version WARNING for v1.pdf; got {progress_lines}"
+    assert "Docker runtime" in warnings[0]
+    # Issue #218 fix round: the deterministic segmenter has no OCR in ANY
+    # runtime (Docker included), so the message must name the segmentation
+    # setting that reaches the OCR path, not just the runtime.
+    assert "deterministic segmenter has no OCR in any runtime" in warnings[0]
+    assert "segmentation.agent: true" in warnings[0]
+
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    rows = {r["version"]: r for r in manifest[0]["version_ingest"]}
+    assert rows["v1"]["status"] == "failed"
+    assert rows["v1"]["error"] == "NoOCRRuntimeError"
+    assert rows["v2"]["status"] == "ok"

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -116,12 +117,23 @@ class ArtifactStore:
         """Number of cache misses (recompute events) since this store was created."""
         return self._misses
 
-    def get_or_compute(self, key: str, compute_fn: Any) -> Any:
+    def get_or_compute(
+        self,
+        key: str,
+        compute_fn: Any,
+        *,
+        cacheable: Callable[[], bool] | None = None,
+    ) -> Any:
         """Return the cached value for *key*, or call *compute_fn()* and cache it.
 
         *compute_fn* must return a JSON-serialisable value (dict or list).
         The returned object is always freshly deserialised from JSON, so callers
         should treat it as read-only.
+
+        *cacheable* (issue #218), when given, is asked AFTER *compute_fn* runs;
+        ``False`` returns the freshly computed value WITHOUT persisting it, so
+        the next run recomputes. For a result that reflects this run rather
+        than the key's inputs (e.g. a version whose extraction timed out).
         """
         if key in self._index:
             artifact_path = self._cache_dir / self._index[key]
@@ -135,8 +147,10 @@ class ArtifactStore:
 
         # Cache miss — recompute and persist.
         value = compute_fn()
-        self._persist(key, value)
         self._misses += 1
+        if cacheable is not None and not cacheable():
+            return value
+        self._persist(key, value)
         return value
 
     def invalidate(self, key: str) -> None:

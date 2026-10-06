@@ -22,7 +22,24 @@ prompt → review) is the whole product in miniature.
 affiliation agreements, ...). You need, per deal, whatever versions you
 have: ideally the signed copy plus the drafts exchanged along the way.
 DOCX with tracked changes is the richest signal (it carries who proposed
-each change); PDF and RTF work; scans work on the Docker runtime (OCR).
+each change); PDF and RTF work; scans need the Docker runtime's OCR path (below).
+
+> **Runtime note — scanned PDFs.** OCR (docling plus `ocrmypdf`) only runs
+> on the `extract_blocks` ingest path: the Docker runtime with
+> `segmentation.agent: true` (no API key needed) or `segmentation.llm: true`
+> in `config.yaml`. The default deterministic segmenter has no OCR in any
+> runtime, Docker included: a PDF with no usable text layer fails loud,
+> naming that setting, rather than coming back as an empty agreement. On the
+> OCR path, a PDF that docling's own OCR returns nothing for gets a second
+> pass through `ocrmypdf` (tesseract) before the version is recorded as
+> failed. A version that timed out is never cached as failed (in neither the
+> extraction cache nor the per-deal stage cache), so the next `mine` retries
+> it. Either way, check the published playbook afterwards:
+> `corpus.documents[].x_mixed_extractors` is `true` for a deal whose versions
+> came through different extractors (a common source of noisy clause
+> alignment), and `x_ingest_reason` gives the per-version reason in the same
+> order as `version_ingest` (for example `backend-error` for a docling
+> fallback, or `timeout` / `no-text` for a failed version).
 
 **Lay out the corpus.** The expected shape is one directory per deal
 ([docs/CORPUS-LAYOUT.md](CORPUS-LAYOUT.md)). `playbook stage` recognizes a
