@@ -920,14 +920,15 @@ def test_degenerate_check_skips_small_corpora(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Corpus-level provenance ambiguity flips (silent-degradation gap: pipeline
-# flips provenance to "counterparty_paper" whenever the detector is
-# ambiguous; on a prior run 40/44 documents were flipped and nothing warned).
+# Corpus-level provenance ambiguity (silent-degradation gap: the pipeline
+# used to flip an ambiguous detection to "counterparty_paper" — on a prior run
+# 40/44 documents were flipped and nothing warned; since issue #225 it records
+# paper "unknown", and a majority of ambiguous trails still warns loudly).
 # ---------------------------------------------------------------------------
 
 
 def test_provenance_ambiguity_flip_majority_flagged(tmp_path: Path) -> None:
-    """More than half the trails ambiguity-flipped → one loud line."""
+    """More than half the trails ambiguous (paper recorded unknown) → one loud line."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     for doc_id, ambiguous in [("deal-alice", True), ("deal-bob", True), ("deal-carol", False)]:
@@ -935,7 +936,7 @@ def test_provenance_ambiguity_flip_majority_flagged(tmp_path: Path) -> None:
             out_dir,
             doc_id,
             ordered_versions=["v1"],
-            provenance="counterparty_paper",
+            provenance="unknown" if ambiguous else "counterparty_paper",
             provenance_is_ambiguous=ambiguous,
         )
     _write_scope(
@@ -944,16 +945,18 @@ def test_provenance_ambiguity_flip_majority_flagged(tmp_path: Path) -> None:
     )
     data = build_after_action_data(out_dir)
     flagged = [
-        i for i in data["needs_attention"] if any("ambiguity-flipped" in r for r in i["reasons"])
+        i
+        for i in data["needs_attention"]
+        if any("provenance undetermined" in r for r in i["reasons"])
     ]
     assert len(flagged) == 1
     assert any("2/3" in r for r in flagged[0]["reasons"])
     report = build_after_action_report(out_dir)
-    assert "ambiguity-flipped" in report
+    assert "provenance undetermined" in report
 
 
 def test_provenance_ambiguity_flip_minority_not_flagged(tmp_path: Path) -> None:
-    """Half or fewer trails ambiguity-flipped → no corpus-level warning."""
+    """Half or fewer trails ambiguous (paper recorded unknown) → no corpus-level warning."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     for doc_id, ambiguous in [("deal-alice", True), ("deal-bob", False), ("deal-carol", False)]:
@@ -961,7 +964,7 @@ def test_provenance_ambiguity_flip_minority_not_flagged(tmp_path: Path) -> None:
             out_dir,
             doc_id,
             ordered_versions=["v1"],
-            provenance="counterparty_paper",
+            provenance="unknown" if ambiguous else "counterparty_paper",
             provenance_is_ambiguous=ambiguous,
         )
     _write_scope(
@@ -969,7 +972,9 @@ def test_provenance_ambiguity_flip_minority_not_flagged(tmp_path: Path) -> None:
         [{"document_id": d, "in_scope": True} for d in ("deal-alice", "deal-bob", "deal-carol")],
     )
     data = build_after_action_data(out_dir)
-    assert not any("ambiguity-flipped" in r for i in data["needs_attention"] for r in i["reasons"])
+    assert not any(
+        "provenance undetermined" in r for i in data["needs_attention"] for r in i["reasons"]
+    )
 
 
 # ---------------------------------------------------------------------------

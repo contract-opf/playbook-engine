@@ -632,10 +632,10 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
             report.add(
                 "warning",
                 "CONFIG_NO_OUR_PARTY_ALIASES",
-                "provenance.our_party_aliases is empty — every document will "
-                "default to counterparty_paper (provenance cannot be "
-                "determined); list every form of your own party's name from "
-                "the recitals.",
+                "provenance.our_party_aliases is empty — provenance cannot be "
+                "determined, so every document's paper side will be recorded "
+                "as 'unknown' (undetermined); list every form of your own "
+                "party's name from the recitals.",
                 config_path,
             )
 

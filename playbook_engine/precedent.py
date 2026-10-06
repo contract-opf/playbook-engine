@@ -61,6 +61,7 @@ __all__ = [
     "build_x_judgments",
     "clause_counts",
     "normalize_variant_text",
+    "paper_of_corpus_document",
     "precedent_id",
     "refresh_derived",
     "restamp_evidence",
@@ -155,25 +156,52 @@ def normalize_variant_text(text: str, *, party: str | None) -> str:
     return normalize_for_standard(neutral, (party,) if party else ())
 
 
-def _paper(corpus_doc: dict[str, Any] | None) -> tuple[str, str, float | None]:
+def paper_of_corpus_document(corpus_doc: dict[str, Any] | None) -> str:
+    """The three-valued paper side a corpus document's provenance records.
+
+    ``corpus.documents[].provenance`` is a frozen two-valued field, so an
+    ambiguous detection (``provenance_is_ambiguous: true``) or a missing
+    side is ``"unknown"`` — never the side the two-valued field had to carry
+    (issue #225). Shared with the validator's paper cross-check.
+    """
+    if corpus_doc is None or corpus_doc.get("provenance_is_ambiguous") is True:
+        return PAPER_UNKNOWN
+    provenance = corpus_doc.get("provenance")
+    if provenance == "our_paper":
+        return PAPER_OURS
+    if provenance == "counterparty_paper":
+        return PAPER_THEIRS
+    return PAPER_UNKNOWN
+
+
+def _paper(
+    corpus_doc: dict[str, Any] | None, rows: Iterable[Observation] = ()
+) -> tuple[str, str, float | None]:
     """Three-valued paper side for one deal: ``(paper, paper_basis, confidence)``.
 
     An ambiguous provenance detection is ``"unknown"`` — never coerced to a
     side. Metadata only: nothing in OPF 0.4 partitions, gates or weights by
     paper side.
+
+    ``paper_basis`` is the detection signal the deal's observations carry
+    (``Observation.paper_basis`` — e.g. ``"template_similarity"``,
+    ``"needs_review"``; issue #225); a store mined before that was recorded
+    falls back to ``"provenance_detection"`` / ``"ambiguous_detection"`` /
+    ``"not_recorded"``.
     """
+    paper = paper_of_corpus_document(corpus_doc)
+    detected_basis = next((o.paper_basis for o in rows if o.paper_basis), None)
     if corpus_doc is None:
-        return PAPER_UNKNOWN, _PAPER_BASIS_NOT_RECORDED, None
+        return paper, detected_basis or _PAPER_BASIS_NOT_RECORDED, None
     confidence = corpus_doc.get("provenance_confidence")
     conf = float(confidence) if isinstance(confidence, (int, float)) else None
+    if detected_basis is not None:
+        return paper, detected_basis, conf
     if corpus_doc.get("provenance_is_ambiguous") is True:
-        return PAPER_UNKNOWN, _PAPER_BASIS_AMBIGUOUS, conf
-    provenance = corpus_doc.get("provenance")
-    if provenance == "our_paper":
-        return PAPER_OURS, _PAPER_BASIS_DETECTED, conf
-    if provenance == "counterparty_paper":
-        return PAPER_THEIRS, _PAPER_BASIS_DETECTED, conf
-    return PAPER_UNKNOWN, _PAPER_BASIS_NOT_RECORDED, conf
+        return paper, _PAPER_BASIS_AMBIGUOUS, conf
+    if paper == PAPER_UNKNOWN:
+        return paper, _PAPER_BASIS_NOT_RECORDED, conf
+    return paper, _PAPER_BASIS_DETECTED, conf
 
 
 def _ref(obs: Observation) -> dict[str, Any]:
@@ -335,7 +363,7 @@ def build_precedent_evidence(
         if terminal is None and not conceded and not refused:
             continue
         corpus_doc = docs_by_id.get(document_id)
-        paper, paper_basis, paper_confidence = _paper(corpus_doc)
+        paper, paper_basis, paper_confidence = _paper(corpus_doc, rows)
         signed_text = _text_entry(terminal) if terminal is not None else None
         refused_asks = sorted(
             (

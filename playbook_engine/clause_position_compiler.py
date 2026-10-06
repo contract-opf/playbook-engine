@@ -933,6 +933,9 @@ def _obs_to_observed_position(
     precedent_count = 1
     if precedent_counts is not None:
         precedent_count = precedent_counts.get(_normalize_for_dedup(obs.full_text), 1)
+    # Deferred: provenance_detector -> config -> clause_position_compiler.
+    from playbook_engine.provenance_detector import two_valued_side  # noqa: PLC0415
+
     return ObservedPosition(
         text_summary=obs.text_summary,
         full_text=obs.full_text,
@@ -945,7 +948,10 @@ def _obs_to_observed_position(
         ),
         deviation=obs.deviation,
         risk_delta=obs.risk_delta,
-        provenance=obs.provenance,
+        # The 0.2/0.3 observed_positions enum is frozen two-valued; an
+        # undetermined ("unknown") paper side is written the §2.3 way
+        # (issue #225). It never counted as our paper above either.
+        provenance=two_valued_side(obs.provenance),
         outcome=obs.outcome,
         precedent_count=precedent_count,
         proposed_by=obs.proposed_by,
@@ -1050,9 +1056,25 @@ def _derive_rollup(
     # n_counterparty_paper count DISTINCT deals (citation.document_id), never
     # observation rows, so a deal carrying both its signed row and a reversal
     # row for this clause is one data point, not two.
-    n_our_paper = len({obs.citation.document_id for obs in group if obs.provenance == "our_paper"})
+    # Issue #225: counted through the same two_valued_side mapping that
+    # _obs_to_observed_position emits with, so an "unknown" paper side counts
+    # as the counterparty_paper the published observed_positions list it as.
+    # Deferred: provenance_detector -> config -> clause_position_compiler.
+    from playbook_engine.provenance_detector import two_valued_side  # noqa: PLC0415
+
+    n_our_paper = len(
+        {
+            obs.citation.document_id
+            for obs in group
+            if two_valued_side(obs.provenance) == "our_paper"
+        }
+    )
     n_counterparty_paper = len(
-        {obs.citation.document_id for obs in group if obs.provenance == "counterparty_paper"}
+        {
+            obs.citation.document_id
+            for obs in group
+            if two_valued_side(obs.provenance) == "counterparty_paper"
+        }
     )
     total = n_our_paper + n_counterparty_paper
     if total > 0:
