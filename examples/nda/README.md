@@ -66,6 +66,31 @@ present, must not reach a confidentiality breach -- responding to the
 $50,000 liability cap that appears in three of the six deals, introduced by
 the counterparty in two of them). `playbook project --opf-version 0.3` still
 projects the same store into the previous (0.3) shape for one release.
+`corpus.stats.dropped_observations` counts removed text that yields no
+precedent. One of `zeta-diagnostics`' three is its first draft's
+unclassified exclusions paragraph, dropped as `removed_origin_undetermined`
+(an unclassified clause has no standard to test its origin against). Before
+issue #222 the aligner paired that paragraph with the signed draft's
+unrelated compelled-disclosure paragraph and diffed the two as one
+"modified" clause. That mispairing is gone, but the paragraph is still
+stranded -- incorrect behaviour tracked in issue #232 (move rows are never
+extended backwards by bind similarity). The global move phase first
+matches the second and signed drafts' identical exclusions paragraphs into
+one row (`content_exact`), which takes them out of the bucket path, so the
+bucket path has nothing left to bind the first draft's paragraph to,
+although its text matches the second draft's copy (Jaccard 0.79). The deal
+therefore still shows a same-deal removed/added pair with identical opening
+text in its first round.
+Below the 0.70 Jaccard threshold the aligner binds two drafts only as a
+localized edit: Jaccard of at least 0.5 and exactly one contiguous edit span.
+`beta-industries`' second draft struck the independent-development exclusion
+and the burden sentence from the exclusions clause (Jaccard 0.68, three
+separate edit spans). That draft is therefore its own row, and its whole text
+is the refused ask the signed copy reversed. The old aligner reduced it to
+the one-letter fragment "c". In `theta-logistics` and `zeta-diagnostics` the
+compelled-disclosure clause gained an appended notice proviso (Jaccard 0.48).
+It splits into removed + added, and the removed text is counted as
+`survives_in_terminal`.
 
 **It is reproducible from the committed inputs above, with no
 `ANTHROPIC_API_KEY`:**

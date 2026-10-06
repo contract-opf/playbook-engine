@@ -16,10 +16,23 @@ Algorithm (fully deterministic, no LLM):
    short boilerplate is left to the positional path.
 1. Group each remaining (unmatched) clause list by ``taxonomy_id``.
 2. Collect all taxonomy_ids in first-appearance order (v0 → v1 → ...).
-3. For each taxonomy_id bucket, align the per-version clause sequences:
-   a. Identical counts across all versions → zip in order (exact alignment).
-   b. Differing counts → greedy text-Jaccard matching against the
-      version with the most clauses; unmatched slots become ``None``.
+3. For each taxonomy_id bucket, align the per-version clause sequences by
+   text similarity (issue #222) — never by position alone, and whether or
+   not the per-version counts agree. Two clauses bind as one logical clause
+   only when their token-set Jaccard is at least
+   ``ALIGNMENT_AMBIGUITY_THRESHOLD``, or — a narrow rescue for a localized
+   edit such as a changed number or an appended proviso — when the Jaccard
+   is at least ``ALIGNMENT_RESCUE_MIN_JACCARD``, the shorter clause has at
+   least ``ALIGNMENT_RESCUE_MIN_TOKENS`` content tokens, and the two token
+   sequences differ by exactly one contiguous replace, insert or delete
+   (see :func:`_bind_by_similarity`). The version with the most clauses (the
+   first one on a tie) is the reference frame; every other version, nearest
+   the reference first, binds each of its clauses to an open row, highest
+   Jaccard first (ties broken by position). A clause that binds nowhere
+   opens its own row, so two unrelated clauses that merely share a
+   taxonomy_id become separate removed/added rows instead of one fabricated
+   ``modified`` diff. A row's slots carry its worst binding Jaccard as
+   ``alignment_confidence``.
 4. Return one ``ClauseAlignment`` per logical clause, preserving the
    first-appearance order of taxonomy_ids.
 
@@ -33,16 +46,18 @@ Handles:
     for earlier versions.
   - Deletions: taxonomy_id absent in a later version → AlignmentSlot(clause=None)
     for that version.
-  - Splits/merges: handled by greedy match within the bucket; extra clauses
-    become new rows.  When counts are identical, remaining clauses are zipped
-    by position — two same-taxonomy_id clauses that swap positions are caught
-    by the global move phase when their text is substantial enough to match.
+  - Splits/merges: handled by similarity matching within the bucket; a part
+    similar enough to the original stays on its row, the rest become new
+    rows. Two same-taxonomy_id clauses that swap positions are matched by
+    similarity (and, when substantial enough, by the global move phase
+    first), never zipped by position.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Protocol, runtime_checkable
 
 from playbook_engine.clause_classifier import ClassifiedClause
@@ -81,9 +96,32 @@ _STOP_WORDS: frozenset[str] = frozenset(
 # Constants
 # ---------------------------------------------------------------------------
 
-#: Jaccard similarity below this threshold triggers an ``AlignmentJudge`` call
-#: for the corresponding bucket (if a judge is configured).
+#: Minimum token-set Jaccard for the bucket path to bind two clauses as the
+#: same logical clause (issue #222). Below it the clauses are separate rows
+#: (removed + added) unless the narrow localized-edit rescue below applies,
+#: and a row left with an empty slot triggers an ``AlignmentJudge`` call (if
+#: a judge is configured). One shared token is not evidence that two clauses
+#: are the same clause.
 ALIGNMENT_AMBIGUITY_THRESHOLD: float = 0.70
+
+#: Localized-edit rescue (issue #222): a pair below
+#: ``ALIGNMENT_AMBIGUITY_THRESHOLD`` still binds when ALL of these hold —
+#: its Jaccard is at least ``ALIGNMENT_RESCUE_MIN_JACCARD``; the shorter
+#: clause has at least ``ALIGNMENT_RESCUE_MIN_TOKENS`` content
+#: (non-stop-word) tokens; and
+#: ``difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()`` over
+#: the two content-token sequences has EXACTLY ONE non-``equal`` opcode — one
+#: contiguous replace, insert or delete. That is the shape of a localized
+#: edit (a changed number, an appended carve-out) that costs a short clause
+#: its Jaccard; short boilerplate that merely shares a skeleton with an
+#: unrelated longer clause differs in several separate spans (or falls below
+#: the Jaccard floor) and is never rescued. A rescue bind may not take a
+#: partner from a competing pair whose Jaccard is within
+#: ``ALIGNMENT_RESCUE_MARGIN`` of its own or higher, and the confidence it
+#: reports is the Jaccard.
+ALIGNMENT_RESCUE_MIN_JACCARD: float = 0.5
+ALIGNMENT_RESCUE_MIN_TOKENS: int = 3
+ALIGNMENT_RESCUE_MARGIN: float = 0.1
 
 #: Global move matching — near-exact phase: normalized clause text must be at
 #: least this many characters to participate. Short boilerplate ("Notices",
@@ -109,9 +147,11 @@ MOVE_JACCARD_MIN_TOKENS: int = 8
 class AlignmentJudge(Protocol):
     """Protocol for LLM-assisted clause alignment disambiguation.
 
-    Called only on ambiguous buckets — those containing a ``None``-matched
-    slot, a low-Jaccard pair (below ``ALIGNMENT_AMBIGUITY_THRESHOLD``), an
-    ``extra_rows`` bucket (count mismatch), or a detected reorder.
+    Called only on ambiguous rows of the bucket path — a row with a
+    ``None`` slot (a version whose clauses did not bind to the row, issue
+    #222), a row opened by a non-reference version's unbound clause, or a
+    row bound by the localized-edit rescue (Jaccard below
+    ``ALIGNMENT_AMBIGUITY_THRESHOLD``).
 
     Contract:
     - Return one ``(before_idx | None, after_idx | None)`` pair per *logical*
@@ -211,11 +251,12 @@ def align_versions(
         classified_versions: ``[(version_id, classified_clauses), ...]`` in
                              version order (oldest first).  Version ids must
                              be unique.
-        alignment_judge:     Optional judge called on ambiguous buckets (those
-                             with a ``None``-matched slot, low-Jaccard score,
-                             count mismatch, or detected reorder).  When
-                             ``None`` the deterministic greedy algorithm is
-                             used for all buckets.
+        alignment_judge:     Optional judge called on ambiguous rows (a
+                             ``None`` slot, a row opened by a non-reference
+                             version's unbound clause, or a rescue bind
+                             below ``ALIGNMENT_AMBIGUITY_THRESHOLD``).  When
+                             ``None`` the deterministic similarity matching
+                             is used for all buckets.
 
     Returns:
         One ``ClauseAlignment`` per logical clause, in first-appearance order
@@ -436,75 +477,71 @@ def _align_seqs(
     *,
     alignment_judge: AlignmentJudge | None = None,
 ) -> list[ClauseAlignment]:
-    """Align per-version clause sequences within one taxonomy_id bucket."""
-    # Fast path: all versions have identical clause counts → zip in order.
-    counts = {len(s) for s in seqs}
-    if len(counts) == 1:
-        n = len(seqs[0])
-        return [
-            ClauseAlignment(
-                taxonomy_id=taxonomy_id,
-                slots=tuple(
-                    AlignmentSlot(version=version_ids[i], clause=seqs[i][j])
-                    for i in range(len(version_ids))
-                ),
-            )
-            for j in range(n)
-        ]
+    """Align per-version clause sequences within one taxonomy_id bucket.
 
-    # Slow path: differing counts.  Use the longest sequence as the reference
-    # frame; greedy-match other versions to it by text-Jaccard similarity.
+    Similarity matching, never position alone (issue #222): the longest
+    sequence (the first one on a tie) is the reference frame and opens one
+    row per clause. Every other version, nearest the reference first, binds
+    its clauses to open rows (see :func:`_bind_by_similarity`) — a clause is
+    compared against the row's member nearest it in version order (its
+    *frontier* on that side of the reference), so a clause that drifts
+    gradually across many drafts stays on one row. Only a Jaccard of at
+    least ``ALIGNMENT_AMBIGUITY_THRESHOLD``, or the narrow localized-edit
+    rescue, binds; a clause that binds nowhere opens its own row. Each row's
+    slots carry the row's worst binding Jaccard as ``alignment_confidence``
+    (``None`` for a single-member row).
+    """
     ref_idx = max(range(len(seqs)), key=lambda i: len(seqs[i]))
     ref_clauses = seqs[ref_idx]
 
-    # matched[j] tracks the per-version clause mapped to reference slot j.
-    # matched_sim[j] tracks the best Jaccard score for reference slot j.
-    matched: list[dict[int, ClassifiedClause | None]] = [{ref_idx: c} for c in ref_clauses]
-    matched_sim: list[float | None] = [None] * len(ref_clauses)
-    extra_rows: list[dict[int, ClassifiedClause | None]] = []
+    # Each clause is tokenized exactly once (issue #246).
+    ref_tokens = [_clause_tokens(rc.node.text or "") for rc in ref_clauses]
 
-    # Precompute reference-clause token sets once per bucket (not per pair, and
-    # not per non-reference version) to avoid O(n^2) re-tokenization below.
-    ref_tokens = [_tokens(rc.node.text or "") for rc in ref_clauses]
+    # rows[r]: {version_index: clause}; row_sim[r]: the worst binding
+    # similarity on the row; left/right[r]: the tokens of the row's member
+    # nearest version 0 / the last version (the frontier a further version on
+    # that side binds against); row_pos[r]: the positional prior used to
+    # break similarity ties (the opening clause's index in its version).
+    rows: list[dict[int, ClassifiedClause]] = [{ref_idx: c} for c in ref_clauses]
+    row_sim: list[float | None] = [None] * len(ref_clauses)
+    left: list[_ClauseTokens] = list(ref_tokens)
+    right: list[_ClauseTokens] = list(ref_tokens)
+    row_pos: list[int] = list(range(len(ref_clauses)))
 
-    for i, ver_clauses in enumerate(seqs):
-        if i == ref_idx:
+    order = sorted(
+        (i for i in range(len(seqs)) if i != ref_idx),
+        key=lambda i: (abs(i - ref_idx), i),
+    )
+    for i in order:
+        ver_clauses = seqs[i]
+        if not ver_clauses:
             continue
-
-        unmatched_ref: list[int] = list(range(len(ref_clauses)))
-
-        for clause in ver_clauses:
-            if not unmatched_ref:
-                extra_rows.append({i: clause})
+        frontier = left if i < ref_idx else right
+        ver_tokens = [_clause_tokens(c.node.text or "") for c in ver_clauses]
+        # Every row open so far lacks a version-i member; rows opened by this
+        # version's own unbound clauses (below) are not candidates for it.
+        n_open = len(rows)
+        bound: set[int] = set()
+        for ci, r, sim in _bind_by_similarity(ver_tokens, frontier[:n_open], row_pos[:n_open]):
+            rows[r][i] = ver_clauses[ci]
+            prev = row_sim[r]
+            row_sim[r] = sim if prev is None else min(prev, sim)
+            frontier[r] = ver_tokens[ci]
+            bound.add(ci)
+        for ci, clause in enumerate(ver_clauses):
+            if ci in bound:
                 continue
-
-            clause_tokens = _tokens(clause.node.text or "")
-            best_j = unmatched_ref[0]
-            best_sim = _jaccard(clause_tokens, ref_tokens[best_j])
-            for j in unmatched_ref[1:]:
-                candidate_sim = _jaccard(clause_tokens, ref_tokens[j])
-                if candidate_sim > best_sim:
-                    best_sim = candidate_sim
-                    best_j = j
-            sim = best_sim
-            if sim > 0.0:
-                matched[best_j][i] = clause
-                # Store the minimum Jaccard seen for this reference slot across
-                # all non-reference versions (worst-case confidence for the row).
-                prev = matched_sim[best_j]
-                matched_sim[best_j] = sim if prev is None else min(prev, sim)
-                unmatched_ref.remove(best_j)
-            else:
-                extra_rows.append({i: clause})
-
-        # Reference slots still unmatched → this version has no clause there.
-        for j in unmatched_ref:
-            matched[j].setdefault(i, None)
+            rows.append({i: clause})
+            row_sim.append(None)
+            left.append(ver_tokens[ci])
+            right.append(ver_tokens[ci])
+            row_pos.append(ci)
 
     alignments: list[ClauseAlignment] = []
-    for row_idx, row_dict in enumerate(matched + extra_rows):
-        is_extra = row_idx >= len(matched)
-        sim_score: float | None = None if is_extra else matched_sim[row_idx]
+    for row_idx, row_members in enumerate(rows):
+        row_dict: dict[int, ClassifiedClause | None] = dict(row_members)
+        is_extra = row_idx >= len(ref_clauses)
+        sim_score: float | None = row_sim[row_idx]
 
         # Determine if this bucket is ambiguous and needs judge intervention.
         has_none_slot = any(row_dict.get(i) is None for i in range(len(version_ids)))
@@ -578,6 +615,126 @@ def _align_seqs(
         alignments.append(ClauseAlignment(taxonomy_id=taxonomy_id, slots=slots))
 
     return alignments
+
+
+def _bind_by_similarity(
+    clause_tokens: list[_ClauseTokens],
+    row_tokens: list[_ClauseTokens],
+    row_pos: list[int],
+) -> list[tuple[int, int, float]]:
+    """Bind clauses to rows (issue #222).
+
+    A pair is a candidate when its token-set Jaccard is at least
+    ``ALIGNMENT_AMBIGUITY_THRESHOLD`` (a *primary* bind) or it passes the
+    localized-edit rescue (:func:`_is_localized_edit`). Candidates are
+    ranked by Jaccard, highest first, then positional distance
+    (``|clause index - row_pos|``), then index, so identical duplicates keep
+    their document order; a pair binds only when both sides are still free.
+    A rescue bind is additionally refused when a competing pair that is
+    still free — another free clause for the same row, or another free row
+    for the same clause — has a Jaccard within ``ALIGNMENT_RESCUE_MARGIN`` of
+    its own or higher: the rescue never settles an ambiguous choice.
+    Identical token sets (Jaccard 1.0) are paired by hashing first, so a
+    bucket of unchanged clauses never pays for the pairwise matrix. Returns
+    ``[(clause_index, row_index, jaccard), ...]`` — the reported similarity
+    is always the Jaccard, never a rescue score.
+    """
+    out: list[tuple[int, int, float]] = []
+    free_rows = set(range(len(row_tokens)))
+    free_clauses = set(range(len(clause_tokens)))
+
+    rows_by_tokens: dict[frozenset[str], list[int]] = {}
+    for r, toks in enumerate(row_tokens):
+        rows_by_tokens.setdefault(toks.vocab, []).append(r)
+    for ci, toks in enumerate(clause_tokens):
+        same = rows_by_tokens.get(toks.vocab)
+        if not same:
+            continue
+        r = min(same, key=lambda k: (abs(ci - row_pos[k]), k))
+        same.remove(r)
+        out.append((ci, r, 1.0))
+        free_rows.discard(r)
+        free_clauses.discard(ci)
+
+    # Jaccard of every remaining pair that could matter: as a candidate
+    # (>= ALIGNMENT_RESCUE_MIN_JACCARD) or as a competitor that blocks a
+    # rescue bind (>= that minus ALIGNMENT_RESCUE_MARGIN). Pairs whose set
+    # sizes alone bound the Jaccard below that floor are skipped.
+    floor = ALIGNMENT_RESCUE_MIN_JACCARD - ALIGNMENT_RESCUE_MARGIN
+    jac: dict[tuple[int, int], float] = {}
+    candidates: list[tuple[float, int, int, bool]] = []
+    for ci in sorted(free_clauses):
+        ta = clause_tokens[ci]
+        for r in sorted(free_rows):
+            tb = row_tokens[r]
+            small, large = sorted((len(ta.vocab), len(tb.vocab)))
+            if large == 0 or small / large < floor:
+                continue
+            j = _jaccard(ta.vocab, tb.vocab)
+            if j < floor:
+                continue
+            jac[(ci, r)] = j
+            if j >= ALIGNMENT_AMBIGUITY_THRESHOLD:
+                candidates.append((j, ci, r, False))
+            elif j >= ALIGNMENT_RESCUE_MIN_JACCARD and _is_localized_edit(ta, tb):
+                candidates.append((j, ci, r, True))
+    candidates.sort(key=lambda t: (-t[0], abs(t[1] - row_pos[t[2]]), t[1], t[2]))
+    for j, ci, r, rescue in candidates:
+        if ci not in free_clauses or r not in free_rows:
+            continue
+        if rescue and _rescue_is_contested(j, ci, r, jac, free_clauses, free_rows):
+            continue
+        out.append((ci, r, j))
+        free_clauses.discard(ci)
+        free_rows.discard(r)
+    return out
+
+
+def _rescue_is_contested(
+    j: float,
+    ci: int,
+    r: int,
+    jac: dict[tuple[int, int], float],
+    free_clauses: set[int],
+    free_rows: set[int],
+) -> bool:
+    """True when a rescue bind of clause ``ci`` to row ``r`` (Jaccard ``j``)
+    would take a partner from a still-free competing pair whose Jaccard is
+    within ``ALIGNMENT_RESCUE_MARGIN`` of ``j`` or higher."""
+    bar = j - ALIGNMENT_RESCUE_MARGIN
+    if any(jac.get((c, r), 0.0) >= bar for c in free_clauses if c != ci):
+        return True
+    return any(jac.get((ci, k), 0.0) >= bar for k in free_rows if k != r)
+
+
+@dataclass(frozen=True, eq=False)
+class _ClauseTokens:
+    """One clause's non-stop-word tokens, in order and as a set."""
+
+    seq: tuple[str, ...]
+    vocab: frozenset[str]
+
+
+def _clause_tokens(text: str) -> _ClauseTokens:
+    seq = tuple(w for w in _normalize(text).split() if w not in _STOP_WORDS)
+    return _ClauseTokens(seq=seq, vocab=frozenset(seq))
+
+
+def _is_localized_edit(a: _ClauseTokens, b: _ClauseTokens) -> bool:
+    """The localized-edit test of the bucket path's rescue bind (issue #222).
+
+    True when the shorter clause has at least ``ALIGNMENT_RESCUE_MIN_TOKENS``
+    content tokens and ``difflib.SequenceMatcher(autojunk=False)`` turns one
+    token sequence into the other with EXACTLY ONE non-``equal`` opcode — a
+    single contiguous replace, insert or delete, the shape of a changed
+    number or an appended (or inserted) proviso. Short boilerplate that
+    shares a skeleton with an unrelated longer clause differs in several
+    separate spans and fails. The Jaccard floor is the caller's check.
+    """
+    if min(len(a.seq), len(b.seq)) < ALIGNMENT_RESCUE_MIN_TOKENS:
+        return False
+    opcodes = SequenceMatcher(None, a.seq, b.seq, autojunk=False).get_opcodes()
+    return sum(1 for tag, *_ in opcodes if tag != "equal") == 1
 
 
 def _normalize(text: str) -> str:

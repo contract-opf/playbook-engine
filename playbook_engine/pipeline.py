@@ -268,7 +268,18 @@ _MEDIA_TYPES: dict[str, str] = {
 # no reversals and no proposed_then_reversed observations (counted under
 # dropped_observations "refused_ask_no_signed_copy"). A warm cache would
 # otherwise replay the old signed anchors, orderings and refused asks forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 12
+#
+# v13 (issue #222): the bucket aligner binds two clauses only at a token
+# Jaccard >= ALIGNMENT_AMBIGUITY_THRESHOLD (or through the narrow
+# localized-edit rescue) and similarity-matches equal-count buckets
+# instead of zipping them by position; a reversal now requires fewer than
+# half of the proposed content tokens to survive (trail reversals gained
+# "retained" / "alignment_confidence"); heading-less children inherit their
+# parent's classification (basis "inherited"); and observations gained
+# "x_alignment_confidence". A warm cache would otherwise replay the old
+# position-zipped alignments, subset-rule reversals and unclassified
+# children forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 13
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1257,6 +1268,7 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 standard=raw.get("standard"),
                 paper_basis=raw.get("paper_basis"),
                 paper_confidence=raw.get("paper_confidence"),
+                alignment_confidence=raw.get("x_alignment_confidence"),
             )
         )
     return result

@@ -11,7 +11,11 @@ from playbook_engine.clause_aligner import align_versions
 from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_differ import diff_aligned
 from playbook_engine.clause_tree import ClauseNode
-from playbook_engine.reversal_detector import ReversalRecord, detect_reversals
+from playbook_engine.reversal_detector import (
+    REVERSAL_RETAINED_THRESHOLD,
+    ReversalRecord,
+    detect_reversals,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -408,3 +412,159 @@ def test_reversal_skipped_without_signed_copy() -> None:
 def test_reversal_has_signed_copy_defaults_true() -> None:
     doc = _planted_insert_then_revert()
     assert detect_reversals(doc) == detect_reversals(doc, has_signed_copy=True)
+
+
+# ---------------------------------------------------------------------------
+# detect_reversals: retained-token ratio (issue #222)
+# ---------------------------------------------------------------------------
+
+_IND_BASE = (
+    "Alice Corp shall defend, indemnify and hold harmless Beta Ltd from all third "
+    "party claims arising from Alice Corp's "
+)
+
+
+_CONF_BASE = (
+    "Beta Ltd shall hold all Confidential Information received from Alice Corp in "
+    "strict confidence, shall use it solely to evaluate the proposed transaction, "
+    "and may disclose Confidential Information "
+)
+
+
+def test_accepted_with_one_word_change_is_not_a_reversal() -> None:
+    """Beta Ltd counter-proposes ONE hunk in v2; the signed v3 keeps that
+    counter-proposal with one word inside it changed. Most of the hunk
+    survived, so it was accepted with an edit — not refused. (The old
+    token-subset rule called it a reversal because one proposed word was
+    missing.)"""
+    v1 = [_cc("1", "conf", _CONF_BASE + "only as required by law.")]
+    v2 = [
+        _cc(
+            "1",
+            "conf",
+            _CONF_BASE + "only as required by law or to its professional advisers bound by "
+            "duties of confidence.",
+        )
+    ]
+    v3 = [
+        _cc(
+            "1",
+            "conf",
+            _CONF_BASE + "only as required by law or to its legal advisers bound by "
+            "duties of confidence.",
+        )
+    ]
+
+    doc = _doc_diff([("v1", v1), ("v2", v2), ("v3", v3)])
+    proposal = doc.consecutive[0].diffs[0]
+    assert proposal.kind == "modified"
+    edits = [h for h in proposal.hunks if h.kind in ("insert", "replace")]
+    assert len(edits) == 1, "fixture: a single-hunk counter-proposal"
+    proposed = set(edits[0].new_text.lower().replace(".", " ").split())
+    signed = set(v3[0].node.text.lower().replace(".", " ").split())
+    assert not proposed <= signed, "fixture: the old subset rule would have fired"
+
+    assert detect_reversals(doc) == []
+
+
+def test_refused_hunk_is_not_masked_by_accepted_sibling_hunk() -> None:
+    """One v2 diff holds two hunks: an accepted insert (kept in the signed
+    copy) and a refused replace (the signed copy restores the original).
+    ``retained`` is per hunk, so the accepted sibling cannot dilute the refused
+    one below detection: exactly one reversal, for the refused hunk."""
+    base = (
+        "Alice Corp shall defend, indemnify and hold harmless Beta Ltd, its "
+        "officers, directors and employees from all third party claims arising "
+        "out of or relating to Alice Corp's negligence"
+    )
+    v1 = [
+        _cc(
+            "1",
+            "ind",
+            base + ". This obligation survives termination of this Agreement for three years.",
+        )
+    ]
+    v2 = [
+        _cc(
+            "1",
+            "ind",
+            base + ", willful misconduct or fraud. This obligation survives termination "
+            "of this Agreement perpetually.",
+        )
+    ]
+    v3 = [
+        _cc(
+            "1",
+            "ind",
+            base + ", willful misconduct or fraud. This obligation survives termination "
+            "of this Agreement for three years.",
+        )
+    ]
+
+    doc = _doc_diff([("v1", v1), ("v2", v2), ("v3", v3)])
+    proposal = doc.consecutive[0].diffs[0]
+    assert proposal.kind == "modified"
+    edits = [h for h in proposal.hunks if h.kind in ("insert", "replace")]
+    assert len(edits) == 2, "fixture: one accepted hunk and one refused hunk"
+
+    reversals = detect_reversals(doc)
+    assert len(reversals) == 1
+    rev = reversals[0]
+    assert "perpetually" in rev.proposed_text
+    assert "misconduct" not in rev.proposed_text
+    assert rev.retained == 0.0
+    assert rev.version_inserted == "v2"
+    assert rev.version_removed == "v3"
+
+
+def test_mostly_refused_proposal_is_a_reversal_and_records_retained() -> None:
+    """A proposal most of whose words are absent from the signed clause is a
+    reversal, and the record carries the retained share (< 0.5)."""
+    v1 = [_cc("1", "ind", _IND_BASE + "negligence.")]
+    v2 = [_cc("1", "ind", _IND_BASE + "negligence, including consequential and punitive damages.")]
+    v3 = [_cc("1", "ind", _IND_BASE + "negligence.")]
+
+    reversals = detect_reversals(_doc_diff([("v1", v1), ("v2", v2), ("v3", v3)]))
+    assert len(reversals) == 1
+    rev = reversals[0]
+    assert rev.retained is not None
+    assert rev.retained < REVERSAL_RETAINED_THRESHOLD
+    assert rev.retained == 0.0
+    assert rev.to_dict()["retained"] == 0.0
+    # The draft clause was bound to the signed clause's row by similarity.
+    assert rev.alignment_confidence is not None
+    assert rev.to_dict()["alignment_confidence"] == round(rev.alignment_confidence, 6)
+
+
+def test_retained_ratio_boundary() -> None:
+    """Exactly half the proposed content tokens retained is accepted (the
+    rule is retained < 0.5); fewer than half is a reversal."""
+    # Proposed (v1 -> v2) tokens: {fraud, misconduct}; signed keeps "fraud".
+    v1 = [_cc("1", "ind", _IND_BASE + "negligence.")]
+    v2 = [_cc("1", "ind", _IND_BASE + "negligence, fraud, misconduct.")]
+    half = [_cc("1", "ind", _IND_BASE + "negligence, fraud.")]
+    assert detect_reversals(_doc_diff([("v1", v1), ("v2", v2), ("v3", half)])) == []
+
+    # Proposed tokens: {fraud, misconduct, recklessness}; signed keeps one.
+    v2b = [_cc("1", "ind", _IND_BASE + "negligence, fraud, misconduct, recklessness.")]
+    reversals = detect_reversals(_doc_diff([("v1", v1), ("v2", v2b), ("v3", half)]))
+    assert len(reversals) == 1
+    assert reversals[0].retained is not None
+    assert abs(reversals[0].retained - 1 / 3) < 1e-9
+
+
+def test_reversal_record_to_dict_omits_absent_alignment_confidence() -> None:
+    """detect_reversals always sets ``retained``; ``alignment_confidence`` is
+    None when the diff's row binds nothing across versions (e.g. a clause
+    added in a draft), and is then omitted from the record."""
+    r = ReversalRecord(
+        taxonomy_id="ind",
+        clause_path="1",
+        version_inserted="v2",
+        version_removed="v3",
+        proposed_text="text",
+        retained=0.0,
+        alignment_confidence=None,
+    )
+    d = r.to_dict()
+    assert "alignment_confidence" not in d

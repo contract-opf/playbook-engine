@@ -12,6 +12,7 @@ import pytest
 from playbook_engine.clause_classifier import (
     AMBIGUITY_THRESHOLD,
     AUTO_CLASSIFY_THRESHOLD,
+    INHERITED_CONFIDENCE_CAP,
     ClassificationHint,
     ClassificationJudge,
     ClauseClassification,
@@ -757,3 +758,163 @@ def test_label_tokens_precomputed_once_per_classify_tree_call(
         f"each + heading tokenized once per node), got {call_count} — "
         "entry.label is likely being re-tokenized per node again"
     )
+
+
+# ---------------------------------------------------------------------------
+# Heading-less child inheritance (issue #222)
+# ---------------------------------------------------------------------------
+
+_IND_BODY = (
+    "Alice Corp shall indemnify Beta Ltd against:\n"
+    "(a) third party claims arising from breach; and\n"
+    "(b) losses caused by gross negligence, including:\n"
+    "(i) bodily injury; and\n"
+    "(ii) property damage."
+)
+
+
+def _segmented(heading: str | None, body: str = _IND_BODY) -> ClauseTree:
+    """A tree whose heading-less children come from the real segmenter (the
+    production producer of ``heading=None`` (a)/(b) and (i)/(ii) nodes)."""
+    from playbook_engine.segmenter import segment
+
+    return segment(
+        _tree(ClauseNode(clause_path="7", heading=heading, text=body, char_span=(0, len(body))))
+    )
+
+
+def _default_judge() -> ClassificationJudge:
+    """The pipeline's default (no-judge) classification judge."""
+    from playbook_engine.pipeline import _NullClassificationJudge
+
+    return _NullClassificationJudge()
+
+
+def test_heading_less_child_inherits_parent_classification() -> None:
+    tree = _segmented("Indemnification")
+    children = [n for n in tree.all_nodes() if n.clause_path != "7"]
+    assert children and all(n.heading is None for n in children)
+
+    tax = _taxonomy(_entry("indemnification", "Indemnification"))
+    result = {
+        cc.node.clause_path: cc.classification for cc in classify_tree(tree, tax, _default_judge())
+    }
+
+    assert result["7"].taxonomy_id == "indemnification"
+    assert result["7"].basis == "exact_match"
+    for path in ("7.a", "7.b", "7.b.i", "7.b.ii"):
+        cls = result[path]
+        assert cls.taxonomy_id == "indemnification", path
+        assert cls.basis == "inherited", path
+        assert cls.confidence == pytest.approx(min(1.0, INHERITED_CONFIDENCE_CAP)), path
+
+
+def test_inherited_confidence_is_capped_by_a_weaker_parent() -> None:
+    """min(parent_conf, 0.6): a parent classified below the cap passes its own
+    (lower) confidence down."""
+
+    class _LowConfidenceJudge:
+        def classify_batch(self, nodes, taxonomy, hints=None):  # type: ignore[no-untyped-def]
+            return [
+                ClauseClassification(taxonomy_id="indemnification", confidence=0.4, basis="judge")
+                if node.heading
+                else ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified")
+                for node in nodes
+            ]
+
+    # Heading Jaccard 0.75 against the label: in the judge band.
+    tree = _segmented("Mutual Indemnification Obligations Generally")
+    tax = _taxonomy(_entry("indemnification", "Mutual Indemnification Obligations"))
+    result = {
+        cc.node.clause_path: cc.classification
+        for cc in classify_tree(tree, tax, _LowConfidenceJudge())
+    }
+    assert result["7"].confidence == pytest.approx(0.4)
+    assert result["7.a"].basis == "inherited"
+    assert result["7.a"].confidence == pytest.approx(0.4)
+
+
+def test_child_of_unclassified_parent_stays_unclassified() -> None:
+    tree = _segmented("Miscellaneous Matters Of Note")
+    tax = _taxonomy(_entry("indemnification", "Indemnification"))
+    for cc in classify_tree(tree, tax, _default_judge()):
+        assert cc.classification.taxonomy_id is None
+        assert cc.classification.basis != "inherited"
+
+
+def test_judge_specific_fit_for_child_is_kept() -> None:
+    """A judge that classifies the child itself wins over inheritance; a
+    judge_error is never masked by it."""
+
+    class _ChildJudge:
+        def classify_batch(self, nodes, taxonomy, hints=None):  # type: ignore[no-untyped-def]
+            out = []
+            for node in nodes:
+                if "bodily injury" in node.text:
+                    out.append(
+                        ClauseClassification(taxonomy_id="insurance", confidence=0.9, basis="judge")
+                    )
+                elif "property damage" in node.text:
+                    out.append(
+                        ClauseClassification(taxonomy_id=None, confidence=0.0, basis="judge_error")
+                    )
+                else:
+                    out.append(
+                        ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified")
+                    )
+            return out
+
+    tree = _segmented("Indemnification")
+    tax = _taxonomy(_entry("indemnification", "Indemnification"), _entry("insurance", "Insurance"))
+    result = {
+        cc.node.clause_path: cc.classification for cc in classify_tree(tree, tax, _ChildJudge())
+    }
+    assert result["7.b.i"].taxonomy_id == "insurance"
+    assert result["7.b.i"].basis == "judge"
+    assert result["7.b.ii"].basis == "judge_error"
+    assert result["7.b.ii"].taxonomy_id is None
+    assert result["7.a"].basis == "inherited"
+
+
+def test_top_level_heading_less_node_does_not_inherit() -> None:
+    """Only a child inherits: a top-level text-only node has no parent."""
+    tree = _tree(_node("1", None, "Some text-only paragraph."))
+    tax = _taxonomy(_entry("indemnification", "Indemnification"))
+    (cc,) = classify_tree(tree, tax, _default_judge())
+    assert cc.classification.taxonomy_id is None
+    assert cc.classification.basis == "unclassified"
+
+
+def test_inherited_basis_is_valid() -> None:
+    cls = ClauseClassification(taxonomy_id="indemnification", confidence=0.6, basis="inherited")
+    assert cls.is_ambiguous  # 0.6 < AMBIGUITY_THRESHOLD
+
+
+def test_headed_child_with_no_taxonomy_match_does_not_inherit() -> None:
+    """A subsection with its own heading (e.g. an ingested "4.1 ..." child) that
+    matches nothing in the taxonomy stays unclassified: only a heading-less
+    child inherits its parent's taxonomy_id."""
+    body = "Each party shall give written notice of any claim within thirty days."
+    child = ClauseNode(
+        clause_path="7.1",
+        heading="Notice Procedure",
+        text=body,
+        char_span=(20, 20 + len(body)),
+    )
+    parent = ClauseNode(
+        clause_path="7",
+        heading="Indemnification",
+        text="",
+        char_span=(0, 20 + len(body)),
+        children=[child],
+    )
+    tax = _taxonomy(_entry("indemnification", "Indemnification"))
+    result = {
+        cc.node.clause_path: cc.classification
+        for cc in classify_tree(_tree(parent), tax, _default_judge())
+    }
+
+    assert result["7"].taxonomy_id == "indemnification"
+    assert result["7"].basis == "exact_match"
+    assert result["7.1"].taxonomy_id is None
+    assert result["7.1"].basis == "unclassified"

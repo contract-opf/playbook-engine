@@ -22,6 +22,15 @@ If the judge raises (LLM timeout, parse error, refusal), affected clauses are
 returned with ``basis="judge_error"`` and ``taxonomy_id=None`` — never silently
 dropped.
 
+Inheritance (issue #222): a heading-less child node (e.g. a segmenter-promoted
+``(a)``/``(b)`` sub-item) that ends up with no taxonomy fit
+(``basis="unclassified"``) inherits its classified parent's ``taxonomy_id`` with
+confidence ``min(parent_confidence, INHERITED_CONFIDENCE_CAP)`` and
+``basis="inherited"`` — it is structurally part of its parent clause, and
+without this it was absent from the playbook in default mode, where no judge
+classifies heading-less nodes. A judge's specific taxonomy fit for the child,
+a ``judge_error`` and a ``needs_review`` are kept as they are.
+
 ``ClauseClassification.basis`` values:
   ``"exact_match"``        — heading matched a taxonomy label exactly.
   ``"heading_similarity"`` — Jaccard ≥ ``AUTO_CLASSIFY_THRESHOLD``.
@@ -29,6 +38,9 @@ dropped.
   ``"judge_error"``        — judge raised; node recorded as unclassified.
   ``"unclassified"``       — no heading/text, or Jaccard < ``AMBIGUITY_THRESHOLD``
                              (below gate); cannot classify without the judge.
+  ``"inherited"``          — a heading-less child given its classified
+                             parent's taxonomy_id (issue #222), at a confidence
+                             capped at ``INHERITED_CONFIDENCE_CAP``.
   ``"llm_segmenter"``      — assigned by the LLM segmenter's single combined
                              segment+classify pass (see
                              ``pipeline._classified_from_taxonomy_by_path``),
@@ -79,6 +91,11 @@ AUTO_CLASSIFY_THRESHOLD: float = 0.85
 """Minimum token-Jaccard similarity between a clause heading and a taxonomy
 entry label to assign automatically, without an LLM call."""
 
+INHERITED_CONFIDENCE_CAP: float = 0.6
+"""Ceiling on the confidence of a ``basis="inherited"`` classification (issue
+#222): a heading-less child takes ``min(parent_confidence, 0.6)`` — below
+``AMBIGUITY_THRESHOLD``, so an inherited assignment always reads as uncertain."""
+
 _BASIS_VALUES = frozenset(
     {
         "exact_match",
@@ -88,6 +105,7 @@ _BASIS_VALUES = frozenset(
         "needs_review",
         "unclassified",
         "llm_segmenter",
+        "inherited",
     }
 )
 
@@ -273,7 +291,10 @@ def classify_tree(
                                  Defaults to ``AUTO_CLASSIFY_THRESHOLD``.
 
     Returns:
-        One ``ClassifiedClause`` per node in ``tree.all_nodes()`` order.
+        One ``ClassifiedClause`` per node in ``tree.all_nodes()`` order. A
+        heading-less child left with no taxonomy fit (``basis="unclassified"``)
+        inherits its classified parent's ``taxonomy_id`` (``basis="inherited"``,
+        confidence ``min(parent, INHERITED_CONFIDENCE_CAP)``; issue #222).
 
     Raises:
         ValueError: if the judge returns a wrong-length batch, or if any
@@ -350,12 +371,64 @@ def classify_tree(
                 )
             results[idx] = ClassifiedClause(node=nodes[idx], classification=classification)
 
-    return [r for r in results if r is not None]
+    final = [r for r in results if r is not None]
+    return _inherit_from_parents(tree, final)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _parent_indices(tree: ClauseTree) -> list[int | None]:
+    """Each node's parent index in ``tree.all_nodes()`` order (``None`` at the top)."""
+    parents: list[int | None] = []
+
+    def _walk(children: list[ClauseNode], parent: int | None) -> None:
+        for child in children:
+            idx = len(parents)
+            parents.append(parent)
+            _walk(child.children, idx)
+
+    _walk(tree.nodes, None)
+    return parents
+
+
+def _inherit_from_parents(
+    tree: ClauseTree, classified: list[ClassifiedClause]
+) -> list[ClassifiedClause]:
+    """Give each heading-less, unclassified child its classified parent's
+    taxonomy_id (issue #222; see the module docstring).
+
+    *classified* is in ``tree.all_nodes()`` (pre-)order, so a parent is final
+    before its children are visited — a grandchild inherits through an
+    inherited child, still capped at ``INHERITED_CONFIDENCE_CAP``.
+    """
+    parents = _parent_indices(tree)
+    if len(parents) != len(classified):  # pragma: no cover - defensive
+        return classified
+    out = list(classified)
+    for i, cc in enumerate(out):
+        parent = parents[i]
+        if parent is None:
+            continue
+        node = cc.node
+        if (node.heading or "").strip() or not (node.text or "").strip():
+            continue
+        if cc.classification.taxonomy_id is not None or cc.classification.basis != "unclassified":
+            continue
+        parent_cls = out[parent].classification
+        if parent_cls.taxonomy_id is None:
+            continue
+        out[i] = ClassifiedClause(
+            node=node,
+            classification=ClauseClassification(
+                taxonomy_id=parent_cls.taxonomy_id,
+                confidence=min(parent_cls.confidence, INHERITED_CONFIDENCE_CAP),
+                basis="inherited",
+            ),
+        )
+    return out
 
 
 def _eligible_entries(taxonomy: Taxonomy) -> list[TaxonomyEntry]:
