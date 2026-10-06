@@ -34,9 +34,17 @@ from unittest.mock import patch
 import yaml
 
 from playbook_engine import pipeline as pipeline_module
-from playbook_engine.artifact_store import ArtifactStore, make_config_fingerprint, make_doc_key
+from playbook_engine.agent_judge import PendingQueue, VerdictStore
+from playbook_engine.artifact_store import (
+    ArtifactStore,
+    make_config_fingerprint,
+    make_doc_key,
+    make_stage_key,
+    write_text_if_changed,
+)
 from playbook_engine.config import load_config
 from playbook_engine.pipeline import mine_corpus
+from playbook_engine.rubric import RubricStamp
 from playbook_engine.taxonomy import load_taxonomy
 
 # ---------------------------------------------------------------------------
@@ -333,6 +341,91 @@ class TestMakeDocKey:
 # ===========================================================================
 
 
+class TestLayeredCachePrimitives:
+    """Issue #219: the building blocks of the layered, portable stage cache."""
+
+    def test_doc_key_ignores_the_directory_the_file_sits_in(self, tmp_path: Path) -> None:
+        a = tmp_path / "checkout-a" / "deal" / "v1.rtf"
+        b = tmp_path / "elsewhere" / "deal" / "v1.rtf"
+        for p in (a, b):
+            p.parent.mkdir(parents=True)
+            _write_rtf(p, _DOC_BODY_A)
+        fp = make_config_fingerprint({"x": 1})
+        assert make_doc_key("deal", [a], fp, "l1") == make_doc_key("deal", [b], fp, "l1")
+
+    def test_doc_key_still_tracks_the_file_name(self, tmp_path: Path) -> None:
+        """The name becomes the version id the L1 record carries."""
+        a = tmp_path / "v1.rtf"
+        b = tmp_path / "v2.rtf"
+        _write_rtf(a, _DOC_BODY_A)
+        _write_rtf(b, _DOC_BODY_A)
+        fp = make_config_fingerprint({"x": 1})
+        assert make_doc_key("deal", [a], fp, "l1") != make_doc_key("deal", [b], fp, "l1")
+
+    def test_stage_key_moves_with_inputs_config_and_hints(self, tmp_path: Path) -> None:
+        hints = tmp_path / "hints.yaml"
+        base = make_stage_key("deal", "l2-l4", "in-1", "cfg-1", hints)
+        assert base == make_stage_key("deal", "l2-l4", "in-1", "cfg-1", hints)
+        assert base != make_stage_key("deal", "l2-l4", "in-2", "cfg-1", hints)
+        assert base != make_stage_key("deal", "l2-l4", "in-1", "cfg-2", hints)
+        hints.write_text("signed_version: v1\n", encoding="utf-8")
+        assert base != make_stage_key("deal", "l2-l4", "in-1", "cfg-1", hints)
+
+    def test_invalid_cached_value_is_recomputed_and_replaced(self, tmp_path: Path) -> None:
+        store = ArtifactStore(tmp_path / ".cache")
+        store.get_or_compute("k", lambda: {"v": 1}, stage="l1")
+        calls: list[int] = []
+
+        def _fn() -> dict[str, int]:
+            calls.append(1)
+            return {"v": 2}
+
+        assert store.get_or_compute("k", _fn, is_valid=lambda v: v["v"] == 1, stage="l1") == {
+            "v": 1
+        }
+        assert calls == []
+        assert store.get_or_compute("k", _fn, is_valid=lambda v: v["v"] == 2, stage="l1") == {
+            "v": 2
+        }
+        assert calls == [1]
+        assert store.stage_stats("l1") == (1, 2)
+        assert store.contains("k", is_valid=lambda v: v["v"] == 2)
+        assert not store.contains("k", is_valid=lambda v: v["v"] == 1)
+
+    def test_write_text_if_changed(self, tmp_path: Path) -> None:
+        path = tmp_path / "sub" / "f.json"
+        assert write_text_if_changed(path, "a")
+        assert not write_text_if_changed(path, "a")
+        assert write_text_if_changed(path, "a", force=True)
+        assert write_text_if_changed(path, "b")
+        assert path.read_text(encoding="utf-8") == "b"
+
+    def test_verdict_store_capture_and_fingerprint(self, tmp_path: Path) -> None:
+        store = VerdictStore(tmp_path / "verdicts.jsonl")
+        payload = {"stage": "classify", "text": "t"}
+        store.put(payload, {"taxonomy_id": "x"})
+        with store.capture_lookups() as seen:
+            store.get_record(payload)
+            store.get({"stage": "classify", "text": "absent"})
+        assert len(seen) == 2
+        key = next(k for k in seen if store.fingerprint(k) is not None)
+        before = store.fingerprint(key)
+        # Re-stamping (judge-migrate) moves the fingerprint even though the
+        # verdict itself is unchanged; so does an overwrite (judge-apply).
+        store.restamp(key, RubricStamp(kind="classify", version="v1+abc"))
+        stamped = store.fingerprint(key)
+        assert stamped != before
+        store.put(payload, {"taxonomy_id": "y"}, rubric=RubricStamp("classify", "v1+abc"))
+        assert store.fingerprint(key) not in (before, stamped)
+
+    def test_pending_capture_records_deduplicated_adds(self, tmp_path: Path) -> None:
+        queue = PendingQueue(tmp_path / "pending.jsonl")
+        queue.add("k1", "classify", {"x": 1})
+        with queue.capture_adds() as seen:
+            assert queue.add("k1", "classify", {"x": 1}) is False
+        assert seen == {"k1"}
+
+
 class TestPipelineIncrementality:
     """AC-pipeline-1/2/3: incrementality acceptance criteria."""
 
@@ -367,8 +460,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -405,8 +502,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -470,8 +571,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -504,8 +609,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -538,8 +647,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -584,8 +697,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -637,8 +754,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -670,8 +791,12 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: count per-document (L2-L4) computes; L1 is per version.
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l2-l4":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -700,8 +825,13 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: the segmenter prompt/schema are L1 inputs — count the
+            # per-version L1 recomputes (L2-L4 replays the identical records).
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l1":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)
@@ -731,8 +861,13 @@ class TestPipelineIncrementality:
         def _tracking_get_or_compute(
             self: ArtifactStore, key: str, compute_fn: object, **kwargs: Any
         ) -> object:
+            kwargs_outer = kwargs
+
+            # Issue #219: the segmenter prompt/schema are L1 inputs — count the
+            # per-version L1 recomputes (L2-L4 replays the identical records).
             def _counted(*args: object, **kwargs: object) -> object:
-                compute_calls.append(key)
+                if kwargs_outer.get("stage") == "l1":
+                    compute_calls.append(key)
                 return (compute_fn)()  # type: ignore[operator]
 
             return original_get_or_compute(self, key, _counted, **kwargs)

@@ -107,6 +107,27 @@ class TrackedChanges:
             ],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrackedChanges:
+        """Inverse of :meth:`to_dict` (issue #219: the L1 stage cache)."""
+        return cls(
+            document_id=data["document_id"],
+            version=data["version"],
+            changes=[
+                TrackedChange(
+                    change_type=c["change_type"],
+                    author=c["author"],
+                    date=c["date"],
+                    text=c["text"],
+                    clause_path=c["clause_path"],
+                    char_span=(
+                        (int(c["char_span"][0]), int(c["char_span"][1])) if c["char_span"] else None
+                    ),
+                )
+                for c in data.get("changes", [])
+            ],
+        )
+
 
 @dataclass(frozen=True)
 class TextUnit:

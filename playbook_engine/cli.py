@@ -288,8 +288,8 @@ def _llm_segmentation_kwargs(
         # segmentation call above, which segmentation_cache already covers.
         # Rooted at the real out_dir (not a temp dir — see judge_cmd's
         # --plan mode below), so it stays warm across every judge/mine/
-        # compile round, independent of the no_cache value store-backed
-        # judges force for the verdict-cache layers (issue #132).
+        # compile round, independent of the no_cache stage-cache flag
+        # (issue #132; store-backed judges no longer force it — issue #219).
         kwargs["extraction_cache"] = ExtractionCache(out_dir / "extraction_cache.jsonl")
         mode_bits.append("cache")
 
@@ -392,9 +392,14 @@ def _verdict_store_kwargs(
     already populated real verdicts, silently overwriting the judged
     ``observations.jsonl`` with stub-mode sentinels.
 
-    The verdict-cache layer is bypassed (``no_cache=True``) to prevent stale
-    sentinels cached under the stub judges from persisting across rounds —
-    the ``VerdictStore`` is the authoritative source for judge verdicts.
+    The L1-L4 stage cache stays ON (issue #219 — this used to force
+    ``no_cache=True``, re-mining every document on every round). The
+    ``VerdictStore`` is still the authoritative source for judge verdicts:
+    ``mine_corpus`` never puts its own verdict cache in front of a
+    store-backed judge, records with each cached document result the verdict
+    keys it replayed (recomputing it when any of them changes), and never
+    caches a result that queued anything — so no stale ``needs_review``
+    sentinel can be replayed across rounds.
 
     Returns an empty dict when no verdict store exists (the stub judges
     remain the default, same as before) — except under
@@ -438,7 +443,6 @@ def _verdict_store_kwargs(
             store=store, pending=pending, rubric=policy
         ),
         "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending, rubric=policy),
-        "no_cache": True,
         "_rubric_policy": policy,
     }
     if with_deviation_judge:
@@ -1512,6 +1516,17 @@ def _run_corpus_preflight(
     ),
 )
 @click.option(
+    "--force-rewrite",
+    "force_rewrite",
+    is_flag=True,
+    default=False,
+    help=(
+        "Rewrite every intermediate (observations.jsonl, trail/, normalized/, …) "
+        "even when its content is unchanged. By default a file whose content "
+        "would not change is left untouched."
+    ),
+)
+@click.option(
     "--skip-preflight",
     "skip_preflight",
     is_flag=True,
@@ -1538,6 +1553,7 @@ def mine_cmd(
     config_path: Path,
     out_path: Path | None,
     no_cache: bool,
+    force_rewrite: bool,
     skip_preflight: bool,
     entity_registry_path: Path | None,
     with_deviation_judge: bool,
@@ -1564,6 +1580,14 @@ def mine_cmd(
     replayed. Reads are bypassed; extraction_cache.jsonl is still
     refreshed with the new result, so a subsequent run without --no-cache
     stays warm.
+
+    The stage cache is layered: L1 (ingest + segment) per
+    version file, L2-L4 per document keyed by its L1 output — a template,
+    taxonomy or threshold change replays every L1 tree — and it stays on when
+    a verdict store is present, recomputing exactly the documents whose
+    stored verdicts changed or are still pending. An intermediate whose
+    content would not change is not rewritten; ``--force-rewrite`` rewrites
+    them all.
 
     Checks the stored run manifest first (so a changed environment is named as
     the root cause), then runs the ``lint-corpus`` checks and refuses to start
@@ -1624,20 +1648,12 @@ def mine_cmd(
 
     # If a verdict store exists (populated by ``playbook judge-apply``), wire in
     # the store-backed judges so the mining step replays stored verdicts rather
-    # than generating new needs_review sentinels (issue #102). ``_verdict_store_kwargs``
-    # forces no_cache=True when a store is wired, which deliberately overrides
-    # the --no-cache flag's default (``no_cache``) below.
+    # than generating new needs_review sentinels (issue #102). The stage cache
+    # stays on under them (issue #219) — see ``_verdict_store_kwargs``.
     #
     # ``refresh_extraction`` is sourced directly from the raw ``no_cache``
-    # flag (the operator's literal --no-cache), NOT from whatever
-    # ``mine_kwargs["no_cache"]`` ends up as after the merges below (issue
-    # #78) — mirrors ``compile_playbook``'s identical reasoning immediately
-    # below its own analogous merge: the verdict store's forced
-    # ``no_cache=True`` exists to bypass stale L1-L4 stage-cache sentinels,
-    # not to declare the extraction suspect, and must not also force every
-    # mine round after a judge round to re-extract/re-OCR the whole corpus
-    # (the exact regression this issue's fix must avoid — see
-    # extraction.py's ExtractionCache docstring).
+    # flag (the operator's literal --no-cache) (issue #78): only an operator
+    # who declares the extraction suspect re-extracts/re-OCRs the corpus.
     verdict_kwargs = _verdict_store_kwargs(
         out_dir, click.echo, with_deviation_judge=with_deviation_judge
     )
@@ -1647,6 +1663,7 @@ def mine_cmd(
     mine_kwargs: dict[str, Any] = {
         "no_cache": no_cache,
         "refresh_extraction": no_cache,
+        "force_rewrite": force_rewrite,
         **seg_kwargs,
         **verdict_kwargs,
     }
@@ -2198,10 +2215,11 @@ def judge_cmd(
     previously supplied verdicts.  For every new clause payload not in the store,
     appends a full record to <out>/judge/pending.jsonl.
 
-    The general-purpose stage cache is intentionally bypassed when using
-    store-backed judges.  This prevents stale needs_review sentinels from
-    being replayed across rounds — the store-backed judges own the verdict
-    life-cycle, not that cache.
+    The stage cache stays on: a document is replayed from it only
+    when every stored verdict it was built from is unchanged, and a document
+    with anything pending is never cached — so each round re-mines exactly
+    the documents whose verdicts moved or are still outstanding, and the
+    pending queue is complete. ``--plan-only`` reads through the same cache.
 
     Use ``playbook judge-apply`` to load verdicts into the store, then re-run
     ``playbook judge`` to confirm no new items are pending.  Finally run
@@ -2342,10 +2360,13 @@ def judge_cmd(
                     classification_judge=cls_judge,
                     deviation_judge=dev_judge,
                     provenance_judge=prov_judge,
-                    no_cache=True,
-                    # Deliberately NOT True (the default already): this
-                    # no_cache=True is the judge wiring's forced bypass of the
-                    # L1-L4 stage cache, not an operator --no-cache request —
+                    # Issue #219: the plan reads through the REAL out-dir's
+                    # stage cache rather than re-mining every document into
+                    # the temp dir. A replayed document is one whose every
+                    # stored verdict is unchanged and which queued nothing,
+                    # so it adds nothing to the plan; every other document
+                    # recomputes and queues exactly what the round would.
+                    cache_dir=out_dir / ".cache",
                     # extraction_cache must stay warm across judge rounds or
                     # every round re-burns docling OCR from scratch (issue
                     # #78; the regression issue #132 originally fixed).
@@ -2449,11 +2470,9 @@ def judge_cmd(
             classification_judge=cls_judge,
             deviation_judge=dev_judge,
             provenance_judge=prov_judge,
-            no_cache=True,
-            # See the --plan-only branch above: this no_cache=True is the
-            # judge wiring's forced bypass, not an operator --no-cache
-            # request — extraction_cache must stay warm across judge rounds
-            # (issue #78).
+            # The stage cache stays on (issue #219) — see the --plan-only
+            # branch above. extraction_cache must stay warm across judge
+            # rounds (issue #78).
             refresh_extraction=False,
             entity_registry_path=(entity_registry_path.resolve() if entity_registry_path else None),
             progress=click.echo,

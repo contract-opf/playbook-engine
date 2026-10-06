@@ -516,8 +516,10 @@ def test_config_fingerprint_differs_across_extractor_env(
         corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
     )
     keys_legacy_1 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
-    assert len(keys_legacy_1) == 2, (
-        f"expected one stage-cache key per document (deal-alpha, deal-beta), got {keys_legacy_1}"
+    # Issue #219: one L1 key per version file (2 docs x 2 versions) plus one
+    # L2-L4 key per document.
+    assert len(keys_legacy_1) == 6, (
+        f"expected 4 per-version L1 keys + 2 per-document L2-L4 keys, got {keys_legacy_1}"
     )
 
     # Run 2 — SAME (legacy) environment, no manual cache-busting: an
@@ -544,9 +546,13 @@ def test_config_fingerprint_differs_across_extractor_env(
     )
     keys_docling = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
     new_keys = keys_docling - keys_legacy_1
-    assert len(new_keys) == 2, (
+    # Issue #219: the extractor environment is an L1 input, so every
+    # VERSION gets a new L1 key. This corpus's deterministic RTF path yields
+    # byte-identical L1 records under either environment, so the L2-L4 layer
+    # (keyed by those records) correctly replays — no new per-document key.
+    assert len(new_keys) == 4, (
         "switching extractor environments (legacy -> docling) with no other config "
-        "change must produce a NEW stage-cache key per document, not replay the "
+        "change must produce a NEW L1 stage-cache key per version, not replay the "
         f"legacy-derived entries verbatim; index now has {keys_docling}"
     )
 
@@ -598,8 +604,9 @@ def test_config_fingerprint_differs_across_declared_extractor(
         corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir, no_cache=False
     )
     keys_auto_1 = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
-    assert len(keys_auto_1) == 2, (
-        f"expected one stage-cache key per document (deal-alpha, deal-beta), got {keys_auto_1}"
+    # Issue #219: 4 per-version L1 keys + 2 per-document L2-L4 keys.
+    assert len(keys_auto_1) == 6, (
+        f"expected 4 per-version L1 keys + 2 per-document L2-L4 keys, got {keys_auto_1}"
     )
 
     # Run 2 — SAME declared value, no manual cache-busting: an unchanged
@@ -626,9 +633,10 @@ def test_config_fingerprint_differs_across_declared_extractor(
     )
     keys_legacy = set(json.loads(index_path.read_text(encoding="utf-8")).keys())
     new_keys = keys_legacy - keys_auto_1
-    assert len(new_keys) == 2, (
+    # Issue #219: a new L1 key per version; L2-L4 replays the identical records.
+    assert len(new_keys) == 4, (
         "switching the DECLARED extractor (auto -> legacy) with the host PATH-check "
-        "environment held constant must produce a NEW stage-cache key per document, "
+        "environment held constant must produce a NEW L1 stage-cache key per version, "
         f"not replay the auto-declared entries verbatim; index now has {keys_legacy}"
     )
 

@@ -64,12 +64,12 @@ _NEUTRAL_ZERO = RiskDelta(direction="neutral", magnitude="none")
 # ``judge_error`` verdict is cached here, a LATER call for the exact same
 # payload — even after e.g. a ``VerdictStore`` used as the delegate has since
 # been populated with the real verdict via ``playbook judge-apply`` — hits
-# this cache first and never reaches the delegate again to notice. The CLI
-# avoids this by forcing ``no_cache=True`` whenever store-backed judges are
-# wired (``cli._verdict_store_kwargs``), but that's a convention any other
-# caller of ``mine_corpus(..., no_cache=False)`` (the library default) with a
-# store-backed delegate could forget. Never caching an unresolved basis in
-# the first place makes that class of caller-error impossible.
+# this cache first and never reaches the delegate again to notice.
+# ``mine_corpus`` never wraps a store-backed judge in this cache at all
+# (issue #219 — the VerdictStore is the verdict cache there; the CLI used to
+# force ``no_cache=True`` instead), but any other wrapped delegate could still
+# return one. Never caching an unresolved basis in the first place makes that
+# class of caller-error impossible.
 _UNRESOLVED_BASES = frozenset({"needs_review", "judge_error"})
 
 

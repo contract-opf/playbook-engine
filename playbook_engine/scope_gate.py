@@ -234,7 +234,8 @@ def scope_gate(
         # model's own response, an SDK error embedding request content, or
         # worse); only the exception TYPE is safe to persist. This branch is
         # reachable whenever an unwrapped delegate is judged directly, e.g.
-        # no_cache=True (as `playbook judge` forces) bypasses the
+        # no_cache=True, or a store-backed judge (which mine_corpus never
+        # wraps — issue #219), bypasses the
         # BatchedScopeJudge wrapper that already gets this right — see
         # judgment.py's _scope_error_decision(), whose safe, generic phrasing
         # this mirrors — and matches the two sibling judges' own already-safe
@@ -380,12 +381,13 @@ class ScopeLog:
             "documents": docs,
         }
 
+    def to_json_text(self) -> str:
+        """The exact text :meth:`write` writes."""
+        return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+
     def write(self, path: Path) -> None:
         """Write the log to *path* as JSON (atomic rename to avoid partial writes)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(self.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        tmp.write_text(self.to_json_text(), encoding="utf-8")
         os.replace(tmp, path)
