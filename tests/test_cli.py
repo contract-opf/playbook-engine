@@ -1234,6 +1234,15 @@ def test_echo_extractor_summary_breaks_down_by_reason(tmp_path: Path) -> None:
                         "extractor": "legacy",
                         "reason": "declared",
                     },
+                    # issue #231: an OCR-recovered scan is its own reason and
+                    # still counts as a fallback.
+                    {
+                        "version": "v5",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "ocr-recovered",
+                    },
                 ],
             }
         ],
@@ -1243,12 +1252,13 @@ def test_echo_extractor_summary_breaks_down_by_reason(tmp_path: Path) -> None:
 
     summary_line = next(line for line in lines if line.strip().startswith("extraction:"))
     assert "docling=1" in summary_line
-    assert "legacy=3" in summary_line
+    assert "legacy=4" in summary_line
 
     fallback_line = next(line for line in lines if "fallback:" in line)
-    assert "2 version(s)" in fallback_line
+    assert "3 version(s)" in fallback_line
     assert "backend-error=1" in fallback_line
     assert "env-missing=1" in fallback_line
+    assert "ocr-recovered=1" in fallback_line
     # "declared" is a deliberate config choice, never a fallback — must not
     # be counted in the fallback tally.
     assert "declared" not in fallback_line

@@ -1803,7 +1803,20 @@ def test_pre_81_legacy_entry_under_docling_env_migrates_to_backend_error(
     environment via a live per-file fallback. Migrating it to
     "backend-error"/"docling" is strictly better than the old ``dict.get``
     tolerance, which reloaded it as ``reason=None`` — the mislabel that made
-    max_fallback/corpus_manifest blind and motivated the bump."""
+    max_fallback/corpus_manifest blind and motivated the bump.
+
+    The #81 rung itself is checked in isolation: the #231 rung further up the
+    ladder then retries every stored ``backend-error`` success once (it may
+    have been a timeout recovery), so through the full ladder the entry is
+    re-extracted rather than replayed."""
+    migrated = extraction._migrate_extractor_label(
+        _success(_PLANTED_TEXT, "legacy"), {"extractor_env": "docling", "suffix": ".pdf"}
+    )
+    assert migrated is not None
+    assert migrated["extractor"] == "legacy"
+    assert migrated["reason"] == "backend-error"
+    assert migrated["fallback_from"] == "docling"
+
     path = _fake_pdf(tmp_path)
     cache = ExtractionCache(tmp_path / "extraction_cache.jsonl")
     _plant(
@@ -1813,14 +1826,8 @@ def test_pre_81_legacy_entry_under_docling_env_migrates_to_backend_error(
         extractor_env="docling",
         value=_success(_PLANTED_TEXT, "legacy"),
     )
-
-    hit = cache.get(path, extractor="docling")
-
-    assert hit is not None
-    _, _, label = hit
-    assert label == "legacy"
-    assert label.reason == "backend-error"
-    assert label.fallback_from == "docling"
+    assert cache.get(path, extractor="docling") is None
+    assert cache.invalidated_count == 1, "invalidated by the #231 rung, not mislabelled"
 
 
 def test_pre_81_legacy_env_reason_comes_from_the_declared_extractor(tmp_path: Path) -> None:
@@ -1981,7 +1988,6 @@ def test_84_rung_keeps_every_entry_the_normalized_retry_cannot_change(tmp_path: 
     and only fires when docling FAILED, so none of these could have changed —
     each must survive the bump and hit."""
     docx = _simple_docx(tmp_path)
-    pdf = _fake_pdf(tmp_path)
 
     # A DOCX docling success: docling never failed, so the retry never ran.
     docling_ok = ExtractionCache(tmp_path / "a.jsonl")
@@ -2008,19 +2014,21 @@ def test_84_rung_keeps_every_entry_the_normalized_retry_cannot_change(tmp_path: 
     assert hit is not None and hit[2].reason == "declared"
 
     # A PDF that DID fall back on a docling failure: the normalize-and-retry
-    # is DOCX-only, so this entry's output is unchanged by #84.
-    pdf_fallback = ExtractionCache(tmp_path / "c.jsonl")
-    _plant(
-        pdf_fallback,
-        pdf,
-        format_version="2",
-        extractor_env="docling",
-        value=_success(_PLANTED_TEXT, "legacy", reason="backend-error", fallback_from="docling"),
+    # is DOCX-only, so this entry's output is unchanged by #84. (The #231 rung
+    # further up the ladder then retries every stored backend-error success
+    # — see test_231_rung_invalidates_only_backend_error_fallback_successes —
+    # so the #84 predicate is checked on its own here.)
+    pdf_fallback = _success(
+        _PLANTED_TEXT, "legacy", reason="backend-error", fallback_from="docling"
     )
-    hit = pdf_fallback.get(pdf, extractor="docling")
-    assert hit is not None and hit[2].reason == "backend-error"
+    assert (
+        extraction._affected_by_normalized_docx_retry(
+            pdf_fallback, {"suffix": ".pdf", "extractor_env": "docling"}
+        )
+        is False
+    )
 
-    for cache in (docling_ok, declared, pdf_fallback):
+    for cache in (docling_ok, declared):
         assert cache.invalidated_count == 0
         assert cache.migrated_count == 1, "carried forward from format 2 without re-extraction"
 
@@ -2160,15 +2168,17 @@ def test_a_discard_all_rung_still_invalidates_everything(
         (
             *extraction._EXTRACTION_CACHE_FORMAT_LADDER,
             extraction.CacheFormatStep(
-                version="5",
+                version="6",
                 issue="#999",
                 summary="hypothetical change that no predicate can scope",
                 discard_all=True,
             ),
         ),
     )
-    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_FORMAT_VERSION", "5")
-    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_STALE_VERSIONS", (superseded, "3", "2", "1"))
+    monkeypatch.setattr(extraction, "_EXTRACTION_CACHE_FORMAT_VERSION", "6")
+    monkeypatch.setattr(
+        extraction, "_EXTRACTION_CACHE_STALE_VERSIONS", (superseded, "4", "3", "2", "1")
+    )
 
     fresh = ExtractionCache(tmp_path / "extraction_cache.jsonl")
     assert fresh.get(path, extractor="docling") is None
@@ -2181,7 +2191,7 @@ def test_format_version_constant_tracks_the_ladder_head() -> None:
         extraction._EXTRACTION_CACHE_FORMAT_LADDER[-1].version
         == extraction._EXTRACTION_CACHE_FORMAT_VERSION
     )
-    assert extraction._EXTRACTION_CACHE_STALE_VERSIONS == ("3", "2", "1")
+    assert extraction._EXTRACTION_CACHE_STALE_VERSIONS == ("4", "3", "2", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -2267,7 +2277,8 @@ def test_docling_no_text_pdf_is_recovered_via_ocrmypdf(
     """docling returns nothing usable and pdfplumber finds no text layer: the
     ocrmypdf pass runs BEFORE the version is recorded as failed, and its
     output is re-extracted by pdfplumber (page numbers intact). The result is
-    labeled a live docling fallback so it stays visible and budgeted."""
+    labeled a live docling fallback so it stays visible and budgeted, with its
+    own ``ocr-recovered`` reason (issue #231)."""
     pdf = _blank_scan_pdf(tmp_path)
     cache = ExtractionCache(tmp_path / "cache.jsonl")
     calls: list[list[str]] = []
@@ -2285,12 +2296,16 @@ def test_docling_no_text_pdf_is_recovered_via_ocrmypdf(
     assert blocks[0].page == 1
     _assert_round_trips(canonical, blocks)
     assert label == "legacy"
-    assert label.reason == "backend-error"
+    assert label.reason == "ocr-recovered"
     assert label.fallback_from == "docling"
+    assert label.timed_out is False
 
-    # The recovery is cached as a success: the next call runs nothing.
+    # No timeout, so the recovery is cached as a success: the next call runs
+    # nothing and replays the same reason.
     calls.clear()
-    assert extract_blocks(pdf, cache=cache)[0] == canonical
+    replay = extract_blocks(pdf, cache=cache)
+    assert replay[0] == canonical
+    assert replay[2].reason == "ocr-recovered"
     assert calls == []
 
 
@@ -2508,3 +2523,231 @@ def test_ocrmypdf_flag_is_only_recorded_for_failures_it_could_change(
     cache.put_failure(pdf, "extraction yielded no text", "legacy")
     monkeypatch.setattr(extraction.shutil, "which", _which("ocrmypdf"))
     assert cache.get_failure(pdf, extractor="legacy") == "extraction yielded no text"
+
+
+# ---------------------------------------------------------------------------
+# Issue #231: a fallback that recovered text after a docling TIMEOUT is used
+# for this run but never cached (so the next run retries docling instead of
+# pinning the trail as mixed-extractor), and ocrmypdf-recovered text carries
+# its own reason. Real pdfplumber on real fpdf2 PDFs; only the docling and
+# ocrmypdf subprocesses are faked, at the subprocess seam.
+# ---------------------------------------------------------------------------
+
+_BORN_DIGITAL = ["1. Indemnification", "Alpha Corp shall indemnify Beta Ltd for direct damages."]
+
+
+def _docling_then(calls: list[list[str]], *, modes: list[str]):
+    """``subprocess.run`` double: the i-th docling call behaves as ``modes[i]``
+    ("timeout" raises ``TimeoutExpired``, "crash" exits non-zero, "ok" writes
+    Markdown carrying ``_BORN_DIGITAL``). Any other binary is an error."""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] != "docling":
+            raise AssertionError(f"unexpected subprocess {cmd[0]!r}")
+        assert kwargs.get("timeout"), "docling must run under a timeout"
+        mode = modes[len(calls)]
+        calls.append(cmd)
+        if mode == "timeout":
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+        if mode == "crash":
+            raise subprocess.CalledProcessError(1, cmd, stderr="docling: conversion failed")
+        target = Path(cmd[2])
+        outdir = Path(cmd[cmd.index("--output") + 1])
+        (outdir / f"{target.stem}.md").write_text(
+            f"# {_BORN_DIGITAL[0]}\n\n{_BORN_DIGITAL[1]}\n", encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    return fake_run
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_docling_timeout_recovered_by_pdfplumber_is_not_cached_and_retries_docling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling times out on a born-digital PDF and pdfplumber recovers its
+    text: the text is returned for this run (labelled a live fallback and
+    flagged ``timed_out``), but NOTHING is cached — the next call runs docling
+    again, and this time docling's own output wins."""
+    pdf = tmp_path / "draft.pdf"
+    _write_text_pdf(pdf, _BORN_DIGITAL)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_then(calls, modes=["timeout", "ok"]))
+
+    canonical, blocks, label = extract_blocks(pdf, cache=cache)
+    assert len(calls) == 1
+    assert "indemnify Beta Ltd" in canonical
+    _assert_round_trips(canonical, blocks)
+    assert (label, label.reason, label.fallback_from) == ("legacy", "backend-error", "docling")
+    assert label.timed_out is True
+    assert cache.get(pdf, extractor="docling") is None, "a timeout recovery must not be cached"
+    assert cache.get_failure(pdf, extractor="docling") is None
+
+    _canonical, _blocks, label_2 = extract_blocks(pdf, cache=cache)
+    assert len(calls) == 2, "the next run must retry docling"
+    assert (label_2, label_2.reason, label_2.timed_out) == ("docling", None, False)
+    # docling's clean result IS cached: a third call runs nothing.
+    assert extract_blocks(pdf, cache=cache)[2] == "docling"
+    assert len(calls) == 2
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_docling_crash_recovered_by_pdfplumber_is_still_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other branch: a docling CRASH (not a timeout) is a property of the
+    bytes, so its pdfplumber fallback is cached exactly as before #231."""
+    pdf = tmp_path / "draft.pdf"
+    _write_text_pdf(pdf, _BORN_DIGITAL)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_then(calls, modes=["crash"]))
+
+    _canonical, _blocks, label = extract_blocks(pdf, cache=cache)
+    assert (label, label.reason, label.timed_out) == ("legacy", "backend-error", False)
+    hit = cache.get(pdf, extractor="docling")
+    assert hit is not None and hit[2].reason == "backend-error"
+    assert hit[2].timed_out is False, "a cache hit is never a timeout recovery"
+    extract_blocks(pdf, cache=cache)
+    assert len(calls) == 1, "a cached crash fallback replays without running docling"
+
+
+def test_docling_timeout_recovered_by_the_normalized_docx_retry_is_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout followed by a recovery that is still DOCLING output (the #84
+    normalized-copy retry) is real docling structure, not a fallback — it is
+    cached and not flagged, so the guard is scoped to legacy recoveries."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    monkeypatch.setattr(extraction.subprocess, "run", _docling_then(calls, modes=["timeout", "ok"]))
+
+    _canonical, _blocks, label = extract_blocks(path, cache=cache)
+    assert len(calls) == 2
+    assert (label, label.reason, label.timed_out) == ("docling", None, False)
+    assert cache.get(path, extractor="docling") is not None
+
+
+def test_docling_crash_then_normalized_docx_retry_timeout_is_not_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """docling crashes on the original DOCX (the common redline case), then
+    the #84 normalized-copy retry TIMES OUT, and python-docx recovers the
+    text. The retry swallows its own timeout, so it must report it back: the
+    legacy fallback is flagged ``timed_out`` and cached nowhere, and the next
+    call runs docling again (and caches docling's clean result)."""
+    path = _simple_docx(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling"))
+    monkeypatch.setattr(
+        extraction.subprocess, "run", _docling_then(calls, modes=["crash", "timeout", "ok"])
+    )
+
+    canonical, blocks, label = extract_blocks(path, cache=cache)
+    assert len(calls) == 2, "original attempt + normalized-copy retry"
+    assert canonical
+    _assert_round_trips(canonical, blocks)
+    assert (label, label.reason, label.fallback_from) == ("legacy", "backend-error", "docling")
+    assert label.timed_out is True
+    assert cache.get(path, extractor="docling") is None, (
+        "a retry-timeout fallback must not be cached"
+    )
+    assert cache.get_failure(path, extractor="docling") is None
+
+    _canonical, _blocks, label_2 = extract_blocks(path, cache=cache)
+    assert len(calls) == 3, "the next run must retry docling"
+    assert (label_2, label_2.reason, label_2.timed_out) == ("docling", None, False)
+    assert cache.get(path, extractor="docling") is not None
+
+
+@pytest.mark.skipif(not _FPDF_AVAILABLE, reason="fpdf2 not installed")
+def test_ocrmypdf_recovery_after_a_docling_timeout_is_labelled_and_not_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scan: docling times out, pdfplumber finds no text layer, ocrmypdf
+    recovers the text. The version is labelled ``ocr-recovered`` (not the
+    born-digital ``backend-error``) and, because docling timed out, is not
+    cached — the next call runs docling and ocrmypdf again."""
+    pdf = _blank_scan_pdf(tmp_path)
+    cache = ExtractionCache(tmp_path / "cache.jsonl")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(extraction.shutil, "which", _which("docling", "ocrmypdf"))
+    monkeypatch.setattr(extraction.subprocess, "run", _fake_binaries(calls, docling="timeout"))
+
+    canonical, _blocks, label = extract_blocks(pdf, cache=cache)
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"]
+    assert _OCR_RECOVERED in canonical
+    assert (label, label.reason, label.fallback_from) == ("legacy", "ocr-recovered", "docling")
+    assert label.timed_out is True
+    assert cache.get(pdf, extractor="docling") is None
+
+    calls.clear()
+    extract_blocks(pdf, cache=cache)
+    assert [c[0] for c in calls] == ["docling", "ocrmypdf"], "the next run must retry docling"
+
+
+# --- #231 rung: only stored backend-error fallbacks are retried --------------
+
+
+def test_231_rung_invalidates_only_backend_error_fallback_successes(tmp_path: Path) -> None:
+    """A format-4 ``backend-error`` success cannot say whether it was a crash
+    fallback (still right), a timeout fallback (must be retried) or an
+    ocrmypdf recovery (now labelled ``ocr-recovered``), so it is retried once.
+    Docling successes and never-attempted legacy successes are kept."""
+    pdf = _fake_pdf(tmp_path)
+
+    fallback = ExtractionCache(tmp_path / "fallback.jsonl")
+    _plant(
+        fallback,
+        pdf,
+        format_version="4",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "legacy", reason="backend-error", fallback_from="docling"),
+    )
+    assert fallback.get(pdf, extractor="docling") is None
+    assert fallback.invalidated_count == 1
+
+    clean = ExtractionCache(tmp_path / "clean.jsonl")
+    _plant(
+        clean,
+        pdf,
+        format_version="4",
+        extractor_env="docling",
+        value=_success(_PLANTED_TEXT, "docling", reason=None, fallback_from=None),
+    )
+    assert clean.get(pdf, extractor="docling") is not None
+    assert (clean.migrated_count, clean.invalidated_count) == (1, 0)
+
+    declared = ExtractionCache(tmp_path / "declared.jsonl")
+    _plant(
+        declared,
+        pdf,
+        format_version="4",
+        extractor_env="legacy",
+        value=_success(_PLANTED_TEXT, "legacy", reason="declared", fallback_from=None),
+    )
+    hit = declared.get(pdf, extractor="legacy", declared_extractor="legacy")
+    assert hit is not None and hit[2].reason == "declared"
+    assert declared.invalidated_count == 0
+
+    failure = ExtractionCache(tmp_path / "failure.jsonl")
+    _plant(
+        failure,
+        pdf,
+        format_version="4",
+        extractor_env="docling",
+        value={"error": "extraction yielded no text", "extractor": "docling", "ocrmypdf": True},
+    )
+    assert failure.get_failure(pdf, extractor="docling") == "extraction yielded no text"
+    assert failure.invalidated_count == 0
+
+
+def test_231_rung_treats_a_reasonless_legacy_success_as_undecidable() -> None:
+    """Not a shape put() or the #81 migration writes — invalidated, not guessed."""
+    assert extraction._affected_by_timeout_fallback_rule(_success("x", "legacy"), {}) is None

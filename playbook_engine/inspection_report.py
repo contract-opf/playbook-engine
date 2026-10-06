@@ -347,7 +347,17 @@ def _dedupe_flags(flags: list[dict[str, Any]]) -> list[dict[str, Any]]:
 _FALLBACK_REASON_TEXT = {
     "env-missing": "docling was not available on this host — legacy ran automatically",
     "backend-error": "docling failed on this file and the engine fell back to legacy",
+    "ocr-recovered": "docling found no text in this file and its text was recovered by OCR",
 }
+
+#: What a fallback version lacks, per reason, for the flag's message. An
+#: OCR-recovered scan (issue #231) did go through OCR — saying "no OCR" for it
+#: would be false — but OCR text can misread characters.
+_FALLBACK_REASON_CAVEAT = {
+    "ocr-recovered": "ocrmypdf text, which can misread characters, and no docling-derived "
+    "heading structure",
+}
+_FALLBACK_DEFAULT_CAVEAT = "no OCR, no docling-derived heading structure"
 
 
 def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -362,9 +372,9 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
         extraction/segmentation raised and it was never mined at all.
       - ``version_ingest_fallback`` (``severity="info"``, issue #81): the
         version WAS mined, but via the legacy extractor after a real
-        degradation (``reason`` is ``"env-missing"``/``"backend-error"`` —
-        never ``"declared"``, a deliberate config choice, not a
-        degradation) — advisory only, since the version isn't missing, just
+        degradation (``reason`` is ``"env-missing"``/``"backend-error"``/
+        ``"ocr-recovered"`` — never ``"declared"``, a deliberate config
+        choice, not a degradation) — advisory only, since the version isn't missing, just
         possibly lower-fidelity (no OCR, no docling-derived heading
         structure). Only ``reason``/``version``/``document_id`` feed this
         message — never ``version_ingest[].detail`` (there is no such key:
@@ -394,6 +404,7 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
                 )
             elif status == "ok" and ver.get("reason") in _FALLBACK_REASON_TEXT:
                 reason_text = _FALLBACK_REASON_TEXT[ver["reason"]]
+                caveat = _FALLBACK_REASON_CAVEAT.get(ver["reason"], _FALLBACK_DEFAULT_CAVEAT)
                 flags.append(
                     {
                         "document_id": doc_id,
@@ -407,7 +418,7 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
                         # Needs-Attention row, not two).
                         "suggested_action": (
                             f"Version {version!r} was mined via the legacy extractor: "
-                            f"{reason_text} — no OCR, no docling-derived heading structure "
+                            f"{reason_text} — {caveat} "
                             "for this version. Review the extracted text, or install docling "
                             "and re-run 'playbook mine' with --no-cache to recover the "
                             "higher-fidelity docling extraction."

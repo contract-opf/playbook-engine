@@ -722,6 +722,36 @@ def test_report_shows_version_ingest_fallback_flag(tmp_path: Path) -> None:
     assert "version_ingest_failed" not in report
 
 
+def test_report_flags_ocr_recovered_version_without_claiming_no_ocr(tmp_path: Path) -> None:
+    """Issue #231: an OCR-recovered scan (reason="ocr-recovered", written by
+    extract_blocks when only the ocrmypdf pass found text) is still an
+    advisory fallback — but its message must not say "no OCR", and must not
+    read like the born-digital backend-error fallback."""
+    out_dir = _make_out_dir(tmp_path)
+    _write_manifest(
+        out_dir,
+        [
+            {
+                "document_id": "deal-alice",
+                "version_ingest": [
+                    {
+                        "version": "v1",
+                        "status": "ok",
+                        "error": None,
+                        "extractor": "legacy",
+                        "reason": "ocr-recovered",
+                    }
+                ],
+            }
+        ],
+    )
+    report = build_inspection_report(out_dir)
+    assert "version_ingest_fallback" in report
+    assert "recovered by OCR" in report
+    assert "no OCR" not in report
+    assert "fell back to legacy" not in report
+
+
 def test_report_no_fallback_flag_for_declared_legacy(tmp_path: Path) -> None:
     """reason="declared" (a deliberate config choice) must not produce an
     advisory fallback flag."""

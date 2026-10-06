@@ -495,7 +495,7 @@ def _count_stored_deviation_verdicts(verdicts_path: Path) -> int:
 #: JSON manifest, never pipeline internals — same "own its vocabulary as
 #: plain literals" convention config.py's _VALID_EXTRACTORS docstring
 #: documents for the analogous cross-module case.
-_FALLBACK_REASONS = ("env-missing", "backend-error")
+_FALLBACK_REASONS = ("env-missing", "backend-error", "ocr-recovered")
 
 #: Cap on how many fallback document/version names _echo_extractor_summary
 #: prints inline before collapsing the rest into a "+N more" tail — a
@@ -521,7 +521,8 @@ def _echo_extractor_summary(out_dir: Path, echo: Callable[[str], None]) -> None:
     PDFs with no OCR was otherwise invisible to the operator.
 
     When any version's ``version_ingest[].reason`` is a real degradation
-    (``"env-missing"``/``"backend-error"`` — never ``"declared"``, a
+    (``"env-missing"``/``"backend-error"``/``"ocr-recovered"`` — never
+    ``"declared"``, a
     deliberate config choice, not a degradation), a second block breaks the
     fallback count down by reason and names the affected document/version
     pairs, up to :data:`_FALLBACK_NAMES_CAP` with a "+N more" tail — the

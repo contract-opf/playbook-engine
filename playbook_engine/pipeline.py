@@ -81,7 +81,11 @@ from playbook_engine.judgment import (
     BatchedScopeJudge,
     JudgmentCache,
 )
-from playbook_engine.llm_segmentation_stage import SegmentFn, segment_to_tree
+from playbook_engine.llm_segmentation_stage import (
+    SegmentFn,
+    extractor_label_of,
+    segment_to_tree,
+)
 from playbook_engine.llm_segmenter import DEFAULT_MODEL
 from playbook_engine.llm_segmenter_batch import (
     DEFAULT_EFFORT,
@@ -295,7 +299,14 @@ _DEVIATION_VS_TEMPLATE_VERSION = 12
 # before this would replay reason=None for a timed-out version (so a consumer
 # could not tell "retry me" from "genuinely unreadable") and would never give
 # a scanned PDF its second OCR pass.
-_VERSION_INGEST_REASON_VERSION = 4
+#
+# v5 (issue #231): text recovered by the ocrmypdf second OCR path is now
+# recorded with reason "ocr-recovered" instead of "backend-error", and a
+# deal holding a version whose text a fallback recovered after a docling
+# timeout is no longer stage-cached. A warm entry from before this would
+# replay "backend-error" for an OCR-recovered scan and would keep replaying a
+# timeout-pinned legacy extraction, never retrying docling.
+_VERSION_INGEST_REASON_VERSION = 5
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_trees changes in a way that must invalidate a warm L1-L4 stage
@@ -326,7 +337,7 @@ _NORMALIZED_TREES_CACHE_VERSION = 2
 # exactly what config.extraction.max_fallback counts and what the CLI/review
 # advisory flags surface; "declared" is a producer's deliberate choice and
 # never counts as a fallback.
-_FALLBACK_REASONS = frozenset({"env-missing", "backend-error"})
+_FALLBACK_REASONS = frozenset({"env-missing", "backend-error", "ocr-recovered"})
 
 # Legacy binary Word format — not ingestible directly, but common in
 # negotiation history from the 2000s-2010s. Flagged distinctly (not lumped
@@ -2098,8 +2109,10 @@ def _compute_doc_result(
     Returns ``None`` if the document has no processable versions.
 
     *timed_out_versions* (issue #218), when given, receives the version id of
-    every version whose extraction failed with reason ``"timeout"``. The
-    caller uses it to keep this result — including the all-failed ``None`` —
+    every version whose extraction failed with reason ``"timeout"`` — and
+    (issue #231) of every version whose text a fallback recovered after a
+    timeout (:attr:`~playbook_engine.extraction.ExtractorLabel.timed_out`).
+    The caller uses it to keep this result — including the all-failed ``None`` —
     OUT of the L1-L4 stage cache: a timeout is a property of the run, not of
     the source bytes the cache key hashes, so caching it would stop every
     later run from retrying the version.
@@ -2342,6 +2355,17 @@ def _compute_doc_result(
                     else None
                 ),
             }
+            if (
+                timed_out_versions is not None
+                and extractor_label is not None
+                and extractor_label.timed_out
+            ):
+                # Issue #231: this version's text came from a fallback after
+                # a docling timeout. ExtractionCache already refused to store
+                # it; storing the deal result here would replay the legacy
+                # extraction one layer up and the next run would never retry
+                # docling — pinning the trail as mixed-extractor.
+                timed_out_versions.append(vid)
         except SegmentationQAError as exc:
             # Fail loud, by design: a QA-gate failure on the LLM path must
             # never be swallowed into a per-file warning + skipped version —
@@ -2438,7 +2462,19 @@ def _compute_doc_result(
                     else (exc.reason if isinstance(exc, ExtractionError) else None)
                 ),
             }
-            if timed_out_versions is not None and version_ingest[vid]["reason"] == FAILURE_TIMEOUT:
+            # Issue #231: extraction recovered this version after a timeout,
+            # then segmentation raised. extractor_label is never bound here
+            # in that case (_llm_segment_file raised before returning it), so
+            # read the label segment_to_tree carried out on the exception —
+            # the recovery is run-only and must keep the deal out of the
+            # stage cache exactly like a plain timeout.
+            recovered_label = (
+                extractor_label if extractor_label is not None else extractor_label_of(exc)
+            )
+            if timed_out_versions is not None and (
+                version_ingest[vid]["reason"] == FAILURE_TIMEOUT
+                or (recovered_label is not None and recovered_label.timed_out)
+            ):
                 timed_out_versions.append(vid)
 
     if not version_trees:
@@ -3563,7 +3599,9 @@ def mine_corpus(
                 )
 
             # Never cache a deal with a timed-out version (issue #218) —
-            # neither a partial result nor the all-failed None. The
+            # neither a partial result nor the all-failed None, nor (issue
+            # #231) a result holding a version a fallback recovered after a
+            # timeout. The
             # ExtractionCache already refuses to negative-cache the timeout;
             # storing the per-deal result here would replay it one layer up
             # and the next run would never retry the version.
@@ -4030,8 +4068,9 @@ def mine_corpus(
     # Extraction fallback budget (issue #81): count every version_ingest
     # entry across the whole run whose "reason" reflects a DEGRADATION — the
     # file was extracted via the legacy adapter because docling was
-    # unavailable ("env-missing") or crashed on this specific file
-    # ("backend-error") — see extraction.ExtractorLabel and _FALLBACK_REASONS
+    # unavailable ("env-missing"), crashed on this specific file
+    # ("backend-error"), or yielded no text that only ocrmypdf recovered
+    # ("ocr-recovered", issue #231) — see extraction.ExtractorLabel and _FALLBACK_REASONS
     # above (fallbacks itself was computed earlier, before pseudonymization
     # reassigned corpus_documents — see the comment there). A config-DECLARED
     # "legacy" run ("declared") is a deliberate choice, not a degradation,

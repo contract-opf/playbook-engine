@@ -39,7 +39,10 @@ each change); PDF and RTF work; scans need the Docker runtime's OCR path (below)
 > came through different extractors (a common source of noisy clause
 > alignment), and `x_ingest_reason` gives the per-version reason in the same
 > order as `version_ingest` (for example `backend-error` for a docling
-> fallback, or `timeout` / `no-text` for a failed version).
+> fallback that read the file's own text layer, `ocr-recovered` for a scan
+> whose text only the `ocrmypdf` pass recovered, or `timeout` / `no-text` for
+> a failed version). A version that a fallback recovered after a docling
+> timeout is not cached either, so the next `mine` retries docling on it.
 
 **Lay out the corpus.** The expected shape is one directory per deal
 ([docs/CORPUS-LAYOUT.md](CORPUS-LAYOUT.md)). `playbook stage` recognizes a

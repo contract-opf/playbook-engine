@@ -20,6 +20,7 @@ scope: this path must never silently degrade to the deterministic segmenter).
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,6 +34,27 @@ from playbook_engine.segmentation_qa import (
     run_gates,
     segment_verify_repair,
 )
+
+#: Attribute :func:`segment_to_tree` sets on an exception raised AFTER
+#: extraction succeeded (issue #231) — see :func:`extractor_label_of`.
+_EXTRACTOR_LABEL_ATTR = "extractor_label"
+
+
+def extractor_label_of(exc: BaseException) -> ExtractorLabel | None:
+    """The :class:`~playbook_engine.extraction.ExtractorLabel` *exc* carries, or ``None``.
+
+    :func:`segment_to_tree` attaches the label :func:`extract_blocks` resolved
+    to any exception raised after extraction succeeded (segmentation, the
+    verify/repair loop, a cache re-ground) so a caller whose own label
+    variable was never bound can still see it — in particular
+    :attr:`~playbook_engine.extraction.ExtractorLabel.timed_out` (issue #231):
+    a version recovered after a docling timeout whose segmentation then
+    failed is still a run-only outcome the pipeline must not stage-cache.
+    ``None`` for an exception raised by extraction itself (no label exists).
+    """
+    label = getattr(exc, _EXTRACTOR_LABEL_ATTR, None)
+    return label if isinstance(label, ExtractorLabel) else None
+
 
 #: Call shape every ``segment_fn`` must satisfy — identical to
 #: ``segmentation_qa.segment_verify_repair``'s own contract, so a caller-supplied
@@ -188,11 +210,44 @@ def segment_to_tree(
         SegmentationQAError:  every attempt (initial + repairs) still fails a
                                gate. Fail loud — no deterministic-segmenter
                                fallback.
+
+    Any exception raised after extraction succeeded carries the resolved
+    *extractor_label* — read it with :func:`extractor_label_of` (issue #231).
     """
     canonical_text, blocks, extractor_label = extract_blocks(
         path, cache=extraction_cache, refresh=refresh_extraction, extractor=extractor
     )
+    try:
+        return _segment_extracted(
+            canonical_text,
+            blocks,
+            extractor_label,
+            taxonomy_ids=taxonomy_ids,
+            segment_fn=segment_fn,
+            max_repairs=max_repairs,
+            cache=cache,
+            model=model,
+        )
+    except Exception as exc:
+        # Issue #231: the caller's own label variable is never bound when
+        # this raises, so carry the label out on the exception instead.
+        with contextlib.suppress(AttributeError, TypeError):
+            setattr(exc, _EXTRACTOR_LABEL_ATTR, extractor_label)
+        raise
 
+
+def _segment_extracted(
+    canonical_text: str,
+    blocks: list[Block],
+    extractor_label: ExtractorLabel,
+    *,
+    taxonomy_ids: list[str],
+    segment_fn: SegmentFn | None,
+    max_repairs: int,
+    cache: SegmentationVerdictCache | None,
+    model: str,
+) -> tuple[GroundingResult, ExtractorLabel]:
+    """The post-extraction half of :func:`segment_to_tree` (cache, segment, verify/repair)."""
     if cache is not None:
         cached_nodes = cache.get(canonical_text, model=model)
         if cached_nodes is not None:
@@ -238,4 +293,4 @@ def segment_to_tree(
     return result, extractor_label
 
 
-__all__: list[str] = ["SegmentFn", "segment_to_tree"]
+__all__: list[str] = ["SegmentFn", "extractor_label_of", "segment_to_tree"]
