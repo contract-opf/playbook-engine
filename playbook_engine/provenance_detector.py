@@ -1,38 +1,50 @@
 """Provenance detector — L2 structure layer.
 
 Decides whether a document is drafted on *our paper* (our standard form / our
-template) or *counterparty paper* (the counterparty's form).  This feeds the
-provenance rule in the OPF: only our-paper observations may define an opening
-position; counterparty-paper observations inform tolerance bounds only.
+template) or *counterparty paper* (the counterparty's form) — or that the
+side cannot be determined (``"unknown"``).  In OPF 0.4 the result is deal
+metadata only (the precedent record's three-valued ``paper``): it never
+partitions, gates or weights anything, and ``our_standard`` comes only from
+the configured template (owner decision 2026-09-13 (b), issue #225).  The
+0.2/0.3 provenance rule (only our-paper observations may define an opening
+position) still reads it for those legacy formats.
 
 Detection signals (applied in priority order):
 1. **Template similarity** (highest fidelity) — if a canonical template is
-   supplied, compute the normalised edit-distance between the document's text
-   fingerprint and the template's.  High similarity → ``our_paper``.  Low
-   similarity → ``counterparty_paper`` (or heavy redline, flagged as
-   low-confidence).
+   supplied, compare the document's node fingerprint with the template's
+   (``version_orderer.node_fingerprint``: one whitespace-collapsed element per
+   node, so a DOCX paragraph and the same paragraph wrapped across PDF/RTF
+   lines are the same element; ``SequenceMatcher`` with ``autojunk=False`` so
+   repeated boilerplate elements are never silently discarded).  High
+   similarity → ``our_paper``.  Low similarity → ``counterparty_paper`` at
+   low confidence (or heavy redline — ambiguous, escalated).
 2. **Alias position in opening recital** — locate a "between X and Y" or
    "by and between X ... and Y" pattern in the first visible text.  If one of
-   our party aliases appears as the *first*-named party (before "and"), it is
-   our paper.  If it appears as the *second*-named party (after "and"), it is
-   counterparty paper.
+   our party aliases appears as the *first*-named party (before "and"), it
+   leans our paper — but many counterparty forms name the customer first, so
+   this name-order signal is escalated to the judge exactly like the
+   second-named case.  If it appears as the *second*-named party (after
+   "and"), it leans counterparty paper.
 3. **Alias present anywhere in first section** — weaker signal used when the
    "between...and" pattern is absent.
 4. **Alias absent entirely** — no alias found anywhere → ``counterparty_paper``
    at low confidence.
-5. **No aliases configured** — returns ``counterparty_paper`` at 0.50 (unknown;
-   defaults toward ``counterparty_paper`` because that is the safe direction
-   per OPF §2.2: it is better to miss an opening position than to falsely
-   attribute one).
+5. **No aliases configured** — returns ``counterparty_paper`` at 0.50: no
+   signal at all, so the lean is below the ambiguity threshold and the deal's
+   paper is recorded ``"unknown"``.
 
 Confidence levels:
-- ≥ 0.85  high   — template_similarity with strong match or alias_first_party
-- 0.70–0.84  medium — alias_second_party
+- ≥ 0.85  high   — template_similarity with strong match
+- 0.70–0.84  medium — alias_second_party (0.75), alias_first_party (0.70)
 - < 0.70  low    — template dissimilarity, alias_present, alias_absent, no_aliases_configured
 
-``AMBIGUITY_THRESHOLD = 0.70`` — callers (L5 compiler) MUST NOT use a result
-with ``confidence < AMBIGUITY_THRESHOLD`` to define an opening position.
-``ProvenanceResult.is_ambiguous`` exposes this check directly.
+``"unknown"`` provenance (a store-backed judge with no verdict yet,
+``basis="needs_review"``, confidence 0.0) is always ambiguous.
+
+``AMBIGUITY_THRESHOLD = 0.70`` — an ambiguous result
+(``ProvenanceResult.is_ambiguous``: confidence below the threshold, or no side
+at all) is recorded as paper ``"unknown"``, never coerced to a side (issue
+#225).
 
 Alias matching uses whole-word boundaries (``\\b``) to prevent substring
 false-positives (e.g. alias ``"Acme"`` must not match ``"Acmeseal Technologies"``).
@@ -62,6 +74,7 @@ define an opening position per OPF §2.2.
 
 PROVENANCE_JUDGE_BASES: frozenset[str] = frozenset(
     {
+        "alias_first_party",  # name-order heuristic — counterparty forms often name the customer first
         "alias_second_party",  # name-order heuristic — weak for complex MSAs
         "no_aliases_configured",  # unknown / no signal
     }
@@ -69,11 +82,12 @@ PROVENANCE_JUDGE_BASES: frozenset[str] = frozenset(
 """Basis values that trigger escalation to ``ProvenanceJudge``, even when
 ``is_ambiguous`` is False.
 
-``alias_second_party`` (name-order): placement of our alias as the
-second-named party is a genuine signal but can be inverted by MSAs where a
-counterparty reuses our form with parties swapped.  ``no_aliases_configured``:
-there is no deterministic signal at all — the result is purely a safe-direction
-default.  Both warrant LLM arbitration when a judge is available.
+``alias_first_party`` / ``alias_second_party`` (name-order): the recital's
+party order is a genuine signal but an unreliable one — many counterparty
+forms name the customer first, and MSAs where a counterparty reuses our form
+can swap the parties.  ``no_aliases_configured``: there is no deterministic
+signal at all — the result is purely a default.  All three warrant LLM
+arbitration when a judge is available.
 """
 
 # Similarity to our template above which we call it our_paper.
@@ -109,6 +123,33 @@ _BETWEEN_AND = re.compile(
 # ---------------------------------------------------------------------------
 
 _PROVENANCE_VALUES = frozenset({"our_paper", "counterparty_paper"})
+"""The two paper SIDES — what a hints.yaml ``provenance`` override may name
+(``version_orderer.Hints``) and what OPF's two-valued
+``corpus.documents[].provenance`` can carry."""
+
+PROVENANCE_UNKNOWN: str = "unknown"
+"""A determination with no side: a store-backed judge with no verdict yet
+(``basis="needs_review"``). Always ambiguous; recorded as paper
+``"unknown"``, never coerced to a side (issue #225)."""
+
+_RESULT_PROVENANCE_VALUES = _PROVENANCE_VALUES | {PROVENANCE_UNKNOWN}
+
+
+def two_valued_side(provenance: str) -> str:
+    """The value a frozen two-valued OPF provenance field carries for *provenance*.
+
+    ``corpus.documents[].provenance`` (every published schema) and the
+    0.2/0.3 ``observed_positions[]`` / ``clause_library`` provenance have no
+    ``"unknown"`` — the published enums are frozen. A side passes through
+    unchanged; ``"unknown"`` (no side at all) is written as
+    ``counterparty_paper``, the 0.2/0.3 §2.3 direction that never lets it
+    define an opening position. It is only ever written next to the honest
+    record of the undetermined side: ``provenance_is_ambiguous: true`` on the
+    corpus document and ``paper: "unknown"`` on the OPF 0.4 precedent record
+    (issue #225).
+    """
+    return provenance if provenance in _PROVENANCE_VALUES else "counterparty_paper"
+
 
 _BASIS_VALUES = frozenset(
     {
@@ -130,7 +171,8 @@ class ProvenanceResult:
     """The provenance determination for a document.
 
     Attributes:
-        provenance:  ``"our_paper"`` or ``"counterparty_paper"``.
+        provenance:  ``"our_paper"``, ``"counterparty_paper"``, or
+                     ``"unknown"`` (no side determined — always ambiguous).
         confidence:  Float in [0, 1].  Values below ``AMBIGUITY_THRESHOLD``
                      indicate the determination is uncertain.
         basis:       Machine-readable reason code (one of ``_BASIS_VALUES``).
@@ -144,10 +186,10 @@ class ProvenanceResult:
     basis: str
 
     def __post_init__(self) -> None:
-        if self.provenance not in _PROVENANCE_VALUES:
+        if self.provenance not in _RESULT_PROVENANCE_VALUES:
             raise ValueError(
                 f"Unknown provenance: {self.provenance!r}. "
-                f"Must be one of {sorted(_PROVENANCE_VALUES)}"
+                f"Must be one of {sorted(_RESULT_PROVENANCE_VALUES)}"
             )
         if self.basis not in _BASIS_VALUES:
             raise ValueError(
@@ -158,13 +200,13 @@ class ProvenanceResult:
 
     @property
     def is_ambiguous(self) -> bool:
-        """True when confidence < AMBIGUITY_THRESHOLD.
+        """True when confidence < AMBIGUITY_THRESHOLD, or no side was determined.
 
-        An ambiguous result MUST NOT be used to define an opening position
-        (OPF §2.2).  Callers should flag it for manual review or LLM
-        arbitration before acting on it.
+        An ambiguous result is recorded as paper ``"unknown"`` — never
+        coerced to a side (issue #225) — and MUST NOT be used to define an
+        opening position (OPF §2.2).
         """
-        return self.confidence < AMBIGUITY_THRESHOLD
+        return self.provenance == PROVENANCE_UNKNOWN or self.confidence < AMBIGUITY_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +335,11 @@ def _detect_provenance_deterministic(
             )
         if similarity <= _COUNTERPARTY_SIMILARITY_THRESHOLD:
             # Dissimilar to our template. This leans counterparty, but low
-            # line-similarity is an unreliable signal — extraction differences
-            # alone (.rtf template vs .docx/.pdf corpus) drive even our-paper
-            # documents to near-zero overlap — so we return it BELOW the ambiguity
+            # similarity is still a weak signal: the node fingerprint removes
+            # the line-shape artefact (a PDF/RTF extraction wrapping lines
+            # differently from the DOCX template), yet a heavily edited
+            # our-paper draft, or node text altered by extraction (e.g. OCR
+            # noise), can still score low — so we return it BELOW the ambiguity
             # threshold. The caller escalates to the ProvenanceJudge instead of
             # acting on false high confidence. (High similarity, by contrast, is a
             # reliable our_paper signal and keeps its strong confidence above.)
@@ -311,9 +355,13 @@ def _detect_provenance_deterministic(
     alias_position = _alias_position_in_recital(opening_text, config.our_party_aliases)
 
     if alias_position == "first":
+        # Issue #225: name order is weak — many counterparty forms name the
+        # customer first — so this sits at the ambiguity threshold (not
+        # ambiguous on its own) and is in PROVENANCE_JUDGE_BASES (escalated
+        # whenever a judge is configured).
         return ProvenanceResult(
             provenance="our_paper",
-            confidence=0.85,
+            confidence=0.70,
             basis="alias_first_party",
         )
     if alias_position == "second":
@@ -346,26 +394,32 @@ def _detect_provenance_deterministic(
 
 
 def _fingerprint(tree: ClauseTree) -> list[str]:
-    """Extract ordered, stripped text lines from a ClauseTree."""
-    lines: list[str] = []
-    for node in tree.all_nodes():
-        if node.heading:
-            lines.append(node.heading.strip())
-        if node.text:
-            for line in node.text.splitlines():
-                s = line.strip()
-                if s:
-                    lines.append(s)
-    return lines
+    """The version orderer's format-independent node fingerprint (issue #225).
+
+    One whitespace-collapsed element per node heading and per node body —
+    never one per physical line, which made a PDF/RTF extraction of our own
+    template (wrapped across lines differently from the DOCX template)
+    collapse toward zero similarity purely on line shape.
+    """
+    # Deferred: version_orderer imports this module (hints validation).
+    from playbook_engine.version_orderer import node_fingerprint  # noqa: PLC0415
+
+    return node_fingerprint(tree)
 
 
 def _similarity(a: list[str], b: list[str]) -> float:
-    """Normalised similarity in [0, 1]; 1 = identical, 0 = no common lines."""
+    """Normalised similarity in [0, 1]; 1 = identical, 0 = no common elements.
+
+    ``autojunk=False``: SequenceMatcher's default heuristic treats any element
+    repeated in more than 1% of a 200+-element sequence as junk and drops it
+    from matching, so a long agreement's repeated boilerplate (a recurring
+    heading or sentence) would silently stop counting toward similarity.
+    """
     if not a and not b:
         return 1.0
     if not a or not b:
         return 0.0
-    return difflib.SequenceMatcher(None, a, b).ratio()
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
 def _full_text(tree: ClauseTree) -> str:

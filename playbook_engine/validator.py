@@ -951,7 +951,9 @@ def _check_precedent_v4(doc: dict[str, Any], result: ValidationResult) -> None:
     - each clause's ``n_deals``/``n_signed_standard``/``n_variants``/
       ``n_refused`` equal what ``precedent`` implies
       (``precedent.clause_counts``, grouping with the document's own
-      ``perspective.party``).
+      ``perspective.party``);
+    - paper side (issue #225) — metadata only, so these are honesty checks,
+      never gates: see :func:`_check_paper_v4`.
     """
     from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
     from playbook_engine.precedent import clause_counts, precedent_id  # noqa: PLC0415
@@ -1038,6 +1040,8 @@ def _check_precedent_v4(doc: dict[str, Any], result: ValidationResult) -> None:
                     f"signed_at={signed_at!r} is not an ISO-8601 date", path=f"{path}.signed_at"
                 )
 
+    _check_paper_v4(doc, result)
+
     records = [p for p in precedent if isinstance(p, dict)]
     party = perspective_party(doc)
     for i, clause in enumerate(_evidence_list(doc, "clauses")):
@@ -1050,6 +1054,117 @@ def _check_precedent_v4(doc: dict[str, Any], result: ValidationResult) -> None:
                     f"{key}={clause.get(key)!r} but evidence.precedent implies {expected_n}",
                     path=f"evidence.clauses[{i}].{key}",
                 )
+
+
+def _check_paper_v4(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.4 paper-side cross-checks (issue #225).
+
+    Paper side is three-valued deal metadata that gates nothing, so these
+    only check that the document tells one consistent story about it:
+
+    - a precedent's ``paper`` agrees with its deal's
+      ``corpus.documents[].provenance`` (``precedent.paper_of_corpus_document``:
+      ``our_paper`` -> ``"ours"``, ``counterparty_paper`` -> ``"theirs"``, an
+      ambiguous detection -> ``"unknown"``). A side MUST match; an ambiguous
+      detection MUST be ``"unknown"`` (never coerced to a side). ``"unknown"``
+      against an unflagged document is accepted — the two-valued corpus field
+      cannot say "unknown", so a record may honestly withhold a side;
+    - a numeric ``paper_confidence`` equals the document's numeric
+      ``provenance_confidence``;
+    - every precedent of one deal carries the same ``paper`` /
+      ``paper_basis`` / ``paper_confidence`` (it is a fact about the deal);
+    - an unknown-paper deal contributes no ``our_standard``;
+    - with no canonical template configured (``baseline.has_canonical_template``
+      false) an unknown-paper deal is never ``standard`` — so it is excluded
+      from ``n_signed_standard``. With a template, ``standard`` is the exact
+      match against it and paper side does not enter into it.
+    """
+    from playbook_engine.precedent import (  # noqa: PLC0415
+        PAPER_UNKNOWN,
+        paper_of_corpus_document,
+    )
+
+    corpus_docs = _corpus_docs(doc)
+    baseline = doc.get("baseline")
+    has_template = isinstance(baseline, dict) and baseline.get("has_canonical_template") is True
+    paper_by_deal: dict[Any, tuple[Any, Any, Any]] = {}
+    first_by_deal: dict[Any, int] = {}
+    unknown_deals: set[Any] = set()
+    for i, record in enumerate(_evidence_list(doc, "precedent")):
+        if not isinstance(record, dict):
+            continue
+        path = f"evidence.precedent[{i}]"
+        doc_id = record.get("document_id")
+        paper = record.get("paper")
+        triple = (paper, record.get("paper_basis"), record.get("paper_confidence"))
+        if doc_id in paper_by_deal:
+            if paper_by_deal[doc_id] != triple:
+                result.add(
+                    f"precedent paper/paper_basis/paper_confidence {list(triple)!r} differs "
+                    f"from deal {doc_id!r}'s first precedent "
+                    f"(evidence.precedent[{first_by_deal[doc_id]}]: "
+                    f"{list(paper_by_deal[doc_id])!r}) — paper side is a fact about the deal",
+                    path=f"{path}.paper",
+                )
+        else:
+            paper_by_deal[doc_id] = triple
+            first_by_deal[doc_id] = i
+        corpus_doc = corpus_docs.get(doc_id) if isinstance(doc_id, str) else None
+        if paper == PAPER_UNKNOWN or (
+            corpus_doc is not None and paper_of_corpus_document(corpus_doc) == PAPER_UNKNOWN
+        ):
+            unknown_deals.add(doc_id)
+        if corpus_doc is not None and isinstance(paper, str):
+            expected = paper_of_corpus_document(corpus_doc)
+            if paper != expected and paper != PAPER_UNKNOWN:
+                result.add(
+                    f"precedent paper={paper!r} but corpus.documents[{doc_id!r}] records "
+                    f"provenance={corpus_doc.get('provenance')!r}"
+                    + (
+                        " with provenance_is_ambiguous=true (an ambiguous detection is "
+                        "'unknown', never a side)"
+                        if corpus_doc.get("provenance_is_ambiguous") is True
+                        else f" (paper {expected!r})"
+                    ),
+                    path=f"{path}.paper",
+                )
+            doc_conf = corpus_doc.get("provenance_confidence")
+            rec_conf = record.get("paper_confidence")
+            if (
+                isinstance(doc_conf, (int, float))
+                and isinstance(rec_conf, (int, float))
+                and float(doc_conf) != float(rec_conf)
+            ):
+                result.add(
+                    f"precedent paper_confidence={rec_conf!r} but corpus.documents"
+                    f"[{doc_id!r}].provenance_confidence={doc_conf!r}",
+                    path=f"{path}.paper_confidence",
+                )
+        if not has_template and paper == PAPER_UNKNOWN and record.get("standard") is True:
+            result.add(
+                "precedent standard=true on an unknown-paper deal with no canonical "
+                "template configured — with no template there is no standard to match "
+                "but our own paper, which this deal is not known to be",
+                path=f"{path}.standard",
+            )
+
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if not isinstance(clause, dict):
+            continue
+        std = clause.get("our_standard")
+        source = std.get("source_ref") if isinstance(std, dict) else None
+        src_doc = source.get("document_id") if isinstance(source, dict) else None
+        if not isinstance(src_doc, str) or src_doc == "template":
+            continue
+        if src_doc in unknown_deals or (
+            src_doc in corpus_docs
+            and paper_of_corpus_document(corpus_docs[src_doc]) == PAPER_UNKNOWN
+        ):
+            result.add(
+                f"our_standard sourced from deal {src_doc!r}, whose paper side is "
+                "unknown — an unknown-paper deal contributes no our_standard",
+                path=f"evidence.clauses[{i}].our_standard.source_ref",
+            )
 
 
 def _check_digest_v4(doc: dict[str, Any], result: ValidationResult) -> None:

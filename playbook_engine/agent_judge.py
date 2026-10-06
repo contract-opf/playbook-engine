@@ -74,7 +74,11 @@ from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
-from playbook_engine.provenance_detector import ProvenanceResult
+from playbook_engine.provenance_detector import (
+    _PROVENANCE_VALUES,
+    PROVENANCE_UNKNOWN,
+    ProvenanceResult,
+)
 from playbook_engine.rubric import (
     RubricPolicy,
     RubricStamp,
@@ -361,14 +365,30 @@ def _deviation_needs_review() -> DeviationResult:
 def _provenance_needs_review() -> ProvenanceResult:
     """Sentinel returned when no stored verdict is available for a provenance payload.
 
-    Returns a low-confidence result so the deterministic detector default is
-    not silently trusted.
+    No side was determined, so the result says so: ``"unknown"`` at 0.0
+    (always ambiguous), recorded as paper ``"unknown"`` — never coerced to
+    ``counterparty_paper`` (issue #225).
     """
     return ProvenanceResult(
-        provenance="counterparty_paper",
+        provenance=PROVENANCE_UNKNOWN,
         confidence=0.0,
         basis="needs_review",
     )
+
+
+def _require_provenance_side(provenance: Any) -> None:
+    """Raise ``ValueError`` unless a stored provenance verdict names a side.
+
+    A stored verdict names a side (the judge's two-valued answer vocabulary,
+    rubric._PROVENANCE_ANSWERS). ``"unknown"`` is reserved for the engine's
+    own no-verdict sentinel (issue #225), so it is rejected here — at apply
+    time and on store replay alike — before ``ProvenanceResult``, which
+    accepts it.
+    """
+    if provenance not in _PROVENANCE_VALUES:
+        raise ValueError(
+            f"Unknown provenance: {provenance!r}. Must be one of {sorted(_PROVENANCE_VALUES)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +540,7 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
                 "ever represents LLM judgment; deterministic bases are set by the engine "
                 "itself, not by you)"
             )
+        _require_provenance_side(verdict["provenance"])
         _validate_confidence_field(verdict, "confidence")
         ProvenanceResult(
             provenance=verdict["provenance"],
@@ -860,9 +881,10 @@ class StoreBackedProvenanceJudge:
     ``ProvenanceJudge`` protocol contract.)
 
     On a store miss: appends the full provenance payload (preamble + letterhead +
-    agreement_type + candidate aliases) to the pending queue and returns a
-    low-confidence ``ProvenanceResult(basis="needs_review")`` so the
-    deterministic detector default is not silently trusted.
+    agreement_type + candidate aliases) to the pending queue and returns
+    ``ProvenanceResult(provenance="unknown", confidence=0.0,
+    basis="needs_review")`` — no side is claimed until a verdict exists, and
+    the deal's paper is recorded ``"unknown"`` (issue #225).
     """
 
     store: VerdictStore
@@ -909,6 +931,10 @@ class StoreBackedProvenanceJudge:
         cached = record.verdict if record is not None else None
         if cached is not None:
             try:
+                # Same two-sides check as validate_verdict: a stored
+                # "unknown" (e.g. a hand-written store row) is malformed and
+                # re-queued, never replayed as a verdict (issue #225).
+                _require_provenance_side(cached["provenance"])
                 return ProvenanceResult(
                     provenance=cached["provenance"],
                     confidence=cached.get("confidence", 0.0),

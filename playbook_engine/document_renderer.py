@@ -331,8 +331,13 @@ def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> 
     n_total = stats.get("documents_total", len(docs))
     n_in_scope = stats.get("documents_in_scope", sum(1 for d in docs if d.get("in_scope")))
     n_versions = stats.get("versions_total", "—")
-    n_our = sum(1 for d in docs if d.get("provenance") == "our_paper")
-    n_cp = sum(1 for d in docs if d.get("provenance") == "counterparty_paper")
+    # Issue #225: an ambiguous detection's two-valued provenance is not a
+    # determined side — count it as undetermined, never as either paper.
+    determined = [d for d in docs if d.get("provenance_is_ambiguous") is not True]
+    n_our = sum(1 for d in determined if d.get("provenance") == "our_paper")
+    n_cp = sum(1 for d in determined if d.get("provenance") == "counterparty_paper")
+    n_unknown = len(docs) - len(determined)
+    unknown_paper = f", {n_unknown} undetermined" if n_unknown else ""
     n_excluded = n_total - n_in_scope if isinstance(n_total, int) else "—"
 
     # version_ingest is a LIST of per-version records in compiled documents
@@ -404,8 +409,8 @@ def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> 
       versions; {failed_versions} version file(s) failed extraction and are
       quarantined, not silently dropped.</li>
     <li><b>Drafting origin:</b> {n_our} agreements on our paper,
-      {n_cp} on counterparty paper — judged from each document's recitals and
-      form structure.</li>
+      {n_cp} on counterparty paper{unknown_paper} — judged from each document's
+      recitals and form structure.</li>
     <li><b>Judged evidence:</b> {n_obs} observed clause positions
       ({dev_line}); {unclassified} clause instances remain unclassified and are
       counted, not hidden.</li>

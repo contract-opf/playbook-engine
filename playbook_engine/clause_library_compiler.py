@@ -136,7 +136,9 @@ def compile_clause_library(
 
         accepted_forms = tuple(_obs_to_accepted_form(obs) for obs in group)
 
-        n_cp = sum(1 for obs in group if obs.provenance == "counterparty_paper")
+        # Same two_valued_side mapping accepted_forms are emitted with
+        # (issue #225), so the note agrees with the listed forms.
+        n_cp = sum(1 for form in accepted_forms if form.provenance == "counterparty_paper")
         notes: str | None = (
             f"Accepted in {n_cp} signed counterparty-paper observation(s)." if n_cp > 0 else None
         )
@@ -161,6 +163,9 @@ def compile_clause_library(
 
 
 def _obs_to_accepted_form(obs: Observation) -> AcceptedForm:
+    # Deferred: provenance_detector -> config -> clause_position_compiler.
+    from playbook_engine.provenance_detector import two_valued_side  # noqa: PLC0415
+
     return AcceptedForm(
         text_summary=obs.text_summary,
         example_ref=OPFCitation(
@@ -169,7 +174,8 @@ def _obs_to_accepted_form(obs: Observation) -> AcceptedForm:
             clause_path=obs.citation.clause_path,
             char_span=obs.citation.char_span,
         ),
-        provenance=obs.provenance,
+        # Frozen two-valued 0.2/0.3 enum — see two_valued_side (issue #225).
+        provenance=two_valued_side(obs.provenance),
         risk_delta_vs_our_standard=obs.risk_delta,
     )
 

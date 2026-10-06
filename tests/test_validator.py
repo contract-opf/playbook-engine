@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
+from playbook_engine.digest import build_digest
 from playbook_engine.validator import ValidationResult, load_opf_file, validate_document
 
 FIXTURES = Path(__file__).parent.parent / "examples" / "fixtures"
@@ -1093,3 +1094,118 @@ def test_v04_rejects_impossible_signed_at() -> None:
     doc["digest"] = build_digest(doc)
     errors = _blocking(_restamp_identity(doc))
     assert any("signed_at" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# OPF 0.4 paper side (issue #225) — three-valued deal metadata that gates
+# nothing; the validator only checks the document tells one consistent story
+# about it. Same real compiled NDA example as above.
+# ---------------------------------------------------------------------------
+
+
+def _make_deal_ambiguous(doc: dict[str, Any], deal: str) -> None:
+    """What the pipeline writes for an ambiguous detection: the corpus document
+    keeps today's two-valued value (counterparty_paper) flagged ambiguous,
+    every precedent says unknown."""
+    corpus_doc = next(d for d in doc["corpus"]["documents"] if d["document_id"] == deal)
+    corpus_doc["provenance"] = "counterparty_paper"
+    corpus_doc["provenance_is_ambiguous"] = True
+    corpus_doc["provenance_confidence"] = 0.65
+    for record in doc["evidence"]["precedent"]:
+        if record["document_id"] == deal:
+            record["paper"] = "unknown"
+            record["paper_basis"] = "alias_present"
+            record["paper_confidence"] = 0.65
+
+
+def test_v04_paper_accepts_an_ambiguous_deal_recorded_unknown() -> None:
+    doc = _nda_04()
+    _make_deal_ambiguous(doc, "beta-industries")
+    assert _blocking(_restamp_identity(doc)) == []
+
+
+def test_v04_paper_rejects_a_side_on_an_ambiguous_deal() -> None:
+    """An ambiguous detection is "unknown" — never coerced to a side."""
+    doc = _nda_04()
+    _make_deal_ambiguous(doc, "beta-industries")
+    for record in doc["evidence"]["precedent"]:
+        if record["document_id"] == "beta-industries":
+            record["paper"] = "theirs"
+    errors = _blocking(_restamp_identity(doc))
+    assert any("provenance_is_ambiguous=true" in e and "paper='theirs'" in e for e in errors), (
+        errors
+    )
+
+
+def test_v04_paper_rejects_a_side_that_contradicts_the_corpus_document() -> None:
+    doc = _nda_04()
+    for record in doc["evidence"]["precedent"]:
+        if record["document_id"] == "zeta-diagnostics":  # counterparty_paper
+            record["paper"] = "ours"
+    errors = _blocking(_restamp_identity(doc))
+    assert any("paper='ours'" in e and "provenance='counterparty_paper'" in e for e in errors), (
+        errors
+    )
+
+
+def test_v04_paper_accepts_unknown_against_an_unflagged_corpus_document() -> None:
+    """The two-valued corpus field cannot say "unknown"; a record may honestly
+    withhold a side (the 0.4 conformance vectors model this)."""
+    doc = _nda_04()
+    for record in doc["evidence"]["precedent"]:
+        if record["document_id"] == "zeta-diagnostics":
+            record["paper"] = "unknown"
+    assert _blocking(_restamp_identity(doc)) == []
+
+
+def test_v04_paper_rejects_confidence_that_disagrees_with_the_corpus_document() -> None:
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["document_id"] == "beta-industries")
+    record["paper_confidence"] = 0.5
+    errors = _blocking(_restamp_identity(doc))
+    assert any("paper_confidence=0.5" in e for e in errors), errors
+
+
+def test_v04_paper_rejects_a_deal_whose_records_disagree() -> None:
+    """Paper side is a fact about the deal — every record of it agrees."""
+    doc = _nda_04()
+    records = [p for p in doc["evidence"]["precedent"] if p["document_id"] == "beta-industries"]
+    records[-1]["paper_basis"] = "alias_first_party"
+    errors = _blocking(_restamp_identity(doc))
+    assert any("paper side is a fact about the deal" in e for e in errors), errors
+
+
+def test_v04_paper_rejects_our_standard_from_an_unknown_paper_deal() -> None:
+    doc = _nda_04()
+    _make_deal_ambiguous(doc, "beta-industries")
+    record = next(
+        p
+        for p in doc["evidence"]["precedent"]
+        if p["document_id"] == "beta-industries" and p["signed_text"]
+    )
+    clause = next(
+        c for c in doc["evidence"]["clauses"] if c["taxonomy_id"] == record["taxonomy_id"]
+    )
+    clause["our_standard"] = {
+        "text": record["signed_text"]["text"],
+        "source_ref": copy.deepcopy(record["signed_text"]["ref"]),
+    }
+    doc["digest"] = build_digest(doc)
+    errors = _blocking(_restamp_identity(doc))
+    assert any("an unknown-paper deal contributes no our_standard" in e for e in errors), errors
+
+
+def test_v04_paper_unknown_deal_standard_needs_a_template() -> None:
+    """With a template, ``standard`` is the exact match against it and an
+    unknown-paper deal counts in n_signed_standard; with no template there is
+    no standard for it to match, so it must not be standard."""
+    doc = _nda_04()
+    _make_deal_ambiguous(doc, "beta-industries")
+    assert any(
+        p["standard"] for p in doc["evidence"]["precedent"] if p["document_id"] == "beta-industries"
+    )
+    assert _blocking(_restamp_identity(doc)) == []
+
+    doc["baseline"]["has_canonical_template"] = False
+    errors = _blocking(_restamp_identity(doc))
+    assert any("standard=true on an unknown-paper deal" in e for e in errors), errors

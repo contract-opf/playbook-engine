@@ -262,7 +262,10 @@ class Observation:
         citation:        Traceability reference to the source version.
         deviation:       How the clause deviates from our standard.
         risk_delta:      Direction and magnitude of risk shift.
-        provenance:      ``"our_paper"`` or ``"counterparty_paper"``.
+        provenance:      The deal's paper side: ``"our_paper"``,
+                         ``"counterparty_paper"``, or ``"unknown"`` when the
+                         detection was ambiguous — never coerced to a side
+                         (issue #225). Metadata only in OPF 0.4.
         outcome:         ``"signed"``, ``"unsigned"``, ``"proposed_then_reversed"``,
                          or ``"conceded_before_signing"`` (issue #216: OUR
                          standard language removed before signing — our
@@ -328,6 +331,13 @@ class Observation:
                          when there is no template clause to be standard
                          against. ``None`` only for legacy callers/stores that
                          never computed it (omitted from ``to_dict()`` then).
+        paper_basis:     The provenance detection's basis for this deal
+                         (``ProvenanceResult.basis`` — e.g.
+                         ``"template_similarity"``, ``"needs_review"``), or
+                         ``None`` for template observations and legacy stores
+                         (omitted from ``to_dict()`` then). Issue #225.
+        paper_confidence: The provenance detection's confidence for this deal,
+                         or ``None`` alongside ``paper_basis``.
     """
 
     observation_id: str
@@ -352,6 +362,8 @@ class Observation:
     observed_at: str | None = None
     counterparty_ref: dict[str, str] | None = None
     standard: bool | None = None
+    paper_basis: str | None = None
+    paper_confidence: float | None = None
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -392,6 +404,12 @@ class Observation:
         # so an absent key reads back as None, never as a fabricated False.
         if self.standard is not None:
             d["standard"] = self.standard
+        # paper_basis / paper_confidence (issue #225): omitted when never
+        # recorded (template observations, legacy stores).
+        if self.paper_basis is not None:
+            d["paper_basis"] = self.paper_basis
+        if self.paper_confidence is not None:
+            d["paper_confidence"] = self.paper_confidence
         return d
 
 
@@ -992,7 +1010,7 @@ def build_observations(
     Args:
         document_id:               Source document identifier.
         version:                   Source version identifier.
-        provenance:                ``"our_paper"`` or ``"counterparty_paper"``.
+        provenance:                ``"our_paper"``, ``"counterparty_paper"`` or ``"unknown"``.
         deviation_results:         Output of ``assess_deviations()`` — list of
                                   ``(ClauseDiff, DeviationResult)`` pairs.  Only
                                   changed clauses carry meaningful deviation data;

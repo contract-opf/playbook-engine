@@ -113,7 +113,13 @@ from playbook_engine.observation_builder import (
 from playbook_engine.pdf_ingester import ingest_pdf
 from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
 from playbook_engine.playbook_assembler import assemble_playbook, write_playbook
-from playbook_engine.provenance_detector import ProvenanceJudge, ProvenanceResult, detect_provenance
+from playbook_engine.provenance_detector import (
+    PROVENANCE_UNKNOWN,
+    ProvenanceJudge,
+    ProvenanceResult,
+    detect_provenance,
+    two_valued_side,
+)
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.run_manifest import read_deviation_mode, record_deviation_mode
@@ -229,7 +235,16 @@ _MEDIA_TYPES: dict[str, str] = {
 # Jaccard >= 0.92 — a first draft that flips a negation or deletes a carve-out
 # from our clause is their refused ask, no longer our concession. A warm
 # cache would otherwise replay the old conceded_before_signing rows forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 10
+#
+# v11 (issue #225): an ambiguous provenance detection is recorded "unknown"
+# instead of being coerced to counterparty_paper — the trail's and every
+# observation's provenance become "unknown" for such a deal, observations
+# gained "paper_basis"/"paper_confidence" (the detection signal the OPF 0.4
+# precedent record's paper side rests on), the alias_first_party confidence
+# dropped to 0.70, template similarity now compares node fingerprints, and
+# corpus_doc provenance is written through two_valued_side. A warm cache
+# would otherwise replay the old relabelled side (and no paper_basis) forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 11
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1174,6 +1189,8 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 observed_at=raw.get("observed_at"),
                 counterparty_ref=raw.get("counterparty_ref"),
                 standard=raw.get("standard"),
+                paper_basis=raw.get("paper_basis"),
+                paper_confidence=raw.get("paper_confidence"),
             )
         )
     return result
@@ -2563,7 +2580,11 @@ def _compute_doc_result(
             basis="hint",
         )
 
-    provenance = "counterparty_paper" if prov_result.is_ambiguous else prov_result.provenance
+    # Issue #225: an ambiguous detection is "unknown" — never coerced to a
+    # side. (The coercion this replaces flipped e.g. an alias_present
+    # our_paper lean to counterparty_paper.) Paper side is deal metadata
+    # only; it gates nothing in OPF 0.4.
+    provenance = PROVENANCE_UNKNOWN if prov_result.is_ambiguous else prov_result.provenance
 
     # has_signed_copy: whether order_versions actually anchored a signed
     # version, not whether one was assumed for chain-ordering purposes below.
@@ -2761,7 +2782,21 @@ def _compute_doc_result(
             party_names=_standard_party_names(config),
         )
 
-    corpus_doc["provenance"] = provenance
+    # Issue #225: paper_basis / paper_confidence travel on every observation
+    # of the deal (template observations carry none), so the L5 precedent
+    # record states which detection signal its paper side rests on.
+    doc_obs = [
+        dataclasses.replace(
+            obs, paper_basis=prov_result.basis, paper_confidence=prov_result.confidence
+        )
+        for obs in doc_obs
+    ]
+
+    # corpus.documents[].provenance is a frozen two-valued field and keeps
+    # today's value (issue #225): an undetermined ("unknown") side is written
+    # the §2.3 way via two_valued_side, and provenance_is_ambiguous: true
+    # records that the side was not determined.
+    corpus_doc["provenance"] = two_valued_side(provenance)
     # Issue #216: summed into corpus.stats.dropped_observations by
     # assemble_playbook (and stripped from the embedded corpus document).
     corpus_doc["dropped_observations"] = dict(sorted(dropped_observations.items()))

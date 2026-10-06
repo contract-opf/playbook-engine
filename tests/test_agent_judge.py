@@ -918,6 +918,43 @@ class TestStoreBackedProvenanceJudge:
         assert len(lines) == 1
         assert json.loads(lines[0])["kind"] == "provenance"
 
+    def test_stored_unknown_verdict_is_malformed_and_requeued(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Issue #225: "unknown" is the engine's own no-verdict sentinel, not a
+        judge answer. ProvenanceResult accepts it, so a hand-written store row
+        carrying it must hit the same two-sides check validate_verdict applies:
+        treated as malformed, re-queued and logged — never replayed as an
+        ``llm`` verdict."""
+        store, pending = _make_store_and_pending(tmp_path)
+        judge = StoreBackedProvenanceJudge(store=store, pending=pending)
+        preamble = "Between Alpha Corp and Beta Inc."
+        letterhead = "MSA"
+        agreement_type = "MSA"
+
+        payload = {
+            "stage": "provenance",
+            "preamble": preamble,
+            "letterhead": letterhead,
+            "agreement_type": agreement_type,
+        }
+        store.put(payload, {"provenance": "unknown", "confidence": 0.9, "basis": "llm"})
+
+        with caplog.at_level(logging.WARNING, logger="playbook_engine.agent_judge"):
+            result = judge.judge(preamble, letterhead, agreement_type)
+
+        assert result.basis == "needs_review"
+        assert result.confidence == 0.0
+        assert any(
+            "malformed stored verdict" in r.message.lower() and r.levelno == logging.WARNING
+            for r in caplog.records
+        ), [r.message for r in caplog.records]
+
+        path = tmp_path / "judge" / "pending.jsonl"
+        lines = path.read_text().splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["kind"] == "provenance"
+
 
 # ---------------------------------------------------------------------------
 # VerdictStore persistence — round-trip across instances (AC-4)
@@ -1313,6 +1350,15 @@ class TestValidateVerdictConfidenceType:
             validate_verdict(
                 "provenance",
                 {"provenance": "counterparty_paper", "confidence": "0.9", "basis": "llm"},
+            )
+
+    def test_provenance_unknown_stored_verdict_is_rejected(self) -> None:
+        """Issue #225: "unknown" is the engine's own no-verdict sentinel, not
+        a judge answer — a stored verdict must name one of the two sides."""
+        with pytest.raises(ValueError, match="Unknown provenance"):
+            validate_verdict(
+                "provenance",
+                {"provenance": "unknown", "basis": "llm", "confidence": 0.9},
             )
 
     def test_deviation_string_confidence_is_now_rejected(self) -> None:

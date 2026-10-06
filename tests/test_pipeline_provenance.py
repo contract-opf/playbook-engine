@@ -51,6 +51,7 @@ from playbook_engine.pipeline import compile_corpus
 from playbook_engine.provenance_detector import AMBIGUITY_THRESHOLD, ProvenanceResult
 from playbook_engine.signed_detector import SignedStatus
 from playbook_engine.taxonomy import load_taxonomy
+from playbook_engine.validator import validate_document
 
 # ---------------------------------------------------------------------------
 # RTF fixture helpers
@@ -169,6 +170,32 @@ _AMBIG_BODY = (
     r"By: David Kim, Managing Director\par "
 )
 
+# Issue #225: same deal, but our alias appears outside the recital's party
+# slots → alias_present → our_paper lean at 0.65 (ambiguous). The coercion
+# issue #225 removed flipped exactly this lean to counterparty_paper.
+_AMBIG_OUR_LEAN_BODY = _AMBIG_BODY.replace(
+    r"4. Term\par ",
+    r"4. Term\par Placements are coordinated with ACME Works staff. ",
+)
+
+# Issue #225: our template — the deal below signs these four sections
+# verbatim, but adds enough of its own sections that its similarity to the
+# template lands in the ambiguous middle band (no alias anywhere either), so
+# the deal's paper is "unknown" while its clauses are exactly our standard.
+_TEMPLATE_BODY = _AMBIG_BODY.split(r"5. Signatures")[0]
+_AMBIG_TEMPLATE_DEAL_BODY = (
+    _TEMPLATE_BODY
+    + r"5. Insurance\par Alpha Corp shall maintain general liability insurance.\par "
+    + r"6. Confidentiality\par Each party shall keep student records confidential.\par "
+    + r"7. Notices\par Notices shall be delivered in writing to the addresses above.\par "
+    + r"8. Assignment\par Neither party may assign this Agreement without consent.\par "
+    + r"9. Supervision\par Beta University shall designate a faculty coordinator.\par "
+    + r"10. Compliance\par Each party shall comply with applicable accreditation rules.\par "
+    + r"11. Signatures\par "
+    + r"By: Maria Garcia, General Counsel\par "
+    + r"By: David Kim, Managing Director\par "
+)
+
 
 # ---------------------------------------------------------------------------
 # Corpus + config factory helpers
@@ -209,8 +236,13 @@ def _make_corpus_earliest_test(tmp_path: Path) -> tuple[Path, Path, Path]:
     return corpus_dir, config_path, out_dir
 
 
-def _make_corpus_ambiguous(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _make_corpus_ambiguous(
+    tmp_path: Path, *, body: str = _AMBIG_BODY, template_body: str | None = None
+) -> tuple[Path, Path, Path]:
     """Corpus with a single document that has no ACME alias in text.
+
+    *body* overrides the document's RTF body; *template_body*, when given, is
+    written as ``template.rtf`` and configured as the baseline template.
 
     alias_absent → confidence=0.65 < AMBIGUITY_THRESHOLD=0.70 → is_ambiguous=True.
 
@@ -223,14 +255,19 @@ def _make_corpus_ambiguous(tmp_path: Path) -> tuple[Path, Path, Path]:
     deal_dir = corpus_dir / "deal-ambig"
     deal_dir.mkdir(parents=True)
 
-    _write_rtf(deal_dir / "v1.rtf", _AMBIG_BODY)
+    _write_rtf(deal_dir / "v1.rtf", body)
+    template: str | None = None
+    if template_body is not None:
+        template_path = tmp_path / "template.rtf"
+        _write_rtf(template_path, template_body)
+        template = str(template_path)
 
     cfg = {
         "agreement_type": {
             "id": "educational-affiliation",
             "name": "Educational Affiliation Agreement",
         },
-        "baseline": {"template": None},
+        "baseline": {"template": template},
         "taxonomy": str(_TAXONOMY_PATH),
         "provenance": {"our_party_aliases": ["ACME Works", "ACME"]},
     }
@@ -238,6 +275,14 @@ def _make_corpus_ambiguous(tmp_path: Path) -> tuple[Path, Path, Path]:
     config_path.write_text(yaml.dump(cfg), encoding="utf-8")
     out_dir = tmp_path / "out"
     return corpus_dir, config_path, out_dir
+
+
+def _make_corpus_ambiguous_with_template(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Issue #225: an unknown-paper deal that signs our template's sections
+    verbatim, with the template configured (see ``_AMBIG_TEMPLATE_DEAL_BODY``)."""
+    return _make_corpus_ambiguous(
+        tmp_path, body=_AMBIG_TEMPLATE_DEAL_BODY, template_body=_TEMPLATE_BODY
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -367,58 +412,241 @@ def test_manifest_carries_provenance_confidence_and_is_ambiguous(tmp_path: Path)
 # ---------------------------------------------------------------------------
 
 
-def test_ambiguous_provenance_does_not_yield_strong_position(tmp_path: Path) -> None:
-    """AC-3: A document where provenance is ambiguous (confidence < AMBIGUITY_THRESHOLD,
-    i.e. alias_absent → 0.65) must not produce a strong opening position
-    (standard / hold_firm / acceptable_variants_exist) in the playbook.
+def _precedent_for(playbook: dict[str, Any], document_id: str) -> list[dict[str, Any]]:
+    return [p for p in playbook["evidence"]["precedent"] if p["document_id"] == document_id]
 
-    The corpus has a single document that mentions no ACME alias → alias_absent
-    → confidence=0.65 < 0.70=AMBIGUITY_THRESHOLD → is_ambiguous=True.
-    All clause rollups for clauses only from this document must be 'negotiable'.
-    """
+
+def _corpus_doc(playbook: dict[str, Any], document_id: str) -> dict[str, Any]:
+    return next(d for d in playbook["corpus"]["documents"] if d["document_id"] == document_id)
+
+
+def test_ambiguous_provenance_is_unknown_paper_on_every_precedent(tmp_path: Path) -> None:
+    """Issue #225 (rewrites a test that iterated the v0.1 ``clauses`` key and so
+    asserted nothing on current output): an ambiguous detection (alias_absent ->
+    0.65 < AMBIGUITY_THRESHOLD) is paper "unknown" in the trail, on every
+    observation and on every OPF 0.4 precedent record of the deal, with the
+    detection's own basis and confidence -- and, with no template configured,
+    it contributes no our_standard and no n_signed_standard."""
     corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
     config = load_config(config_path)
     taxonomy = load_taxonomy(config.taxonomy_path)
 
     compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False)
 
-    # Verify the manifest marks the doc as ambiguous.
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text())
     deal_entry = next(d for d in manifest if d["document_id"] == "deal-ambig")
-    assert deal_entry["provenance_is_ambiguous"] is True, (
-        "Expected deal-ambig to be flagged as provenance_is_ambiguous"
-    )
+    assert deal_entry["provenance_is_ambiguous"] is True
     assert deal_entry["provenance_confidence"] < AMBIGUITY_THRESHOLD
 
-    # Verify no strong opening position in the playbook for clauses from this doc.
+    trail = json.loads((out_dir / "trail" / "deal-ambig.json").read_text())
+    assert trail["provenance_is_ambiguous"] is True
+    assert trail["provenance"] == "unknown", (
+        f"An ambiguous detection must be recorded as 'unknown', never coerced to a "
+        f"side; got {trail['provenance']!r}"
+    )
+
     playbook = json.loads((out_dir / "playbook.opf.json").read_text())
-    _STRONG_POSITIONS = {"standard", "hold_firm", "acceptable_variants_exist"}
-    for cp in playbook.get("clauses", []):
-        rollup = cp.get("rollup", {})
-        position = rollup.get("position", "negotiable")
-        assert position not in _STRONG_POSITIONS, (
-            f"Clause position {cp.get('taxonomy_id')!r} has strong position {position!r} "
-            f"but its only source document (deal-ambig) has ambiguous provenance. "
-            f"OPF §2.2 requires this to be 'negotiable'."
-        )
+    assert playbook["opf_version"] == "0.4"
+    assert validate_document(playbook).ok
+    records = _precedent_for(playbook, "deal-ambig")
+    assert records, "deal-ambig produced no precedent records -- nothing would be checked"
+    for record in records:
+        assert record["paper"] == "unknown", record
+        assert record["paper_basis"] == "alias_absent", record
+        assert record["paper_confidence"] == deal_entry["provenance_confidence"]
+        assert record["standard"] is False
+    # No template configured -> no our_standard anywhere, nothing signed-standard.
+    for clause in playbook["evidence"]["clauses"]:
+        assert clause["our_standard"] is None, clause
+        assert clause["n_signed_standard"] == 0, clause
+    # The observation store carries the deal's paper side, basis and confidence.
+    obs_rows = [
+        json.loads(line)
+        for line in (out_dir / "observations.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    deal_rows = [o for o in obs_rows if o["citation"]["document_id"] == "deal-ambig"]
+    assert deal_rows
+    assert {o["provenance"] for o in deal_rows} == {"unknown"}
+    assert {o["paper_basis"] for o in deal_rows} == {"alias_absent"}
+    assert {o["paper_confidence"] for o in deal_rows} == {deal_entry["provenance_confidence"]}
 
 
-def test_ambiguous_provenance_recorded_in_trail(tmp_path: Path) -> None:
-    """AC-2 + AC-3 integration: when provenance is ambiguous, trail records
-    provenance_is_ambiguous=True and provenance='counterparty_paper'."""
-    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
+def test_pre_225_stage_cache_entry_is_not_replayed(tmp_path: Path) -> None:
+    """Issue #225 changes what _compute_doc_result records (unknown paper side,
+    paper_basis/paper_confidence on observations), so a warm out/.cache entry
+    written before it (deviation_vs_template_version 10) must miss — otherwise
+    the relabelled counterparty_paper side would replay forever."""
+    import playbook_engine.pipeline as pipeline_mod
+
+    assert pipeline_mod._DEVIATION_VS_TEMPLATE_VERSION >= 11
+    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path, body=_AMBIG_OUR_LEAN_BODY)
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(config.taxonomy_path)
+
+    def _run() -> list[str]:
+        lines: list[str] = []
+        compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=True, progress=lines.append)
+        return [line for line in lines if "cache hits=" in line]
+
+    # Run 1: a pre-#225 engine populates the stage cache.
+    with patch.object(pipeline_mod, "_DEVIATION_VS_TEMPLATE_VERSION", 10):
+        assert any("misses=1" in line for line in _run())
+
+    # Run 2: the current engine over the same warm out dir must recompute.
+    run_2 = _run()
+    assert any("hits=0" in line and "misses=1" in line for line in run_2), run_2
+    trail = json.loads((out_dir / "trail" / "deal-ambig.json").read_text())
+    assert trail["provenance"] == "unknown"
+
+    # Run 3: a current-version entry IS replayed (the miss above is not vacuous).
+    run_3 = _run()
+    assert any("hits=1" in line and "misses=0" in line for line in run_3), run_3
+
+
+def test_ambiguous_our_paper_lean_is_never_relabelled(tmp_path: Path) -> None:
+    """Issue #225: the coercion this replaces flipped an alias_present our_paper
+    lean (0.65) to counterparty_paper. Now the trail and every precedent say
+    "unknown"; the frozen two-valued corpus.documents[].provenance keeps
+    today's value (counterparty_paper) with provenance_is_ambiguous: true
+    recording that the side was not determined."""
+    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path, body=_AMBIG_OUR_LEAN_BODY)
     config = load_config(config_path)
     taxonomy = load_taxonomy(config.taxonomy_path)
 
     compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False)
 
     trail = json.loads((out_dir / "trail" / "deal-ambig.json").read_text())
+    assert trail["provenance"] == "unknown"
     assert trail["provenance_is_ambiguous"] is True
-    # When ambiguous, pipeline must treat doc as counterparty_paper (OPF §2.2 gate).
-    assert trail["provenance"] == "counterparty_paper", (
-        f"Ambiguous provenance must be stored as counterparty_paper, got {trail['provenance']!r}"
+
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert validate_document(playbook).ok
+    corpus_doc = _corpus_doc(playbook, "deal-ambig")
+    assert corpus_doc["provenance"] == "counterparty_paper"
+    assert corpus_doc["provenance_is_ambiguous"] is True
+    records = _precedent_for(playbook, "deal-ambig")
+    assert records
+    assert {(r["paper"], r["paper_basis"]) for r in records} == {("unknown", "alias_present")}
+
+
+def test_v03_unknown_paper_counts_match_the_listed_observed_positions(tmp_path: Path) -> None:
+    """Issue #225: in 0.3 output an "unknown" paper side is emitted through
+    two_valued_side, and summary.confidence's counts (and the clause-library
+    note) are counted through the same mapping — the document never says one
+    thing in observed_positions and another in its counts."""
+    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path, body=_AMBIG_OUR_LEAN_BODY)
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(config.taxonomy_path)
+
+    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False, opf_version="0.3")
+
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert playbook["opf_version"] == "0.3"
+    assert validate_document(playbook).ok
+    corpus_doc = _corpus_doc(playbook, "deal-ambig")
+    assert corpus_doc["provenance"] == "counterparty_paper"
+    assert corpus_doc["provenance_is_ambiguous"] is True
+
+    clauses = playbook["evidence"]["clauses"]
+    assert clauses, "no clauses compiled -- nothing would be checked"
+    for clause in clauses:
+        positions = clause["observed_positions"]
+        assert positions
+        confidence = clause["summary"]["confidence"]
+        for side, key in (
+            ("our_paper", "n_our_paper"),
+            ("counterparty_paper", "n_counterparty_paper"),
+        ):
+            listed = {p["example_ref"]["document_id"] for p in positions if p["provenance"] == side}
+            assert confidence[key] == len(listed), (key, confidence, positions)
+        assert confidence["n_counterparty_paper"] == 1
+        assert confidence["score"] == 0.5
+
+    library = playbook["evidence"]["clause_library"]
+    assert library
+    for concept in library:
+        n_cp = sum(1 for f in concept["accepted_forms"] if f["provenance"] == "counterparty_paper")
+        assert n_cp == 1
+        assert concept["notes"] == f"Accepted in {n_cp} signed counterparty-paper observation(s)."
+
+
+def test_store_backed_judge_miss_is_unknown_never_counterparty(tmp_path: Path) -> None:
+    """Issue #225: a store-backed provenance judge with no verdict returns
+    "unknown" at 0.0 (basis needs_review) -- previously counterparty_paper at
+    0.0. Driven through the real StoreBackedProvenanceJudge on an empty store
+    (the alias_absent document is ambiguous, so the judge is consulted)."""
+    from playbook_engine.agent_judge import (
+        PendingQueue,
+        StoreBackedProvenanceJudge,
+        VerdictStore,
     )
-    assert trail["provenance_confidence"] < AMBIGUITY_THRESHOLD
+
+    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(config.taxonomy_path)
+    judge = StoreBackedProvenanceJudge(
+        store=VerdictStore(tmp_path / "verdicts.jsonl"),
+        pending=PendingQueue(tmp_path / "pending.jsonl"),
+    )
+
+    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False, provenance_judge=judge)
+
+    trail = json.loads((out_dir / "trail" / "deal-ambig.json").read_text())
+    assert trail["provenance"] == "unknown"
+    assert trail["provenance_confidence"] == 0.0
+    queued = [
+        json.loads(line)
+        for line in (tmp_path / "pending.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert [q["kind"] for q in queued] == ["provenance"]
+
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert validate_document(playbook).ok
+    corpus_doc = _corpus_doc(playbook, "deal-ambig")
+    # The frozen two-valued field must carry a side; it is flagged ambiguous.
+    assert corpus_doc["provenance"] == "counterparty_paper"
+    assert corpus_doc["provenance_is_ambiguous"] is True
+    assert corpus_doc["provenance_confidence"] == 0.0
+    records = _precedent_for(playbook, "deal-ambig")
+    assert records
+    for record in records:
+        assert (record["paper"], record["paper_basis"], record["paper_confidence"]) == (
+            "unknown",
+            "needs_review",
+            0.0,
+        )
+
+
+def test_unknown_paper_deal_signing_our_template_counts_as_signed_standard(
+    tmp_path: Path,
+) -> None:
+    """Issue #225: with a template configured, ``standard`` is the exact match
+    against it and paper side does not enter into it -- an unknown-paper deal
+    that signed our template language counts in n_signed_standard, while
+    our_standard still comes only from the configured template."""
+    corpus_dir, config_path, out_dir = _make_corpus_ambiguous_with_template(tmp_path)
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(config.taxonomy_path)
+
+    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False)
+
+    playbook = json.loads((out_dir / "playbook.opf.json").read_text())
+    assert validate_document(playbook).ok
+    assert playbook["baseline"]["has_canonical_template"] is True
+    assert _corpus_doc(playbook, "deal-ambig")["provenance_is_ambiguous"] is True
+    records = _precedent_for(playbook, "deal-ambig")
+    assert records and {r["paper"] for r in records} == {"unknown"}
+    standard_tids = {r["taxonomy_id"] for r in records if r["standard"] and r["signed"]}
+    assert standard_tids, "the deal signed template text verbatim -- some clause must be standard"
+    clauses = {c["taxonomy_id"]: c for c in playbook["evidence"]["clauses"]}
+    for tid in standard_tids:
+        assert clauses[tid]["n_signed_standard"] == 1, clauses[tid]
+    assert any(c["our_standard"] is not None for c in clauses.values())
+    for clause in clauses.values():
+        if clause["our_standard"] is not None:
+            assert clause["our_standard"]["source_ref"]["document_id"] == "template"
 
 
 # ---------------------------------------------------------------------------

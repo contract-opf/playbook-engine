@@ -639,8 +639,8 @@ def _fingerprint(tree: ClauseTree) -> list[str]:
     signed PDF of a DOCX draft could come out looking maximally distant
     from that draft purely because the two formats wrap lines differently
     (#97) — mixed-format trails are explicitly supported (see
-    docs/CORPUS-LAYOUT.md:22). ``provenance_detector.py``'s ``_fingerprint``
-    documents the identical physics for the template-similarity signal.
+    docs/CORPUS-LAYOUT.md:22). ``provenance_detector.py``'s template-similarity
+    signal uses this same fingerprint (``node_fingerprint``, issue #225).
 
     Collapsing all internal whitespace (including embedded newlines) to
     single spaces per node makes the fingerprint depend only on a node's
@@ -659,6 +659,14 @@ def _fingerprint(tree: ClauseTree) -> list[str]:
             if body:
                 lines.append(body)
     return lines
+
+
+def node_fingerprint(tree: ClauseTree) -> list[str]:
+    """Public wrapper around :func:`_fingerprint` — the format-independent
+    node fingerprint (one whitespace-collapsed element per node heading and
+    body). Shared with ``provenance_detector``'s template-similarity signal
+    (issue #225) so both compare documents on exactly the same footing."""
+    return _fingerprint(tree)
 
 
 def _edit_distance(a: list[str], b: list[str]) -> float:

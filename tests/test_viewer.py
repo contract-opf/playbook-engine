@@ -2690,6 +2690,49 @@ def test_bundle_method_panel_counts_list_shaped_version_ingest(tmp_path: Path) -
     assert "1 version file(s) failed extraction" in html
 
 
+def test_bundle_method_panel_counts_ambiguous_paper_as_undetermined(tmp_path: Path) -> None:
+    """Issue #225: an ambiguous detection's two-valued corpus provenance is not
+    a determined side, so the panel counts it as undetermined — never as our
+    paper or counterparty paper.
+
+    Seeds exactly the shape pipeline._compute_doc_result writes for an
+    undetermined side: ``two_valued_side("unknown")`` = ``counterparty_paper``
+    next to ``provenance_is_ambiguous: true`` (which used to be counted as
+    "on counterparty paper"), alongside one determined document per side.
+    """
+    _make_opf(tmp_path)
+    opf_path = tmp_path / "out" / "playbook.opf.json"
+    doc = json.loads(opf_path.read_text(encoding="utf-8"))
+    doc["corpus"]["documents"] = [
+        {
+            "document_id": "state-university-2023",
+            "provenance": "our_paper",
+            "provenance_is_ambiguous": False,
+            "in_scope": True,
+        },
+        {
+            "document_id": "city-college-2022",
+            "provenance": "counterparty_paper",
+            "provenance_is_ambiguous": False,
+            "in_scope": True,
+        },
+        {
+            "document_id": "pacific-state-college-2022",
+            "provenance": "counterparty_paper",
+            "provenance_is_ambiguous": True,
+            "in_scope": True,
+        },
+    ]
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+    result = CliRunner().invoke(cli, ["view", "bundle", str(tmp_path / "out")])
+    assert result.exit_code == 0, result.output
+    html = (tmp_path / "out" / "playbook.opf.html").read_text(encoding="utf-8")
+    assert "1 agreements on our paper" in html
+    # Only the determined counterparty document counts — not the ambiguous one.
+    assert "1 on counterparty paper, 1 undetermined" in html
+    assert "2 on counterparty paper" not in html
+
+
 # ---------------------------------------------------------------------------
 # Round trip — issue #90 acceptance criteria
 # ---------------------------------------------------------------------------

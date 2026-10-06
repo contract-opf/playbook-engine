@@ -13,6 +13,7 @@ from playbook_engine.config import ProvenanceConfig
 from playbook_engine.provenance_detector import (
     AMBIGUITY_THRESHOLD,
     PROVENANCE_JUDGE_BASES,
+    PROVENANCE_UNKNOWN,
     ProvenanceJudge,
     ProvenanceResult,
     _alias_position_in_recital,
@@ -23,6 +24,7 @@ from playbook_engine.provenance_detector import (
     _fingerprint,
     _similarity,
     detect_provenance,
+    two_valued_side,
 )
 
 # ---------------------------------------------------------------------------
@@ -176,7 +178,23 @@ def test_provenance_result_invalid_provenance() -> None:
     import pytest
 
     with pytest.raises(ValueError, match="Unknown provenance"):
-        ProvenanceResult(provenance="unknown", confidence=0.80, basis="alias_first_party")
+        ProvenanceResult(provenance="their_paper", confidence=0.80, basis="alias_first_party")
+
+
+def test_unknown_provenance_is_always_ambiguous() -> None:
+    """Issue #225: "unknown" (no side determined) is a valid result and is
+    ambiguous at ANY confidence — it can never pass as a determined side."""
+    for confidence in (0.0, 0.69, 0.70, 0.95):
+        r = ProvenanceResult(provenance=PROVENANCE_UNKNOWN, confidence=confidence, basis="llm")
+        assert r.is_ambiguous is True
+
+
+def test_two_valued_side_passes_sides_through_and_maps_unknown() -> None:
+    """Issue #225: frozen two-valued OPF fields carry a side unchanged; only a
+    side-less "unknown" needs a two-valued stand-in."""
+    assert two_valued_side("our_paper") == "our_paper"
+    assert two_valued_side("counterparty_paper") == "counterparty_paper"
+    assert two_valued_side(PROVENANCE_UNKNOWN) == "counterparty_paper"
 
 
 def test_provenance_result_invalid_basis() -> None:
@@ -209,6 +227,46 @@ def test_fingerprint_strips_whitespace() -> None:
     tree = _tree(_node("1", heading="  Definitions  ", text="  Body.  "))
     fp = _fingerprint(tree)
     assert all(s == s.strip() for s in fp)
+
+
+def test_fingerprint_is_the_version_orderers_node_fingerprint() -> None:
+    """Issue #225: template similarity uses the version orderer's
+    whitespace-collapsed node fingerprint — one element per node heading and
+    body, never one per physical line."""
+    from playbook_engine.version_orderer import node_fingerprint
+
+    tree = _our_paper_from_template()
+    assert _fingerprint(tree) == node_fingerprint(tree)
+    wrapped = _tree(_node("1", "Payment", "Payment shall be\nthirty days\n  after invoice."))
+    assert _fingerprint(wrapped) == ["Payment", "Payment shall be thirty days after invoice."]
+
+
+def test_similarity_ignores_line_wrapping_across_formats() -> None:
+    """Issue #225: the same template text extracted with a different line shape
+    (a DOCX paragraph vs the PDF/RTF extraction wrapping it across lines) is
+    identical — it no longer collapses toward zero on line shape alone."""
+    docx_like = _our_template_tree()
+    wrapped_nodes = [
+        _node(n.clause_path or "?", n.heading, "\n".join((n.text or "").split(" ")))
+        for n in docx_like.all_nodes()
+    ]
+    pdf_like = _tree(*wrapped_nodes)
+    assert _similarity(_fingerprint(docx_like), _fingerprint(pdf_like)) == 1.0
+    result = detect_provenance(pdf_like, _config(), template_tree=docx_like)
+    assert result.basis == "template_similarity"
+    assert result.provenance == "our_paper"
+    assert result.is_ambiguous is False
+
+
+def test_similarity_does_not_autojunk_repeated_elements() -> None:
+    """Issue #225: autojunk=False. With difflib's default heuristic an element
+    repeated in >1% of a 200+-element sequence is junk and never matched, so a
+    long agreement made mostly of one recurring line would score ~0 against an
+    identical copy of itself with a single line changed."""
+    template = ["Each party shall comply with applicable law."] * 250
+    doc = list(template)
+    doc[0] = "This Agreement is between ACME and Beta Ltd."
+    assert _similarity(doc, template) > 0.99
 
 
 def test_similarity_identical() -> None:
@@ -288,9 +346,12 @@ def test_any_alias_case_insensitive() -> None:
 
 
 def test_detect_our_paper_alias_first() -> None:
+    """Issue #225: name order is weak (many counterparty forms name the
+    customer first) — 0.70, at the threshold, and escalated to a judge."""
     result = detect_provenance(_our_paper_tree(), _config())
     assert result.provenance == "our_paper"
-    assert result.confidence >= 0.80
+    assert result.confidence == 0.70
+    assert result.is_ambiguous is False
     assert result.basis == "alias_first_party"
 
 
@@ -434,7 +495,8 @@ def test_alias_absent_result_is_ambiguous() -> None:
 
 
 def test_high_confidence_not_ambiguous() -> None:
-    """alias_first_party (0.85) and alias_second_party (0.75) must not be ambiguous."""
+    """alias_first_party (0.70) and alias_second_party (0.75) are not ambiguous
+    on their own (both are escalated whenever a judge is configured)."""
     assert not detect_provenance(_our_paper_tree(), _config()).is_ambiguous
     assert not detect_provenance(_counterparty_paper_tree(), _config()).is_ambiguous
 
@@ -506,14 +568,26 @@ def test_judge_called_on_ambiguous_result() -> None:
 def test_judge_not_called_on_high_confidence_non_judge_basis() -> None:
     """When confidence >= AMBIGUITY_THRESHOLD and basis not in PROVENANCE_JUDGE_BASES,
     the judge must NOT be called."""
-    # alias_first_party → confidence=0.85, basis="alias_first_party" (not in PROVENANCE_JUDGE_BASES).
-    tree = _our_paper_tree()
+    # A strong template match → template_similarity (not in PROVENANCE_JUDGE_BASES).
+    template = _our_template_tree()
     judge = _StubJudge(_stub_result())
 
-    result = detect_provenance(tree, _config(), provenance_judge=judge)
+    result = detect_provenance(template, _config(), template_tree=template, provenance_judge=judge)
 
-    assert len(judge.calls) == 0, "judge must not be called for high-confidence alias_first_party"
-    assert result.basis == "alias_first_party"
+    assert len(judge.calls) == 0, "judge must not be called for a strong template match"
+    assert result.basis == "template_similarity"
+
+
+def test_judge_called_on_alias_first_party() -> None:
+    """Issue #225: alias_first_party is in PROVENANCE_JUDGE_BASES — many
+    counterparty forms name the customer first, so the judge decides."""
+    judge = _StubJudge(_stub_result("counterparty_paper"))
+
+    result = detect_provenance(_our_paper_tree(), _config(), provenance_judge=judge)
+
+    assert len(judge.calls) == 1, "judge must be called for alias_first_party basis"
+    assert result.basis == "llm"
+    assert result.provenance == "counterparty_paper"
 
 
 def test_judge_called_on_name_order_basis() -> None:
@@ -609,6 +683,7 @@ def test_no_judge_no_change_in_behavior() -> None:
 
 def test_provenance_judge_bases_constant() -> None:
     """PROVENANCE_JUDGE_BASES must contain the name-order and unknown basis values."""
+    assert "alias_first_party" in PROVENANCE_JUDGE_BASES
     assert "alias_second_party" in PROVENANCE_JUDGE_BASES
     assert "no_aliases_configured" in PROVENANCE_JUDGE_BASES
 

@@ -743,12 +743,12 @@ def _build_needs_attention(
                 }
             )
 
-    # Corpus-level provenance ambiguity: pipeline flips provenance to
-    # "counterparty_paper" whenever the detector is ambiguous (confidence
-    # below threshold); on a prior run 40/44 documents were flipped and
-    # nothing warned. When more than half the trails carry
-    # provenance_is_ambiguous, the corpus provenance split is a default, not
-    # a detection — one loud line here.
+    # Corpus-level provenance ambiguity: the pipeline records an ambiguous
+    # detection (confidence below threshold) as paper "unknown" (issue #225;
+    # it used to flip it to "counterparty_paper" — on a prior run 40/44
+    # documents were flipped and nothing warned). When more than half the
+    # trails carry provenance_is_ambiguous, the corpus has no real paper
+    # split — one loud line here.
     trails = trails or {}
     ambiguous_count = sum(
         1
@@ -764,11 +764,10 @@ def _build_needs_attention(
                 "version": "—",
                 "taxonomy_id": None,
                 "reasons": [
-                    f"provenance ambiguity-flipped for {ambiguous_count}/"
+                    f"provenance undetermined for {ambiguous_count}/"
                     f"{len(trails)} document(s): detector confidence was below "
-                    "threshold so provenance defaulted to 'counterparty_paper' "
-                    "— the corpus provenance distribution is a default, not a "
-                    "detection"
+                    "threshold so their paper side is recorded as 'unknown' "
+                    "— the corpus has no real paper-side distribution"
                 ],
             }
         )
