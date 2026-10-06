@@ -340,6 +340,17 @@ class Observation:
                          (omitted from ``to_dict()`` then). Issue #225.
         paper_confidence: The provenance detection's confidence for this deal,
                          or ``None`` alongside ``paper_basis``.
+        alignment_confidence: How strongly the aligner bound this clause's
+                         versions together (issue #222) — the
+                         ``ClauseDiff.alignment_confidence`` of the row(s)
+                         the observation was built from (the lowest, for a
+                         terminal observation merging several nodes), or the
+                         ``ReversalRecord.alignment_confidence`` for a
+                         reversal. ``None`` when no row binds anything across
+                         versions (a single-version deal, a clause present in
+                         one version only). Serialized under the vendor key
+                         ``x_alignment_confidence`` (omitted when ``None``)
+                         until the format gives it a home.
     """
 
     observation_id: str
@@ -366,6 +377,7 @@ class Observation:
     standard: bool | None = None
     paper_basis: str | None = None
     paper_confidence: float | None = None
+    alignment_confidence: float | None = None
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -412,6 +424,10 @@ class Observation:
             d["paper_basis"] = self.paper_basis
         if self.paper_confidence is not None:
             d["paper_confidence"] = self.paper_confidence
+        # alignment_confidence (issue #222): vendor key, omitted when no row
+        # bound anything across versions.
+        if self.alignment_confidence is not None:
+            d["x_alignment_confidence"] = round(self.alignment_confidence, 6)
         return d
 
 
@@ -1406,6 +1422,7 @@ def build_observations(
                 proposed_by=proposed_by,
                 observed_at=observed_at,
                 standard=removed_standard,
+                alignment_confidence=clause_diff.alignment_confidence,
             )
         )
 
@@ -1434,6 +1451,10 @@ def build_observations(
             basis = weakest
         confidences = [c for c in (_confidence(r[0]) for r in rows) if c is not None]
         conf: float | None = min(confidences) if confidences else None
+        # Issue #222: the weakest binding among the group's rows.
+        alignments = [r[1].alignment_confidence for r in rows]
+        bound = [a for a in alignments if a is not None]
+        alignment_conf: float | None = min(bound) if bound else None
         attribution = _attribution(rep_idx)
         if attribution is None:
             attribution = next(
@@ -1474,6 +1495,7 @@ def build_observations(
                 proposed_by=proposed_by,
                 observed_at=observed_at,
                 standard=group_standard,
+                alignment_confidence=alignment_conf,
             )
         )
 
@@ -1532,7 +1554,7 @@ def build_observations(
                 ),
                 # "substantive": the proposed text genuinely differed from the
                 # signed terminal (that is exactly what detect_reversals
-                # verified via its token-subset check) — never "none". On
+                # verified via its retained-token ratio) — never "none". On
                 # the consumer path (issue #220) deviation is the standard
                 # fact instead, like every other row.
                 deviation=(
@@ -1554,14 +1576,15 @@ def build_observations(
                 # guessed (issue #177). Omitted entirely for legacy callers.
                 proposed_by="unknown" if our_party_aliases is not None else None,
                 confidence=None,
-                # "deterministic": detected by detect_reversals' token-subset
-                # comparison, not a judge call — but NOT one of the
+                # "deterministic": detected by detect_reversals' retained-
+                # token ratio (issue #222), not a judge call — but NOT one of the
                 # _UNJUDGED_BASES/_STUB_BASES values, since this is a real,
                 # fully-verified signal (unlike the stub judges' placeholder
                 # basis values) and must not cap the clause's rollup position
                 # to "negotiable".
                 basis="deterministic",
                 standard=reversal_standard,
+                alignment_confidence=r.alignment_confidence,
             )
         )
 

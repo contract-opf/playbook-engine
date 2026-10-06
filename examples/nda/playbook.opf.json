@@ -491,7 +491,7 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 1
       },
       {
         "id": "clause.export_control",
@@ -1068,7 +1068,21 @@
         "opening_text": null,
         "standard": true,
         "moved": true,
-        "refused_asks": []
+        "refused_asks": [
+          {
+            "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of confidentiality.",
+            "round": 1,
+            "ref": {
+              "document_id": "beta-industries",
+              "version": 2,
+              "clause_path": "4",
+              "char_span": [
+                968,
+                1316
+              ]
+            }
+          }
+        ]
       },
       {
         "id": "prec.13e258823f81e544",
@@ -3901,7 +3915,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:b28a082355fe228517a9329d9f500842fb396f4193e8af62b1c711cac5b37dfa"
+      "grounded_in": "evidence@sha256:6d82493e1fa31cba8827a8951ea6d80f546bf6c06b6ca53dd7cd16345b7d1f1c"
     }
   },
   "floor": {
@@ -4281,15 +4295,15 @@
         ]
       },
       "dropped_observations": {
-        "count": 5,
+        "count": 7,
         "by_reason": {
-          "removed_origin_undetermined": 1,
-          "survives_in_terminal": 4
+          "removed_origin_undetermined": 2,
+          "survives_in_terminal": 5
         },
         "by_document": {
           "beta-industries": 2,
-          "theta-logistics": 1,
-          "zeta-diagnostics": 2
+          "theta-logistics": 2,
+          "zeta-diagnostics": 3
         }
       }
     },
@@ -4305,7 +4319,7 @@
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:5f1d60cbcdc0e9e2c72b9e64a44b6ee688575bb905c7b5e207cf0f43a1b12551",
+      "sha256": "sha256:0cd173f36d934ee8f1eb281491cf920cd519e0889eb71524c5c4267b0da7927e",
       "records": 113
     }
   },
@@ -4598,9 +4612,26 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "signed_variants": [],
-        "refused_asks": [],
+        "refused_asks": [
+          {
+            "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
+            "n_deals": 1,
+            "ref": {
+              "document_id": "beta-industries",
+              "version": 2,
+              "clause_path": "4",
+              "char_span": [
+                968,
+                1316
+              ]
+            },
+            "precedent_ids": [
+              "prec.55b0f3a1eb6df7c8"
+            ]
+          }
+        ],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 1
       },
       {
         "id": "clause.export_control",
@@ -5251,10 +5282,10 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:6d6579bd6cbfa4d222b6beee0806baec20fedf54183eefd2e2c30c22f25ecc4e",
+    "content_hash": "sha256:8fe863af0733e1cb25eabe09b20d092f6a76e4ff294e279dbdacccf7e611f231",
     "section_digests": {
-      "evidence": "sha256:b28a082355fe228517a9329d9f500842fb396f4193e8af62b1c711cac5b37dfa",
-      "posture": "sha256:24dbb264e8bcb5dfd45af1bd17df091dec01d06816fd5106f2dd721aaf0147e4",
+      "evidence": "sha256:6d82493e1fa31cba8827a8951ea6d80f546bf6c06b6ca53dd7cd16345b7d1f1c",
+      "posture": "sha256:22f5c0b461682195932d3249bd4a562b5d865f529208564588c99330042c46c6",
       "floor": "sha256:a05838c288dcba9c481f2870721864b7839f2559a7d3120f87acc2e2610666bb",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }

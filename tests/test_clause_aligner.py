@@ -50,6 +50,12 @@ def _cc(
     return ClassifiedClause(node=_node(path, taxonomy_id, text), classification=cls)
 
 
+def _tokens_jaccard(a: str, b: str) -> float:
+    from playbook_engine.clause_aligner import _jaccard, _tokens
+
+    return _jaccard(_tokens(a), _tokens(b))
+
+
 # ---------------------------------------------------------------------------
 # align_versions: edge cases
 # ---------------------------------------------------------------------------
@@ -193,8 +199,8 @@ def test_align_deletion_other_rows_intact() -> None:
 
 def test_align_unclassified_clauses_grouped_together() -> None:
     """Unclassified clauses (taxonomy_id=None) get their own bucket."""
-    v1 = [_cc("1", None, "Miscellaneous preamble text here.")]
-    v2 = [_cc("1", None, "Miscellaneous preamble text revised.")]
+    v1 = [_cc("1", None, "Miscellaneous preamble text here regarding the parties.")]
+    v2 = [_cc("1", None, "Miscellaneous preamble text revised regarding the parties.")]
     result = align_versions([("v1", v1), ("v2", v2)])
     assert len(result) == 1
     assert result[0].taxonomy_id is None
@@ -204,8 +210,8 @@ def test_align_unclassified_clauses_grouped_together() -> None:
 
 def test_align_mixed_classified_and_unclassified() -> None:
     """Classified and unclassified clauses coexist without interfering."""
-    v1 = [_cc("1", "ind"), _cc("2", None, "Preamble.")]
-    v2 = [_cc("1", "ind"), _cc("2", None, "Preamble revised.")]
+    v1 = [_cc("1", "ind"), _cc("2", None, "Preamble recitals background text.")]
+    v2 = [_cc("1", "ind"), _cc("2", None, "Preamble recitals background text revised.")]
     result = align_versions([("v1", v1), ("v2", v2)])
     assert len(result) == 2
 
@@ -240,14 +246,20 @@ def test_align_two_indemnification_clauses_same_count() -> None:
 def test_align_merge_two_clauses_to_one() -> None:
     """v1 has 2 ind clauses; v2 merges them into 1.
 
-    The extra v1 clause becomes an extra row with v2=None.
+    The merged clause stays on the row of the part it is similar to (at or
+    above ALIGNMENT_AMBIGUITY_THRESHOLD); the other v1 clause becomes a row
+    with v2=None.
     """
     v1 = [
-        _cc("1", "ind", "Indemnification direct losses."),
-        _cc("2", "ind", "Indemnification indirect losses."),
+        _cc("1", "ind", "Supplier shall indemnify Customer for direct losses arising from breach."),
+        _cc("2", "ind", "Supplier shall also cover indirect losses."),
     ]
     v2 = [
-        _cc("1", "ind", "Indemnification covers direct and indirect losses."),
+        _cc(
+            "1",
+            "ind",
+            "Supplier shall indemnify Customer for direct and indirect losses arising from breach.",
+        ),
     ]
     result = align_versions([("v1", v1), ("v2", v2)])
     # Expect 2 rows: one matched + one v1-only
@@ -262,18 +274,554 @@ def test_align_merge_two_clauses_to_one() -> None:
 def test_align_split_one_clause_to_two() -> None:
     """v1 has 1 ind clause; v2 splits it into 2.
 
-    The extra v2 clause becomes an extra row with v1=None.
+    The part similar to the original stays on its row; the extra v2 clause
+    becomes a row with v1=None.
     """
-    v1 = [_cc("1", "ind", "Indemnification covers all losses.")]
+    v1 = [
+        _cc(
+            "1",
+            "ind",
+            "Supplier shall indemnify Customer for direct and indirect losses arising from breach.",
+        )
+    ]
     v2 = [
-        _cc("1", "ind", "Indemnification covers direct losses."),
-        _cc("2", "ind", "Indemnification covers indirect losses."),
+        _cc("1", "ind", "Supplier shall indemnify Customer for direct losses arising from breach."),
+        _cc("2", "ind", "Supplier shall also cover indirect losses."),
     ]
     result = align_versions([("v1", v1), ("v2", v2)])
     ind_rows = [r for r in result if r.taxonomy_id == "ind"]
     assert len(ind_rows) == 2
     v1_clauses = [r.slots[0].clause for r in ind_rows]
     assert v1_clauses.count(None) == 1
+
+
+# ---------------------------------------------------------------------------
+# align_versions: similarity floor on the bucket path (issue #222)
+# ---------------------------------------------------------------------------
+
+_REPORTS = "The supplier shall deliver monthly service reports to the customer portal."
+_REPORTS_EDITED = "The supplier shall deliver quarterly service reports to the customer portal."
+_PRICING = "Each party shall keep pricing schedules confidential always."
+_PRICING_EDITED = "Each party shall keep pricing schedules confidential throughout."
+# Shares only "supplier"/"shall" with _REPORTS — same taxonomy, different clause.
+_INSURANCE = "The supplier shall maintain insurance coverage with reputable carriers."
+
+
+def test_unrelated_same_taxonomy_clauses_at_low_jaccard_are_not_paired() -> None:
+    """Count-mismatch path: a clause sharing a token or two with a reference
+    clause must NOT bind to it (it used to bind at any similarity > 0, and
+    the two were diffed as one fabricated "modified" clause)."""
+    assert (
+        _tokens_jaccard(_REPORTS, _INSURANCE) > 0.0
+        and _tokens_jaccard(_REPORTS, _INSURANCE) < ALIGNMENT_AMBIGUITY_THRESHOLD
+    )
+    v1 = [_cc("1", "svc", _REPORTS), _cc("2", "svc", _PRICING)]
+    v2 = [_cc("1", "svc", _INSURANCE)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 3
+    paired = [r for r in result if r.is_present_in_all]
+    assert paired == []
+    insurance_row = next(r for r in result if r.slots[1].clause is v2[0])
+    assert insurance_row.slots[0].clause is None
+
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed", "removed"]
+
+
+def test_unrelated_same_taxonomy_clauses_equal_count_are_not_paired() -> None:
+    """Equal-count path: one clause per version under one taxonomy_id used to
+    be zipped by position with no similarity check at all."""
+    v1 = [_cc("1", "svc", _REPORTS)]
+    v2 = [_cc("1", "svc", _INSURANCE)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert [r.slots[0].clause for r in result] == [v1[0], None]
+    assert [r.slots[1].clause for r in result] == [None, v2[0]]
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def test_equal_count_swapped_clauses_matched_by_similarity() -> None:
+    """Two same-taxonomy clauses swap positions AND are edited — too short /
+    too different for the global move phase — so the bucket path decides.
+    They must pair by similarity, not by position."""
+    for a, b in ((_REPORTS, _REPORTS_EDITED), (_PRICING, _PRICING_EDITED)):
+        sim = _tokens_jaccard(a, b)
+        assert ALIGNMENT_AMBIGUITY_THRESHOLD <= sim < MOVE_JACCARD_THRESHOLD
+    v1 = [_cc("1", "svc", _REPORTS), _cc("2", "svc", _PRICING)]
+    v2 = [_cc("1", "svc", _PRICING_EDITED), _cc("2", "svc", _REPORTS_EDITED)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    pairs = {(r.slots[0].clause.node.text, r.slots[1].clause.node.text) for r in result}
+    assert pairs == {(_REPORTS, _REPORTS_EDITED), (_PRICING, _PRICING_EDITED)}
+    for row in result:
+        conf = row.slots[0].alignment_confidence
+        assert conf is not None and ALIGNMENT_AMBIGUITY_THRESHOLD <= conf < 1.0
+
+    diffs = diff_aligned(result, ["v1", "v2"]).net.diffs
+    assert all(d.kind == "modified" for d in diffs)
+    assert {d.alignment_confidence for d in diffs} == {
+        r.slots[0].alignment_confidence for r in result
+    }
+
+
+def test_identical_duplicates_keep_positional_order() -> None:
+    """Identical same-taxonomy clauses (similarity 1.0 ties) pair in order."""
+    v1 = [_cc("1", "svc", _REPORTS), _cc("2", "svc", _REPORTS)]
+    v2 = [_cc("1", "svc", _REPORTS), _cc("2", "svc", _REPORTS)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    # Substantial identical text is paired by the move phase; either way each
+    # clause pairs with its positional twin.
+    assert [(r.slots[0].clause, r.slots[1].clause) for r in result] == [
+        (v1[0], v2[0]),
+        (v1[1], v2[1]),
+    ]
+
+
+def test_gradual_drift_across_drafts_stays_on_one_row() -> None:
+    """Each draft is compared with its nearest bound draft, so a clause that
+    drifts below the threshold from the OPENING draft — but never between
+    two adjacent drafts — stays one logical clause."""
+    d1 = "Supplier shall deliver monthly written service reports to the customer portal."
+    d2 = "Supplier shall deliver quarterly written service reports to the customer portal."
+    d3 = "Supplier shall deliver quarterly written performance reports to the customer portal."
+    d4 = "Supplier shall deliver quarterly written performance summaries to the customer portal."
+    assert _tokens_jaccard(d1, d4) < ALIGNMENT_AMBIGUITY_THRESHOLD
+    versions = [(f"v{i}", [_cc("1", "svc", t)]) for i, t in enumerate((d1, d2, d3, d4), start=1)]
+    result = align_versions(versions)
+    assert len(result) == 1
+    assert result[0].is_present_in_all
+
+
+def test_one_number_change_in_short_headingless_clause_stays_one_modified_row() -> None:
+    """Fix round 1 regression: a short heading-less clause whose only edit is
+    one number ("five (5)" -> "three (3)") is the same clause. Its token-set
+    Jaccard is below the floor (a seven-token clause loses two tokens and
+    gains two), but the edit is one contiguous replaced span, so the
+    localized-edit rescue binds it — one ``modified`` row, never an
+    add/remove pair with identical opening text."""
+    from playbook_engine.clause_aligner import ALIGNMENT_RESCUE_MIN_JACCARD
+
+    before = "The confidentiality obligations in this Agreement continue for five (5) years."
+    after = "The confidentiality obligations in this Agreement continue for three (3) years."
+    jac, _, spans = _rescue_shape(before, after)
+    assert ALIGNMENT_RESCUE_MIN_JACCARD <= jac < ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert spans == 1
+    v1 = [_cc("1", None, before)]
+    v2 = [_cc("1", None, after)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 1
+    assert result[0].match_basis is None, "bucket path, not the move phase"
+    assert (result[0].slots[0].clause, result[0].slots[1].clause) == (v1[0], v2[0])
+    # The reported confidence is the Jaccard, never a rescue score.
+    assert result[0].slots[0].alignment_confidence == pytest.approx(jac)
+
+    diffs = diff_aligned(result, ["v1", "v2"]).net.diffs
+    assert [d.kind for d in diffs] == ["modified"]
+
+
+def test_rescue_does_not_bind_unrelated_clauses() -> None:
+    """The localized-edit rescue is no back door for unrelated text: clauses
+    that share only a few words still split into removed + added."""
+    before = "The receiving party may disclose Confidential Information to its legal advisers."
+    after = "Confidential Information excludes information the party independently developed."
+    v1 = [_cc("1", None, before)]
+    v2 = [_cc("1", None, after)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def _rescue_shape(a: str, b: str) -> tuple[float, int, int]:
+    """(Jaccard, shorter clause's content-token count, number of non-equal
+    ``SequenceMatcher`` opcodes — contiguous edit spans — between the two
+    content-token sequences)."""
+    from difflib import SequenceMatcher
+
+    from playbook_engine.clause_aligner import _clause_tokens
+
+    ta, tb = _clause_tokens(a), _clause_tokens(b)
+    short = min(len(ta.seq), len(tb.seq))
+    opcodes = SequenceMatcher(None, ta.seq, tb.seq, autojunk=False).get_opcodes()
+    spans = sum(1 for tag, *_ in opcodes if tag != "equal")
+    return _tokens_jaccard(a, b), short, spans
+
+
+_ASSIGNMENT = "Neither party may assign this Agreement without consent."
+_PUBLICITY = (
+    "Neither party may disclose the terms of this Agreement or use the other "
+    "party's name without prior written consent."
+)
+_COSTS = "Each party shall bear its own costs."
+_EXPORT = (
+    "Each party shall comply with all applicable export control laws and "
+    "regulations and shall bear its own costs of compliance."
+)
+
+
+@pytest.mark.parametrize(
+    ("short", "long"),
+    [(_ASSIGNMENT, _PUBLICITY), (_COSTS, _EXPORT)],
+    ids=["assignment-vs-publicity", "costs-vs-export"],
+)
+def test_short_boilerplate_does_not_bind_an_unrelated_longer_clause(short: str, long: str) -> None:
+    """Review regressions (a) and (b), issue #222: short boilerplate shares a
+    skeleton with an unrelated longer clause of the same bucket — nearly all
+    of its tokens appear, in order, in the longer one — but it is a
+    different provision. It must split into removed + added, never one
+    ``modified`` row (whose diff would fabricate a refused ask). Each fails
+    the rescue twice over: its Jaccard is below ALIGNMENT_RESCUE_MIN_JACCARD
+    and the two clauses differ in more than one separate span."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        ALIGNMENT_RESCUE_MIN_TOKENS,
+    )
+
+    jac, n_short, spans = _rescue_shape(short, long)
+    assert jac < ALIGNMENT_RESCUE_MIN_JACCARD
+    assert n_short >= ALIGNMENT_RESCUE_MIN_TOKENS, "fixture: long enough for the rescue"
+    assert spans > 1
+
+    v1 = [_cc("1", None, short)]
+    v2 = [_cc("1", None, long)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def test_assignment_vs_publicity_yields_no_fragment_reversal() -> None:
+    """Review regression (a), three rounds: the assignment clause is replaced
+    by the publicity clause in the draft and restored in the signed copy.
+    The publicity clause is its own row, so any reversal reports it whole —
+    never a fabricated fragment diffed against the assignment clause."""
+    from playbook_engine.reversal_detector import detect_reversals
+
+    versions = [
+        ("v1", [_cc("1", None, _ASSIGNMENT)]),
+        ("v2", [_cc("1", None, _PUBLICITY)]),
+        ("v3", [_cc("1", None, _ASSIGNMENT)]),
+    ]
+    result = align_versions(versions)
+    assert sorted(tuple(s.clause is not None for s in r.slots) for r in result) == [
+        (False, True, False),
+        (True, False, True),
+    ]
+    doc = diff_aligned(result, ["v1", "v2", "v3"])
+    assert all(d.kind != "modified" for c in doc.consecutive for d in c.diffs)
+    for rev in detect_reversals(doc):
+        assert rev.proposed_text.strip() in {_PUBLICITY, _ASSIGNMENT}
+
+
+# Review regression (c), issue #222: (L, L', S) where L' is an edit of L and
+# S is short text that L' wholly contains. "primary": L' adds one word to L
+# (Jaccard 0.875; L is too short for the move phase) and S is itself a
+# primary candidate for L' (0.75). "rescue": L' appends a proviso to L (a
+# rescue-only pair, 0.69) and S, a prefix of L', is itself a rescue
+# candidate for L' (0.54).
+_CASE_C: dict[str, tuple[str, str, str]] = {
+    "primary": (
+        "Recipient shall hold Confidential Information in strict confidence.",
+        "Recipient shall hold all Confidential Information in strict confidence.",
+        "Recipient shall hold Confidential Information in confidence.",
+    ),
+    "rescue": (
+        "Recipient shall hold Confidential Information in strict confidence for five years.",
+        "Recipient shall hold Confidential Information in strict confidence for five years "
+        "unless disclosure is legally compelled.",
+        "Recipient shall hold Confidential Information in strict confidence.",
+    ),
+}
+
+
+@pytest.mark.parametrize("s_first", [False, True], ids=["ticket-order", "s-positionally-closer"])
+@pytest.mark.parametrize("shape", sorted(_CASE_C))
+def test_case_c_partner_goes_to_the_better_jaccard_clause(shape: str, s_first: bool) -> None:
+    """Review regression (c), issue #222: v1 = [L, S], v2 = [L'] where L' is
+    an edit of L and S is short text wholly contained in L'. S is a viable
+    bind candidate for L' in its own right (alone, the two bind), but its
+    Jaccard trails L–L' by more than ALIGNMENT_RESCUE_MARGIN, so the contest
+    rule cannot decide this — Jaccard-first ranking does. L' binds to L and
+    S is reported removed, also when S sits positionally closer to L' (a
+    position-first ranking would hand L' to S)."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MARGIN,
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        _clause_tokens,
+        _is_localized_edit,
+    )
+
+    long_, edited, short = _CASE_C[shape]
+    j_long = _tokens_jaccard(long_, edited)
+    j_short = _tokens_jaccard(short, edited)
+    if shape == "primary":
+        assert ALIGNMENT_AMBIGUITY_THRESHOLD <= j_short < j_long
+    else:
+        assert ALIGNMENT_RESCUE_MIN_JACCARD <= j_short < j_long < ALIGNMENT_AMBIGUITY_THRESHOLD
+        for text in (long_, short):
+            assert _is_localized_edit(_clause_tokens(text), _clause_tokens(edited))
+    assert j_long - j_short > ALIGNMENT_RESCUE_MARGIN
+
+    clause_l = _cc("1", "conf", long_)
+    clause_s = _cc("2", "conf", short)
+    v2 = [_cc("1", "conf", edited)]
+
+    # S is a viable candidate: with L absent, S and L' bind.
+    alone = align_versions([("v1", [clause_s]), ("v2", v2)])
+    assert len(alone) == 1 and alone[0].is_present_in_all
+    assert alone[0].slots[0].alignment_confidence == pytest.approx(j_short)
+
+    v1 = [clause_s, clause_l] if s_first else [clause_l, clause_s]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    by_v1 = {r.slots[0].clause.node.text: r for r in result if r.slots[0].clause}
+    assert by_v1[long_].slots[1].clause is v2[0]
+    assert by_v1[short].slots[1].clause is None
+    # The reported confidence is the Jaccard, never a rescue score.
+    conf = by_v1[long_].slots[0].alignment_confidence
+    assert conf == pytest.approx(j_long)
+
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["modified", "removed"]
+
+
+# Three same-bucket service clauses for the ranking and one-to-one tests.
+# _Q_REPORTS is the draft; _M_REPORTS is its monthly predecessor (Jaccard
+# 0.79) and _Q_INVOICES a different provision that still clears the primary
+# threshold against it (0.74). Both are below MOVE_JACCARD_THRESHOLD, so the
+# bucket path, not the move phase, decides.
+_Q_REPORTS = (
+    "Supplier shall deliver quarterly written service reports to the customer "
+    "portal within ten business days after each quarter end."
+)
+_M_REPORTS = (
+    "Supplier shall deliver monthly written service reports to the customer "
+    "portal within ten business days after each month end."
+)
+_Q_INVOICES = (
+    "Supplier shall deliver quarterly service invoices to the customer portal "
+    "within thirty business days after each quarter end."
+)
+
+
+def test_primary_binds_rank_by_jaccard_before_position() -> None:
+    """Jaccard-first ranking, primary vs primary (issue #222): both v1 rows
+    clear ALIGNMENT_AMBIGUITY_THRESHOLD against the one v2 clause, and the
+    lower-Jaccard row sits positionally closer to it. The higher Jaccard
+    wins; the other row is reported removed."""
+    j_reports = _tokens_jaccard(_M_REPORTS, _Q_REPORTS)
+    j_invoices = _tokens_jaccard(_Q_INVOICES, _Q_REPORTS)
+    assert ALIGNMENT_AMBIGUITY_THRESHOLD <= j_invoices < j_reports < MOVE_JACCARD_THRESHOLD
+
+    v1 = [_cc("1", "svc", _Q_INVOICES), _cc("2", "svc", _M_REPORTS)]
+    v2 = [_cc("1", "svc", _Q_REPORTS)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    by_v1 = {r.slots[0].clause.node.text: r for r in result if r.slots[0].clause}
+    assert by_v1[_M_REPORTS].slots[1].clause is v2[0]
+    assert by_v1[_Q_INVOICES].slots[1].clause is None
+    assert by_v1[_M_REPORTS].slots[0].alignment_confidence == pytest.approx(j_reports)
+
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["modified", "removed"]
+
+
+def test_two_clauses_qualifying_for_one_row_each_land_on_exactly_one_row() -> None:
+    """One-to-one binding (issue #222): both v2 clauses clear
+    ALIGNMENT_AMBIGUITY_THRESHOLD against the same v1 row. The higher
+    Jaccard takes the row and the other opens its own row: every clause of
+    every version appears on exactly one row, none overwritten or lost."""
+    assert _tokens_jaccard(_Q_INVOICES, _Q_REPORTS) >= ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert _tokens_jaccard(_M_REPORTS, _Q_REPORTS) >= ALIGNMENT_AMBIGUITY_THRESHOLD
+
+    v1 = [_cc("1", "svc", _Q_REPORTS), _cc("2", "svc", _INSURANCE)]
+    v2 = [_cc("1", "svc", _Q_INVOICES), _cc("2", "svc", _M_REPORTS)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    for vi, clauses in enumerate((v1, v2)):
+        for clause in clauses:
+            assert sum(1 for r in result if r.slots[vi].clause is clause) == 1
+    assert len(result) == 3
+    reports_row = next(r for r in result if r.slots[0].clause is v1[0])
+    assert reports_row.slots[1].clause is v2[1]
+
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "modified", "removed"]
+
+
+def test_contested_rescue_bind_is_refused() -> None:
+    """A rescue bind may not take a partner from a competing pair whose
+    Jaccard is within ALIGNMENT_RESCUE_MARGIN of its own: when the draft
+    clause is about as similar to another open row, the rescue does not
+    settle the choice, and the clause opens its own row."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MARGIN,
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        _clause_tokens,
+        _is_localized_edit,
+    )
+
+    reports = (
+        "Supplier shall deliver monthly written service reports to the customer "
+        "portal within ten business days."
+    )
+    invoices = (
+        "Supplier shall deliver monthly written invoices to the customer portal "
+        "within ten business days of each calendar month end."
+    )
+    draft = reports[:-1] + (
+        " after each calendar month ends, together with uptime statistics and incident summaries."
+    )
+    rescue_jac = _tokens_jaccard(reports, draft)
+    assert ALIGNMENT_RESCUE_MIN_JACCARD <= rescue_jac < ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert _is_localized_edit(_clause_tokens(reports), _clause_tokens(draft))
+    assert _tokens_jaccard(invoices, draft) >= rescue_jac - ALIGNMENT_RESCUE_MARGIN
+
+    v1 = [_cc("1", "svc", reports), _cc("2", "svc", invoices)]
+    v2 = [_cc("1", "svc", draft)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 3
+    assert not any(r.is_present_in_all for r in result)
+
+    # Uncontested (the competing row absent), the same pair binds.
+    alone = align_versions([("v1", [v1[0]]), ("v2", v2)])
+    assert len(alone) == 1 and alone[0].is_present_in_all
+
+
+def test_rescue_contested_by_a_second_clause_for_the_same_row_is_refused() -> None:
+    """Clause-side contest (issue #222): two v2 clauses are each a localized
+    edit of the same v1 row — one changes the term, one appends a survival
+    proviso — and their Jaccards are within ALIGNMENT_RESCUE_MARGIN of each
+    other. The rescue does not settle that choice: neither binds, the row is
+    reported removed and both draft clauses added."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MARGIN,
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        _clause_tokens,
+        _is_localized_edit,
+    )
+
+    term = "The confidentiality obligations in this Agreement continue for five (5) years."
+    shorter = "The confidentiality obligations in this Agreement continue for three (3) years."
+    survives = (
+        "The confidentiality obligations in this Agreement continue for five (5) "
+        "years after termination of this Agreement for any reason."
+    )
+    unrelated = "Either party may terminate this Agreement on thirty days written notice."
+    j_shorter = _tokens_jaccard(term, shorter)
+    j_survives = _tokens_jaccard(term, survives)
+    for jac, text in ((j_shorter, shorter), (j_survives, survives)):
+        assert ALIGNMENT_RESCUE_MIN_JACCARD <= jac < ALIGNMENT_AMBIGUITY_THRESHOLD
+        assert _is_localized_edit(_clause_tokens(term), _clause_tokens(text))
+    assert abs(j_shorter - j_survives) < ALIGNMENT_RESCUE_MARGIN
+
+    v1 = [_cc("1", "term", term), _cc("2", "term", unrelated)]
+    v2 = [_cc("1", "term", shorter), _cc("2", "term", survives)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 4
+    assert not any(r.is_present_in_all for r in result)
+    for vi, clauses in enumerate((v1, v2)):
+        for clause in clauses:
+            assert sum(1 for r in result if r.slots[vi].clause is clause) == 1
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "added", "removed", "removed"]
+
+    # Uncontested (the competing clause absent), each pair binds.
+    for draft in v2:
+        alone = align_versions([("v1", v1), ("v2", [draft])])
+        assert any(r.slots[0].clause is v1[0] and r.slots[1].clause is draft for r in alone)
+
+
+def test_rescue_ignores_a_clause_below_the_min_token_floor() -> None:
+    """ALIGNMENT_RESCUE_MIN_TOKENS guard: a two-content-token clause that grew
+    by one appended token is one contiguous insert at Jaccard 0.67, but a
+    clause that short proves nothing about identity. Only the primary
+    threshold applies, so the two split into removed + added."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        ALIGNMENT_RESCUE_MIN_TOKENS,
+    )
+
+    short = "Notices in writing."
+    long = "Notices in writing by email."
+    jac, n_short, spans = _rescue_shape(short, long)
+    assert ALIGNMENT_RESCUE_MIN_JACCARD <= jac < ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert spans == 1
+    assert n_short < ALIGNMENT_RESCUE_MIN_TOKENS
+
+    v1 = [_cc("1", "notices", short)]
+    v2 = [_cc("1", "notices", long)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def test_single_span_rewrite_below_the_rescue_jaccard_is_not_bound() -> None:
+    """A clause whose second half is rewritten is still ONE contiguous
+    replaced span, but its Jaccard is below ALIGNMENT_RESCUE_MIN_JACCARD:
+    the edit shape alone never binds, so the clauses split into removed +
+    added."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        ALIGNMENT_RESCUE_MIN_TOKENS,
+    )
+
+    before = (
+        "Supplier shall deliver monthly service reports to the customer portal "
+        "within ten business days."
+    )
+    after = "Supplier shall deliver monthly service reports to the customer by registered post each quarter."
+    jac, n_short, spans = _rescue_shape(before, after)
+    assert spans == 1
+    assert n_short >= ALIGNMENT_RESCUE_MIN_TOKENS
+    assert jac < ALIGNMENT_RESCUE_MIN_JACCARD
+
+    v1 = [_cc("1", "reports", before)]
+    v2 = [_cc("1", "reports", after)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
+
+
+def test_rescue_requires_exactly_one_edit_span() -> None:
+    """Edit-shape guard: two separate number swaps leave the Jaccard above
+    ALIGNMENT_RESCUE_MIN_JACCARD, but the clauses differ in two separate
+    spans — not a localized edit — so the rescue does not apply and, below
+    the primary threshold, the clauses split into removed + added."""
+    from playbook_engine.clause_aligner import (
+        ALIGNMENT_RESCUE_MIN_JACCARD,
+        _clause_tokens,
+        _is_localized_edit,
+    )
+
+    before = (
+        "The confidentiality obligations in this Agreement continue for five (5) "
+        "years after disclosure by the disclosing party."
+    )
+    after = (
+        "The confidentiality obligations in this Agreement continue for three (3) "
+        "years after disclosure by the receiving party."
+    )
+    jac, _, spans = _rescue_shape(before, after)
+    assert ALIGNMENT_RESCUE_MIN_JACCARD <= jac < ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert spans == 2
+    assert not _is_localized_edit(_clause_tokens(before), _clause_tokens(after))
+
+    v1 = [_cc("1", "term", before)]
+    v2 = [_cc("1", "term", after)]
+    result = align_versions([("v1", v1), ("v2", v2)])
+    assert len(result) == 2
+    assert all(r.match_basis is None for r in result), "bucket path, not the move phase"
+    kinds = sorted(d.kind for d in diff_aligned(result, ["v1", "v2"]).net.diffs)
+    assert kinds == ["added", "removed"]
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +1217,7 @@ def test_moved_clause_no_longer_floods_added_removed() -> None:
 
 
 def test_alignment_judge_split_emits_multiple_rows() -> None:
-    """A judge resolving a 3-version bucket with a 2-row split must not
+    """A judge resolving a multi-version bucket with a 2-row split must not
     collapse the pairings into one overwritten row, and must address the
     correct version index for each pairing (not always the first non-ref
     version) — regression test for issue #111.
@@ -689,9 +1237,11 @@ def test_alignment_judge_split_emits_multiple_rows() -> None:
             # ref clause, no match on the other side.
             return [(0, None)] if before_clauses else []
 
-    # v1 (ref) has 2 "ind" clauses; v2 and v3 each have 1 clause that both
-    # best-match v1's first clause (low Jaccard, so the row is flagged), and
-    # so land in the SAME bucket row alongside the ref clause.
+    # v1 (ref) has 2 "ind" clauses; v2 and v3 each have 1 clause that binds
+    # (at or above ALIGNMENT_AMBIGUITY_THRESHOLD, issue #222) to v1's first
+    # clause's row, so both land in the SAME bucket row alongside the ref
+    # clause; v4 has no "ind" clause at all, so that row has an empty slot
+    # and is flagged for the judge.
     v1 = [
         _cc(
             "1",
@@ -708,19 +1258,22 @@ def test_alignment_judge_split_emits_multiple_rows() -> None:
         _cc(
             "1",
             "ind",
-            "Indemnification duties survive termination for direct losses under agreement.",
+            "Indemnification obligations survive termination of this agreement entirely for "
+            "direct losses.",
         ),
     ]
     v3 = [
         _cc(
             "1",
             "ind",
-            "Indemnification survive termination covering consequential losses agreement.",
+            "Indemnification obligations survive expiration of this agreement entirely for "
+            "direct losses.",
         ),
     ]
+    v4 = [_cc("1", "gov", "Governing law is the law of the State of Delaware.")]
 
     judge = _SplitJudge()
-    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3)], alignment_judge=judge)
+    result = align_versions([("v1", v1), ("v2", v2), ("v3", v3), ("v4", v4)], alignment_judge=judge)
     ind_rows = [r for r in result if r.taxonomy_id == "ind"]
 
     # Rows whose v1 slot carries the first (split) ref clause.
@@ -746,6 +1299,7 @@ def test_alignment_judge_split_emits_multiple_rows() -> None:
     )
     assert v2_having[0].slots[2].clause is None, "the v2 row must not also carry v3's clause"
     assert v3_having[0].slots[1].clause is None, "the v3 row must not also carry v2's clause"
+    assert all(r.slots[3].clause is None for r in split_rows)
 
 
 def test_align_seqs_slow_path_tokenizes_each_clause_a_constant_number_of_times(
@@ -761,6 +1315,7 @@ def test_align_seqs_slow_path_tokenizes_each_clause_a_constant_number_of_times(
     import playbook_engine.clause_aligner as ca
 
     real_tokens = ca._tokens
+    real_clause_tokens = ca._clause_tokens
     call_count = 0
 
     def counting_tokens(text: str) -> frozenset[str]:
@@ -768,7 +1323,13 @@ def test_align_seqs_slow_path_tokenizes_each_clause_a_constant_number_of_times(
         call_count += 1
         return real_tokens(text)
 
+    def counting_clause_tokens(text: str) -> ca._ClauseTokens:
+        nonlocal call_count
+        call_count += 1
+        return real_clause_tokens(text)
+
     monkeypatch.setattr(ca, "_tokens", counting_tokens)
+    monkeypatch.setattr(ca, "_clause_tokens", counting_clause_tokens)
 
     # All clauses share taxonomy_id=None (the realistic default-classifier
     # bucket per the ticket) and use short, sub-threshold text so none of

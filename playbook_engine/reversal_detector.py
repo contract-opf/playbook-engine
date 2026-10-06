@@ -11,12 +11,17 @@ Algorithm (fully deterministic, no LLM):
 1. Build a token set for each clause in the signed (final) version from the
    ``net`` diff's ``text_after`` values.
 2. Scan every consecutive diff for ``"modified"`` or ``"added"`` clauses.
-3. For each ``"insert"`` or ``"replace"`` hunk (or the whole clause for
-   ``"added"``), collect the proposed word tokens.
-4. If those tokens are **not a subset** of the signed token set for the same
-   logical clause (matched by ``ClauseDiff.alignment_index``, not by
-   per-version ``clause_path`` — see below), the proposal was reversed →
-   emit a ``ReversalRecord``.
+3. Each ``"insert"`` or ``"replace"`` hunk is one proposal (the whole clause
+   is one proposal for ``"added"``); collect its word tokens.
+4. Per proposal (per hunk), compute
+   ``retained = |tokens(hunk) ∩ tokens(signed clause)| / |tokens(hunk)|``
+   against the signed token set for the same logical clause (matched by
+   ``ClauseDiff.alignment_index``, not by per-version ``clause_path`` — see
+   below). That hunk was reversed only when
+   ``retained < REVERSAL_RETAINED_THRESHOLD`` (0.5) → emit a
+   ``ReversalRecord`` carrying that hunk's text and ``retained`` (issue #222).
+   Hunks are never pooled: pooling would let an accepted sibling edit in the
+   same round dilute a refused one below detection.
 
 Matching is keyed by ``alignment_index`` rather than ``clause_path`` because
 ``clause_path`` is per-version dotted numbering: the aligner
@@ -27,10 +32,12 @@ lookup by the draft version's path would then compare a proposal against the
 wrong clause's signed text, both fabricating reversals for clauses that
 actually survived and, in the mirror case, masking real reversals.
 
-Token-subset check: conservative but correct.  A proposed phrase whose content
-words are all retained in the signed text is treated as *accepted* even if the
-exact phrasing changed.  A phrase whose content words are wholly absent from
-the signed text is unambiguously reversed.
+Retained-token ratio (issue #222): a proposal is *accepted* when at least half
+of its content words survive in the signed clause, even if the exact phrasing
+changed — a counter-proposal accepted with one word changed is not a refusal.
+A proposal most of whose content words are absent from the signed clause was
+reversed. The previous rule (reversed unless EVERY proposed word survived) read
+any accepted-with-edits proposal as refused.
 """
 
 from __future__ import annotations
@@ -71,6 +78,12 @@ _STOP_WORDS: frozenset[str] = frozenset(
     }
 )
 
+#: A proposal is a reversal only when less than this share of its content
+#: tokens (stop words excluded) survives in the signed clause (issue #222):
+#: ``retained = |tokens(proposal) ∩ tokens(signed clause)| / |tokens(proposal)|``.
+#: At or above it the proposal was accepted, possibly with edits.
+REVERSAL_RETAINED_THRESHOLD: float = 0.5
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -94,13 +107,24 @@ class ReversalRecord:
                            copy — see ``detect_reversals``' ``has_signed_copy``)
                            — the proposal is confirmed absent from the
                            executed text.
-        proposed_text:     The word tokens that were proposed then reversed.
+        proposed_text:     The text of the one proposal (insert/replace hunk,
+                           or whole added clause) that was reversed.
         char_span:         ``ClauseNode.char_span`` of ``clause_path`` in
                            ``version_inserted`` (issue #108), or ``None`` when
                            unavailable. Threaded from the ``ClauseDiff`` this
                            reversal was detected on so the citation built from
                            this record is one-click verifiable, not just a
                            clause-path/ordinal pair.
+        retained:          Share of this hunk's content tokens present in
+                           the signed clause (issue #222) — always below
+                           ``REVERSAL_RETAINED_THRESHOLD`` for a detected
+                           reversal; ``None`` only for records built outside
+                           ``detect_reversals``.
+        alignment_confidence: The ``ClauseDiff.alignment_confidence`` of the
+                           diff the reversal was detected on — how strongly
+                           the draft clause was bound to the clause it is
+                           compared with — or ``None`` when that row binds
+                           nothing across versions.
     """
 
     taxonomy_id: str | None
@@ -109,9 +133,11 @@ class ReversalRecord:
     version_removed: str
     proposed_text: str
     char_span: tuple[int, int] | None = None
+    retained: float | None = None
+    alignment_confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "taxonomy_id": self.taxonomy_id,
             "clause_path": self.clause_path,
             "version_inserted": self.version_inserted,
@@ -119,6 +145,12 @@ class ReversalRecord:
             "proposed_text": self.proposed_text,
             "char_span": list(self.char_span) if self.char_span else None,
         }
+        # Omitted when never computed, so an absent key reads back as None.
+        if self.retained is not None:
+            d["retained"] = round(self.retained, 6)
+        if self.alignment_confidence is not None:
+            d["alignment_confidence"] = round(self.alignment_confidence, 6)
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -185,22 +217,6 @@ def detect_reversals(
             # The clause instance path in the draft (the "after" side of this diff).
             clause_path = cd.clause_path_after or cd.clause_path_before or "?"
 
-            # Collect proposed tokens for this clause diff.
-            if cd.kind == "added":
-                proposed_text = cd.text_after
-                proposed_toks = _tokens(proposed_text)
-            else:
-                proposed_parts: list[str] = []
-                proposed_toks = frozenset()
-                for hunk in cd.hunks:
-                    if hunk.kind in ("insert", "replace") and hunk.new_text:
-                        proposed_parts.append(hunk.new_text)
-                        proposed_toks |= _tokens(hunk.new_text)
-                proposed_text = " ".join(proposed_parts)
-
-            if not proposed_toks:
-                continue
-
             # Compare against signed version's tokens for this clause instance,
             # keyed by alignment_index (logical-clause identity) — not by
             # clause_path, which is per-version and may have been renumbered
@@ -210,21 +226,42 @@ def detect_reversals(
                 if cd.alignment_index is not None
                 else frozenset()
             )
-            if not proposed_toks.issubset(signed):
-                reversals.append(
-                    ReversalRecord(
-                        taxonomy_id=cd.taxonomy_id,
-                        clause_path=clause_path,
-                        version_inserted=vdiff.version_after,
-                        version_removed=signed_version,
-                        proposed_text=proposed_text,
-                        char_span=(
-                            cd.char_span_after
-                            if cd.clause_path_after is not None
-                            else cd.char_span_before
-                        ),
+
+            # The unit of proposal is the HUNK (issue #222): each insert/replace
+            # hunk is scored on its own, so an accepted sibling edit in the same
+            # round cannot dilute a refused one below detection. An ``added``
+            # clause is a single proposal.
+            if cd.kind == "added":
+                proposals = [cd.text_after]
+            else:
+                proposals = [
+                    hunk.new_text
+                    for hunk in cd.hunks
+                    if hunk.kind in ("insert", "replace") and hunk.new_text
+                ]
+
+            for proposed_text in proposals:
+                proposed_toks = _tokens(proposed_text)
+                if not proposed_toks:
+                    continue
+                retained = len(proposed_toks & signed) / len(proposed_toks)
+                if retained < REVERSAL_RETAINED_THRESHOLD:
+                    reversals.append(
+                        ReversalRecord(
+                            taxonomy_id=cd.taxonomy_id,
+                            clause_path=clause_path,
+                            version_inserted=vdiff.version_after,
+                            version_removed=signed_version,
+                            proposed_text=proposed_text,
+                            char_span=(
+                                cd.char_span_after
+                                if cd.clause_path_after is not None
+                                else cd.char_span_before
+                            ),
+                            retained=retained,
+                            alignment_confidence=cd.alignment_confidence,
+                        )
                     )
-                )
 
     return reversals
 

@@ -114,6 +114,17 @@ class ClauseDiff:
     not on ``clause_path_before``/``clause_path_after``.  ``None`` only for
     ``ClauseDiff``s built outside ``diff_aligned`` (e.g.
     ``pipeline._single_version_clause_diffs``), which have no alignment row.
+
+    ``alignment_confidence`` (issue #222) is the similarity on which the
+    aligner bound this clause's versions into one row
+    (``AlignmentSlot.alignment_confidence``: the row's worst binding
+    token-set Jaccard: at least ``clause_aligner.ALIGNMENT_AMBIGUITY_THRESHOLD``
+    on the bucket path, or at least ``ALIGNMENT_RESCUE_MIN_JACCARD`` when the
+    localized-edit rescue bound it, and ``MOVE_JACCARD_THRESHOLD`` on the move
+    path), or
+    ``None`` when the row binds nothing across versions (an added/removed
+    clause with a single member) or the diff was built outside
+    ``diff_aligned``.
     """
 
     taxonomy_id: str | None
@@ -128,6 +139,7 @@ class ClauseDiff:
     char_span_before: tuple[int, int] | None = None
     char_span_after: tuple[int, int] | None = None
     alignment_index: int | None = None
+    alignment_confidence: float | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in _DIFF_KINDS:
@@ -283,6 +295,7 @@ def _version_diff(
                 char_span_before=before_clause.node.char_span if before_clause else None,
                 char_span_after=after_clause.node.char_span if after_clause else None,
                 alignment_index=alignment_index,
+                alignment_confidence=_row_confidence(alignment),
             )
         )
 
@@ -291,6 +304,12 @@ def _version_diff(
         version_after=v_after,
         diffs=tuple(diffs),
     )
+
+
+def _row_confidence(alignment: ClauseAlignment) -> float | None:
+    """The row's binding similarity: the lowest any of its slots carries."""
+    values = [s.alignment_confidence for s in alignment.slots if s.alignment_confidence is not None]
+    return min(values) if values else None
 
 
 def _tokenize(text: str) -> list[str]:

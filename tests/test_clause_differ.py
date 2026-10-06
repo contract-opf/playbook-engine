@@ -260,7 +260,8 @@ def test_net_diff_unchanged_when_reverted() -> None:
     """If v3 reverts to v1 text, the net diff sees no change."""
     original = "Alice Corp shall indemnify Beta Ltd."
     v1 = [_cc("1", "ind", original)]
-    v2 = [_cc("1", "ind", "Alice Corp shall fully indemnify Beta Ltd against all claims.")]
+    # Similar enough to bind (issue #222: text-Jaccard >= 0.70).
+    v2 = [_cc("1", "ind", "Alice Corp shall fully indemnify Beta Ltd.")]
     v3 = [_cc("1", "ind", original)]
     doc = _align_and_diff([("v1", v1), ("v2", v2), ("v3", v3)])
     net_cd = doc.net.diffs[0]
@@ -272,7 +273,8 @@ def test_consecutive_captures_intermediate_changes() -> None:
     """Consecutive diffs capture v1→v2 even when v3 reverts."""
     original = "Alice Corp shall indemnify Beta Ltd."
     v1 = [_cc("1", "ind", original)]
-    v2 = [_cc("1", "ind", "Alice Corp shall fully indemnify Beta Ltd against all claims.")]
+    # Similar enough to bind (issue #222: text-Jaccard >= 0.70).
+    v2 = [_cc("1", "ind", "Alice Corp shall fully indemnify Beta Ltd.")]
     v3 = [_cc("1", "ind", original)]
     doc = _align_and_diff([("v1", v1), ("v2", v2), ("v3", v3)])
 
@@ -301,8 +303,8 @@ def test_version_order_stored_in_document_diff() -> None:
 
 
 def test_version_diff_changed_filters_unchanged() -> None:
-    v1 = [_cc("1", "ind", "same text."), _cc("2", "gov", "different text.")]
-    v2 = [_cc("1", "ind", "same text."), _cc("2", "gov", "revised text.")]
+    v1 = [_cc("1", "ind", "same text."), _cc("2", "gov", "governing law text of delaware.")]
+    v2 = [_cc("1", "ind", "same text."), _cc("2", "gov", "governing law text of delaware revised.")]
     doc = _align_and_diff([("v1", v1), ("v2", v2)])
     changed = doc.consecutive[0].changed()
     assert len(changed) == 1

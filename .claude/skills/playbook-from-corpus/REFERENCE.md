@@ -251,7 +251,12 @@ shown for each kind below:
   `"unclassified"` (with `taxonomy_id: null`) for a producer-supplied
   no-fit verdict — both are replayable (`_CLASSIFY_REPLAYABLE_BASES`).
   `exact_match` / `heading_similarity` / `judge_error` / `needs_review` /
-  `llm_segmenter` are set by the engine itself, not by you, and are rejected.
+  `llm_segmenter` / `inherited` are set by the engine itself, not by you, and
+  are rejected. A no-fit (`"unclassified"`) answer for a heading-less
+  sub-item (an `(a)`/`(b)` or `(i)`/`(ii)` child) whose parent clause is
+  classified is resolved to the parent's `taxonomy_id` with
+  `basis: "inherited"` (confidence capped at 0.6, issue #222); a specific
+  taxonomy fit you give the child is kept.
 - Deviation (`DeviationResult.basis`, `deviation_classifier.py`) — use
   `"judge"` for an agent-produced verdict (also accepts `deterministic` /
   `reworded_equivalent` / `judge_error` / `needs_review`, set by the engine).

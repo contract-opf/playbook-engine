@@ -2098,3 +2098,167 @@ def test_reversals_sharing_a_path_from_different_drafts_are_each_emitted() -> No
         ("proposed_then_reversed", "six 6 months directly involved", 3),
     ]
     assert len({o.observation_id for o in obs}) == 2
+
+
+# ---------------------------------------------------------------------------
+# alignment_confidence reaches the observation (issue #222)
+# ---------------------------------------------------------------------------
+
+
+def test_alignment_confidence_carried_from_real_alignment_to_observations() -> None:
+    """Drive the real producers (align_versions -> diff_aligned ->
+    detect_reversals) and check the binding similarity lands on the
+    observations, serialized as x_alignment_confidence and read back."""
+    from playbook_engine.clause_aligner import ALIGNMENT_AMBIGUITY_THRESHOLD, align_versions
+    from playbook_engine.clause_differ import diff_aligned
+    from playbook_engine.pipeline import _restore_observations
+    from playbook_engine.reversal_detector import detect_reversals
+
+    def cc(path: str, tid: str, text: str) -> ClassifiedClause:
+        return ClassifiedClause(
+            node=ClauseNode(clause_path=path, heading=None, text=text, char_span=(0, len(text))),
+            classification=ClauseClassification(
+                taxonomy_id=tid, confidence=1.0, basis="exact_match"
+            ),
+        )
+
+    base = "Alice Corp shall indemnify Beta Ltd for all losses"
+    versions = [
+        ("v1", [cc("1", "ind", base + ".")]),
+        ("v2", [cc("1", "ind", base + ", including consequential damages.")]),
+        (
+            "v3",
+            [
+                cc("1", "ind", base + "."),
+                cc("2", "notices", "Notices go to the registered office by courier."),
+            ],
+        ),
+    ]
+    order = [vid for vid, _ in versions]
+    alignments = align_versions(versions)
+    doc_diff = diff_aligned(alignments, order)
+    reversals = detect_reversals(doc_diff)
+    assert len(reversals) == 1
+
+    net = list(doc_diff.net.diffs)
+    obs = build_observations(
+        "doc-1",
+        3,
+        "our_paper",
+        [(cd, _dr()) for cd in net],
+        reversals,
+        ordinal_by_vid={vid: i + 1 for i, vid in enumerate(order)},
+        terminal_clauses=versions[-1][1],
+        terminal_version_id="v3",
+        standard_text_by_tid=_STD,
+        deterministic_deviations=True,
+    )
+    by_outcome = {(o.taxonomy_id, o.outcome): o for o in obs}
+
+    signed_ind = by_outcome[("ind", "signed")]
+    bound = next(cd for cd in net if cd.taxonomy_id == "ind").alignment_confidence
+    assert bound is not None and bound >= ALIGNMENT_AMBIGUITY_THRESHOLD
+    assert signed_ind.alignment_confidence == bound
+    assert signed_ind.to_dict()["x_alignment_confidence"] == round(bound, 6)
+
+    refused = by_outcome[("ind", "proposed_then_reversed")]
+    assert refused.alignment_confidence == reversals[0].alignment_confidence
+    assert refused.alignment_confidence is not None
+
+    # A clause present only in the terminal binds nothing across versions.
+    notices = by_outcome[("notices", "signed")]
+    assert notices.alignment_confidence is None
+    assert "x_alignment_confidence" not in notices.to_dict()
+
+    restored = {o.observation_id: o for o in _restore_observations([o.to_dict() for o in obs])}
+    for o in obs:
+        assert restored[o.observation_id].alignment_confidence == (
+            round(o.alignment_confidence, 6) if o.alignment_confidence is not None else None
+        )
+
+
+def test_appended_carve_out_stays_modified_and_keeps_tracked_attribution() -> None:
+    """Fix round 1 regression (issue #222): our tracked carve-out appended to
+    a clause roughly halves its token-set Jaccard, but the clause is the same
+    clause — the localized-edit rescue (Jaccard >= 0.5, the two token
+    sequences differing by exactly one contiguous insert) must keep it on one
+    ``modified`` row, so the signed
+    observation keeps the insertion's tracked-change attribution (author,
+    date, type) and proposed_by "us" instead of degrading to an add/remove
+    pair with no hunks and nothing to attribute."""
+    from playbook_engine.clause_aligner import ALIGNMENT_AMBIGUITY_THRESHOLD, align_versions
+    from playbook_engine.clause_differ import diff_aligned
+    from playbook_engine.docx_ingester import TrackedChange, TrackedChanges
+    from playbook_engine.pipeline import _attribution_for_diff
+
+    def cc(text: str) -> ClassifiedClause:
+        return ClassifiedClause(
+            node=ClauseNode(clause_path="9", heading=None, text=text, char_span=(0, len(text))),
+            classification=ClauseClassification(
+                taxonomy_id="limitation_of_liability", confidence=1.0, basis="exact_match"
+            ),
+        )
+
+    base = "Each party's aggregate liability under this Agreement shall not exceed $50,000"
+    carve_out = (
+        ", except that this limitation shall not apply to a breach of either "
+        "party's confidentiality obligations or to claims of gross negligence"
+    )
+    v1_text, v2_text = base + ".", base + carve_out + "."
+    from playbook_engine.clause_aligner import _jaccard, _tokens
+
+    assert _jaccard(_tokens(v1_text), _tokens(v2_text)) < ALIGNMENT_AMBIGUITY_THRESHOLD
+
+    versions = [("v1", [cc(v1_text)]), ("v2", [cc(v2_text)])]
+    alignments = align_versions(versions)
+    assert len(alignments) == 1, "the appended carve-out must not split the clause"
+    net = list(diff_aligned(alignments, ["v1", "v2"]).net.diffs)
+    assert [d.kind for d in net] == ["modified"]
+
+    start = len(base)
+    tracked = TrackedChanges(
+        document_id="doc-1",
+        version="v2",
+        changes=[
+            TrackedChange(
+                change_type="insertion",
+                author="Our Counsel",
+                date="2024-02-03T10:00:00Z",
+                text=carve_out,
+                clause_path="9",
+                char_span=(start, start + len(carve_out)),
+            )
+        ],
+    )
+    attribution = _attribution_for_diff(net[0], tracked, single_round=True)
+    assert attribution is not None
+    assert (attribution.author, attribution.tracked_type) == ("Our Counsel", "insertion")
+
+    obs = build_observations(
+        "doc-1",
+        2,
+        "our_paper",
+        [(net[0], _dr("substantive"))],
+        [],
+        attributions=[attribution],
+        our_party_aliases=["AlphaCorp"],
+        our_authors=["Our Counsel"],
+        ordinal_by_vid={"v1": 1, "v2": 2},
+        terminal_clauses=versions[-1][1],
+        terminal_version_id="v2",
+        standard_text_by_tid={"limitation_of_liability": v1_text},
+        deterministic_deviations=True,
+    )
+    signed = [o for o in obs if o.outcome == "signed"]
+    assert len(signed) == 1
+    assert signed[0].proposed_by == "us"
+    assert signed[0].attribution is not None
+    assert signed[0].attribution.author == "Our Counsel"
+    assert signed[0].attribution.date == "2024-02-03T10:00:00Z"
+    assert signed[0].attribution.tracked_type == "insertion"
+    # The localized-edit rescue bound the row; its confidence is the honest
+    # token-set Jaccard (below the primary threshold), never a rescue score.
+    conf = signed[0].alignment_confidence
+    assert conf is not None
+    assert conf == pytest.approx(_jaccard(_tokens(v1_text), _tokens(v2_text)))
+    assert conf < ALIGNMENT_AMBIGUITY_THRESHOLD
