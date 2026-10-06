@@ -733,17 +733,25 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
 @click.option(
     "--clause",
     "clause_id",
-    required=True,
-    help="evidence.clauses[].id, e.g. clause.indemnification",
+    default=None,
+    help="evidence.clauses[].id, e.g. clause.indemnification (with --obs).",
 )
 @click.option(
     "--obs",
     "obs_index",
     type=int,
-    required=True,
+    default=None,
     help=(
         "Index into that clause's observed_positions (OPF 0.2/0.3), or into its "
         "evidence.precedent records (OPF 0.4)."
+    ),
+)
+@click.option(
+    "--precedent-id",
+    "precedent_id",
+    default=None,
+    help=(
+        "OPF 0.4: an evidence.precedent[].id (prec.<sha>) to resolve, instead of --clause/--obs."
     ),
 )
 @click.option(
@@ -753,16 +761,32 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     help="Directory holding the corpus source files.",
 )
 def resolve_citation_cmd(
-    playbook_file: Path, clause_id: str, obs_index: int, corpus_dir: Path
+    playbook_file: Path,
+    clause_id: str | None,
+    obs_index: int | None,
+    precedent_id: str | None,
+    corpus_dir: Path,
 ) -> None:
     """Resolve one observation's citation to a hash-verified source file (OPF §4).
 
-    Looks up the cited (document_id, version) in corpus.documents[].version_files,
-    finds the file under CORPUS-DIR whose sha256 matches, and prints the path plus
-    clause_path/char_span. Exits 1 on hash mismatch or a missing content address —
-    the reference implementation consumers copy.
+    Address the citation either by --clause and --obs, or (OPF 0.4) by
+    --precedent-id. Looks up the cited (document_id, version) in
+    corpus.documents[].version_files, finds the file under CORPUS-DIR whose
+    sha256 matches, and prints the path plus clause_path/char_span. Exits 1 on
+    hash mismatch or a missing content address — the reference implementation
+    consumers copy.
     """
-    from playbook_engine.citation_resolver import CitationResolutionError, resolve_citation
+    from playbook_engine.citation_resolver import (
+        CitationResolutionError,
+        resolve_citation,
+        resolve_precedent_citation,
+    )
+
+    by_index = clause_id is not None or obs_index is not None
+    if precedent_id is not None and by_index:
+        raise click.UsageError("pass either --precedent-id or --clause/--obs, not both")
+    if precedent_id is None and (clause_id is None or obs_index is None):
+        raise click.UsageError("pass --clause and --obs together, or --precedent-id")
 
     try:
         doc = load_opf_file(playbook_file)
@@ -771,7 +795,11 @@ def resolve_citation_cmd(
         raise SystemExit(1) from exc
 
     try:
-        resolved = resolve_citation(doc, clause_id, obs_index, corpus_dir)
+        if precedent_id is not None:
+            resolved = resolve_precedent_citation(doc, precedent_id, corpus_dir)
+        else:
+            assert clause_id is not None and obs_index is not None
+            resolved = resolve_citation(doc, clause_id, obs_index, corpus_dir)
     except CitationResolutionError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
@@ -782,6 +810,186 @@ def resolve_citation_cmd(
         click.echo(f"clause_path: {resolved.clause_path}")
     if resolved.char_span:
         click.echo(f"char_span: [{resolved.char_span[0]}, {resolved.char_span[1]}]")
+
+
+def _precedent_table(rows: list[dict[str, Any]], *, refused: bool) -> str:
+    """Render precedent records (or refused asks) as a plain-text table."""
+
+    def snippet(text: Any) -> str:
+        flat = " ".join(str(text).split()) if isinstance(text, str) else "-"
+        return flat if len(flat) <= 60 else flat[:57] + "..."
+
+    header: tuple[str, ...]
+    body: list[tuple[str, ...]]
+    if refused:
+        header = ("precedent_id", "document_id", "round", "text")
+        body = [
+            (
+                str(r.get("precedent_id")),
+                str(r.get("document_id")),
+                str(r.get("round")),
+                snippet(r.get("text")),
+            )
+            for r in rows
+        ]
+    else:
+        header = (
+            "id",
+            "document_id",
+            "signed",
+            "signed_at",
+            "standard",
+            "moved",
+            "refused",
+            "text",
+        )
+
+        def signed_text(r: dict[str, Any]) -> Any:
+            st = r.get("signed_text")
+            return st.get("text") if isinstance(st, dict) else None
+
+        body = [
+            (
+                str(r.get("id")),
+                str(r.get("document_id")),
+                "yes" if r.get("signed") else "no",
+                str(r.get("signed_at") or "-"),
+                "yes" if r.get("standard") else "no",
+                "yes" if r.get("moved") else "no",
+                str(len(r.get("refused_asks") or [])),
+                snippet(signed_text(r)) if signed_text(r) is not None else "(struck)",
+            )
+            for r in rows
+        ]
+    widths = [max(len(h), *(len(row[i]) for row in body)) for i, h in enumerate(header)]
+    lines = ["  ".join(h.ljust(w) for h, w in zip(header, widths, strict=True)).rstrip()]
+    lines += [
+        "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip() for row in body
+    ]
+    return "\n".join(lines)
+
+
+@cli.command(name="precedent")
+@click.argument("playbook_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--clause",
+    "clause",
+    default=None,
+    help="Clause taxonomy_id (e.g. governing_law) or evidence.clauses[].id.",
+)
+@click.option(
+    "--id",
+    "precedent_id",
+    default=None,
+    help="One precedent record by its stable id (prec.<sha>).",
+)
+@click.option(
+    "--refused",
+    is_flag=True,
+    default=False,
+    help="Return the refused asks instead of the precedent records.",
+)
+@click.option(
+    "--limit",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Keep at most N results.",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["jsonl", "table"]),
+    default="table",
+    show_default=True,
+    help="jsonl: one canonical JSON object per line; table: a plain-text table.",
+)
+def precedent_cmd(
+    playbook_file: Path,
+    clause: str | None,
+    precedent_id: str | None,
+    refused: bool,
+    limit: int | None,
+    fmt: str,
+) -> None:
+    """Query an OPF 0.4 playbook's precedent records.
+
+    --clause returns one clause's records, ranked by how many distinct deals
+    signed the same text, then by most recent signing, with unsigned deals'
+    records (their text is the last draft) after every signed one; with
+    --refused, the asks refused before signing instead. --id returns one record (with
+    --refused, its refused asks). With neither, every record sorted by id —
+    as jsonl, byte-identical to the precedent.jsonl sidecar `playbook project`
+    writes. Records are printed exactly as the playbook carries them.
+    """
+    from playbook_engine.canonicalize import canonicalize
+    from playbook_engine.opf_accessors import (
+        find_precedent,
+        is_precedent_shape,
+        playbook_clauses,
+        playbook_precedent,
+        precedent_by_id,
+    )
+
+    if clause is not None and precedent_id is not None:
+        raise click.UsageError("pass either --clause or --id, not both")
+
+    try:
+        doc = load_opf_file(playbook_file)
+    except Exception as exc:  # noqa: BLE001
+        click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+
+    if not is_precedent_shape(doc):
+        click.secho(
+            f"ERROR: {playbook_file.name} carries no evidence.precedent (OPF "
+            f"{doc.get('opf_version')!s}); precedent queries need an OPF 0.4 playbook",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    rows: list[dict[str, Any]]
+    if precedent_id is not None:
+        record = precedent_by_id(doc, precedent_id)
+        if record is None:
+            click.secho(f"ERROR: no precedent record with id {precedent_id!r}", fg="red", err=True)
+            raise SystemExit(1)
+        if refused:
+            rows = [
+                {
+                    "precedent_id": record.get("id"),
+                    "document_id": record.get("document_id"),
+                    "taxonomy_id": record.get("taxonomy_id"),
+                    **ask,
+                }
+                for ask in record.get("refused_asks") or []
+                if isinstance(ask, dict)
+            ]
+        else:
+            rows = [record]
+    elif clause is not None:
+        known = {c.get("taxonomy_id") for c in playbook_clauses(doc)} | {
+            c.get("id") for c in playbook_clauses(doc)
+        }
+        if clause not in known:
+            names = ", ".join(sorted(str(c.get("taxonomy_id")) for c in playbook_clauses(doc)))
+            click.secho(f"ERROR: no clause {clause!r} (known: {names})", fg="red", err=True)
+            raise SystemExit(1)
+        rows = find_precedent(doc, clause, refused=refused)
+    else:
+        if refused:
+            raise click.UsageError("--refused needs --clause or --id")
+        rows = sorted(playbook_precedent(doc), key=lambda p: str(p.get("id")))
+    if limit is not None:
+        rows = rows[:limit]
+
+    if fmt == "jsonl":
+        for row in rows:
+            click.echo(canonicalize(row))
+    elif rows:
+        click.echo(_precedent_table(rows, refused=refused))
+    else:
+        click.echo("(no results)", err=True)
 
 
 @cli.command(name="publish")

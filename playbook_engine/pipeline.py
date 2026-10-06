@@ -117,7 +117,11 @@ from playbook_engine.observation_builder import (
 )
 from playbook_engine.pdf_ingester import ingest_pdf
 from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
-from playbook_engine.playbook_assembler import assemble_playbook, write_playbook
+from playbook_engine.playbook_assembler import (
+    assemble_playbook,
+    write_playbook,
+    write_precedent_sidecar,
+)
 from playbook_engine.provenance_detector import (
     PROVENANCE_UNKNOWN,
     ProvenanceJudge,
@@ -4137,6 +4141,11 @@ def project_playbook(
                          #223) or ``"0.3"`` (kept for one release).
         progress:        Callable receiving progress message strings.
 
+    Writes ``{out_dir}/playbook.opf.json`` and, for OPF 0.4,
+    ``{out_dir}/precedent.jsonl`` — one ``evidence.precedent`` record per
+    line, sorted by id, whose sha256 the playbook records under
+    ``x_sidecars`` (issue #224; see ``write_precedent_sidecar``).
+
     Returns:
         Validated playbook dict (also written to ``{out_dir}/playbook.opf.json``).
 
@@ -4350,6 +4359,11 @@ def project_playbook(
 
     write_playbook(playbook, out_file)
     progress(f"Playbook written: {out_file}")
+    # One evidence.precedent record per line, sorted by id (issue #224); its
+    # sha256 is recorded in the playbook's x_sidecars.
+    sidecar = write_precedent_sidecar(playbook, out_file)
+    if sidecar is not None:
+        progress(f"Precedent sidecar written: {sidecar}")
 
     return playbook
 

@@ -270,10 +270,45 @@ reach for them:
   schema-validated JSON with content-addressed citations. The
   [bundle boundary](OPF-BUNDLE-BOUNDARY.md) doc says exactly what a
   review engine owns vs what the playbook owns.
+- **Query precedent** instead of loading the whole document (see below).
 - **Recompile on every new deal.** The playbook is not a trained model;
   "retraining" is re-running the compiler. Caches make incremental runs
   cheap, pins survive, and `corpus.snapshot.manifest_hash` records exactly
   which corpus state produced which playbook.
+
+### Querying precedent
+
+An OPF 0.4 playbook keeps one `evidence.precedent` record per (deal,
+clause type), each with a stable id (`prec.<sha>`). Three ways to get at
+them without scanning the whole document:
+
+- **CLI.** `playbook precedent playbook.opf.json --clause governing_law`
+  lists one clause's records, ranked by how many distinct deals signed the
+  same text, then by most recent signing; records of unsigned deals, whose
+  text is the last draft rather than signed precedent, come after every
+  signed record (`--refused` lists the asks refused before signing instead;
+  `--limit N`; `--format jsonl|table`).
+  `playbook precedent playbook.opf.json --id prec.<sha>` prints one record.
+  When the output is records (no `--refused`), each `--format jsonl` line is
+  the record exactly as the playbook carries it. With `--refused`, each line
+  is one refused ask: the ask's own fields (`text`, `round`, `ref`) merged
+  with the `precedent_id`, `document_id` and `taxonomy_id` of the record
+  that carries it.
+- **Library.** `playbook_engine.opf_accessors.find_precedent(doc,
+  taxonomy_id, refused=False, limit=None, order=("n_deals",
+  "last_signed"))` and `precedent_by_id(doc, id)` return the same records.
+  Paper side never enters the ranking.
+- **Sidecar.** `playbook project` also writes `precedent.jsonl` next to
+  `playbook.opf.json`: one record per line, sorted by id, a good fit for
+  indexing in a vector store. The playbook records the sidecar's sha256
+  under `x_sidecars["precedent.jsonl"]`, so you can check that a
+  `precedent.jsonl` belongs to it (`verify_precedent_sidecar(doc, path)`).
+  `playbook precedent playbook.opf.json --format jsonl` with no filter
+  prints the same bytes.
+
+To open the source text a record cites, run `playbook resolve-citation
+playbook.opf.json --precedent-id prec.<sha> --corpus-dir <corpus>`. It
+returns the hash-verified file and the clause's location in it.
 
 ## Stage 5 — Share it (optional)
 
