@@ -92,6 +92,7 @@ def test_help_tree_walk_reaches_every_known_command() -> None:
         "validate",
         "render-prompt",
         "resolve-citation",
+        "precedent",
         "publish",
         "taxonomy",
         "taxonomy merge",

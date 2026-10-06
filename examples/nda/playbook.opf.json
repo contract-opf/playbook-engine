@@ -3868,7 +3868,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-06T02:36:01+00:00",
+      "generated_at": "2026-10-06T07:55:57+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -3921,7 +3921,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-06T02:36:04+00:00",
+        "x_signed_at": "2026-10-06T07:55:57+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -4300,8 +4300,14 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-06T02:35:56+00:00",
+    "generated_at": "2026-10-06T07:55:57+00:00",
     "stub_basis_present": false
+  },
+  "x_sidecars": {
+    "precedent.jsonl": {
+      "sha256": "sha256:5f1d60cbcdc0e9e2c72b9e64a44b6ee688575bb905c7b5e207cf0f43a1b12551",
+      "records": 113
+    }
   },
   "digest": {
     "digest_version": "3",
@@ -5245,11 +5251,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:5cbd8d7786f0d5f708a585e378602adec1a0a46889b608e603cc1a8fdca6be70",
+    "content_hash": "sha256:6d6579bd6cbfa4d222b6beee0806baec20fedf54183eefd2e2c30c22f25ecc4e",
     "section_digests": {
       "evidence": "sha256:b28a082355fe228517a9329d9f500842fb396f4193e8af62b1c711cac5b37dfa",
-      "posture": "sha256:ca5da71828d9b51e0bc976c7bad7cdf8ae1233f5cb21bae3af7339b9ea7180af",
-      "floor": "sha256:4a3adcfcf8a595395b76ba32a2c153ec430875f8dc0ff09736212085859bc5bf",
+      "posture": "sha256:24dbb264e8bcb5dfd45af1bd17df091dec01d06816fd5106f2dd721aaf0147e4",
+      "floor": "sha256:a05838c288dcba9c481f2870721864b7839f2559a7d3120f87acc2e2610666bb",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }

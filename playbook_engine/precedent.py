@@ -50,7 +50,12 @@ from playbook_engine.observation_builder import (
     Observation,
     RoundMove,
 )
-from playbook_engine.opf_accessors import perspective_party
+from playbook_engine.opf_accessors import (
+    PRECEDENT_SIDECAR,
+    SIDECARS_KEY,
+    perspective_party,
+    precedent_sidecar_manifest,
+)
 
 __all__ = [
     "PAPER_OURS",
@@ -469,7 +474,9 @@ def refresh_derived(doc: dict[str, Any]) -> None:
     digest (rebuilt with ``digest.build_digest`` so it carries the
     transformed text — never a stale copy of the pre-transform text — and
     the transformed ``perspective``; the counts and the digest group texts
-    with the transformed ``perspective.party``). ``identity`` is left to the
+    with the transformed ``perspective.party``), and the ``precedent.jsonl``
+    sha256 under ``x_sidecars`` when the document records one (issue #224).
+    ``identity`` is left to the
     caller, which re-stamps it last. A no-op on any pre-0.4 document.
     """
     evidence = doc.get("evidence")
@@ -494,6 +501,9 @@ def refresh_derived(doc: dict[str, Any]) -> None:
         from playbook_engine.digest import build_digest  # noqa: PLC0415
 
         doc["digest"] = build_digest(doc)
+    sidecars = doc.get(SIDECARS_KEY)
+    if isinstance(sidecars, dict) and PRECEDENT_SIDECAR in sidecars:
+        sidecars.update(precedent_sidecar_manifest(doc))
 
 
 def clause_counts(

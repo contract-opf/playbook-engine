@@ -47,7 +47,14 @@ from playbook_engine.clause_position_compiler import (
 from playbook_engine.curation import merge_curation
 from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, RoundMove
-from playbook_engine.opf_accessors import clause_stance, perspective_party
+from playbook_engine.opf_accessors import (
+    PRECEDENT_SIDECAR,
+    SIDECARS_KEY,
+    clause_stance,
+    perspective_party,
+    precedent_jsonl,
+    precedent_sidecar_manifest,
+)
 from playbook_engine.precedent import (
     build_precedent_evidence,
     build_x_judgments,
@@ -584,6 +591,11 @@ def assemble_playbook(
         judgments = build_x_judgments(list(observations or []), playbook["evidence"]["precedent"])
         if judgments:
             playbook["x_judgments"] = _strip_invisible(judgments)
+        # The precedent.jsonl sidecar's content address (issue #224): a pure
+        # function of the final evidence.precedent, recorded before the
+        # digest and identity so content_hash covers it. Vendor namespace
+        # because `compiler` is closed to extensions (OPF-SPEC §10.1).
+        playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
 
     # --- digest (OPF 0.3: digest v2; OPF 0.4: digest v3) ---
     # The compact model-facing projection of the evidence section. Computed
@@ -639,3 +651,33 @@ def write_playbook(playbook: dict[str, Any], path: Path) -> None:
         encoding="utf-8",
     )
     os.replace(tmp, path)
+
+
+def write_precedent_sidecar(playbook: dict[str, Any], playbook_path: Path) -> Path | None:
+    """Write ``precedent.jsonl`` next to *playbook_path*, atomically (issue #224).
+
+    The file is :func:`~playbook_engine.opf_accessors.precedent_jsonl` —
+    one ``evidence.precedent`` record per line, sorted by id — and its bytes
+    hash to the ``x_sidecars["precedent.jsonl"].sha256`` the playbook
+    records. A playbook recording no such sidecar (OPF 0.3 and earlier)
+    gets none, and a stale ``precedent.jsonl`` left by an earlier 0.4
+    compile into the same directory is removed, so the directory never
+    pairs a playbook with a sidecar that does not belong to it.
+
+    Args:
+        playbook:      A validated playbook dict (from ``assemble_playbook()``).
+        playbook_path: Where the playbook itself was written.
+
+    Returns:
+        The sidecar path, or ``None`` when no sidecar applies.
+    """
+    path = playbook_path.parent / PRECEDENT_SIDECAR
+    sidecars = playbook.get(SIDECARS_KEY)
+    if not isinstance(sidecars, dict) or PRECEDENT_SIDECAR not in sidecars:
+        path.unlink(missing_ok=True)
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".jsonl.tmp")
+    tmp.write_bytes(precedent_jsonl(playbook).encode("utf-8"))
+    os.replace(tmp, path)
+    return path

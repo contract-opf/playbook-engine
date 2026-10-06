@@ -28,6 +28,12 @@ posture-answers.json     -- the six-question GC-interview answers used to
 playbook.opf.json        -- the derived, worked playbook: populated
                              evidence + posture + floor. THE reference
                              artifact -- see "The worked playbook" below.
+precedent.jsonl          -- the sidecar `playbook project` writes beside
+                             playbook.opf.json: one evidence.precedent record
+                             per line, sorted by id; its sha256 is recorded
+                             under the playbook's root `x_sidecars`, and
+                             test_committed_nda_sidecar_belongs_to_its_playbook
+                             keeps the two in sync
 ```
 
 ## The worked playbook

@@ -35,6 +35,7 @@ from click.testing import CliRunner
 from click.testing import Result as CliResult
 
 from playbook_engine.cli import cli
+from playbook_engine.opf_accessors import PRECEDENT_SIDECAR, verify_precedent_sidecar
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _NDA_DIR = _REPO_ROOT / "examples" / "nda"
@@ -108,6 +109,14 @@ def test_nda_smoke_full_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     playbook = json.loads(playbook_path.read_text(encoding="utf-8"))
     assert playbook["agreement_type"]["id"] == "nda"
+    # Issue #224: project also writes the precedent.jsonl sidecar, whose
+    # sha256 the playbook records under x_sidecars.
+    sidecar = out_dir / PRECEDENT_SIDECAR
+    assert sidecar.is_file(), "project did not write precedent.jsonl"
+    assert verify_precedent_sidecar(playbook, sidecar)
+    assert len(sidecar.read_text(encoding="utf-8").splitlines()) == len(
+        playbook["evidence"]["precedent"]
+    )
     assert playbook["evidence"]["clauses"], "no clauses observed at all"
     # Evidence-only: no posture interview or floor sign step is run here, so
     # the compiled playbook must not carry fabricated negotiation intent or

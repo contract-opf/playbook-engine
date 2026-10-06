@@ -24,6 +24,9 @@ no producer in this codebase ever writes ``page`` into ``example_ref`` —
 it stays ``None`` from real data (see ``test_resolve_citation_roundtrip``)
 unless a non-conformant/foreign playbook dict happens to carry the key.
 
+On an OPF 0.4 document a precedent record can also be addressed directly
+by its stable id (:func:`resolve_precedent_citation`, issue #224).
+
 Consumers copy this algorithm; ``playbook resolve-citation`` (cli.py) is
 its command-line face.
 """
@@ -35,7 +38,12 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import file_sha256
-from playbook_engine.opf_accessors import clause_precedent, is_precedent_shape, playbook_clauses
+from playbook_engine.opf_accessors import (
+    clause_precedent,
+    is_precedent_shape,
+    playbook_clauses,
+    precedent_by_id,
+)
 
 
 class CitationResolutionError(ValueError):
@@ -135,13 +143,41 @@ def resolve_citation(
             f"observation index {obs_index} out of range for {clause_id!r} "
             f"({len(refs)} observation(s))"
         )
-    ref = refs[obs_index]
+    return _resolve_ref(playbook, refs[obs_index], f"{clause_id!r} obs {obs_index}", corpus_dir)
+
+
+def resolve_precedent_citation(
+    playbook: dict[str, Any],
+    precedent_id: str,
+    corpus_dir: Path,
+) -> ResolvedCitation:
+    """Resolve one OPF 0.4 precedent record's citation by its stable id (issue #224).
+
+    The record is addressed by ``evidence.precedent[].id`` (``prec.<sha>``,
+    as the digest's ``precedent_ids`` and ``precedent.jsonl`` carry it)
+    rather than by a clause and an index. It cites its signed text, else
+    the text it opened with, else its first refused ask — the same rule
+    :func:`resolve_citation` applies on a 0.4 document.
+
+    Raises:
+        CitationResolutionError: no precedent record with that id (including
+            any pre-0.4 document), or any failure :func:`resolve_citation`
+            documents.
+    """
+    record = precedent_by_id(playbook, precedent_id)
+    if record is None:
+        raise CitationResolutionError(f"no precedent record with id {precedent_id!r}")
+    return _resolve_ref(playbook, _precedent_ref(record), f"{precedent_id!r}", corpus_dir)
+
+
+def _resolve_ref(
+    playbook: dict[str, Any], ref: dict[str, Any], label: str, corpus_dir: Path
+) -> ResolvedCitation:
+    """Resolve one citation dict to a hash-verified file (*label* names it in errors)."""
     document_id = ref.get("document_id", "")
     version: int | str | None = ref.get("version")
     if not isinstance(version, (int, str)):
-        raise CitationResolutionError(
-            f"citation on {clause_id!r} obs {obs_index} carries no version — unresolvable"
-        )
+        raise CitationResolutionError(f"citation on {label} carries no version — unresolvable")
 
     if document_id == "template":
         expected = (playbook.get("baseline", {}).get("template_ref") or {}).get("sha256")
