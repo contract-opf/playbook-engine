@@ -3514,6 +3514,65 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
         )
 
 
+@cli.command(name="scorecard")
+@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
+@click.option(
+    "--compare",
+    "compare_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="A previous scorecard.json to compare against (prints baseline, current and delta).",
+)
+@click.option(
+    "--out",
+    "scorecard_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write the scorecard JSON to this file (default: <out_dir>/scorecard.json).",
+)
+def scorecard_cmd(out_dir: Path, compare_path: Path | None, scorecard_path: Path | None) -> None:
+    """Write a counts-only scorecard of a derivation OUT_DIR and print it.
+
+    Integers, ratios and closed-vocabulary labels only — no clause text,
+    party name, file name, document id or clause type — so a maintainer can
+    post the result of a private evaluation corpus in public. Covers corpus
+    size, template-standard coverage, classification by basis (with a
+    paper-side parity diagnostic), precedent, openings, dropped
+    observations, digest size and pending agent queues. A field the
+    artifact does not carry yet is null. With --compare, prints the delta
+    against an earlier scorecard.json.
+    """
+    import json as _json  # noqa: PLC0415
+
+    from playbook_engine.scorecard import (  # noqa: PLC0415
+        SCORECARD_FILENAME,
+        build_scorecard,
+        render_table,
+        write_scorecard,
+    )
+
+    resolved = out_dir.resolve()
+    if not resolved.is_dir():
+        click.secho(f"ERROR: {resolved} is not a directory", fg="red", err=True)
+        raise SystemExit(1)
+    baseline = None
+    if compare_path is not None:
+        try:
+            baseline = _json.loads(compare_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            click.secho(f"ERROR: could not read {compare_path}: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        if not isinstance(baseline, dict):
+            click.secho(f"ERROR: {compare_path} is not a scorecard object", fg="red", err=True)
+            raise SystemExit(1)
+
+    card = build_scorecard(resolved)
+    dest = scorecard_path.resolve() if scorecard_path else resolved / SCORECARD_FILENAME
+    write_scorecard(card, dest)
+    click.echo(render_table(card, baseline))
+    click.secho(f"OK  {dest}", fg="green")
+
+
 @cli.group(name="view")
 def view_group() -> None:
     """Render a review HTML surface or apply reviewer feedback."""
