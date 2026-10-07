@@ -10,6 +10,30 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **`playbook scorecard`: a counts-only scorecard of a derivation out-dir
+  (issue #237).** Writes `<out-dir>/scorecard.json` and prints it as a
+  table: documents, versions, signed and in-scope deals; template standards
+  classified and `our_standard` coverage; classification by basis, the
+  classified share of observations and distinct classified clause types
+  per deal, each also split by paper side as a parity diagnostic only;
+  precedent records, signed variants, refused asks and openings;
+  `corpus.stats.dropped_observations` by reason; the template-drift
+  distribution (per clause with `our_standard`, the share of our-paper
+  signed deals that signed it); digest token estimate and capped clauses;
+  and unanswered judge and segmentation queue items. The split of openings
+  (precedent records with a non-null `opening_text`) by `opened_with`, the
+  split of all precedent records by `opened_with` (#233) and dossier sizes
+  (#228) are `null` until a playbook carries them.
+  `--compare <scorecard.json>` prints the delta against an earlier card.
+  The output is integers, ratios and closed-vocabulary labels only: every
+  label read from the out-dir outside its vocabulary is written as
+  `"other"`, every number read from it must be an integer count or is
+  `null`, and nothing is keyed by a deal, file or clause type. To feed
+  the basis counts, observations gain the vendor key
+  `x_classification_basis`: how the cited node's taxonomy_id was reached,
+  or `"aligned"` when it came from the aligned row. The L1-L4 stage cache
+  version (`_DEVIATION_VS_TEMPLATE_VERSION`) moves to 16.
+
 - **An earlier draft's copy of a clause joins the move row it belongs to
   (issue #232).** The aligner's global move phase chains a clause across
   drafts only at a near-exact or high-Jaccard match, and takes every clause

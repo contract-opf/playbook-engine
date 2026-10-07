@@ -287,7 +287,18 @@ _MEDIA_TYPES: dict[str, str] = {
 # instead of a removed + added pair. Alignments, diffs, reversals and
 # observations change for identical source content; a warm cache would
 # otherwise replay the old fabricated concessions and refused asks forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 14
+#
+# v15 (issue #237): observations gained "x_classification_basis" — how the
+# cited node's taxonomy_id was reached (or "aligned"), which `playbook
+# scorecard` counts. A warm cache would otherwise replay observations with
+# no classification basis forever, and the scorecard would report them all
+# as unrecorded.
+#
+# v16 (issue #237): an unclassified observation's basis is "unclassified"
+# even when its cited node is classified ("aligned" now only means
+# "classified via the aligned row"). A warm v15 cache would otherwise replay
+# those observations as "aligned".
+_DEVIATION_VS_TEMPLATE_VERSION = 16
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1277,9 +1288,36 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 paper_basis=raw.get("paper_basis"),
                 paper_confidence=raw.get("paper_confidence"),
                 alignment_confidence=raw.get("x_alignment_confidence"),
+                classification_basis=raw.get("x_classification_basis"),
             )
         )
     return result
+
+
+def _observation_classification_basis(
+    obs: Observation, classification_by_node: dict[tuple[str, str], ClauseClassification]
+) -> str | None:
+    """How *obs*'s taxonomy_id was reached (issue #237), or ``None`` if unknown.
+
+    The ``ClauseClassification.basis`` of the node the citation points at
+    when that node's own taxonomy_id is the observation's; ``"aligned"`` when
+    the observation's taxonomy_id came from its aligned row instead (the
+    row's latest member, issues #222/#232); ``"unclassified"`` whenever the
+    observation itself carries no taxonomy_id, so ``"aligned"`` only ever
+    means "classified via the aligned row"; ``None`` when the cited node is
+    not in the classified trees.
+    """
+    if obs.taxonomy_id is None:
+        return "unclassified"
+    cit = obs.citation
+    if cit.version_id is None:
+        return None
+    classification = classification_by_node.get((cit.version_id, cit.clause_path or "?"))
+    if classification is None:
+        return None
+    if classification.taxonomy_id != obs.taxonomy_id:
+        return "aligned"
+    return classification.basis
 
 
 def _standard_party_names(config: EngineConfig) -> list[str]:
@@ -3125,6 +3163,25 @@ def _compute_doc_from_l1(
     doc_obs = [
         dataclasses.replace(
             obs, paper_basis=prov_result.basis, paper_confidence=prov_result.confidence
+        )
+        for obs in doc_obs
+    ]
+
+    # Issue #237: record how each observation's cited node was classified,
+    # for `playbook scorecard` (classification by basis). Looked up by the
+    # citation's (version_id, clause_path) in the same classified trees the
+    # observations were built from; an observation whose taxonomy_id differs
+    # from its node's own classification took it from its aligned row
+    # ("aligned").
+    classification_by_node: dict[tuple[str, str], ClauseClassification] = {
+        (vid, cc.node.clause_path or "?"): cc.classification
+        for vid, classified in classified_by_version.items()
+        for cc in classified
+    }
+    doc_obs = [
+        dataclasses.replace(
+            obs,
+            classification_basis=_observation_classification_basis(obs, classification_by_node),
         )
         for obs in doc_obs
     ]

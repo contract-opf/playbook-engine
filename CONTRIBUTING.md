@@ -185,6 +185,17 @@ external contributions.
   useful if commits bypass review entirely; consider pairing with
   `required_pull_request_reviews` (forcing every change through a PR) as a
   separate, bigger process decision, not bundled into this one.
+- **Private evaluation corpus.** The NDA example is the public CI fixture,
+  but it is small and synthetic. Maintainers also run a private corpus of
+  real agreements end to end on the Docker runtime and score the result
+  with `playbook scorecard <out-dir>` (and
+  `playbook scorecard <out-dir> --compare <baseline>/scorecard.json` for
+  the delta a change caused). The scorecard holds only integers, ratios and
+  closed-vocabulary labels, with no clause text, party names, file names,
+  document ids or clause types, so its numbers can be posted on an issue or
+  PR. Nothing else from a private corpus run leaves the maintainer's
+  machine: the corpus, its out-dir, its run scripts and any notes on agent
+  judgments stay gitignored and are never committed, pushed or quoted.
 
 ## Issue-number provenance
 

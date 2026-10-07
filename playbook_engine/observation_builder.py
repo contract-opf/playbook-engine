@@ -351,6 +351,19 @@ class Observation:
                          one version only). Serialized under the vendor key
                          ``x_alignment_confidence`` (omitted when ``None``)
                          until the format gives it a home.
+        classification_basis: How the cited node's taxonomy_id was reached
+                         (issue #237) — the ``ClauseClassification.basis`` of
+                         the node the citation points at (``exact_match``,
+                         ``heading_similarity``, ``judge``, ``llm_segmenter``,
+                         ``inherited``, ``unclassified``, ...), or
+                         ``"aligned"`` when the observation's taxonomy_id
+                         came from its aligned row rather than from that
+                         node's own classification. Recorded by the pipeline
+                         after the observation is built; ``None`` when not
+                         recorded. Serialized under the vendor key
+                         ``x_classification_basis`` (omitted when ``None``) —
+                         read by ``playbook scorecard``, never by the
+                         playbook.
     """
 
     observation_id: str
@@ -378,6 +391,7 @@ class Observation:
     paper_basis: str | None = None
     paper_confidence: float | None = None
     alignment_confidence: float | None = None
+    classification_basis: str | None = None
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -428,6 +442,10 @@ class Observation:
         # bound anything across versions.
         if self.alignment_confidence is not None:
             d["x_alignment_confidence"] = round(self.alignment_confidence, 6)
+        # classification_basis (issue #237): vendor key, omitted when the
+        # pipeline did not record one.
+        if self.classification_basis is not None:
+            d["x_classification_basis"] = self.classification_basis
         return d
 
 
