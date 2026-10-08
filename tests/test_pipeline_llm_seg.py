@@ -989,14 +989,10 @@ def test_quarantined_document_partial_record_survives_compile(tmp_path: Path) ->
     assert playbook["corpus"]["stats"]["documents_total"] == 2
     assert playbook["corpus"]["stats"]["documents_in_scope"] == 1
 
-    # No clause position in the published evidence can trace back to the
+    # No precedent in the published evidence can trace back to the
     # quarantined document — it produced zero observations, so none of its
     # content can appear as evidence.
-    cited_doc_ids = {
-        obs["example_ref"]["document_id"]
-        for clause in playbook["evidence"]["clauses"]
-        for obs in clause.get("observed_positions", [])
-    }
+    cited_doc_ids = {p["document_id"] for p in playbook["evidence"]["precedent"]}
     assert "deal-002" not in cited_doc_ids
 
 
@@ -3681,7 +3677,7 @@ def test_mixed_extractor_trail_and_timeout_reason_reach_the_playbook(
     assert doc["x_mixed_extractors"] is True
     assert doc["x_ingest_reason"] == [None, "timeout", "backend-error"]
     # The per-version reason still never enters version_ingest itself — the
-    # 0.3 schema's additionalProperties:false there has no x_ escape hatch.
+    # 0.4 schema's additionalProperties:false there has no x_ escape hatch.
     assert all("reason" not in vi for vi in doc["version_ingest"])
 
 

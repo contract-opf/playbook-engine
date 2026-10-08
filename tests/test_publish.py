@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.export_profile import RedactionFinding, VerifyFinding
+from playbook_engine.precedent import restamp_evidence
 from playbook_engine.publisher import (
     DEFAULT_COUNTERPARTY_LABEL,
     DEFAULT_PARTY_LABEL,
@@ -41,7 +42,7 @@ REAL_NAME = "Northwind State University"
 
 
 def _make_doc(*, real_name: str | None = None, alias: str = "Counterparty-7") -> dict[str, Any]:
-    """Return a schema-valid OPF v0.2 doc.
+    """Return a schema-valid OPF 0.4 doc.
 
     If *real_name* is given, it is seeded verbatim into EVERY free-text
     surface issue #188 added (plus the two pre-existing ones), for
@@ -51,8 +52,8 @@ def _make_doc(*, real_name: str | None = None, alias: str = "Counterparty-7") ->
     """
     residue_suffix = f" (mentions {real_name})" if real_name else ""
 
-    return {
-        "opf_version": "0.2",
+    doc: dict[str, Any] = {
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "taxonomy": {
             "source": "test",
@@ -123,71 +124,40 @@ def _make_doc(*, real_name: str | None = None, alias: str = "Counterparty-7") ->
                             "clause_path": "8",
                         },
                     },
-                    "observed_positions": [
-                        {
-                            "text_summary": f"{alias} demanded a mutual carve-out.",
-                            "full_text": f"{alias} demanded a mutual carve-out.",
-                            "example_ref": {
-                                "document_id": "counterparty-deal-1",
-                                "version": 1,
-                                "clause_path": "8",
-                            },
-                            "deviation": "substantive",
-                            "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                            "provenance": "counterparty_paper",
-                            "outcome": "signed",
-                            "observed_at": "2023-06-15",
-                            "counterparty_ref": {"alias": alias, "counterparty_type": "University"},
+                }
+            ],
+            "precedent": [
+                {
+                    "id": "",
+                    "taxonomy_id": "indemnification",
+                    "document_id": "counterparty-deal-1",
+                    "counterparty_ref": {"alias": alias},
+                    "paper": "theirs",
+                    "paper_basis": "provenance_detection",
+                    "paper_confidence": None,
+                    "signed": True,
+                    "signed_at": "2023-06-15",
+                    "rounds": 1,
+                    "signed_text": {
+                        "text": f"{alias} demanded a mutual carve-out.",
+                        "ref": {
+                            "document_id": "counterparty-deal-1",
+                            "version": 1,
+                            "clause_path": "8",
                         },
+                    },
+                    "opening_text": None,
+                    "standard": False,
+                    "moved": True,
+                    "refused_asks": [
                         {
-                            "text_summary": "A second counterparty insisted on capping liability.",
-                            "full_text": "A second counterparty insisted on capping liability.",
-                            "example_ref": {
+                            "text": "A second counterparty insisted on capping liability.",
+                            "round": 0,
+                            "ref": {
                                 "document_id": "counterparty-deal-1",
                                 "version": 1,
                                 "clause_path": "9",
                             },
-                            "deviation": "none",
-                            "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                            "provenance": "counterparty_paper",
-                            "outcome": "signed",
-                            "observed_at": "2022-01-10",
-                        },
-                    ],
-                    "negotiation_trail": [
-                        {
-                            "document_id": "counterparty-deal-1",
-                            "round": 1,
-                            "moved_by": "counterparty",
-                            "change_summary": "Cap raised from 1x fees to 2x fees.",
-                            "ref": {
-                                "document_id": "counterparty-deal-1",
-                                "version": 1,
-                                "clause_path": "8",
-                            },
-                        }
-                    ],
-                    "summary": {
-                        "historical_stance": "no_signal",
-                        "confidence": {"score": 0.5, "n_our_paper": 0, "n_counterparty_paper": 2},
-                    },
-                }
-            ],
-            "clause_library": [
-                {
-                    "concept_id": "concept.indemnification.mutual",
-                    "taxonomy_id": "indemnification",
-                    "description": f"Mutual indemnification clause{residue_suffix}.",
-                    "notes": f"Observed in one deal so far{residue_suffix}.",
-                    "accepted_forms": [
-                        {
-                            "text_summary": "Mutual indemnification, capped at fees paid.",
-                            "example_ref": {
-                                "document_id": "counterparty-deal-1",
-                                "version": 1,
-                                "clause_path": "8",
-                            },
-                            "provenance": "counterparty_paper",
                         }
                     ],
                 }
@@ -229,6 +199,12 @@ def _make_doc(*, real_name: str | None = None, alias: str = "Counterparty-7") ->
             },
         },
     }
+    # Precedent ids and clause counts are stamped by the producer's own
+    # function, so the document is self-consistent (it validates).
+    restamp_evidence(
+        doc["evidence"], doc["agreement_type"]["id"], party=doc["perspective"]["party"]
+    )
+    return doc
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +299,6 @@ def test_deterministic_backstop_catches_every_surface() -> None:
         "floor.invariants[0].rationale",
         "curation.pins[0].comment",
         "evidence.clauses[0].our_standard.text",
-        "evidence.clause_library[0].description",
-        "evidence.clause_library[0].notes",
         "corpus.documents[0].title",
         "baseline.template_ref.title",
     ]
@@ -413,11 +387,10 @@ def test_publish_happy_path() -> None:
     assert not _contains_key(report.doc, "source_uri")
     assert "source" not in report.doc["baseline"]["template_ref"]
 
-    for clause in report.doc["evidence"]["clauses"]:
-        for obs in clause["observed_positions"]:
-            observed_at = obs.get("observed_at")
-            assert observed_at is not None
-            assert re.match(r"^\d{4}-Q[1-4]$", observed_at), observed_at
+    for record in report.doc["evidence"]["precedent"]:
+        signed_at = record.get("signed_at")
+        assert signed_at is not None
+        assert re.match(r"^\d{4}-Q[1-4]$", signed_at), signed_at
 
     assert report.doc["identity"]["content_hash"] != original["identity"]["content_hash"]
     assert report.doc["identity"]["supersedes"] == original["identity"]["content_hash"]
@@ -445,11 +418,9 @@ def test_per_deal_aliases_preserved() -> None:
         published_at="2026-07-13T00:00:00Z",
     )
 
-    clause = report.doc["evidence"]["clauses"][0]
-    tagged_obs = clause["observed_positions"][0]
-    assert tagged_obs["counterparty_ref"]["alias"] == "Counterparty-7"
-    assert tagged_obs["text_summary"] == "Counterparty-7 demanded a mutual carve-out."
-    assert tagged_obs["full_text"] == "Counterparty-7 demanded a mutual carve-out."
+    tagged = report.doc["evidence"]["precedent"][0]
+    assert tagged["counterparty_ref"]["alias"] == "Counterparty-7"
+    assert tagged["signed_text"]["text"] == "Counterparty-7 demanded a mutual carve-out."
 
     # Meanwhile a GENERIC (unnumbered) mention in free text IS normalized to
     # the counterparty label — proving the two are distinguished, not that
@@ -477,12 +448,11 @@ def test_keep_dates_flag() -> None:
     )
 
     dates = [
-        obs["observed_at"]
-        for clause in report.doc["evidence"]["clauses"]
-        for obs in clause["observed_positions"]
-        if obs.get("observed_at")
+        record["signed_at"]
+        for record in report.doc["evidence"]["precedent"]
+        if record.get("signed_at")
     ]
-    assert dates == ["2023-06-15", "2022-01-10"]
+    assert dates == ["2023-06-15"]
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +462,7 @@ def test_keep_dates_flag() -> None:
 
 def test_residue_finding_blocks_without_flag() -> None:
     doc = _make_doc()
-    leak_path = "clauses[0:clause.indemnification].observed_positions[0].text_summary"
+    leak_path = f"precedent[0:{doc['evidence']['precedent'][0]['id']}].signed_text.text"
 
     with pytest.raises(PublishError, match="leaking semantic"):
         publish_playbook(
@@ -543,9 +513,10 @@ def test_publish_output_validates() -> None:
 def _doc_with_prose(text: str) -> dict[str, Any]:
     """Minimal schema-agnostic doc carrying *text* in a scanned free-text field."""
     return {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "evidence": {
             "clauses": [{"id": "c1", "our_standard": {"text": text}}],
+            "precedent": [],
         },
     }
 
@@ -585,15 +556,10 @@ def test_proper_noun_residue_dedups_with_counts_and_paths() -> None:
     from playbook_engine.publisher import proper_noun_residue
 
     doc = {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "evidence": {
-            "clauses": [
-                {
-                    "id": "c1",
-                    "our_standard": {"text": "Ashland proposed the change."},
-                    "observed_positions": [{"full_text": "Ashland later signed."}],
-                }
-            ]
+            "clauses": [{"id": "c1", "our_standard": {"text": "Ashland proposed the change."}}],
+            "precedent": [{"signed_text": {"text": "Ashland later signed."}}],
         },
     }
     findings = proper_noun_residue(doc)
@@ -654,7 +620,7 @@ def test_publish_report_carries_proper_noun_findings() -> None:
 
 def _publish_with_text(text: str, redact_terms: list[str] | None = None) -> dict:
     doc = _make_doc()
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = text
+    doc["evidence"]["precedent"][0]["signed_text"]["text"] = text
     report = publish_playbook(
         doc,
         redaction_judge=_CleanRedactionJudge(),
@@ -663,7 +629,7 @@ def _publish_with_text(text: str, redact_terms: list[str] | None = None) -> dict
         published_at="2026-07-16T00:00:00Z",
         redact_terms=redact_terms or (),
     )
-    return report.doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"]  # type: ignore[no-any-return]
+    return report.doc["evidence"]["precedent"][0]["signed_text"]["text"]  # type: ignore[no-any-return]
 
 
 def test_publish_strips_esign_audit_lines() -> None:
@@ -901,7 +867,7 @@ def _doc_leaking_institution_everywhere() -> dict[str, Any]:
     surfaces the born-safe pass historically missed: signature-block prose, a
     corpus.stats dict KEY, and a filename-derived document_id slug value."""
     doc = _make_doc()
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = (
+    doc["evidence"]["precedent"][0]["signed_text"]["text"] = (
         f"IN WITNESS WHEREOF, signed on behalf of {_INST_NAME} by its officer."
     )
     slug = "affiliation-agreement-wexford-university-0212e146"
@@ -926,7 +892,7 @@ def test_institution_gate_blocks_unregistered_name_across_surfaces() -> None:
     message = str(exc_info.value)
     assert "wexford university" in message.lower()
     # every leaking surface is named in the failure
-    assert "observed_positions" in message
+    assert "signed_text" in message
     assert "document_id" in message
     assert "observations_by_document" in message
 

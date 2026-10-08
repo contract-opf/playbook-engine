@@ -12,7 +12,7 @@ A pin records BOTH the attorney's asserted ``position`` AND the
 ``baseline_stance`` — the engine's own ``historical_stance`` for that clause
 at the moment the pin was made (i.e. what the attorney was overriding
 *from*). This is deliberate: a pin's whole purpose is usually to assert a
-position that already differs from the corpus rollup, so comparing the
+position that already differs from the engine's own stance, so comparing the
 *recomputed* stance against ``position`` would flag a "conflict" on every
 single recompile, even when nothing about the underlying evidence changed.
 Comparing the recomputed stance against ``baseline_stance`` instead answers
@@ -41,7 +41,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["CurationPin", "merge_curation"]
+__all__ = ["NO_STANCE", "CurationPin", "merge_curation"]
+
+#: The stance every clause of an OPF 0.4 document compares as. 0.4 carries
+#: no stance (issue #223), so a pin's ``baseline_stance`` and every
+#: recompile's clause stance are this value, and a pin conflicts only with a
+#: carried-over baseline that is not it.
+NO_STANCE = "unknown"
 
 
 @dataclass(frozen=True)
@@ -79,7 +85,7 @@ class CurationPin:
             clause_id=d["clause_id"],
             item_id=d.get("item_id", ""),
             position=d["position"],
-            baseline_stance=d.get("baseline_stance", "unknown"),
+            baseline_stance=d.get("baseline_stance", NO_STANCE),
             pinned_at=d.get("pinned_at", ""),
             pinned_by=d.get("pinned_by"),
             comment=d.get("comment"),

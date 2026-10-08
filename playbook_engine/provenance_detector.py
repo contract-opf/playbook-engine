@@ -5,9 +5,7 @@ template) or *counterparty paper* (the counterparty's form) — or that the
 side cannot be determined (``"unknown"``).  In OPF 0.4 the result is deal
 metadata only (the precedent record's three-valued ``paper``): it never
 partitions, gates or weights anything, and ``our_standard`` comes only from
-the configured template (owner decision 2026-09-13 (b), issue #225).  The
-0.2/0.3 provenance rule (only our-paper observations may define an opening
-position) still reads it for those legacy formats.
+the configured template (owner decision 2026-09-13 (b), issue #225).
 
 Detection signals (applied in priority order):
 1. **Template similarity** (highest fidelity) — if a canonical template is
@@ -138,12 +136,10 @@ _RESULT_PROVENANCE_VALUES = _PROVENANCE_VALUES | {PROVENANCE_UNKNOWN}
 def two_valued_side(provenance: str) -> str:
     """The value a frozen two-valued OPF provenance field carries for *provenance*.
 
-    ``corpus.documents[].provenance`` (every published schema) and the
-    0.2/0.3 ``observed_positions[]`` / ``clause_library`` provenance have no
-    ``"unknown"`` — the published enums are frozen. A side passes through
-    unchanged; ``"unknown"`` (no side at all) is written as
-    ``counterparty_paper``, the 0.2/0.3 §2.3 direction that never lets it
-    define an opening position. It is only ever written next to the honest
+    ``corpus.documents[].provenance`` has no ``"unknown"`` — the published
+    enum is frozen. A side passes through unchanged; ``"unknown"`` (no side
+    at all) is written as ``counterparty_paper``, the §2.3 direction that
+    never lets it define an opening position. It is only ever written next to the honest
     record of the undetermined side: ``provenance_is_ambiguous: true`` on the
     corpus document and ``paper: "unknown"`` on the OPF 0.4 precedent record
     (issue #225).

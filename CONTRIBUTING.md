@@ -5,9 +5,9 @@ compiler. By participating you agree to our
 [Code of Conduct](CODE_OF_CONDUCT.md). Two things live in this repository, and they have different bars:
 
 - **The OPF standard** (`docs/OPF-SPEC.md`, `spec/playbook.schema-0.4.json`)
-  — the current format. `spec/playbook.schema-0.2.json` documents remain
-  valid but are not current; `docs/OPF-SPEC-v0.1.md` /
-  `spec/playbook.schema.json` are superseded.
+  — the one format the engine reads and writes. The 0.1–0.3 schemas were
+  retired (issue #238; git history keeps them); `docs/OPF-SPEC-v0.1.md` is
+  retained for history only.
 - **The engine** (`playbook_engine/`) — the compiler that produces OPF
   playbooks from a corpus of negotiated agreements.
 
@@ -52,8 +52,10 @@ changes carry a higher bar** — the format is an interface others build on:
 
 - a rationale (what can't be expressed today, and why this shape),
 - the schema change as a NEW schema file (currently `spec/playbook.schema-0.4.json`; published schemas are never edited in place),
-- an updated example (`examples/our-paper-baseline.v0.2.playbook.json`
-  must keep validating — CI enforces this),
+- an updated reference playbook (`examples/nda/playbook.opf.json` must keep
+  validating and reproducing from its committed inputs — CI enforces this
+  via `tests/test_examples_validate.py` and
+  `tests/test_nda_derive_reproducible.py`),
 - a spec-text update (`docs/OPF-SPEC.md`) including Appendix B changelog,
 - a note on versioning impact: as of OPF 1.0, 1.x changes are additive-only
   (new OPTIONAL fields, new `x_*` extensions); removing/retyping a field or

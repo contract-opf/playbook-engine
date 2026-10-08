@@ -30,7 +30,7 @@ of authorship already is the sign-off).
 API
 ---
 ``INTERVIEW_QUESTIONS``       — the canonical 6-question set (OPF §7).
-``generate_posture()``        — answers -> a schema-0.2 ``posture`` dict,
+``generate_posture()``        — answers -> a schema-shaped ``posture`` dict,
                                  versioned (bumped from ``existing_posture``).
 ``check_posture_floor_conflict()`` — deterministic SHOULD-warn: does the
                                  Posture prose name a Floor invariant's
@@ -220,7 +220,7 @@ def generate_posture(
     existing_posture: dict[str, Any] | None = None,
     base_version: int | None = None,
 ) -> dict[str, Any]:
-    """Assemble a schema-0.2 ``posture`` dict from interview *answers*.
+    """Assemble a schema-shaped ``posture`` dict from interview *answers*.
 
     Args:
         answers:          ``{question_id: answer_text}`` for >= 3 of the
@@ -418,7 +418,7 @@ def check_posture_floor_conflict(
 
     Args:
         system_prompt:    ``posture.system_prompt`` text (may be empty).
-        floor_invariants: ``floor.invariants`` list (schema-0.2 shape: dicts
+        floor_invariants: ``floor.invariants`` list (schema shape: dicts
                           with ``id``/``statement``), or ``None``/``[]``.
 
     Returns:

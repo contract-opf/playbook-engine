@@ -58,8 +58,8 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
           otherwise it was removed (narrowed or replaced text included, even
           when its words recur), and its ORIGIN (never the deal's paper side,
           tested against every template node for the taxonomy_id) decides:
-            · our standard language struck → our CONCESSION (a conceded deal in
-              stance_detail and the position; never a rejected/refused ask) —
+            · our standard language struck → our CONCESSION (the precedent's
+              opening_text; never a rejected/refused ask) —
               only in a deal with a detected executed copy; in an unsigned
               deal it is dropped and counted, never a concession
             · non-standard (their) language struck → proposed_then_reversed —
@@ -68,21 +68,15 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
               an unsigned deal's precedent records carry no refused_asks
             · no standard to compare against → dropped and counted
                                      │
-  L5  COMPILE PLAYBOOK      aggregate observations → OPF (deterministic assembly)
-        - build ClausePosition[] (template-anchored) honoring the provenance rule
-        - build ClauseConcept[] (concept library) for counterparty-paper matching
-        - compute rollups (acceptable_if / fallbacks / rejected), confidence, citations
-        - consumer path (no judged deviations): no stance, tolerance or fallback is
-          read from risk direction — historical_stance "no_signal", acceptable_if /
-          fallbacks empty, stance_detail {held: n_signed_standard, of: n_deals,
-          basis: "all"}; refused asks (rejected) are kept
-        - every evidence count (precedent_count, n_our_paper / n_counterparty_paper,
-          stance_detail held/of, digest n) counts DISTINCT DEALS
-        - OPF 0.4 (default, issue #223): evidence = {clauses, precedent} — one
-          verdict-free precedent per (deal, clause) (signed_text, standard,
-          rounds/moved, refused_asks, paper as metadata only); clause n_* counts
-          and the digest_version 3 digest are derived from it (precedent.py);
-          `project --opf-version 0.3` keeps the 0.3 shape above for one release
+  L5  COMPILE PLAYBOOK      aggregate observations → OPF 0.4 (deterministic assembly)
+        - decide the clause types and each one's our_standard (template only)
+        - evidence = {clauses, precedent} (issue #223) — one verdict-free
+          precedent per (deal, clause) (signed_text, standard, rounds/moved,
+          opening_text, refused_asks, paper as metadata only); clause n_* counts
+          and the digest_version 3 digest are derived from it (precedent.py)
+        - every evidence count counts DISTINCT DEALS; nothing is read from a
+          judged verdict or risk direction
+        - one format only: OPF 0.1–0.3 and digest 2 were retired (issue #238)
                                      │
             ┌──────────────────────────────────────────────────────────────┐
   OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.4.json)     │
@@ -97,7 +91,7 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
 
 **Reversal detection recovers "rejected" without labels.** A span inserted in one version and removed before the signed terminal is an explicit rejection — derivable purely from ordered diffs. This is the cleanest "unacceptable" signal in any corpus.
 
-**Each negotiation is one precedent.** Version count reflects how hard a deal was, not how important it is. The *signed outcome* counts once per deal; intermediate reversals are supplementary and must not double-count an outcome. Concretely: L4 emits exactly one signed (or, with no detected executed copy, unsigned) observation per deal per taxonomy_id, built from the signed version's own text — a clause the segmenter split across several nodes is still one precedent, and a draft's text that was replaced before signing is never reported as signed. L5 counts precedent per normalized text, `n_our_paper`/`n_counterparty_paper`, and `stance_detail` held/of as the number of distinct deals (`document_id`), never as observation rows. The digest's `n` is likewise the number of distinct deals in each group, never a sum of `precedent_count`, so a deal carrying two texts that the digest's looser normalization merges counts once.
+**Each negotiation is one precedent.** Version count reflects how hard a deal was, not how important it is. The *signed outcome* counts once per deal; intermediate reversals are supplementary and must not double-count an outcome. Concretely: L4 emits exactly one signed (or, with no detected executed copy, unsigned) observation per deal per taxonomy_id, built from the signed version's own text — a clause the segmenter split across several nodes is still one precedent, and a draft's text that was replaced before signing is never reported as signed. L5 writes one precedent record per (deal, clause), and every clause count (`n_deals`, `n_signed_standard`, `n_variants`, `n_refused`) and every digest `n_deals` is a number of distinct deals (`document_id`), never of observation rows.
 
 ## Intermediate artifacts (not part of OPF)
 

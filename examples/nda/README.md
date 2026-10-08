@@ -60,8 +60,8 @@ Information; survival of confidentiality obligations) and one hand-authored
 conditional hard line via `playbook floor sign` (limitation of liability, if
 present, must not reach a confidentiality breach -- responding to the
 $50,000 liability cap that appears in three of the six deals, introduced by
-the counterparty in two of them). `playbook project --opf-version 0.3` still
-projects the same store into the previous (0.3) shape for one release.
+the counterparty in two of them). OPF 0.4 is the only format the engine
+emits (issue #238).
 `corpus.stats.dropped_observations` counts removed text that yields no
 precedent.
 A clause edited in an early round and then carried unchanged into the

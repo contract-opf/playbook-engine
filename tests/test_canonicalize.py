@@ -39,11 +39,11 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": {"clauses": [], "precedent": []},
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},
@@ -86,6 +86,29 @@ def test_canonicalize_does_not_reorder_arrays() -> None:
     a = canonicalize({"items": ["z", "a", "m"]})
     b = canonicalize({"items": ["m", "a", "z"]})
     assert a != b
+
+
+def test_canonicalize_emits_unicode_literally() -> None:
+    """Non-ASCII is emitted as UTF-8, never \\u-escaped (formerly pinned by
+    the retired 0.3 conformance vector 005)."""
+    out = canonicalize({"text": "合同 🔒 café"})
+    assert out == '{"text":"合同 🔒 café"}'
+    assert "\\u" not in out
+
+
+def test_canonicalize_does_not_normalize_unicode() -> None:
+    """NFC and NFD spellings of the same word hash differently — the engine
+    never normalizes Unicode before hashing (formerly vectors 006/007)."""
+    nfc = "caf\u00e9"
+    nfd = "cafe\u0301"
+    assert canonicalize({"t": nfc}) != canonicalize({"t": nfd})
+    assert sha256_hex(canonicalize({"t": nfc})) != sha256_hex(canonicalize({"t": nfd}))
+
+
+def test_canonicalize_pins_float_and_int_renderings() -> None:
+    """A whole-number float keeps its trailing .0 (formerly vector 008)."""
+    out = canonicalize({"a": 1.0, "b": 1000000000, "c": 0.0, "d": -0.5})
+    assert out == '{"a":1.0,"b":1000000000,"c":0.0,"d":-0.5}'
 
 
 def test_sha256_hex_format() -> None:

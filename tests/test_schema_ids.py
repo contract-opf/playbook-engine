@@ -24,8 +24,7 @@ ROOT = Path(__file__).parent.parent
 CANONICAL_BASE = "https://contract-opf.github.io/playbook-engine"
 
 SCHEMA_FILES = [
-    ROOT / "spec" / "playbook.schema.json",
-    ROOT / "spec" / "playbook.schema-0.2.json",
+    ROOT / "spec" / "playbook.schema-0.4.json",
     ROOT / "spec" / "clause-tree.schema.json",
 ]
 

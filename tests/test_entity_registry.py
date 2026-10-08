@@ -499,11 +499,12 @@ def test_compiled_artifact_carries_alias_not_raw_entity_name(tmp_path: Path) -> 
 def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boundary(
     tmp_path: Path,
 ) -> None:
-    """Regression (issue #95): the compiled playbook's new
-    x_search_snippet field must go through the SAME born-safe
-    pseudonymization as text_summary/full_text — never the raw entity name,
-    only the alias (modeled on
-    test_compiled_artifact_carries_alias_not_raw_entity_name above).
+    """Regression (issue #95): the store's search_snippet field must go
+    through the SAME born-safe pseudonymization as text_summary/full_text —
+    never the raw entity name, only the alias (modeled on
+    test_compiled_artifact_carries_alias_not_raw_entity_name above). The
+    compiled playbook (OPF 0.4) carries the aliased text in its precedent
+    record and the raw name nowhere.
 
     The known entity name below is deliberately positioned to straddle
     observation_builder._SEARCH_SNIPPET_MAX, the snippet's truncation cap: a
@@ -533,11 +534,9 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
         r"This agreement is governed by the laws of the State of Example.\par "
         # Filled signature block (signed_detector.py's single_signature basis)
         # so this single-version document is detected as executed — an
-        # undetected signature means outcome="unsigned" (issue #83), which
-        # compile_clause_positions withholds from observed_positions
-        # entirely, and the x_search_snippet assertions below would then
-        # pass vacuously on an empty evidence.clauses rather than proving
-        # anything.
+        # undetected signature means outcome="unsigned" (issue #83), whose
+        # precedent is not signed, and the alias assertions below would then
+        # prove less than they should.
         r"3. Signatures\par "
         r"By: Alice Smith\par "
     )
@@ -603,22 +602,6 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
         p["signed_text"]["text"] for p in playbook["evidence"]["precedent"] if p["signed_text"]
     ]
     assert any(alias in t for t in precedent_texts)
-
-    # x_search_snippet is an OPF 0.3 observed_positions extension — check it
-    # on the 0.3 projection of the same store.
-    playbook_03 = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
-    )
-    assert entity not in json.dumps(playbook_03)
-    snippet_values = [
-        op.get("x_search_snippet")
-        for clause in playbook_03["evidence"]["clauses"]
-        for op in clause.get("observed_positions", [])
-        if op.get("x_search_snippet")
-    ]
-    assert snippet_values, "expected the compiled playbook to carry at least one x_search_snippet"
-    assert any(alias in s for s in snippet_values)
-    assert not any(entity in s or "Wintermoor" in s for s in snippet_values)
 
 
 def test_alias_stable_across_two_mine_corpus_runs(tmp_path: Path) -> None:

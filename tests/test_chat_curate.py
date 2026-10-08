@@ -21,7 +21,7 @@ from playbook_engine.cli import cli
 
 
 def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
-    """Build a minimal valid OPF v0.1-shaped dict and write playbook.opf.json.
+    """Build a minimal OPF 0.4-shaped dict and write playbook.opf.json.
 
     Clauses sort by (taxonomy_id, id) in ``_build_index`` — governing_law <
     indemnification — so C1 is always governing_law and C2 indemnification.
@@ -33,21 +33,25 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                 "taxonomy_id": "indemnification",
                 "title": "Indemnification",
                 "our_standard": None,
-                "observed_positions": [],
-                "rollup": {"position": "usually_held", "confidence": {"score": 0.6}},
+                "n_deals": 0,
+                "n_signed_standard": 0,
+                "n_variants": 0,
+                "n_refused": 0,
             },
             {
                 "id": "clause.governing_law",
                 "taxonomy_id": "governing_law",
                 "title": "Governing Law",
                 "our_standard": None,
-                "observed_positions": [],
-                "rollup": {"position": "no_signal", "confidence": {"score": 0.1}},
+                "n_deals": 0,
+                "n_signed_standard": 0,
+                "n_variants": 0,
+                "n_refused": 0,
             },
         ]
 
     doc = {
-        "opf_version": "0.1",
+        "opf_version": "0.4",
         "agreement_type": {"id": "educational-affiliation", "name": "Educational Affiliation"},
         "baseline": {"has_canonical_template": True},
         "taxonomy": {
@@ -57,7 +61,7 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                 {"id": "governing_law", "label": "Governing Law", "status": "active"},
             ],
         },
-        "clauses": clauses,
+        "evidence": {"clauses": clauses, "precedent": []},
         "corpus": {"documents": [], "stats": {}},
         "compiler": {
             "name": "playbook-engine",
@@ -105,9 +109,9 @@ def test_pin_and_note_write_expected_embedded_state(tmp_path: Path) -> None:
     assert pin["position"] == "usually_conceded"
     assert pin["comment"] == "keep as filed"
     assert pin["pinned_by"] == "marc"
-    # baseline_stance records what the pin overrides FROM: governing_law's
-    # rollup.position ("no_signal") at pin time.
-    assert pin["baseline_stance"] == "no_signal"
+    # baseline_stance records what the pin overrides FROM. The document
+    # carries no stance (issue #223), so it is curation.NO_STANCE.
+    assert pin["baseline_stance"] == "unknown"
     assert "conflict" not in pin
 
     notes_path = out_dir / "viewer_notes.md"
@@ -224,9 +228,18 @@ def test_identity_digests_refresh_when_present(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _carry_over_stance_baseline(out_dir: Path, stance: str) -> None:
+    """Give the pin a baseline that is not the document's (a pin whose
+    baseline was stamped against a stance a later document no longer
+    carries), without touching anything else."""
+    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
+    doc["curation"]["pins"][0]["baseline_stance"] = stance
+    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
 def test_pin_conflicting_with_new_evidence_is_reported(tmp_path: Path) -> None:
-    """A pin made against one historical_stance, whose clause's stance later
-    moves (simulating a recompile / fresh evidence), is flagged as a
+    """A pin whose baseline differs from the clause's current stance (always
+    curation.NO_STANCE now — the document carries none) is flagged as a
     conflict the next time curate runs — even via an unrelated instruction."""
     _make_opf(tmp_path)
     out_dir = tmp_path / "out"
@@ -234,30 +247,22 @@ def test_pin_conflicting_with_new_evidence_is_reported(tmp_path: Path) -> None:
     first = apply_curate_commands(out_dir, ["pin governing_law to usually_conceded"])
     assert first.conflicts == []
     doc = _load_opf(tmp_path)
-    assert doc["curation"]["pins"][0]["baseline_stance"] == "no_signal"
-    assert (
-        "conflict" not in doc["curation"]["pins"][0]
-        or doc["curation"]["pins"][0]["conflict"] is None
-    )
+    assert doc["curation"]["pins"][0]["baseline_stance"] == "unknown"
+    assert doc["curation"]["pins"][0].get("conflict") is None
 
-    # Simulate new evidence: the clause's recomputed stance has since moved
-    # (e.g. via a pipeline recompile) without touching curation.pins.
-    doc["clauses"][1]["rollup"]["position"] = "usually_held"
-    assert doc["clauses"][1]["id"] == "clause.governing_law"
-    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
+    _carry_over_stance_baseline(out_dir, "usually_held")
     second = apply_curate_commands(out_dir, ["note indemnification: unrelated instruction"])
 
     assert len(second.conflicts) == 1
     conflict = second.conflicts[0]
     assert conflict.clause_id == "clause.governing_law"
     assert conflict.action == "conflict"
-    assert "no_signal" in conflict.detail
     assert "usually_held" in conflict.detail
+    assert "unknown" in conflict.detail
 
     after = _load_opf(tmp_path)
     persisted_pin = after["curation"]["pins"][0]
-    assert persisted_pin["conflict"]["recomputed_historical_stance"] == "usually_held"
+    assert persisted_pin["conflict"]["recomputed_historical_stance"] == "unknown"
 
 
 def test_repinning_a_conflicted_clause_clears_the_conflict(tmp_path: Path) -> None:
@@ -267,9 +272,7 @@ def test_repinning_a_conflicted_clause_clears_the_conflict(tmp_path: Path) -> No
     out_dir = tmp_path / "out"
 
     apply_curate_commands(out_dir, ["pin governing_law to usually_conceded"])
-    doc = _load_opf(tmp_path)
-    doc["clauses"][1]["rollup"]["position"] = "usually_held"
-    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+    _carry_over_stance_baseline(out_dir, "usually_held")
 
     # Confirm the conflict exists before re-pinning.
     pre = apply_curate_commands(out_dir, ["note indemnification: noop"])
@@ -281,7 +284,7 @@ def test_repinning_a_conflicted_clause_clears_the_conflict(tmp_path: Path) -> No
 
     after = _load_opf(tmp_path)
     pin = after["curation"]["pins"][0]
-    assert pin["baseline_stance"] == "usually_held"
+    assert pin["baseline_stance"] == "unknown"
     assert pin.get("conflict") is None
 
 
@@ -359,9 +362,7 @@ def test_curate_cmd_reports_conflict(tmp_path: Path) -> None:
         cli, ["curate", str(out_dir), "--command", "pin governing_law to usually_conceded"]
     )
 
-    doc = _load_opf(tmp_path)
-    doc["clauses"][1]["rollup"]["position"] = "usually_held"
-    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
+    _carry_over_stance_baseline(out_dir, "usually_held")
 
     result = runner.invoke(
         cli, ["curate", str(out_dir), "--command", "note indemnification: unrelated"]

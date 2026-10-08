@@ -5,7 +5,7 @@
 
 ## The canonical-format decision
 
-**OPF 1.0 (document shape `opf_version` 0.4; 0.3 still validates) is the canonical playbook format.**
+**OPF 1.0 (document shape `opf_version` 0.4, the one format the engine reads and writes) is the canonical playbook format.**
 There is no second, parallel
 "review-engine playbook format" that OPF must be converted into. What a review
 engine installs and runs is **an OPF document plus a
@@ -28,8 +28,7 @@ OPF is the single source of negotiation **knowledge and intent** for an
 agreement type. Concretely, OPF owns:
 
 - **Knowledge** — the compiled, cited record of what the corpus shows:
-  `evidence.clauses`, `evidence.clause_library`, `historical_stance`,
-  `acceptable_if`, `fallbacks`, `rejected` (§3.5).
+  `evidence.clauses` and the per-deal `evidence.precedent` record (§3.5).
 - **Intent** — the negotiation posture: `posture.system_prompt`, generated
   from the compiler interview and grounded in Evidence (§3.6).
 - **Hard lines** — the deterministic floor: `floor.invariants`, the

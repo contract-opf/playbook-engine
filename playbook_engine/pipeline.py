@@ -42,12 +42,7 @@ from playbook_engine.clause_classifier import (
     classify_tree,
 )
 from playbook_engine.clause_differ import ClauseDiff, diff_aligned
-from playbook_engine.clause_library_compiler import compile_clause_library
-from playbook_engine.clause_position_compiler import (
-    CoherenceJudge,
-    compile_clause_positions,
-    deviations_are_deterministic,
-)
+from playbook_engine.clause_position_compiler import compile_clause_positions
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.config import EngineConfig
 from playbook_engine.deviation_classifier import (
@@ -120,7 +115,6 @@ from playbook_engine.observation_builder import (
     truncate_search_snippets,
 )
 from playbook_engine.pdf_ingester import ingest_pdf
-from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
 from playbook_engine.playbook_assembler import (
     assemble_playbook,
     write_playbook,
@@ -136,7 +130,7 @@ from playbook_engine.provenance_detector import (
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.rubric import RubricPolicy, current_versions
-from playbook_engine.run_manifest import read_deviation_mode, record_deviation_mode
+from playbook_engine.run_manifest import record_deviation_mode
 from playbook_engine.scope_gate import (
     ScopeDecision,
     ScopeJudge,
@@ -2083,7 +2077,7 @@ def _build_quarantine_corpus_doc(
       ``version_ingest``) — keeping it a fixed string is one less place that
       would need auditing for leaked content.
     - ``x_quarantined=True`` — the sanctioned ``x_`` extension point
-      (spec/playbook.schema-0.3.json's ``corpus.documents.items``; NOT
+      (spec/playbook.schema-0.4.json's ``corpus.documents.items``; NOT
       stripped by ``playbook_assembler._sanitize_corpus_documents_for_schema``,
       which only rewrites ``version_ingest`` entries) gives a downstream
       consumer an explicit, unambiguous way to recognize "quarantined
@@ -2405,7 +2399,7 @@ def _collect_l1(
                 # as ClauseNode.char_span), or None when no block was found
                 # (or its offsets could not be related to the tree). Engine-
                 # internal: corpus_manifest.json carries it; the frozen
-                # OPF 0.3 schema's version_ingest (additionalProperties:
+                # OPF 0.4 schema's version_ingest (additionalProperties:
                 # false) does not, so playbook_assembler's
                 # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
                 # playbook.
@@ -3050,8 +3044,8 @@ def _compute_doc_from_l1(
             doc_diff, has_signed_copy=has_signed_copy and ordered_ids[-1] == signed_vid
         )
         # Negotiation dynamics (issue #177): surface the per-round diffs as
-        # RoundMove records instead of discarding them — these become each
-        # ClausePosition's negotiation_trail at L5.
+        # RoundMove records instead of discarding them — L5 derives each
+        # precedent's rounds/moved from them.
         round_moves = build_round_moves(
             doc_id,
             doc_diff,
@@ -4600,8 +4594,8 @@ def mine_corpus(
     # indistinguishable from the consumer path).
     record_deviation_mode(out_dir, "deterministic" if _dev_judge is None else "judged")
     # Round moves (issue #177) — written post-pseudonymization like
-    # observations.jsonl; project_playbook reads it back for the
-    # negotiation_trail (absent file → no trail, e.g. a pre-#177 store).
+    # observations.jsonl; project_playbook reads it back for each
+    # precedent's rounds/moved (absent file → rounds 0, e.g. a pre-#177 store).
     # Truncation runs strictly AFTER the aliasing above: slicing raw text
     # first can cut an entity name mid-word, and a cut name survives the
     # whole-word pseudonymization match (born-safe leak — review finding).
@@ -4676,8 +4670,6 @@ def project_playbook(
     config: EngineConfig,
     taxonomy: Taxonomy,
     *,
-    coherence_judge: CoherenceJudge | None = None,
-    opf_version: str = DEFAULT_OPF_VERSION,
     progress: Callable[[str], None] = lambda _: None,
 ) -> dict[str, Any]:
     """Run L5 only — read the observation store and write ``playbook.opf.json``.
@@ -4695,24 +4687,20 @@ def project_playbook(
                                         conflict with fresh evidence is (re-)flagged. Absent
                                         on a first compile.
 
-    When a ``coherence_judge`` is supplied this function performs LLM calls
-    for flagged clauses.  Without one all L5 logic is deterministic given the
-    store.
+    All L5 logic is deterministic given the store — zero LLM calls.
 
     Args:
         out_dir:         Output directory that already contains the observation store.
         config:          Engine configuration (agreement type, baseline, taxonomy).
         taxonomy:        Loaded taxonomy object.
-        coherence_judge: L5 coherence judge; defaults to None (coherence check skipped).
-                         When set, flags are written to ``{out_dir}/coherence_flags.json``.
-        opf_version:     OPF version to emit — ``"0.4"`` (the default, issue
-                         #223) or ``"0.3"`` (kept for one release).
         progress:        Callable receiving progress message strings.
 
-    Writes ``{out_dir}/playbook.opf.json`` and, for OPF 0.4,
-    ``{out_dir}/precedent.jsonl`` — one ``evidence.precedent`` record per
-    line, sorted by id, whose sha256 the playbook records under
-    ``x_sidecars`` (issue #224; see ``write_precedent_sidecar``).
+    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.4, the one format the
+    engine emits — issue #238), ``{out_dir}/coherence_flags.json`` (the
+    fragment-quarantine warnings) and ``{out_dir}/precedent.jsonl`` — one
+    ``evidence.precedent`` record per line, sorted by id, whose sha256 the
+    playbook records under ``x_sidecars`` (issue #224; see
+    ``write_precedent_sidecar``).
 
     Returns:
         Validated playbook dict (also written to ``{out_dir}/playbook.opf.json``).
@@ -4777,43 +4765,23 @@ def project_playbook(
     # -----------------------------------------------------------------------
     # L5: Compile playbook (deterministic given the store)
     # -----------------------------------------------------------------------
-    progress("L5: compiling clause positions + library…")
+    progress("L5: compiling clause types + precedent…")
 
     # Round moves (issue #177) — absent for pre-#177 stores or
-    # single-version corpora; read_round_moves_jsonl returns [] then and no
-    # negotiation_trail is emitted.
+    # single-version corpora; read_round_moves_jsonl returns [] then and
+    # every precedent records rounds = 0.
     round_moves = read_round_moves_jsonl(out_dir / "round_moves.jsonl")
     if round_moves:
         progress(f"  loaded {len(round_moves)} round move(s) from store")
-
-    # Issue #230: the deviation mode is the one mine_corpus recorded for this
-    # store, never guessed from its rows. Only an out-dir mined before the
-    # mode was recorded falls back to inference — and says so.
-    deviation_mode = read_deviation_mode(out_dir)
-    if deviation_mode is None:
-        deterministic_deviations = deviations_are_deterministic(all_observations)
-        progress(
-            "  WARNING: no deviation mode recorded for this store (mined before it was "
-            "recorded); inferred "
-            f"{'deterministic' if deterministic_deviations else 'judged'} from the "
-            "observations. Re-run 'playbook mine' to record it."
-        )
-    else:
-        deterministic_deviations = deviation_mode == "deterministic"
 
     taxonomy_titles = {e.id: e.label for e in taxonomy.entries}
     clause_positions, coherence_flags, unclassified_coverage = compile_clause_positions(
         all_observations,
         t_observations,
         taxonomy_titles=taxonomy_titles,
-        coherence_judge=coherence_judge,
-        min_evidence_n=config.provenance.min_evidence_n,
-        round_moves=round_moves,
-        deterministic_deviations=deterministic_deviations,
     )
-    clause_library, _library_unclassified_coverage = compile_clause_library(all_observations)
 
-    # Persist coherence flags (empty list when no judge configured).
+    # Persist coherence flags (fragment quarantine; empty list when none).
     coherence_flags_path = out_dir / "coherence_flags.json"
     _atomic_json_write([f.to_dict() for f in coherence_flags], coherence_flags_path)
 
@@ -4877,8 +4845,7 @@ def project_playbook(
 
     # Issue #147: read the PRIOR compile's curation overlay (attorney-pinned
     # positions), if a playbook already exists in out_dir, so the merge layer
-    # inside assemble_playbook can preserve pins across this recompile and
-    # flag/clear conflicts against the freshly recomputed historical_stance.
+    # inside assemble_playbook can preserve pins across this recompile.
     # Absent on a first compile — no prior pins to carry forward.
     #
     # Issue #123: the same prior-playbook read also carries forward
@@ -4910,19 +4877,16 @@ def project_playbook(
         baseline=baseline_dict,
         taxonomy=taxonomy_dict,
         clause_positions=clause_positions,
-        clause_library=clause_library,
         corpus_documents=corpus_documents,
         generated_at=generated_at,
         observations=all_observations,
         scope_bases=scope_bases,
         unclassified_coverage=unclassified_coverage,
         perspective=perspective_dict,
-        min_evidence_n=config.provenance.min_evidence_n,
         existing_curation=existing_curation,
         existing_posture=existing_posture,
         existing_floor=existing_floor,
         round_moves=round_moves,
-        opf_version=opf_version,
     )
 
     write_playbook(playbook, out_file)
@@ -4952,7 +4916,6 @@ def compile_corpus(
     trail_judge: TrailJudge | None = None,
     signed_judge: SignedJudge | None = None,
     provenance_judge: ProvenanceJudge | None = None,
-    coherence_judge: CoherenceJudge | None = None,
     no_cache: bool = False,
     # Backward-compatibility alias: ``resume=False`` maps to ``no_cache=True``.
     resume: bool = True,
@@ -4967,7 +4930,6 @@ def compile_corpus(
     refresh_extraction: bool = False,
     entity_registry_path: Path | None = None,
     stop_after: str | None = None,
-    opf_version: str = DEFAULT_OPF_VERSION,
     progress: Callable[[str], None] = lambda _: None,
 ) -> dict[str, Any]:
     """Compile a corpus directory into a validated OPF playbook.
@@ -4989,8 +4951,6 @@ def compile_corpus(
         trail_judge:          Version-ordering judge; defaults to None (deterministic only).
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).
         provenance_judge:     L2 provenance judge; defaults to None (deterministic only).
-        coherence_judge:      L5 coherence judge; defaults to None (coherence check skipped).
-                              When set, flags are written to ``{out_dir}/coherence_flags.json``.
         no_cache:             If True, skip the cache and force a full recompute.
         resume:               Deprecated — use *no_cache* instead.  ``resume=False``
                               is equivalent to ``no_cache=True``.
@@ -5021,9 +4981,6 @@ def compile_corpus(
                               and return a status dict instead of the playbook.
                               ``playbook.opf.json`` is NOT written.
                               Supported values: ``"intermediates"``.
-        opf_version:          OPF version to emit (``"0.4"`` default, or
-                              ``"0.3"`` for one release) — see
-                              :func:`project_playbook`.
         progress:             Callable receiving progress message strings.
 
     Returns:
@@ -5090,7 +5047,5 @@ def compile_corpus(
         out_dir=out_dir,
         config=config,
         taxonomy=taxonomy,
-        coherence_judge=coherence_judge,
-        opf_version=opf_version,
         progress=progress,
     )

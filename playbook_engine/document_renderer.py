@@ -26,9 +26,9 @@ document, with the bundle passing its extra markup through that function's
 explicit seams — so the bundle contains the whole document by construction,
 not by string-splicing rendered template text.
 
-Sections rendered per clause: historical stance + confidence, the
-``acceptable_if`` variations, fallback positions, rejected asks (collapsed),
-and accepted exemplar forms from the clause library. Empty Posture/Floor
+Sections rendered per clause: our standard, how many deals signed it, the
+non-standard variants signed and the asks refused before signing (collapsed),
+each with its distinct-deal count and citation. Empty Posture/Floor
 sections render as an explicit "pending GC interview" note rather than being
 omitted — same honesty-first convention as the after-action report.
 
@@ -50,64 +50,11 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.opf_accessors import (
-    clause_confidence,
-    clause_stance,
-    is_precedent_shape,
     perspective_party,
     playbook_clauses,
     playbook_precedent,
 )
 from playbook_engine.viewer import _resolve_aliases_in_doc
-
-_STANCE_STYLES: dict[str, tuple[str, str]] = {
-    # stance -> (background, foreground)
-    "consistently_held": ("#dcfce7", "#14532d"),
-    "usually_held": ("#dcfce7", "#166534"),
-    "mixed": ("#fef9c3", "#713f12"),
-    "usually_conceded": ("#fee2e2", "#7f1d1d"),
-    "no_signal": ("#e5e7eb", "#374151"),
-    "unknown": ("#e5e7eb", "#374151"),
-}
-
-_RISK_GLYPHS = {"worse": "▲", "better": "▼", "neutral": "–"}
-
-
-def _chip(text: str, bg: str, fg: str) -> str:
-    return (
-        f'<span style="background:{bg};color:{fg};border-radius:999px;'
-        f"padding:2px 10px;font-size:0.78rem;font-weight:600;"
-        f'letter-spacing:0.02em">{html_lib.escape(text)}</span>'
-    )
-
-
-_STANCE_HELP = {
-    "consistently_held": "Corpus shows we held our language every time this was contested.",
-    "usually_held": "Corpus shows we held our language in most contested deals.",
-    "mixed": "Corpus shows BOTH concessions and successful pushbacks for this clause type.",
-    "usually_conceded": "Corpus shows we have conceded this clause when contested.",
-    "no_signal": "Not enough our-paper evidence (or no standard to measure against) to characterise a stance.",
-    "unknown": "Stance could not be derived.",
-}
-
-
-def _stance_chip(stance: str) -> str:
-    bg, fg = _STANCE_STYLES.get(stance, _STANCE_STYLES["unknown"])
-    help_text = _STANCE_HELP.get(stance, _STANCE_HELP["unknown"])
-    return (
-        f'<span title="{html_lib.escape(help_text)}" '
-        f'style="background:{bg};color:{fg};border-radius:999px;'
-        f"padding:2px 10px;font-size:0.78rem;font-weight:600;cursor:help;"
-        f'letter-spacing:0.02em">{html_lib.escape(stance.replace("_", " "))}</span>'
-    )
-
-
-def _risk_str(risk: dict[str, Any] | None) -> str:
-    if not isinstance(risk, dict):
-        return ""
-    direction = str(risk.get("direction", ""))
-    magnitude = str(risk.get("magnitude", ""))
-    glyph = _RISK_GLYPHS.get(direction, "")
-    return f"{glyph} {direction}/{magnitude}".strip()
 
 
 def _cite_str(ref: dict[str, Any] | None) -> str:
@@ -127,150 +74,16 @@ def _quote_block(text: str, cite: str = "") -> str:
 
 def _render_clause(
     clause: dict[str, Any],
-    library_by_tid: dict[str, dict[str, Any]],
-    tax_labels: dict[str, str],
-    number: int,
-) -> str:
-    tid = str(clause.get("taxonomy_id", ""))
-    title = clause.get("title") or tax_labels.get(tid, tid)
-    stance = clause_stance(clause)
-    confidence = clause_confidence(clause)
-    summary = clause.get("summary") if isinstance(clause.get("summary"), dict) else {}
-    assert isinstance(summary, dict)
-
-    parts: list[str] = [f'<section class="clause" id="clause-{number}">']
-    parts.append(
-        f'<h2><span class="cnum">{number}.</span> {html_lib.escape(str(title))} '
-        f"{_stance_chip(stance)}</h2>"
-    )
-
-    meta_bits: list[str] = [f"taxonomy: {html_lib.escape(tax_labels.get(tid, tid))}"]
-    score = confidence.get("score")
-    if isinstance(score, (int, float)):
-        meta_bits.append(f"confidence {score:.0%}")
-    n_our = confidence.get("n_our_paper")
-    n_cp = confidence.get("n_counterparty_paper")
-    if n_our is not None or n_cp is not None:
-        meta_bits.append(f"evidence n_our={n_our} n_counterparty={n_cp}")
-    stance_detail = summary.get("stance_detail")
-    if isinstance(stance_detail, dict) and stance_detail:
-        held = stance_detail.get("held")
-        of = stance_detail.get("of")
-        if held is not None and of is not None:
-            meta_bits.append(f"held {held} of {of}")
-    parts.append(
-        f'<p class="meta" title="confidence = evidence-depth score; n_our / '
-        f"n_counterparty = observations from our paper vs counterparty paper; "
-        f"held X of Y = contested deals where our language survived to "
-        f'signature">{" · ".join(meta_bits)}</p>'
-    )
-
-    our_standard = clause.get("our_standard") or {}
-    std_text = our_standard.get("text") if isinstance(our_standard, dict) else None
-    if std_text:
-        parts.append("<h3>Our standard</h3>")
-        parts.append(_quote_block(str(std_text)))
-
-    acceptable = summary.get("acceptable_if") or []
-    if acceptable:
-        parts.append(
-            '<h3 title="Negotiated changes we signed at neutral or equivalent '
-            "risk. Precedent says: take these without escalation. (OPF field: "
-            'summary.acceptable_if)">Preferred variations</h3>'
-        )
-        for entry in acceptable:
-            if not isinstance(entry, dict):
-                continue
-            parts.append('<div class="variation">')
-            if entry.get("if"):
-                parts.append(f'<p class="var-label">From</p>{_quote_block(str(entry["if"]))}')
-            if entry.get("to"):
-                parts.append(
-                    f'<p class="var-label">Acceptable as</p>{_quote_block(str(entry["to"]))}'
-                )
-            if entry.get("rationale"):
-                parts.append(f'<p class="rationale">{html_lib.escape(str(entry["rationale"]))}</p>')
-            parts.append("</div>")
-
-    fallbacks = summary.get("fallbacks") or []
-    if fallbacks:
-        parts.append(
-            '<h3 title="Forms we have historically signed even though they moved '
-            "risk against us (see the risk marker on each). Concessions you can "
-            "live with when pressed — not first asks. (OPF field: "
-            'summary.fallbacks)">Acceptable variations — concessions</h3><ul>'
-        )
-        for fb in fallbacks:
-            if isinstance(fb, dict):
-                text = fb.get("text_summary") or fb.get("text") or json.dumps(fb)
-                risk = _risk_str(fb.get("risk_delta"))
-                suffix = (
-                    f' <span class="risk" title="Judged risk shift from our '
-                    f"perspective: direction (worse = more risk for us) / "
-                    f'magnitude (minor or material)">{html_lib.escape(risk)}</span>'
-                    if risk
-                    else ""
-                )
-                parts.append(f"<li>{html_lib.escape(str(text))}{suffix}</li>")
-            else:
-                parts.append(f"<li>{html_lib.escape(str(fb))}</li>")
-        parts.append("</ul>")
-
-    rejected = summary.get("rejected") or []
-    if rejected:
-        parts.append(
-            f'<details><summary title="Counterparty asks that appeared in a draft '
-            f"and were reversed or removed before signing — historically refused. "
-            f'Use as pushback precedent. (OPF field: summary.rejected)">'
-            f"Unacceptable variations — rejected/reversed asks ({len(rejected)})</summary><ul>"
-        )
-        for r in rejected:
-            if not isinstance(r, dict):
-                continue
-            text = r.get("text_summary") or r.get("full_text") or ""
-            risk = _risk_str(r.get("risk_delta"))
-            suffix = f' <span class="risk">{html_lib.escape(risk)}</span>' if risk else ""
-            parts.append(f"<li>{html_lib.escape(str(text)[:400])}{suffix}</li>")
-        parts.append("</ul></details>")
-
-    library_entry = library_by_tid.get(tid)
-    accepted_forms = (library_entry or {}).get("accepted_forms") or []
-    if accepted_forms:
-        parts.append(
-            f'<details><summary title="The evidence library: every distinct final '
-            f"form of this clause across the signed corpus, with citations — "
-            f"including forms that were never negotiated. The variation sections "
-            f"above are distilled from the negotiated subset of these, so entries "
-            f'overlap by design.">All signed forms — evidence library '
-            f"({len(accepted_forms)})</summary>"
-        )
-        for form in accepted_forms:
-            if not isinstance(form, dict):
-                continue
-            parts.append(
-                _quote_block(
-                    str(form.get("text_summary", "")),
-                    _cite_str(form.get("example_ref")),
-                )
-            )
-        parts.append("</details>")
-
-    parts.append("</section>")
-    return "\n".join(parts)
-
-
-def _render_clause_v04(
-    clause: dict[str, Any],
     precedent: list[dict[str, Any]],
     tax_labels: dict[str, str],
     number: int,
     *,
     party: str | None,
 ) -> str:
-    """One OPF 0.4 clause (issue #223): our standard, how many deals signed
-    it, every non-standard variant signed and every refused ask — each with
-    its distinct-deal count and citation. No stance chip, no risk marker:
-    0.4 carries no judged verdict."""
+    """One clause (issue #223): our standard, how many deals signed it,
+    every non-standard variant signed and every refused ask — each with its
+    distinct-deal count and citation. No stance chip, no risk marker: the
+    document carries no judged verdict."""
     from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
 
     tid = str(clause.get("taxonomy_id", ""))
@@ -316,7 +129,7 @@ def _render_clause_v04(
     return "\n".join(parts)
 
 
-def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> str:
+def _render_method_panel(doc: dict[str, Any]) -> str:
     """The "Method & provenance" panel: how this document was built, from the
     document's own numbers — so "where did this come from?" is answerable
     without leaving the page. Every figure is computed from the OPF itself
@@ -358,29 +171,17 @@ def _render_method_panel(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> 
     )
     unclassified = (stats.get("unclassified") or {}).get("count", 0)
 
+    # One precedent per (deal, clause); the standard check is a
+    # deterministic fact, not a judged deviation.
     dev_counts: dict[str, int] = {}
     n_obs = 0
-    if is_precedent_shape(doc):
-        # OPF 0.4: one precedent per (deal, clause); the standard check is a
-        # deterministic fact, not a judged deviation.
-        for record in playbook_precedent(doc):
-            n_obs += 1
-            key = "standard" if record.get("standard") is True else "non-standard"
-            dev_counts[key] = dev_counts.get(key, 0) + 1
-        dev_line = ", ".join(
-            f"{dev_counts[k]} {k}" for k in ("standard", "non-standard") if k in dev_counts
-        )
-    else:
-        for clause in clauses:
-            for obs in clause.get("observed_positions", []):
-                n_obs += 1
-                key = str(obs.get("deviation", "?"))
-                dev_counts[key] = dev_counts.get(key, 0) + 1
-        dev_line = ", ".join(
-            f"{dev_counts[k]} {k.replace('_', ' ')}"
-            for k in ("none", "reworded_equivalent", "substantive")
-            if k in dev_counts
-        )
+    for record in playbook_precedent(doc):
+        n_obs += 1
+        key = "standard" if record.get("standard") is True else "non-standard"
+        dev_counts[key] = dev_counts.get(key, 0) + 1
+    dev_line = ", ".join(
+        f"{dev_counts[k]} {k}" for k in ("standard", "non-standard") if k in dev_counts
+    )
 
     judge_line = (
         "structural stages are deterministic; scope, provenance, and "
@@ -532,11 +333,6 @@ def _render_document_page(
     for entry in doc.get("taxonomy", {}).get("entries", []):
         tax_labels[str(entry.get("id", ""))] = str(entry.get("label", entry.get("id", "")))
 
-    library_by_tid: dict[str, dict[str, Any]] = {}
-    for concept in doc.get("evidence", {}).get("clause_library", []):
-        if isinstance(concept, dict):
-            library_by_tid[str(concept.get("taxonomy_id", ""))] = concept
-
     clauses = playbook_clauses(doc)
     clauses_sorted = sorted(
         clauses, key=lambda c: tax_labels.get(str(c.get("taxonomy_id", "")), "")
@@ -548,37 +344,22 @@ def _render_document_page(
         sum(1 for d in corpus.get("documents", []) if d.get("in_scope")),
     )
     versions_total = stats.get("versions_total", "—")
-    precedent_shape = is_precedent_shape(doc)
-    if precedent_shape:
-        acceptable_label, rejected_label = "signed variants", "refused asks"
-        n_acceptable = sum(c.get("n_variants") or 0 for c in clauses)
-        n_rejected = sum(c.get("n_refused") or 0 for c in clauses)
-    else:
-        acceptable_label, rejected_label = "acceptable variations", "rejected asks"
-        n_acceptable = sum(
-            len((c.get("summary") or {}).get("acceptable_if") or []) for c in clauses
-        )
-        n_rejected = sum(len((c.get("summary") or {}).get("rejected") or []) for c in clauses)
+    acceptable_label, rejected_label = "signed variants", "refused asks"
+    n_acceptable = sum(c.get("n_variants") or 0 for c in clauses)
+    n_rejected = sum(c.get("n_refused") or 0 for c in clauses)
 
     toc_items = "".join(
         f'<li><a href="#clause-{i}">{html_lib.escape(str(c.get("title") or tax_labels.get(str(c.get("taxonomy_id", "")), "")))}</a>'
-        + ("" if precedent_shape else f" {_stance_chip(clause_stance(c))}")
         + "</li>"
         for i, c in enumerate(clauses_sorted, start=1)
     )
 
-    if precedent_shape:
-        precedent = playbook_precedent(doc)
-        party = perspective_party(doc)
-        clause_html = "\n".join(
-            _render_clause_v04(c, precedent, tax_labels, i, party=party)
-            for i, c in enumerate(clauses_sorted, start=1)
-        )
-    else:
-        clause_html = "\n".join(
-            _render_clause(c, library_by_tid, tax_labels, i)
-            for i, c in enumerate(clauses_sorted, start=1)
-        )
+    precedent = playbook_precedent(doc)
+    party = perspective_party(doc)
+    clause_html = "\n".join(
+        _render_clause(c, precedent, tax_labels, i, party=party)
+        for i, c in enumerate(clauses_sorted, start=1)
+    )
 
     posture = doc.get("posture") or {}
     floor = doc.get("floor") or {}
@@ -650,7 +431,7 @@ def _render_document_page(
         if x
     )
 
-    method_html = _render_method_panel(doc, clauses)
+    method_html = _render_method_panel(doc)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -739,38 +520,8 @@ def _escape_json_for_script(json_text: str) -> str:
     return json_text.replace("</", "<\\/")
 
 
-def _render_digest_v2_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
-    """Digest-section summary table for a digest_version 2 digest (OPF 0.3)."""
-    rows = "".join(
-        "<tr>"
-        f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
-        f"<td>{_stance_chip(str(c.get('historical_stance') or 'unknown'))}</td>"
-        f"<td>{len(c.get('preferred_variations') or [])}</td>"
-        f"<td>{len(c.get('concessions') or [])}</td>"
-        f"<td>{len(c.get('unacceptable') or [])}</td>"
-        f"<td>{len(c.get('exemplar_forms') or [])}</td>"
-        "</tr>"
-        for c in d_clauses
-    )
-    return f"""<section class="clause" id="digest">
-  <h2>Digest (model-facing projection)</h2>
-  <p>This bundle embeds a compact digest of the evidence section — per clause:
-  stance, preferred variations verbatim, concession/unacceptable summaries, and
-  frequency-annotated exemplar forms (deduped; <code>n</code>-weighted; bands
-  often/sometimes/rare). Estimated size: ~{token_est:,} tokens. The machine
-  blocks below carry the digest and the canonical OPF JSON; the bare
-  <code>playbook.opf.json</code> remains the canonical artifact.</p>
-  <table>
-    <thead><tr><th>Clause</th><th>Stance</th><th>Preferred</th>
-    <th>Concessions</th><th>Unacceptable</th><th>Exemplars</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</section>
-"""
-
-
-def _render_digest_v3_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
-    """Digest-section summary table for a digest_version 3 digest (OPF 0.4)."""
+def _render_digest_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
+    """Digest-section summary table (digest_version 3)."""
     rows = "".join(
         "<tr>"
         f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
@@ -812,8 +563,8 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
       never replaces it. A consumer extracts the block, parses it, and
       verifies ``identity.content_hash`` over the canonical serialization
       (``playbook_engine.canonicalize``).
-    - ``id="opf-digest"`` — the digest section (built on the fly for a
-      pre-0.3 document that carries none).
+    - ``id="opf-digest"`` — the digest section (built on the fly when the
+      document carries none).
 
     Deliberately takes no alias map: the bundle embeds the canonical JSON
     verbatim, so resolving real names into it would both leak them and break
@@ -830,10 +581,7 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
 
     d_clauses = digest.get("clauses", [])
     token_est = digest_token_estimate(digest)
-    if digest.get("digest_version") == "3":
-        digest_summary = _render_digest_v3_summary(d_clauses, token_est)
-    else:
-        digest_summary = _render_digest_v2_summary(d_clauses, token_est)
+    digest_summary = _render_digest_summary(d_clauses, token_est)
 
     scripts = (
         "<!-- Machine-readable payloads. Extract a block, JSON-parse it, and verify\n"

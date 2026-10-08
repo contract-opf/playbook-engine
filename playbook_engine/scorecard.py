@@ -123,8 +123,10 @@ PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
 #: ``opened_with`` (OPF 0.5, issue #233); a null value is ``undetermined``.
 OPENED_WITH = frozenset({"standard", "non_standard", "absent", "undetermined"})
 
-OPF_VERSIONS = frozenset({"0.1", "0.2", "0.3", "0.4", "0.5"})
-DIGEST_VERSIONS = frozenset({"1", "2", "3", "4"})
+#: The engine's one format (0.4) and its planned successor (#233); any other
+#: version a playbook claims is labelled ``other``.
+OPF_VERSIONS = frozenset({"0.4", "0.5"})
+DIGEST_VERSIONS = frozenset({"3", "4"})
 
 #: Every string the scorecard may carry as a value or a data-derived key.
 ENUM_LABELS = frozenset(

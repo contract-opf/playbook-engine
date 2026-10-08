@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from playbook_engine.clause_library_compiler import compile_clause_library
 from playbook_engine.clause_position_compiler import (
     compile_clause_positions,
 )
@@ -153,7 +152,6 @@ def _minimal_playbook(
     playbook_id: str | None = None,
     playbook_version: str | None = None,
     supersedes: str | None = None,
-    opf_version: str = "0.4",
 ) -> dict:
     """Helper: build and return a schema-valid playbook dict."""
     deal_obs = obs_list or [
@@ -164,7 +162,6 @@ def _minimal_playbook(
     all_obs = deal_obs + (cp_obs_list or [])
 
     positions, _, _ = compile_clause_positions(all_obs, template_obs)
-    library, _ = compile_clause_library(all_obs)
     docs = corpus_docs or [_corpus_doc("deal_001")]
 
     return assemble_playbook(
@@ -172,7 +169,6 @@ def _minimal_playbook(
         baseline=_BASELINE,
         taxonomy=_TAXONOMY,
         clause_positions=positions,
-        clause_library=library,
         corpus_documents=docs,
         generated_at=_GENERATED_AT,
         run_id=run_id,
@@ -183,7 +179,6 @@ def _minimal_playbook(
         playbook_id=playbook_id,
         playbook_version=playbook_version,
         supersedes=supersedes,
-        opf_version=opf_version,
     )
 
 
@@ -225,7 +220,6 @@ def test_assemble_small_corpus_end_to_end() -> None:
     ]
     template_obs = [_template_obs("indemnification"), _template_obs("governing_law", "12")]
     positions, _, _ = compile_clause_positions(deal_obs, template_obs)
-    library, _ = compile_clause_library(deal_obs)
     docs = [_corpus_doc("deal_001"), _corpus_doc("deal_002")]
 
     playbook = assemble_playbook(
@@ -233,7 +227,6 @@ def test_assemble_small_corpus_end_to_end() -> None:
         baseline=_BASELINE,
         taxonomy=_TAXONOMY,
         clause_positions=positions,
-        clause_library=library,
         corpus_documents=docs,
         generated_at=_GENERATED_AT,
     )
@@ -248,7 +241,7 @@ def test_assemble_small_corpus_end_to_end() -> None:
 
 
 def test_assemble_top_level_keys() -> None:
-    """All required (OPF v0.2 schema) top-level keys are present."""
+    """All required (OPF 0.4 schema) top-level keys are present."""
     playbook = _minimal_playbook()
     required = {
         "opf_version",
@@ -265,15 +258,14 @@ def test_assemble_top_level_keys() -> None:
 
 
 def test_assemble_opf_version() -> None:
-    """Issue #223: 0.4 is the default; 0.3 is still emittable for one release;
-    anything else is refused before assembly."""
-    assert _minimal_playbook()["opf_version"] == "0.4"
-    pb_03 = _minimal_playbook(opf_version="0.3")
-    assert pb_03["opf_version"] == "0.3"
-    assert pb_03["digest"]["digest_version"] == "2"
-    assert validate_document(pb_03).ok
-    with pytest.raises(ValueError, match="cannot be emitted"):
-        _minimal_playbook(opf_version="0.2")
+    """Issue #238: the assembler emits exactly one format, OPF 0.4, and takes
+    no version argument."""
+    import inspect
+
+    pb = _minimal_playbook()
+    assert pb["opf_version"] == "0.4"
+    assert pb["digest"]["digest_version"] == "3"
+    assert "opf_version" not in inspect.signature(assemble_playbook).parameters
 
 
 def test_assemble_agreement_type_preserved() -> None:
@@ -295,30 +287,19 @@ def test_assemble_taxonomy_preserved() -> None:
 
 
 def test_assemble_clauses_present() -> None:
-    """OPF v0.2 (§3.5): clauses live under `evidence`, not top-level."""
+    """Clauses live under `evidence`, not top-level."""
     pb = _minimal_playbook()
     assert isinstance(pb["evidence"]["clauses"], list)
     assert len(pb["evidence"]["clauses"]) > 0
 
 
-def test_assemble_clause_library_present() -> None:
-    """OPF 0.3 carries a clause_library; OPF 0.4 replaces it with precedent."""
-    pb = _minimal_playbook(opf_version="0.3")
-    assert "clause_library" in pb["evidence"]
-    assert isinstance(pb["evidence"]["clause_library"], list)
-    pb_04 = _minimal_playbook()
-    assert set(pb_04["evidence"]) == {"clauses", "precedent"}
+def test_assemble_evidence_is_clauses_and_precedent() -> None:
+    """Issue #223: evidence is {clauses, precedent} — no clause library."""
+    assert set(_minimal_playbook()["evidence"]) == {"clauses", "precedent"}
 
 
-def test_assemble_clauses_carry_historical_stance() -> None:
-    """OPF v0.2/0.3 (§3.5, §2.2): every clause's `summary` carries the
-    descriptive `historical_stance`, not v0.1's prescriptive `rollup.position`.
-    OPF 0.4 (issue #223) carries no stance at all — only counts."""
-    pb = _minimal_playbook(opf_version="0.3")
-    for clause in pb["evidence"]["clauses"]:
-        assert "summary" in clause
-        assert "historical_stance" in clause["summary"]
-        assert "rollup" not in clause
+def test_assemble_clauses_carry_counts_and_no_stance() -> None:
+    """Issue #223: a clause carries no stance at all — only counts."""
     for clause in _minimal_playbook()["evidence"]["clauses"]:
         assert set(clause) == {
             "id",
@@ -433,9 +414,6 @@ def test_assemble_identity_content_hash_stable_across_run_id_and_generated_at() 
             [_obs("indemnification"), _obs("governing_law", clause_path="12")],
             [_template_obs("indemnification"), _template_obs("governing_law", "12")],
         )[0],
-        clause_library=compile_clause_library(
-            [_obs("indemnification"), _obs("governing_law", clause_path="12")]
-        )[0],
         corpus_documents=[_corpus_doc("deal_001")],
         generated_at="2099-01-01T00:00:00Z",
         run_id="run-2-completely-different",
@@ -528,13 +506,11 @@ def test_assemble_no_observations_arg_watermarks_false() -> None:
     positions, _, _ = compile_clause_positions(
         [_obs("indemnification")], [_template_obs("indemnification")]
     )
-    library, _ = compile_clause_library([_obs("indemnification")])
     playbook = assemble_playbook(
         agreement_type=_AGREEMENT_TYPE,
         baseline=_BASELINE,
         taxonomy=_TAXONOMY,
         clause_positions=positions,
-        clause_library=library,
         corpus_documents=[_corpus_doc("deal_001")],
         generated_at=_GENERATED_AT,
     )
@@ -626,14 +602,12 @@ def test_assemble_raises_on_invalid_document() -> None:
         ],
     }
     positions, _, _ = compile_clause_positions([], [])
-    library, _ = compile_clause_library([])
     with pytest.raises(AssemblyError) as exc_info:
         assemble_playbook(
             agreement_type=_AGREEMENT_TYPE,
             baseline=_BASELINE,
             taxonomy=bad_taxonomy,
             clause_positions=positions,
-            clause_library=library,
             corpus_documents=[_corpus_doc("deal_001")],
             generated_at=_GENERATED_AT,
         )
@@ -647,14 +621,12 @@ def test_assemble_error_message_contains_error_info() -> None:
         "entries": [{"id": "ind", "label": "Ind", "status": "bad"}],
     }
     positions, _, _ = compile_clause_positions([], [])
-    library, _ = compile_clause_library([])
     with pytest.raises(AssemblyError) as exc_info:
         assemble_playbook(
             agreement_type=_AGREEMENT_TYPE,
             baseline=_BASELINE,
             taxonomy=bad_taxonomy,
             clause_positions=positions,
-            clause_library=library,
             corpus_documents=[_corpus_doc("deal_001")],
             generated_at=_GENERATED_AT,
         )
@@ -666,14 +638,12 @@ def test_assemble_out_of_scope_without_rationale_raises() -> None:
     """§3.6: out-of-scope doc without scope_rationale must fail validation."""
     docs = [{"document_id": "deal_oos", "provenance": "our_paper", "in_scope": False}]
     positions, _, _ = compile_clause_positions([], [])
-    library, _ = compile_clause_library([])
     with pytest.raises(AssemblyError):
         assemble_playbook(
             agreement_type=_AGREEMENT_TYPE,
             baseline=_BASELINE,
             taxonomy=_TAXONOMY,
             clause_positions=positions,
-            clause_library=library,
             corpus_documents=docs,
             generated_at=_GENERATED_AT,
         )
@@ -804,34 +774,16 @@ def _version_ingest_schema_properties(schema_filename: str) -> set[str]:
     return set(props)
 
 
-def test_version_ingest_schema_keys_matches_schema_0_3() -> None:
+def test_version_ingest_schema_keys_matches_schema_0_4() -> None:
     """_VERSION_INGEST_SCHEMA_KEYS (the strip-list assemble_playbook applies
     to every version_ingest entry) must stay in sync with
-    spec/playbook.schema-0.3.json's actual property set — the schema
-    assemble_playbook's self-validation ACTUALLY enforces (issue #81:
-    _OPF_VERSION is hardcoded to "0.3"). Used as a strip-list, drift in the
-    OTHER direction (a future schema addition silently stripped from every
-    published playbook) would otherwise fail silently — this test exists so
-    that drift fails LOUDLY instead, at test time.
-    """
-    assert (
-        _version_ingest_schema_properties("playbook.schema-0.3.json") == _VERSION_INGEST_SCHEMA_KEYS
-    )
-
-
-def test_version_ingest_schema_keys_matches_schema_0_4() -> None:
-    """The default emitted version (issue #223) enforces the same strip-list."""
+    spec/playbook.schema-0.4.json's actual property set — the schema
+    assemble_playbook's self-validation enforces (issue #81). Used as a
+    strip-list, drift in the OTHER direction (a future schema addition
+    silently stripped from every published playbook) would otherwise fail
+    silently — this test exists so that drift fails LOUDLY instead."""
     assert (
         _version_ingest_schema_properties("playbook.schema-0.4.json") == _VERSION_INGEST_SCHEMA_KEYS
-    )
-
-
-def test_version_ingest_schema_keys_matches_schema_0_2() -> None:
-    """Same guard against spec/playbook.schema-0.2.json — identical shape to
-    0.3 today, but assemble_playbook's whitelist isn't itself version-aware,
-    so both must agree."""
-    assert (
-        _version_ingest_schema_properties("playbook.schema-0.2.json") == _VERSION_INGEST_SCHEMA_KEYS
     )
 
 
@@ -952,13 +904,11 @@ def _assemble_04(
         _template_obs("governing_law", "12"),
     ]
     positions, _, _ = compile_clause_positions(observations, template_obs)
-    library, _ = compile_clause_library(observations)
     return assemble_playbook(
         agreement_type=_AGREEMENT_TYPE,
         baseline=_BASELINE,
         taxonomy=_TAXONOMY,
         clause_positions=positions,
-        clause_library=library,
         corpus_documents=docs,
         generated_at=_GENERATED_AT,
         observations=observations,
@@ -1116,8 +1066,8 @@ def test_v04_judged_verdicts_go_to_x_judgments_never_into_precedent() -> None:
 
 
 def test_v04_fragment_rows_never_become_precedent() -> None:
-    """Sub-sentence fragments are excluded exactly as the 0.3 compiler
-    excludes them (MIN_OBSERVATION_TEXT_LEN)."""
+    """Sub-sentence fragments are excluded exactly as the clause-type
+    compiler excludes them (MIN_OBSERVATION_TEXT_LEN)."""
     observations = [
         _std(_obs("indemnification", text=_LONG_STD, basis="deterministic"), True),
         _std(_obs("governing_law", clause_path="12", text="1 6", basis="deterministic"), False),

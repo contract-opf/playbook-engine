@@ -1,4 +1,9 @@
-"""Tests for the ClausePosition compiler (L5, issue #22).
+"""Tests for the clause-type compiler (L5, issues #22 / #238).
+
+The compiler decides which clause types a playbook carries and each one's
+``our_standard``; the per-deal facts live in the precedent record
+(``tests/test_playbook_assembler.py``). OPF 0.1-0.3's rollup, observed
+positions and clause library were retired with those formats (issue #238).
 
 SECURITY NOTE: All fixtures are programmatically constructed with synthetic
 text.  No real agreements are referenced.  Fictional party/document names only
@@ -11,25 +16,20 @@ import pytest
 
 from playbook_engine.clause_differ import ClauseDiff
 from playbook_engine.clause_position_compiler import (
-    COHERENCE_MIN_CITATIONS,
+    MIN_OBSERVATION_TEXT_LEN,
     UNCLASSIFIED_EXAMPLE_LIMIT,
     ClausePosition,
-    ClauseRollup,
-    CoherenceFlag,
-    CoherenceJudge,
-    ObservedPosition,
     OPFCitation,
     UnclassifiedCoverage,
     compile_clause_positions,
-    deviations_are_deterministic,
 )
 from playbook_engine.deviation_classifier import (
     DeviationResult,
     RiskDelta,
-    assess_deviations,
     assess_deviations_deterministic,
 )
 from playbook_engine.observation_builder import (
+    OUTCOME_CONCEDED_BEFORE_SIGNING,
     Observation,
     ObservationCitation,
     build_observations,
@@ -40,22 +40,16 @@ from playbook_engine.observation_builder import (
 # ---------------------------------------------------------------------------
 
 _NEUTRAL = RiskDelta(direction="neutral", magnitude="none")
-_WORSE_MINOR = RiskDelta(direction="worse", magnitude="minor")
-_WORSE_MATERIAL = RiskDelta(direction="worse", magnitude="material")
-_BETTER = RiskDelta(direction="better", magnitude="minor")
 
 
 def _obs(
     taxonomy_id: str | None,
     provenance: str = "our_paper",
     outcome: str = "signed",
-    deviation: str = "none",
-    risk_delta: RiskDelta = _NEUTRAL,
     text: str = "Mutual indemnification clause language.",
     doc_id: str = "deal_001",
     version: str = "v2",
     clause_path: str = "8",
-    basis: str | None = None,
 ) -> Observation:
     return Observation(
         observation_id=f"{doc_id}/{version}/{clause_path}",
@@ -67,11 +61,10 @@ def _obs(
             clause_path=clause_path,
             char_span=None,
         ),
-        deviation=deviation,
-        risk_delta=risk_delta.to_dict(),
+        deviation="none",
+        risk_delta=_NEUTRAL.to_dict(),
         provenance=provenance,
         outcome=outcome,
-        basis=basis,
     )
 
 
@@ -84,8 +77,6 @@ def _template_obs(
         taxonomy_id=taxonomy_id,
         provenance="our_paper",
         outcome="signed",
-        deviation="none",
-        risk_delta=_NEUTRAL,
         text=text,
         doc_id="template",
         version="template",
@@ -93,15 +84,10 @@ def _template_obs(
     )
 
 
-# ---------------------------------------------------------------------------
-# Thin wrapper: unpack (positions, flags) so existing tests stay unchanged
-# ---------------------------------------------------------------------------
-
-
 def _compile(
-    observations: list,
-    template_observations: list,
-    taxonomy_titles: dict | None = None,
+    observations: list[Observation],
+    template_observations: list[Observation],
+    taxonomy_titles: dict[str, str] | None = None,
 ) -> list[ClausePosition]:
     """Call compile_clause_positions and return only the positions list."""
     positions, _, _ = compile_clause_positions(
@@ -113,64 +99,66 @@ def _compile(
 
 
 # ---------------------------------------------------------------------------
-# compile_clause_positions: basic grouping and structure
+# Which clause types appear
 # ---------------------------------------------------------------------------
 
 
 def test_compile_returns_one_position_per_taxonomy_id() -> None:
-    """Acceptance criterion: one ClausePosition per distinct taxonomy_id."""
     obs = [
         _obs("indemnification"),
         _obs("governing_law", doc_id="deal_001", version="v2", clause_path="12"),
     ]
     positions = _compile(obs, [])
+    assert {p.taxonomy_id for p in positions} == {"indemnification", "governing_law"}
     assert len(positions) == 2
-    tids = {p.taxonomy_id for p in positions}
-    assert tids == {"indemnification", "governing_law"}
 
 
 def test_compile_none_taxonomy_id_skipped() -> None:
-    """Unclassified observations (taxonomy_id=None) are silently skipped."""
-    obs = [_obs(None), _obs("indemnification")]
-    positions = _compile(obs, [])
-    assert len(positions) == 1
-    assert positions[0].taxonomy_id == "indemnification"
+    """Unclassified observations never become a clause type (they are counted
+    in the unclassified coverage instead — see below)."""
+    positions = _compile([_obs(None), _obs("indemnification")], [])
+    assert [p.taxonomy_id for p in positions] == ["indemnification"]
 
 
 def test_compile_sorted_by_taxonomy_id() -> None:
-    """Returned positions are in taxonomy_id sorted order."""
-    obs = [
-        _obs("governing_law"),
-        _obs("indemnification"),
-        _obs("confidentiality"),
-    ]
-    positions = _compile(obs, [])
-    tids = [p.taxonomy_id for p in positions]
+    obs = [_obs("governing_law"), _obs("indemnification"), _obs("confidentiality")]
+    tids = [p.taxonomy_id for p in _compile(obs, [])]
     assert tids == sorted(tids)
 
 
 def test_compile_includes_template_only_taxonomy_ids() -> None:
-    """A taxonomy_id present only in template_observations is included."""
-    template_obs = [_template_obs("limitation_of_liability")]
-    positions = _compile([], template_obs)
-    assert len(positions) == 1
-    assert positions[0].taxonomy_id == "limitation_of_liability"
+    positions = _compile([], [_template_obs("limitation_of_liability")])
+    assert [p.taxonomy_id for p in positions] == ["limitation_of_liability"]
+
+
+@pytest.mark.parametrize(
+    "outcome", ["signed", "proposed_then_reversed", OUTCOME_CONCEDED_BEFORE_SIGNING]
+)
+def test_clause_defining_outcomes_make_a_clause_type_appear(outcome: str) -> None:
+    """A signed text, a refused ask and our standard struck before signing
+    each make their clause type appear on their own."""
+    positions = _compile([_obs("non_solicit", outcome=outcome)], [])
+    assert [p.taxonomy_id for p in positions] == ["non_solicit"]
+
+
+def test_unsigned_only_clause_type_does_not_appear() -> None:
+    """An ``unsigned`` row (a deal with no detected executed copy, issue #83)
+    never makes a clause type appear on its own — the template or a signed
+    deal must."""
+    assert _compile([_obs("non_solicit", outcome="unsigned")], []) == []
+    positions = _compile([_obs("non_solicit", outcome="unsigned")], [_template_obs("non_solicit")])
+    assert [p.taxonomy_id for p in positions] == ["non_solicit"]
 
 
 def test_compile_id_format() -> None:
-    """ClausePosition.id = 'clause.<taxonomy_id>'."""
-    positions = _compile([_obs("indemnification")], [])
-    assert positions[0].id == "clause.indemnification"
+    assert _compile([_obs("indemnification")], [])[0].id == "clause.indemnification"
 
 
 def test_compile_title_derived_from_taxonomy_id() -> None:
-    """Title defaults to title-cased words from taxonomy_id."""
-    positions = _compile([_obs("limitation_of_liability")], [])
-    assert positions[0].title == "Limitation Of Liability"
+    assert _compile([_obs("limitation_of_liability")], [])[0].title == "Limitation Of Liability"
 
 
 def test_compile_title_overridden_by_taxonomy_titles() -> None:
-    """taxonomy_titles map overrides the default title derivation."""
     positions = _compile(
         [_obs("indemnification")],
         [],
@@ -180,17 +168,13 @@ def test_compile_title_overridden_by_taxonomy_titles() -> None:
 
 
 # ---------------------------------------------------------------------------
-# our_standard: set from template, absent when counterparty-paper-only
+# our_standard comes only from the template
 # ---------------------------------------------------------------------------
 
 
 def test_our_standard_set_from_template_observation() -> None:
-    """Acceptance: our_standard text + citation come from template_observation."""
     t_obs = _template_obs("indemnification", text="Mutual indemnification.", clause_path="8")
-    deal_obs = [_obs("indemnification")]
-    positions = _compile(deal_obs, [t_obs])
-
-    pos = positions[0]
+    pos = _compile([_obs("indemnification")], [t_obs])[0]
     assert pos.our_standard is not None
     assert pos.our_standard.text == "Mutual indemnification."
     assert pos.our_standard.source_ref.document_id == "template"
@@ -199,14 +183,7 @@ def test_our_standard_set_from_template_observation() -> None:
 
 
 def test_our_standard_absent_when_template_text_empty() -> None:
-    """An empty-text template observation yields our_standard=None (issue #182).
-
-    Deterministic segmentation can classify a heading-only template clause,
-    producing a template observation with blank full_text. Building an
-    OurStandard from it would be present-with-empty-text and fail OPF
-    validation ("our_standard.text is empty"), blocking projection — the clause
-    must degrade to emergent (our_standard=None) instead.
-    """
+    """An empty-text template observation yields our_standard=None (issue #182)."""
     empty_t_obs = Observation(
         observation_id="template/template/8",
         taxonomy_id="indemnification",
@@ -220,20 +197,14 @@ def test_our_standard_absent_when_template_text_empty() -> None:
         provenance="our_paper",
         outcome="signed",
     )
-    deal_obs = [_obs("indemnification", provenance="counterparty_paper")]
-    positions = _compile(deal_obs, [empty_t_obs])
-
+    positions = _compile([_obs("indemnification", provenance="counterparty_paper")], [empty_t_obs])
     assert len(positions) == 1
     assert positions[0].our_standard is None
 
 
 def test_our_standard_carries_full_text() -> None:
-    """Regression (audit 2026-07, issue #105): our_standard.text must be the
-    untruncated clause text, not the 200-char text_summary — any real
-    indemnification/insurance clause exceeds 200 chars, and a truncated
-    fragment is useless as a drafting standard."""
+    """our_standard.text is the untruncated clause text (issue #105)."""
     long_text = "Each party shall indemnify the other against claims. " * 5
-    assert len(long_text) > 200
     t_obs = Observation(
         observation_id="template/template/8",
         taxonomy_id="indemnification",
@@ -247,197 +218,19 @@ def test_our_standard_carries_full_text() -> None:
         provenance="our_paper",
         outcome="signed",
     )
-    positions = _compile([], [t_obs])
-    pos = positions[0]
+    pos = _compile([], [t_obs])[0]
     assert pos.our_standard is not None
     assert pos.our_standard.text == long_text
-    assert len(pos.our_standard.text) > 200
 
 
-def test_acceptable_if_carries_full_text() -> None:
-    """Regression (issue #105): acceptable_if entries must be the full clause
-    text — that IS the acceptable alternative language lawyers need, not a
-    200-char fragment of it."""
-    long_text = "Mutual indemnification limited to gross negligence. " * 5
-    assert len(long_text) > 200
-    t_obs = _template_obs("indemnification")
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary=long_text[:200],
-        full_text=long_text,
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="reworded_equivalent",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [t_obs])
-    assert len(positions[0].rollup.acceptable_if) == 1
-    entry = positions[0].rollup.acceptable_if[0]
-    assert entry.to == long_text
-    assert len(entry.to) > 200
+@pytest.mark.parametrize("provenance", ["our_paper", "counterparty_paper", "unknown"])
+def test_our_standard_never_comes_from_a_deal(provenance: str) -> None:
+    """No template clause, no our_standard — whatever paper the deals sit on."""
+    obs = [_obs("indemnification", provenance=provenance, doc_id=f"deal_{i}") for i in range(3)]
+    assert _compile(obs, [])[0].our_standard is None
 
 
-def test_acceptable_if_entry_is_if_to_rationale_triple() -> None:
-    """Issue #141: acceptable_if entries are structured {if,to,rationale}
-    triples (the acceptable_variations shape consuming apps prove out), each citing
-    its supporting observation — not free text."""
-    t_obs = _template_obs("indemnification")
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary="Mutual indemnification, reworded but equivalent.",
-        full_text="Mutual indemnification, reworded but equivalent (full clause text).",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=(0, 40)
-        ),
-        deviation="reworded_equivalent",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [t_obs])
-    entry = positions[0].rollup.acceptable_if[0]
-    assert entry.if_ == "Mutual indemnification, reworded but equivalent."
-    assert entry.to == "Mutual indemnification, reworded but equivalent (full clause text)."
-    assert entry.rationale  # non-empty — cites deviation/precedent basis
-    assert "reworded_equivalent" in entry.rationale
-    # observation_ref resolves to the observation this entry was derived from.
-    assert entry.observation_ref.document_id == "deal_001"
-    assert entry.observation_ref.version == "v2"
-    assert entry.observation_ref.clause_path == "8"
-
-    d = entry.to_dict()
-    assert set(d.keys()) == {"if", "to", "rationale", "observation_ref"}
-    assert d["observation_ref"]["document_id"] == "deal_001"
-
-
-def test_acceptable_if_serializes_as_triple_in_to_dict() -> None:
-    """ClausePosition.to_dict()'s summary.acceptable_if carries the full
-    {if,to,rationale,observation_ref} shape, not bare strings (issue #141)."""
-    t_obs = _template_obs("indemnification")
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary="Mutual, reworded.",
-        full_text="Mutual indemnification, reworded but equivalent.",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="reworded_equivalent",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [t_obs])
-    d = positions[0].to_dict()
-    entries = d["summary"]["acceptable_if"]
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry["if"] == "Mutual, reworded."
-    assert entry["to"] == "Mutual indemnification, reworded but equivalent."
-    assert isinstance(entry["rationale"], str) and entry["rationale"]
-    assert entry["observation_ref"]["document_id"] == "deal_001"
-
-
-def test_rollup_fallback_carries_full_text() -> None:
-    """Regression (issue #105): fallback text must be the full clause text,
-    not the 200-char text_summary."""
-    long_text = "We accept liability up to the aggregate fees paid. " * 5
-    assert len(long_text) > 200
-    t_obs = _template_obs("indemnification")
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary=long_text[:200],
-        full_text=long_text,
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="substantive",
-        risk_delta=_WORSE_MINOR.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [t_obs])
-    assert len(positions[0].rollup.fallbacks) == 1
-    assert positions[0].rollup.fallbacks[0].full_text == long_text
-
-
-def test_our_standard_none_when_no_template_obs() -> None:
-    """No our_standard if template_observations has no entry for this tid."""
-    positions = _compile([_obs("indemnification")], [])
-    assert positions[0].our_standard is None
-
-
-# ---------------------------------------------------------------------------
-# §2.2 provenance rule — structural enforcement tests
-# ---------------------------------------------------------------------------
-
-
-def test_provenance_rule_counterparty_only_no_our_standard() -> None:
-    """Acceptance criterion: counterparty-paper-only → our_standard is None."""
-    obs = [_obs("indemnification", provenance="counterparty_paper")]
-    # No template passed: template would give has_our_paper=True and enable our_standard.
-    positions = _compile(obs, [])
-    assert positions[0].our_standard is None
-
-
-def test_provenance_rule_counterparty_only_position_capped_at_negotiable() -> None:
-    """Acceptance criterion: counterparty-paper-only → position='negotiable'."""
-    obs = [_obs("indemnification", provenance="counterparty_paper")]
-    positions = _compile(obs, [])
-    # §2.2: counterparty-paper-only cannot have position stronger than "negotiable".
-    assert positions[0].rollup.position == "negotiable"
-
-
-def test_provenance_rule_counterparty_only_cannot_emit_stronger_position() -> None:
-    """Acceptance criterion: provenance rule violation is IMPOSSIBLE to emit.
-
-    Even with many counterparty-paper signed observations, the position must
-    remain 'negotiable'. This is enforced structurally, not by validation.
-    """
-    obs = [
-        _obs("indemnification", provenance="counterparty_paper", deviation="none"),
-        _obs(
-            "indemnification",
-            provenance="counterparty_paper",
-            deviation="none",
-            doc_id="deal_002",
-            version="v1",
-        ),
-        _obs(
-            "indemnification",
-            provenance="counterparty_paper",
-            deviation="none",
-            doc_id="deal_003",
-            version="v1",
-        ),
-    ]
-    positions = _compile(obs, [])
-    pos = positions[0]
-    # Structural guarantee: these values cannot appear for counterparty-paper-only.
-    assert pos.our_standard is None
-    assert pos.rollup.position not in {"standard", "acceptable_variants_exist", "hold_firm"}
-    assert pos.rollup.position == "negotiable"
-
-
-def test_provenance_rule_template_obs_provides_our_paper() -> None:
-    """Template observation counts as our-paper; enables our_standard and stronger positions."""
-    t_obs = _template_obs("indemnification")
-    # No deal observations — only template.
-    positions = _compile([], [t_obs])
-    pos = positions[0]
-    assert pos.our_standard is not None
-    # Template-only grounding: conservative "negotiable" (no deal evidence to assert standard).
-    assert pos.rollup.position == "negotiable"
-
-
-def test_provenance_rule_template_must_be_our_paper() -> None:
-    """ValueError if template_observations contains non-our-paper provenance."""
+def test_template_observation_must_be_our_paper() -> None:
     bad_template = _obs(
         "indemnification", provenance="counterparty_paper", doc_id="template", version="template"
     )
@@ -445,627 +238,12 @@ def test_provenance_rule_template_must_be_our_paper() -> None:
         compile_clause_positions([], [bad_template])
 
 
-def test_provenance_rule_template_plus_counterparty_reversal_not_hold_firm() -> None:
-    """Regression (§2.2): a template match (our-paper grounding) plus counterparty-paper
-    observations — including a proposed_then_reversed ask — must NOT be promoted to
-    'hold_firm'. Only our-paper DEAL signal may set a position stronger than 'negotiable';
-    a counterparty reversal previously rode in on the template match and produced an
-    illegal hold_firm that failed schema validation on the real corpus."""
-    template = [_template_obs("indemnification")]
-    obs = [
-        _obs(
-            "indemnification",
-            provenance="counterparty_paper",
-            outcome="signed",
-            deviation="substantive",
-            doc_id="deal_a",
-            version="v3",
-        ),
-        _obs(
-            "indemnification",
-            provenance="counterparty_paper",
-            outcome="proposed_then_reversed",
-            deviation="substantive",
-            doc_id="deal_b",
-            version="v2",
-        ),
-    ]
-    pos = _compile(obs, template)[0]
-    # our_standard is set from the template (template is our-paper drafting) ...
+def test_multiple_template_observations_first_wins() -> None:
+    t1 = _template_obs("indemnification", text="First version.", clause_path="8")
+    t2 = _template_obs("indemnification", text="Second version.", clause_path="9")
+    pos = _compile([], [t1, t2])[0]
     assert pos.our_standard is not None
-    # ... but the position is capped at negotiable: no our-paper DEAL evidence exists.
-    assert pos.rollup.position == "negotiable"
-    # the counterparty reversal is still preserved as evidence, just not as the position.
-    assert len(pos.rollup.rejected) == 1
-
-
-# ---------------------------------------------------------------------------
-# observed_positions: citations carried on every asserted text
-# ---------------------------------------------------------------------------
-
-
-def test_observed_positions_count() -> None:
-    """One ObservedPosition per observation in the group."""
-    obs = [
-        _obs("indemnification", doc_id="deal_001", version="v2"),
-        _obs("indemnification", doc_id="deal_002", version="v1"),
-    ]
-    positions = _compile(obs, [])
-    assert len(positions[0].observed_positions) == 2
-
-
-def test_observed_positions_citation_carried() -> None:
-    """Citations are present on every observed position (no citation omitted)."""
-    obs = [_obs("indemnification", doc_id="deal_007", version="v3", clause_path="9")]
-    positions = _compile(obs, [])
-    op = positions[0].observed_positions[0]
-    assert op.example_ref.document_id == "deal_007"
-    assert op.example_ref.version == "v3"
-    assert op.example_ref.clause_path == "9"
-
-
-def test_observed_positions_text_summary_preserved() -> None:
-    obs = [_obs("indemnification", text="Alice shall indemnify Beta LLC.")]
-    positions = _compile(obs, [])
-    assert positions[0].observed_positions[0].text_summary == "Alice shall indemnify Beta LLC."
-
-
-def test_observed_positions_deviation_and_risk_delta() -> None:
-    obs = [_obs("indemnification", deviation="substantive", risk_delta=_WORSE_MATERIAL)]
-    positions = _compile(obs, [])
-    op = positions[0].observed_positions[0]
-    assert op.deviation == "substantive"
-    assert op.risk_delta == {"direction": "worse", "magnitude": "material"}
-
-
-def test_observed_positions_outcome_preserved() -> None:
-    obs = [_obs("indemnification", outcome="proposed_then_reversed")]
-    positions = _compile(obs, [])
-    assert positions[0].observed_positions[0].outcome == "proposed_then_reversed"
-
-
-def test_observed_positions_provenance_preserved() -> None:
-    obs = [_obs("indemnification", provenance="counterparty_paper")]
-    positions = _compile(obs, [])
-    assert positions[0].observed_positions[0].provenance == "counterparty_paper"
-
-
-# ---------------------------------------------------------------------------
-# search_snippet threading (issue #95)
-# ---------------------------------------------------------------------------
-
-
-def test_observed_positions_search_snippet_preserved() -> None:
-    """_obs_to_observed_position carries the source Observation's
-    (already-pseudonymized, already-truncated) search_snippet through
-    unchanged onto ObservedPosition."""
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary="Mutual indemnification.",
-        full_text="Mutual indemnification, negligence-based, full clause text.",
-        search_snippet="Mutual indemnification, negligence-based",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [])
-    assert (
-        positions[0].observed_positions[0].search_snippet
-        == "Mutual indemnification, negligence-based"
-    )
-
-
-def test_to_dict_observed_positions_include_x_search_snippet_when_present() -> None:
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary="Mutual indemnification obligations survive termination.",
-        search_snippet="a short searchable phrase",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [])
-    op_dict = positions[0].to_dict()["observed_positions"][0]
-    assert op_dict["x_search_snippet"] == "a short searchable phrase"
-
-
-def test_to_dict_observed_positions_omit_x_search_snippet_when_no_clause_text() -> None:
-    """No text_summary/full_text/search_snippet at all → the OPF dict omits
-    x_search_snippet entirely (never a null/"" placeholder) — schema
-    validation stays green with no schema edit precisely because this is an
-    optional x_-prefixed key, not a required one.
-
-    Exercises ``ObservedPosition.to_dict()`` directly rather than through
-    ``compile_clause_positions`` — an Observation with no clause text at all
-    is exactly the degenerate case the issue #210 guard quarantines out of
-    ``observed_positions`` before it ever reaches this shape, so routing it
-    through the full compiler would test the guard, not the omit-key
-    behavior this test is about."""
-    op = ObservedPosition(
-        text_summary="",
-        example_ref=OPFCitation(document_id="deal_001", version="v2", clause_path="8"),
-        deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    assert "x_search_snippet" not in op.to_dict()
-
-
-def test_rollup_fallback_carries_search_snippet() -> None:
-    """fallbacks/rejected share _obs_to_observed_position with
-    observed_positions, so a worse-risk our-paper fallback also carries its
-    search_snippet through to summary.fallbacks[].x_search_snippet."""
-    t_obs = _template_obs("indemnification")
-    obs = Observation(
-        observation_id="deal_001/v2/8",
-        taxonomy_id="indemnification",
-        text_summary="We accept liability up to the aggregate fees paid.",
-        search_snippet="We accept liability up to the aggregate fees paid",
-        citation=ObservationCitation(
-            document_id="deal_001", version="v2", clause_path="8", char_span=None
-        ),
-        deviation="substantive",
-        risk_delta=_WORSE_MINOR.to_dict(),
-        provenance="our_paper",
-        outcome="signed",
-    )
-    positions = _compile([obs], [t_obs])
-    assert len(positions[0].rollup.fallbacks) == 1
-    assert (
-        positions[0].rollup.fallbacks[0].search_snippet
-        == "We accept liability up to the aggregate fees paid"
-    )
-    fallback_dict = positions[0].to_dict()["summary"]["fallbacks"][0]
-    assert fallback_dict["x_search_snippet"] == "We accept liability up to the aggregate fees paid"
-
-
-# ---------------------------------------------------------------------------
-# rollup.position derivation
-# ---------------------------------------------------------------------------
-
-
-def test_position_standard_all_deviation_none() -> None:
-    """Standard: all our-paper observations have deviation=none, no concessions.
-
-    Two our-paper observations (issue #107 evidence-depth floor — a single
-    observation is capped at "negotiable" regardless of the cascade below;
-    see test_evidence_depth_caps_single_observation_at_negotiable).
-    """
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs("indemnification", deviation="none", outcome="signed"),
-        _obs("indemnification", deviation="none", outcome="signed", doc_id="deal_002"),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "standard"
-
-
-def test_position_acceptable_variants_exist() -> None:
-    """acceptable_variants_exist: neutral-risk signed variant (deviation != none).
-
-    Two our-paper observations (issue #107 evidence-depth floor).
-    """
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="reworded_equivalent",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-        ),
-        _obs(
-            "indemnification",
-            deviation="reworded_equivalent",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            doc_id="deal_002",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "acceptable_variants_exist"
-
-
-def test_unjudged_deviation_does_not_fabricate_acceptable_variants() -> None:
-    """A neutral-risk substantive variant whose basis is unjudged
-    (``needs_review`` — e.g. stub-mode or judge-error) must NOT compile into an
-    ``acceptable_variants_exist`` position: nothing actually assessed the risk,
-    so the neutral risk_delta is a placeholder, not evidence of an acceptable
-    variant. With no other signal this falls through to ``standard``.
-
-    Two our-paper observations (issue #107 evidence-depth floor).
-    """
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="needs_review",
-        ),
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="needs_review",
-            doc_id="deal_002",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "standard"
-    # And it must not leak into acceptable_if either.
-    assert positions[0].rollup.acceptable_if == ()
-
-
-def test_judged_deviation_still_yields_acceptable_variants() -> None:
-    """The counterpart to the unjudged case: an identical neutral-risk
-    substantive variant WITH ``basis="judge"`` is a real assessment and must
-    still compile into ``acceptable_variants_exist``.
-
-    Two our-paper observations (issue #107 evidence-depth floor).
-    """
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="judge",
-        ),
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="judge",
-            doc_id="deal_002",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "acceptable_variants_exist"
-
-
-def test_stub_basis_caps_position_at_negotiable() -> None:
-    """issue #101: an our-paper signed observation carrying ``basis="stub"``
-    (no judge configured at all) must not yield "standard" or
-    "acceptable_variants_exist" — even though an identical deviation="none"
-    observation without a stub basis WOULD yield "standard"
-    (test_position_standard_all_deviation_none). "stub" is stricter than
-    "needs_review": it means no judge was ever configured, not that one
-    judge call failed, so no clause type touched by it can be trusted beyond
-    the §2.2-style "negotiable" cap."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="none",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="stub",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "negotiable"
-    assert positions[0].rollup.position not in {
-        "standard",
-        "acceptable_variants_exist",
-        "hold_firm",
-    }
-
-
-def test_stub_basis_excluded_from_acceptable_if() -> None:
-    """A neutral-risk substantive variant with basis="stub" must not leak into
-    acceptable_if — mirrors the needs_review/judge_error exclusion."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="stub",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.acceptable_if == ()
-    assert positions[0].rollup.position == "negotiable"
-
-
-def test_stub_basis_caps_even_with_other_judged_observations() -> None:
-    """A single stub-basis observation caps the WHOLE clause type at
-    "negotiable", even when other observations for the same taxonomy_id were
-    genuinely judged and would otherwise support "standard"."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="none",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="deterministic",
-            doc_id="deal_001",
-        ),
-        _obs(
-            "indemnification",
-            deviation="none",
-            risk_delta=_NEUTRAL,
-            outcome="signed",
-            basis="stub",
-            doc_id="deal_002",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "negotiable"
-
-
-def test_position_negotiable_when_concessions_exist() -> None:
-    """negotiable: worse-risk signed our-paper observations exist."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs("indemnification", deviation="substantive", risk_delta=_WORSE_MINOR, outcome="signed"),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "negotiable"
-
-
-def test_position_hold_firm_reversals_no_concessions() -> None:
-    """hold_firm: proposed_then_reversed with no worse-risk signed observations.
-
-    Two our-paper observations (issue #107 evidence-depth floor).
-    """
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_WORSE_MINOR,
-            outcome="proposed_then_reversed",
-        ),
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_WORSE_MINOR,
-            outcome="proposed_then_reversed",
-            doc_id="deal_002",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "hold_firm"
-
-
-def test_position_negotiable_takes_precedence_over_hold_firm() -> None:
-    """negotiable when both fallbacks and reversals present (concession dominates)."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs("indemnification", deviation="substantive", risk_delta=_WORSE_MINOR, outcome="signed"),
-        _obs(
-            "indemnification",
-            deviation="substantive",
-            risk_delta=_WORSE_MINOR,
-            outcome="proposed_then_reversed",
-            doc_id="deal_002",
-            version="v1",
-        ),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].rollup.position == "negotiable"
-
-
-# ---------------------------------------------------------------------------
-# rollup.fallbacks and rollup.rejected
-# ---------------------------------------------------------------------------
-
-
-def test_rollup_fallbacks_are_worse_risk_signed_our_paper() -> None:
-    """fallbacks = signed our-paper observations with risk_delta.direction=worse."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs("indemnification", deviation="substantive", risk_delta=_WORSE_MINOR, outcome="signed"),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert len(positions[0].rollup.fallbacks) == 1
-    assert positions[0].rollup.fallbacks[0].risk_delta["direction"] == "worse"
-
-
-def test_rollup_fallbacks_exclude_counterparty_paper() -> None:
-    """Counterparty-paper observations never appear in fallbacks."""
-    obs = [
-        _obs(
-            "indemnification",
-            provenance="counterparty_paper",
-            deviation="substantive",
-            risk_delta=_WORSE_MINOR,
-            outcome="signed",
-        ),
-    ]
-    positions = _compile(obs, [])
-    assert len(positions[0].rollup.fallbacks) == 0
-
-
-def test_rollup_rejected_are_proposed_then_reversed() -> None:
-    """rejected = observations with outcome=proposed_then_reversed."""
-    t_obs = _template_obs("indemnification")
-    obs = [
-        _obs("indemnification", outcome="proposed_then_reversed", risk_delta=_WORSE_MATERIAL),
-    ]
-    positions = _compile(obs, [t_obs])
-    assert len(positions[0].rollup.rejected) == 1
-    assert positions[0].rollup.rejected[0].outcome == "proposed_then_reversed"
-
-
-def test_rollup_signed_obs_not_in_rejected() -> None:
-    obs = [_obs("indemnification", outcome="signed")]
-    positions = _compile(obs, [])
-    assert len(positions[0].rollup.rejected) == 0
-
-
-# ---------------------------------------------------------------------------
-# rollup.confidence
-# ---------------------------------------------------------------------------
-
-
-def test_rollup_confidence_fields_present() -> None:
-    obs = [_obs("indemnification")]
-    positions = _compile(obs, [])
-    conf = positions[0].rollup.confidence
-    assert "score" in conf
-    assert "n_our_paper" in conf
-    assert "n_counterparty_paper" in conf
-
-
-def test_rollup_confidence_counts_provenance() -> None:
-    obs = [
-        _obs("indemnification", provenance="our_paper"),
-        _obs("indemnification", provenance="counterparty_paper", doc_id="deal_002", version="v1"),
-        _obs("indemnification", provenance="counterparty_paper", doc_id="deal_003", version="v1"),
-    ]
-    positions = _compile(obs, [])
-    conf = positions[0].rollup.confidence
-    assert conf["n_our_paper"] == 1
-    assert conf["n_counterparty_paper"] == 2
-
-
-def test_rollup_confidence_score_range() -> None:
-    obs = [
-        _obs("indemnification", provenance="our_paper"),
-        _obs("indemnification", provenance="our_paper", doc_id="d2", version="v1"),
-    ]
-    positions = _compile(obs, [])
-    score = positions[0].rollup.confidence["score"]
-    assert 0.0 <= score <= 1.0
-
-
-def test_rollup_confidence_score_zero_for_no_observations() -> None:
-    """Template-only clause (no deal observations) has confidence score 0."""
-    t_obs = _template_obs("indemnification")
-    positions = _compile([], [t_obs])
-    assert positions[0].rollup.confidence["score"] == 0.0
-
-
-# ---------------------------------------------------------------------------
-# ClausePosition.to_dict: OPF-shaped output
-# ---------------------------------------------------------------------------
-
-
-def test_to_dict_structure() -> None:
-    """to_dict() produces the expected top-level OPF keys."""
-    t_obs = _template_obs("indemnification")
-    obs = [_obs("indemnification")]
-    positions = _compile(obs, [t_obs])
-    d = positions[0].to_dict()
-
-    assert d["id"] == "clause.indemnification"
-    assert d["taxonomy_id"] == "indemnification"
-    assert "title" in d
-    assert "our_standard" in d
-    assert "observed_positions" in d
-    assert "summary" in d
-
-
-def test_to_dict_our_standard_none_serializes_null() -> None:
-    obs = [_obs("indemnification", provenance="counterparty_paper")]
-    positions = _compile(obs, [])
-    assert positions[0].to_dict()["our_standard"] is None
-
-
-def test_to_dict_our_standard_carries_source_ref() -> None:
-    """Acceptance: citations are present on every asserted text (our_standard)."""
-    t_obs = _template_obs("indemnification", clause_path="8")
-    positions = _compile([], [t_obs])
-    d = positions[0].to_dict()
-    assert d["our_standard"]["source_ref"]["document_id"] == "template"
-    assert d["our_standard"]["source_ref"]["clause_path"] == "8"
-
-
-def test_to_dict_observed_positions_each_have_example_ref() -> None:
-    """Acceptance: every ObservedPosition in output carries example_ref (citation)."""
-    obs = [
-        _obs("indemnification", doc_id="deal_A", version="v2", clause_path="8.1"),
-        _obs(
-            "indemnification",
-            doc_id="deal_B",
-            version="v1",
-            clause_path="5",
-            provenance="counterparty_paper",
-        ),
-    ]
-    positions = _compile(obs, [])
-    d = positions[0].to_dict()
-    for op in d["observed_positions"]:
-        assert "example_ref" in op
-        assert "document_id" in op["example_ref"]
-
-
-def test_to_dict_summary_structure() -> None:
-    """OPF v0.2 (§3.5): to_dict() emits `summary` with `historical_stance`
-    (descriptive), not v0.1's `rollup.position` (prescriptive)."""
-    obs = [_obs("indemnification")]
-    positions = _compile(obs, [])
-    summary = positions[0].to_dict()["summary"]
-    assert "historical_stance" in summary
-    assert "acceptable_if" in summary
-    assert "fallbacks" in summary
-    assert "rejected" in summary
-    assert "confidence" in summary
-
-
-def test_to_dict_historical_stance_no_signal_when_evidence_insufficient() -> None:
-    """Below MIN_EVIDENCE_N our-paper observations → historical_stance is the
-    descriptive "no_signal", never a stronger stance (mirrors the §2.2/#107
-    rollup.position="negotiable" cap)."""
-    obs = [_obs("indemnification")]  # single our-paper observation
-    positions = _compile(obs, [])
-    assert positions[0].rollup.position == "negotiable"
-    assert positions[0].to_dict()["summary"]["historical_stance"] == "no_signal"
-
-
-def test_to_dict_historical_stance_consistently_held() -> None:
-    # A stance stronger than "mixed" requires an our_standard to point at
-    # (OPF §2.2), so a template observation must be present (issue #182).
-    t_obs = _template_obs("indemnification")
-    obs = [_obs("indemnification"), _obs("indemnification", doc_id="deal_002")]
-    positions = _compile(obs, [t_obs])
-    assert positions[0].our_standard is not None
-    assert positions[0].rollup.position == "standard"
-    assert positions[0].to_dict()["summary"]["historical_stance"] == "consistently_held"
-
-
-def test_strong_stance_capped_when_no_our_standard() -> None:
-    """our-paper obs but no template clause → §2.2 cap (issue #182).
-
-    Without an our_standard to reference, the position must cap at "negotiable"
-    and historical_stance must not exceed "mixed" — otherwise the assembled
-    playbook fails OPF §2.2 validation ('consistently_held' with
-    our_standard: null).
-    """
-    obs = [_obs("indemnification"), _obs("indemnification", doc_id="deal_002")]
-    positions = _compile(obs, [])  # no template observations
-    pos = positions[0]
-    assert pos.our_standard is None
-    assert pos.rollup.position == "negotiable"
-    assert pos.to_dict()["summary"]["historical_stance"] not in {
-        "usually_conceded",
-        "usually_held",
-        "consistently_held",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Edge cases
-# ---------------------------------------------------------------------------
+    assert pos.our_standard.text == "First version."
 
 
 def test_empty_inputs_returns_empty() -> None:
@@ -1074,150 +252,24 @@ def test_empty_inputs_returns_empty() -> None:
     assert flags == []
 
 
-def test_empty_deal_observations_template_only() -> None:
-    """Template-only: correct ClausePosition with no deal observations."""
-    t_obs = _template_obs("confidentiality")
-    positions = _compile([], [t_obs])
-    assert len(positions) == 1
-    assert positions[0].taxonomy_id == "confidentiality"
-    assert positions[0].our_standard is not None
-    assert len(positions[0].observed_positions) == 0
-
-
-def test_multiple_template_observations_first_wins() -> None:
-    """Only the first template observation for a taxonomy_id is used."""
-    t1 = _template_obs("indemnification", text="First version.", clause_path="8")
-    t2 = _template_obs("indemnification", text="Second version.", clause_path="9")
-    positions = _compile([], [t1, t2])
-    assert positions[0].our_standard is not None
-    assert positions[0].our_standard.text == "First version."
-
-
 def test_opf_citation_to_dict_no_optional_fields() -> None:
-    """OPFCitation omits clause_path and char_span when None."""
-    c = OPFCitation(document_id="template", version="template")
-    d = c.to_dict()
+    d = OPFCitation(document_id="template", version="template").to_dict()
     assert "clause_path" not in d
     assert "char_span" not in d
 
 
 def test_opf_citation_to_dict_with_all_fields() -> None:
-    c = OPFCitation(document_id="deal_x", version=3, clause_path="8.1", char_span=(0, 120))
-    d = c.to_dict()
+    d = OPFCitation(
+        document_id="deal_x", version=3, clause_path="8.1", char_span=(0, 120)
+    ).to_dict()
     assert d["version"] == 3
     assert d["clause_path"] == "8.1"
     assert d["char_span"] == [0, 120]
 
 
-def test_clause_rollup_rejects_invalid_position() -> None:
-    with pytest.raises(ValueError, match="position"):
-        ClauseRollup(
-            position="unknown",
-            acceptable_if=(),
-            fallbacks=(),
-            rejected=(),
-            confidence={"score": 0.0},
-        )
-
-
-# ---------------------------------------------------------------------------
-# CoherenceJudge — acceptance criteria (issue #54)
-# ---------------------------------------------------------------------------
-
-
-class _FlagAllJudge:
-    """Stub judge that always returns a CoherenceFlag (severity=warn)."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def judge(self, clause_summary: dict) -> CoherenceFlag:
-        self.calls.append(clause_summary)
-        return CoherenceFlag(
-            clause_id=clause_summary["clause_id"],
-            reason="low citation count",
-            severity="warn",
-        )
-
-
-class _NullJudge:
-    """Stub judge that never flags (returns None)."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def judge(self, clause_summary: dict) -> CoherenceFlag | None:
-        self.calls.append(clause_summary)
-        return None
-
-
-def test_coherence_judge_called_for_low_n_our_paper() -> None:
-    """Acceptance: judge is called for clause with n_our_paper < COHERENCE_MIN_CITATIONS."""
-    # One our-paper observation — below threshold of 3.
-    obs = [_obs("indemnification", provenance="our_paper")]
-    judge = _FlagAllJudge()
-    positions, flags, _ = compile_clause_positions(obs, [], coherence_judge=judge)
-    assert len(judge.calls) == 1
-    assert judge.calls[0]["clause_id"] == "clause.indemnification"
-    assert judge.calls[0]["n_our_paper"] == 1
-
-
-def test_coherence_flag_appears_in_result_for_low_n_our_paper() -> None:
-    """Acceptance: CoherenceFlag for low n_our_paper clause appears in output."""
-    obs = [_obs("indemnification", provenance="our_paper")]
-    judge = _FlagAllJudge()
-    positions, flags, _ = compile_clause_positions(obs, [], coherence_judge=judge)
-    assert len(flags) == 1
-    flag = flags[0]
-    assert flag.clause_id == "clause.indemnification"
-    assert flag.reason == "low citation count"
-    assert flag.severity == "warn"
-
-
-def test_coherence_judge_not_called_when_sufficient_citations_and_consistent_risk() -> None:
-    """Acceptance: judge NOT called when all clauses have n_our_paper >= threshold and
-    consistent risk_delta directions."""
-    # COHERENCE_MIN_CITATIONS = 3; supply 3 our-paper observations with consistent neutral risk.
-    obs = [
-        _obs("indemnification", provenance="our_paper", doc_id="d1", version="v1"),
-        _obs("indemnification", provenance="our_paper", doc_id="d2", version="v1"),
-        _obs("indemnification", provenance="our_paper", doc_id="d3", version="v1"),
-    ]
-    judge = _NullJudge()
-    positions, flags, _ = compile_clause_positions(obs, [], coherence_judge=judge)
-    # All 3 observations have neutral risk and no fallbacks — no trigger conditions met.
-    assert len(judge.calls) == 0
-    assert len(flags) == 0
-
-
-def test_coherence_judge_not_called_when_none() -> None:
-    """No calls and no flags when coherence_judge=None (default)."""
-    obs = [_obs("indemnification", provenance="our_paper")]
-    positions, flags, _ = compile_clause_positions(obs, [], coherence_judge=None)
-    assert flags == []
-
-
-def test_coherence_flag_dataclass_fields() -> None:
-    """CoherenceFlag carries clause_id, reason, and severity."""
-    flag = CoherenceFlag(
-        clause_id="clause.governing_law",
-        reason="contradictory risk_delta directions",
-        severity="block",
-    )
-    assert flag.clause_id == "clause.governing_law"
-    assert flag.reason == "contradictory risk_delta directions"
-    assert flag.severity == "block"
-
-
-def test_coherence_min_citations_constant() -> None:
-    """COHERENCE_MIN_CITATIONS is defined and equals 3 per spec."""
-    assert COHERENCE_MIN_CITATIONS == 3
-
-
-def test_coherence_judge_protocol_satisfied_by_stub() -> None:
-    """Stub judges satisfy the CoherenceJudge protocol (runtime_checkable)."""
-    assert isinstance(_FlagAllJudge(), CoherenceJudge)
-    assert isinstance(_NullJudge(), CoherenceJudge)
+def test_opf_citation_normalizes_string_versions() -> None:
+    assert OPFCitation(document_id="d", version="v2").to_dict()["version"] == 2
+    assert OPFCitation(document_id="d", version="template").to_dict()["version"] == "template"
 
 
 # ---------------------------------------------------------------------------
@@ -1226,8 +278,6 @@ def test_coherence_judge_protocol_satisfied_by_stub() -> None:
 
 
 def test_unclassified_coverage_counts_none_taxonomy_observations() -> None:
-    """taxonomy_id=None observations are excluded from positions but counted,
-    not silently omitted, in the returned unclassified coverage."""
     obs = [
         _obs(None, doc_id="deal_001", version="v1", clause_path="3"),
         _obs(None, doc_id="deal_002", version="v1", clause_path="7"),
@@ -1240,7 +290,6 @@ def test_unclassified_coverage_counts_none_taxonomy_observations() -> None:
 
 
 def test_unclassified_coverage_by_document_breakdown() -> None:
-    """Per-document counts let a consumer see which documents lost content."""
     obs = [
         _obs(None, doc_id="deal_001", version="v1", clause_path="3"),
         _obs(None, doc_id="deal_001", version="v1", clause_path="5"),
@@ -1251,23 +300,7 @@ def test_unclassified_coverage_by_document_breakdown() -> None:
     assert unclassified.by_document == {"deal_001": 2, "deal_002": 1}
 
 
-def test_unclassified_coverage_example_citations_present() -> None:
-    """Example citations are real OPFCitation objects pointing at the source."""
-    obs = [
-        _obs(None, doc_id="deal_001", version="v1", clause_path="3"),
-        _obs("indemnification"),
-    ]
-    _positions, _flags, unclassified = compile_clause_positions(obs, [])
-    assert len(unclassified.example_citations) == 1
-    citation = unclassified.example_citations[0]
-    assert isinstance(citation, OPFCitation)
-    assert citation.document_id == "deal_001"
-    assert citation.clause_path == "3"
-
-
 def test_unclassified_coverage_example_citations_capped() -> None:
-    """Example citations are capped at UNCLASSIFIED_EXAMPLE_LIMIT even when
-    many more observations are unclassified."""
     obs = [
         _obs(None, doc_id=f"deal_{i:03d}", version="v1", clause_path=str(i))
         for i in range(UNCLASSIFIED_EXAMPLE_LIMIT + 5)
@@ -1275,25 +308,25 @@ def test_unclassified_coverage_example_citations_capped() -> None:
     _positions, _flags, unclassified = compile_clause_positions(obs, [])
     assert unclassified.count == UNCLASSIFIED_EXAMPLE_LIMIT + 5
     assert len(unclassified.example_citations) == UNCLASSIFIED_EXAMPLE_LIMIT
+    assert isinstance(unclassified.example_citations[0], OPFCitation)
 
 
 def test_unclassified_coverage_zero_when_all_classified() -> None:
-    """No unclassified observations → count 0, empty breakdown/examples."""
-    obs = [_obs("indemnification"), _obs("governing_law")]
-    _positions, _flags, unclassified = compile_clause_positions(obs, [])
+    _positions, _flags, unclassified = compile_clause_positions(
+        [_obs("indemnification"), _obs("governing_law")], []
+    )
     assert unclassified.count == 0
     assert unclassified.by_document == {}
     assert unclassified.example_citations == ()
 
 
 def test_unclassified_coverage_to_dict_shape() -> None:
-    """to_dict() emits count/by_document/example_citations for JSON persistence."""
-    obs = [_obs(None, doc_id="deal_001", version="v1", clause_path="3")]
-    _positions, _flags, unclassified = compile_clause_positions(obs, [])
+    _positions, _flags, unclassified = compile_clause_positions(
+        [_obs(None, doc_id="deal_001", version="v1", clause_path="3")], []
+    )
     d = unclassified.to_dict()
     assert d["count"] == 1
     assert d["by_document"] == {"deal_001": 1}
-    assert len(d["example_citations"]) == 1
     assert d["example_citations"][0]["document_id"] == "deal_001"
 
 
@@ -1302,182 +335,38 @@ def test_unclassified_coverage_to_dict_shape() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_degenerate_fragment_excluded_from_observed_positions() -> None:
-    """A sub-25-char full_text (segmentation fragment) never reaches
-    observed_positions, but a real-length observation for the same clause
-    does."""
+def test_degenerate_fragment_is_flagged_beside_real_text() -> None:
     real = _obs("indemnification", text="Mutual indemnification for third-party claims.")
     fragment = _obs("indemnification", text="1 6", doc_id="deal_002", version="v1", clause_path="3")
     positions, flags, _ = compile_clause_positions([real, fragment], [])
-    assert len(positions) == 1
-    pos = positions[0]
-    assert len(pos.observed_positions) == 1
-    assert pos.observed_positions[0].full_text == "Mutual indemnification for third-party claims."
-    # Surfaced, not silently dropped.
-    assert any(f.clause_id == "clause.indemnification" and f.severity == "warn" for f in flags)
-
-
-def test_degenerate_fragment_does_not_inflate_precedent_count() -> None:
-    """Two identical fragments must not count toward precedent_count for a
-    real observation of different text in the same clause group."""
-    real = _obs("indemnification", text="Mutual indemnification for third-party claims.")
-    frag1 = _obs(
-        "indemnification", text="indemnification", doc_id="deal_002", version="v1", clause_path="3"
-    )
-    frag2 = _obs(
-        "indemnification", text="indemnification", doc_id="deal_003", version="v1", clause_path="3"
-    )
-    positions, _flags, _ = compile_clause_positions([real, frag1, frag2], [])
-    assert len(positions) == 1
-    assert len(positions[0].observed_positions) == 1
-    assert positions[0].observed_positions[0].precedent_count == 1
+    assert [p.taxonomy_id for p in positions] == ["indemnification"]
+    assert [(f.clause_id, f.severity) for f in flags] == [("clause.indemnification", "warn")]
+    assert flags[0].reason.startswith("1 observation(s) excluded from precedent")
 
 
 def test_taxonomy_id_with_only_fragments_has_no_position_but_is_flagged() -> None:
-    """A taxonomy_id whose ONLY observations are fragments (no template
-    either) never appears in `positions`, but is still surfaced via a
-    CoherenceFlag — never silently dropped."""
-    fragment = _obs("amendments", text="1 7")
-    positions, flags, _ = compile_clause_positions([fragment], [])
-    assert all(p.taxonomy_id != "amendments" for p in positions)
-    matching = [f for f in flags if f.clause_id == "clause.amendments"]
-    assert len(matching) == 1
-    assert matching[0].severity == "warn"
-    assert "1" in matching[0].reason  # count of quarantined observations
+    positions, flags, _ = compile_clause_positions([_obs("amendments", text="1 7")], [])
+    assert positions == []
+    assert [f.clause_id for f in flags] == ["clause.amendments"]
 
 
 def test_exactly_min_length_text_is_not_degenerate() -> None:
-    """A full_text exactly MIN_OBSERVATION_TEXT_LEN chars long is admitted —
-    the floor excludes strictly-shorter text only."""
-    from playbook_engine.clause_position_compiler import MIN_OBSERVATION_TEXT_LEN
-
-    text = "x" * MIN_OBSERVATION_TEXT_LEN
-    obs = _obs("governing_law", text=text)
+    obs = _obs("governing_law", text="x" * MIN_OBSERVATION_TEXT_LEN)
     positions, flags, _ = compile_clause_positions([obs], [])
-    assert len(positions[0].observed_positions) == 1
+    assert [p.taxonomy_id for p in positions] == ["governing_law"]
     assert flags == []
 
 
 # ---------------------------------------------------------------------------
-# precedent_count is a count of distinct deals (issue #216)
-# ---------------------------------------------------------------------------
-
-_ASSIGN_TEXT = "Neither party may assign this Agreement without consent."
-
-
-def test_precedent_count_counts_distinct_deals_not_rows() -> None:
-    """The same normalized text appearing in several rows of ONE deal (e.g.
-    a signed row plus a reversed row, or rows from a pre-#216 store) is one
-    precedent; across two deals it is two."""
-    same_deal = [
-        _obs("assignment", text=_ASSIGN_TEXT, doc_id="deal_001", clause_path="9"),
-        _obs(
-            "assignment",
-            text=_ASSIGN_TEXT.upper(),  # whitespace/case-insensitive match
-            doc_id="deal_001",
-            clause_path="10",
-            outcome="proposed_then_reversed",
-        ),
-    ]
-    other_deal = [_obs("assignment", text=_ASSIGN_TEXT, doc_id="deal_002", clause_path="9")]
-
-    positions = _compile(same_deal, [])
-    assert {op.precedent_count for op in positions[0].observed_positions} == {1}
-
-    positions = _compile(same_deal + other_deal, [])
-    assert {op.precedent_count for op in positions[0].observed_positions} == {2}
-
-
-def test_acceptable_if_rationale_cites_distinct_deal_count() -> None:
-    variant = "Recipient may disclose to its legal and financial advisers."
-    obs = [
-        _obs(
-            "confidentiality",
-            text=variant,
-            deviation="substantive",
-            basis="judge",
-            doc_id=doc_id,
-            clause_path=path,
-        )
-        for doc_id, path in (("deal_001", "4"), ("deal_001", "5"), ("deal_002", "4"))
-    ]
-    positions = _compile(obs, [])
-    entries = positions[0].rollup.acceptable_if
-    assert len(entries) == 1
-    assert "2x precedent" in entries[0].rationale
-
-
-def test_deal_with_signed_and_reversed_rows_counts_once_in_confidence_and_stance() -> None:
-    """Issue #216: a deal carrying both its signed row and a reversed row for
-    one clause is ONE deal in n_our_paper / n_counterparty_paper and in
-    stance_detail held/of — never two rows counted as two data points."""
-    signed_text = "Recipient keeps Confidential Information secret for three years."
-    reversed_text = "Recipient keeps Confidential Information secret in perpetuity."
-    obs = [
-        # deal_001 (our paper): signed row + a reversal from its own trail.
-        _obs("survival", text=signed_text, doc_id="deal_001", clause_path="4"),
-        _obs(
-            "survival",
-            text=reversed_text,
-            doc_id="deal_001",
-            version="v2",
-            clause_path="4",
-            outcome="proposed_then_reversed",
-        ),
-        # deal_002 (our paper): conceded in the signed text, even though a
-        # reversal also appears in its trail — the deal is not "held".
-        _obs(
-            "survival",
-            text=signed_text + " Extended.",
-            doc_id="deal_002",
-            clause_path="4",
-            deviation="substantive",
-            risk_delta=_WORSE_MINOR,
-            basis="judge",
-        ),
-        _obs(
-            "survival",
-            text=reversed_text,
-            doc_id="deal_002",
-            version="v2",
-            clause_path="4",
-            outcome="proposed_then_reversed",
-        ),
-        # deal_003 (counterparty paper): signed row + reversal.
-        _obs(
-            "survival",
-            provenance="counterparty_paper",
-            text=signed_text,
-            doc_id="deal_003",
-            clause_path="7",
-        ),
-        _obs(
-            "survival",
-            provenance="counterparty_paper",
-            text=reversed_text,
-            doc_id="deal_003",
-            version="v2",
-            clause_path="7",
-            outcome="proposed_then_reversed",
-        ),
-    ]
-    rollup = _compile(obs, [])[0].rollup
-    assert rollup.confidence["n_our_paper"] == 2
-    assert rollup.confidence["n_counterparty_paper"] == 1
-    assert rollup.stance_detail == {"held": 1, "of": 2, "basis": "our_paper"}
-
-
-# ---------------------------------------------------------------------------
-# Removed-before-signing rows are classified by ORIGIN (issue #216)
-#
-# Driven through the real producer (build_observations) so the compiler sees
-# exactly the rows the pipeline emits: our standard language struck before
-# signing is our concession — never a rejected ask — and a counterparty ask
-# struck before signing is a rejection. Paper side never decides.
+# The consumer path's observations — driven through the real producers
+# (deviation_classifier.assess_deviations_deterministic -> build_observations
+# (deterministic_deviations=True)), exactly what mine_corpus writes with no
+# deviation judge configured (its default).
 # ---------------------------------------------------------------------------
 
 _STD_NON_SOLICIT = "For twelve months neither party shall solicit the other's employees."
 _THEIR_NON_SOLICIT = "For thirty-six months neither party shall hire any of the other's staff."
+_STD_ONLY = {"non_solicit": _STD_NON_SOLICIT}
 
 
 def _removed(taxonomy_id: str, text: str, path: str = "9") -> ClauseDiff:
@@ -1510,234 +399,12 @@ def _signed(taxonomy_id: str, text: str, path: str = "9", kind: str = "added") -
     )
 
 
-def _deal(
-    doc_id: str, rows: list[tuple[ClauseDiff, DeviationResult]], provenance: str = "our_paper"
-) -> list[Observation]:
-    return build_observations(
-        doc_id,
-        3,
-        provenance,
-        rows,
-        [],
-        ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
-        standard_text_by_tid={"non_solicit": _STD_NON_SOLICIT},
-    )
-
-
-_NONE_DR = DeviationResult(deviation="none", risk_delta=_NEUTRAL, basis="deterministic")
-_JUDGED_WORSE = DeviationResult(deviation="substantive", risk_delta=_WORSE_MATERIAL, basis="judge")
-_JUDGED_NEUTRAL = DeviationResult(deviation="substantive", risk_delta=_NEUTRAL, basis="judge")
-
-
-def _non_solicit_position(observations: list[Observation]) -> ClausePosition:
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-    positions = _compile(observations, template)
-    return next(p for p in positions if p.taxonomy_id == "non_solicit")
-
-
-def _rejected_texts(pos: ClausePosition) -> list[str]:
-    return [op.full_text for op in pos.rollup.rejected]
-
-
-def test_our_standard_clause_struck_outright_is_a_concession_not_a_rejection() -> None:
-    """Two our-paper deals strike our non-solicit outright before signing; a
-    third signs it unchanged. Our standard never lands in rollup.rejected,
-    the striking deals are conceded (not held), and the position is not
-    hold_firm."""
-    observations = (
-        _deal("deal_a", [(_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE)])
-        + _deal("deal_b", [(_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE)])
-        + _deal("deal_c", [(_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged"), _NONE_DR)])
-    )
-    pos = _non_solicit_position(observations)
-    assert _STD_NON_SOLICIT not in _rejected_texts(pos)
-    assert pos.rollup.rejected == ()
-    assert pos.rollup.stance_detail == {"held": 1, "of": 3, "basis": "our_paper"}
-    assert pos.rollup.position == "negotiable"
-    # Concessions are not OPF observations: never in observed_positions.
-    assert {op.outcome for op in pos.observed_positions} == {"signed"}
-    assert {op.example_ref.document_id for op in pos.observed_positions} == {"deal_c"}
-
-
-def test_our_standard_clause_replaced_is_a_concession_even_when_replacement_judged_neutral() -> (
-    None
-):
-    """Our non-solicit struck and replaced by their text in two deals. Even
-    where the signed replacement was judged neutral-risk, striking our
-    standard is a concession: the deal is conceded (never held), and our
-    standard never appears in rollup.rejected."""
-    observations = _deal(
-        "deal_a",
-        [
-            (_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE),
-            (_signed("non_solicit", _THEIR_NON_SOLICIT, path="10"), _JUDGED_NEUTRAL),
-        ],
-    ) + _deal(
-        "deal_b",
-        [
-            (_removed("non_solicit", _STD_NON_SOLICIT), _JUDGED_WORSE),
-            (_signed("non_solicit", _THEIR_NON_SOLICIT, path="10"), _JUDGED_WORSE),
-        ],
-    )
-    pos = _non_solicit_position(observations)
-    assert _STD_NON_SOLICIT not in _rejected_texts(pos)
-    assert pos.rollup.stance_detail == {"held": 0, "of": 2, "basis": "our_paper"}
-    assert pos.rollup.position == "negotiable"
-    assert all(op.outcome == "signed" for op in pos.observed_positions)
-    assert {op.full_text for op in pos.observed_positions} == {_THEIR_NON_SOLICIT}
-
-
-def test_their_ask_struck_before_signing_is_a_rejection_on_either_paper() -> None:
-    """Their non-standard language struck before signing is their refused
-    ask: it lands in rollup.rejected whatever paper the deal is on, and the
-    deal (which signed our standard) is held."""
-    for provenance in ("our_paper", "counterparty_paper"):
-        observations = _deal(
-            "deal_a",
-            [
-                (_removed("non_solicit", _THEIR_NON_SOLICIT), _JUDGED_WORSE),
-                (_signed("non_solicit", _STD_NON_SOLICIT, path="10"), _NONE_DR),
-            ],
-            provenance=provenance,
-        )
-        pos = _non_solicit_position(observations)
-        assert _rejected_texts(pos) == [_THEIR_NON_SOLICIT]
-        assert pos.rollup.stance_detail["held"] == pos.rollup.stance_detail["of"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Issue #216: conceded_before_signing counts by ORIGIN, never paper side —
-# position/historical_stance and stance_detail must agree.
-# ---------------------------------------------------------------------------
-
-
-def _stance_warnings(position: ClausePosition) -> list[str]:
-    from playbook_engine.validator import ValidationResult, _check_dynamics_v2
-
-    result = ValidationResult()
-    _check_dynamics_v2({"evidence": {"clauses": [position.to_dict()]}}, result)
-    return [e.message for e in result.errors if "historical_stance" in e.message]
-
-
-_GOV_STD = "This Agreement is governed by the laws of the State of Delaware."
-
-
-def test_counterparty_paper_concession_counts_beside_held_our_paper_deals() -> None:
-    """Our-paper deals A and B sign our standard unchanged; counterparty-paper
-    deal C struck our standard before signing. C is our concession (origin),
-    so stance_detail must show it, agreeing with the position — under basis
-    "all", because C is not an our-paper deal and must not be counted under
-    an our_paper label."""
-    obs = [
-        _obs("governing_law", doc_id="deal_a", text=_GOV_STD),
-        _obs("governing_law", doc_id="deal_b", text=_GOV_STD),
-        _obs(
-            "governing_law",
-            provenance="counterparty_paper",
-            outcome="conceded_before_signing",
-            doc_id="deal_c",
-            version="v1",
-            text=_GOV_STD,
-        ),
-    ]
-    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
-    summary = pos.to_dict()["summary"]
-    detail = summary["stance_detail"]
-    assert detail["basis"] == "all"
-    assert (detail["held"], detail["of"]) == (2, 3)
-    assert pos.rollup.position == "negotiable"
-    assert summary["historical_stance"] == "usually_conceded"
-    assert _stance_warnings(pos) == []
-
-
-def test_counterparty_paper_concession_with_no_our_paper_deals() -> None:
-    """No our-paper deal evidence at all: basis is "all", and the struck
-    standard still counts as a concession in stance_detail."""
-    obs = [
-        _obs(
-            "governing_law",
-            provenance="counterparty_paper",
-            doc_id="deal_x",
-            text="Governed by the laws of New York.",
-            deviation="substantive",
-            risk_delta=_NEUTRAL,
-        ),
-        _obs(
-            "governing_law",
-            provenance="counterparty_paper",
-            outcome="conceded_before_signing",
-            doc_id="deal_y",
-            version="v1",
-            text=_GOV_STD,
-        ),
-    ]
-    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
-    detail = pos.to_dict()["summary"]["stance_detail"]
-    assert detail["basis"] == "all"
-    assert detail["of"] == 2
-    assert detail["held"] == 1
-    assert _stance_warnings(pos) == []
-
-
-def test_counterparty_paper_holds_and_concessions_are_counted_symmetrically() -> None:
-    """Counterparty-paper deals that HOLD our standard must count exactly
-    like the one that conceded it — never only when they concede."""
-    obs = [_obs("governing_law", doc_id="deal_a", text=_GOV_STD)]
-    obs += [
-        _obs("governing_law", provenance="counterparty_paper", doc_id=f"deal_h{i}", text=_GOV_STD)
-        for i in range(3)
-    ]
-    obs.append(
-        _obs(
-            "governing_law",
-            provenance="counterparty_paper",
-            outcome="conceded_before_signing",
-            doc_id="deal_c",
-            version="v1",
-            text=_GOV_STD,
-        )
-    )
-    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
-    detail = pos.to_dict()["summary"]["stance_detail"]
-    assert detail == {"held": 4, "of": 5, "basis": "all"}
-    assert _stance_warnings(pos) == []
-
-
-def test_our_paper_only_concession_keeps_our_paper_basis() -> None:
-    """When every conceded row is our-paper, basis stays our_paper."""
-    obs = [
-        _obs("governing_law", doc_id="deal_a", text=_GOV_STD),
-        _obs("governing_law", doc_id="deal_b", text=_GOV_STD),
-        _obs(
-            "governing_law",
-            outcome="conceded_before_signing",
-            doc_id="deal_c",
-            version="v1",
-            text=_GOV_STD,
-        ),
-    ]
-    pos = _compile(obs, [_template_obs("governing_law", text=_GOV_STD)])[0]
-    detail = pos.to_dict()["summary"]["stance_detail"]
-    assert detail == {"held": 2, "of": 3, "basis": "our_paper"}
-    assert _stance_warnings(pos) == []
-
-
-# ---------------------------------------------------------------------------
-# Issue #220: the consumer path — deterministic standard facts, no stance
-#
-# Driven through the real producers (deviation_classifier.
-# assess_deviations_deterministic -> build_observations(deterministic_
-# deviations=True)), exactly what mine_corpus writes with no deviation judge
-# configured (its default), so the compiler sees the shape production emits.
-# ---------------------------------------------------------------------------
-
-_STD_ONLY = {"non_solicit": _STD_NON_SOLICIT}
-
-
 def _consumer_deal(
     doc_id: str, diffs: list[ClauseDiff], provenance: str = "our_paper"
 ) -> list[Observation]:
-    rows = assess_deviations_deterministic(diffs, _STD_NON_SOLICIT)
+    rows: list[tuple[ClauseDiff, DeviationResult]] = assess_deviations_deterministic(
+        diffs, _STD_NON_SOLICIT
+    )
     return build_observations(
         doc_id,
         3,
@@ -1752,19 +419,14 @@ def _consumer_deal(
 
 def _consumer_corpus() -> list[Observation]:
     return [
-        # Two deals signed our standard (one on counterparty paper — paper
-        # side never partitions the count).
         *_consumer_deal("deal-a", [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")]),
         *_consumer_deal(
             "deal-b",
             [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")],
             provenance="counterparty_paper",
         ),
-        # One deal signed their language.
         *_consumer_deal("deal-c", [_signed("non_solicit", _THEIR_NON_SOLICIT)]),
-        # One deal struck our standard before signing (a concession) ...
         *_consumer_deal("deal-d", [_removed("non_solicit", _STD_NON_SOLICIT)]),
-        # ... and one refused their ask, then signed our standard.
         *_consumer_deal(
             "deal-e",
             [
@@ -1777,7 +439,6 @@ def _consumer_corpus() -> list[Observation]:
 
 def test_consumer_path_observations_carry_the_standard_fact() -> None:
     obs = _consumer_corpus()
-    assert deviations_are_deterministic(obs)
     for o in obs:
         assert o.basis == "deterministic"
         assert isinstance(o.standard, bool)
@@ -1785,133 +446,16 @@ def test_consumer_path_observations_carry_the_standard_fact() -> None:
         assert o.risk_delta == {"direction": "neutral", "magnitude": "none"}
     by_outcome = {(o.citation.document_id, o.outcome): o.standard for o in obs}
     assert by_outcome[("deal-c", "signed")] is False
-    assert by_outcome[("deal-d", "conceded_before_signing")] is True
+    assert by_outcome[("deal-d", OUTCOME_CONCEDED_BEFORE_SIGNING)] is True
     assert by_outcome[("deal-e", "proposed_then_reversed")] is False
     assert by_outcome[("deal-e", "signed")] is True
 
 
-def test_consumer_path_rollup_reads_no_stance_out_of_placeholder_risk() -> None:
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-    pos = next(p for p in _compile(_consumer_corpus(), template) if p.taxonomy_id == "non_solicit")
-    summary = pos.to_dict()["summary"]
-    assert summary["historical_stance"] == "no_signal"
-    # held = distinct deals that SIGNED our standard (a, b, e); of = every
-    # distinct deal with an observation of this clause, the concession
-    # included (a..e). basis "all": the 0.3 spelling of "every deal".
-    assert summary["stance_detail"] == {"held": 3, "of": 5, "basis": "all"}
-    # Judged categories never reach the consumer path ...
-    assert summary["acceptable_if"] == []
-    assert summary["fallbacks"] == []
-    assert pos.rollup.position == "negotiable"
-    # ... but the refused ask (a deterministic outcome fact) is kept.
-    assert [op.full_text for op in pos.rollup.rejected] == [_THEIR_NON_SOLICIT]
-
-
-def test_consumer_path_stance_detail_validates_against_frozen_0_3_schema() -> None:
-    import json
-    from pathlib import Path
-
-    import jsonschema
-
-    schema = json.loads(
-        (Path(__file__).resolve().parent.parent / "spec" / "playbook.schema-0.3.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    detail_schema = schema["$defs"]["clausePosition"]["properties"]["summary"]["properties"][
-        "stance_detail"
-    ]
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-    pos = next(p for p in _compile(_consumer_corpus(), template) if p.taxonomy_id == "non_solicit")
-    jsonschema.validate(pos.to_dict()["summary"]["stance_detail"], detail_schema)
-
-
-def test_judged_store_keeps_the_judged_derivation() -> None:
-    """A store with a judged row (the opt-in advisory layer), a legacy store
-    that never computed `standard`, and a hand-built basis=None row all keep
-    the judged cascade unchanged."""
-    consumer = _consumer_corpus()
-    judged_row = _deal("deal-f", [(_signed("non_solicit", _THEIR_NON_SOLICIT), _JUDGED_WORSE)])
-    assert not deviations_are_deterministic(consumer + judged_row)
-    assert not deviations_are_deterministic([_obs("non_solicit", basis="deterministic")])
-    assert not deviations_are_deterministic([_obs("non_solicit")])
-    assert not deviations_are_deterministic([])
-
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-    pos = next(
-        p for p in _compile(consumer + judged_row, template) if p.taxonomy_id == "non_solicit"
-    )
-    assert not pos.rollup.deterministic_deviations
-    assert pos.rollup.fallbacks  # the judged worse-risk signing is a fallback again
-
-
-def test_explicit_mode_overrides_inference() -> None:
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-    positions, _, _ = compile_clause_positions(
-        _consumer_corpus(), template, deterministic_deviations=False
-    )
-    pos = next(p for p in positions if p.taxonomy_id == "non_solicit")
-    assert not pos.rollup.deterministic_deviations
-
-
-class _NeverCalledJudge:
-    """A configured deviation judge that every row bypasses (unchanged)."""
-
-    def assess_batch(self, items, our_standard):  # pragma: no cover - never reached
-        raise AssertionError("an unchanged clause never reaches the judge")
-
-
-def _opt_in_unchanged_deal(doc_id: str) -> list[Observation]:
-    """An opt-in judged run's deal that signed our standard unchanged: the
-    judged producer (``assess_deviations`` with a judge configured) takes its
-    unchanged fast path, and ``build_observations`` runs with
-    ``deterministic_deviations=False`` — exactly what ``mine_corpus`` writes
-    with ``--with-deviation-judge`` for a clause nobody touched."""
-    rows = assess_deviations(
-        [_signed("non_solicit", _STD_NON_SOLICIT, kind="unchanged")],
-        _STD_NON_SOLICIT,
-        _NeverCalledJudge(),
-        document_id=doc_id,
-    )
-    return build_observations(
-        doc_id,
-        3,
-        "our_paper",
-        rows,
-        [],
-        ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
-        standard_text_by_tid=_STD_ONLY,
-        deterministic_deviations=False,
-    )
-
-
-def test_opt_in_store_of_unchanged_clauses_compiles_judged_when_mode_is_given() -> None:
-    """Issue #230: an opt-in judged run where every clause matched the
-    template writes rows indistinguishable from the consumer path's, so the
-    inference reads it as the consumer path. The mode recorded at mine time,
-    passed explicitly, compiles the judged rollup."""
-    obs = _opt_in_unchanged_deal("deal-a") + _opt_in_unchanged_deal("deal-b")
-    assert {o.basis for o in obs} == {"deterministic"}
-    assert all(o.standard is True for o in obs)
-    assert deviations_are_deterministic(obs)  # the inference cannot tell
-
-    template = [_template_obs("non_solicit", text=_STD_NON_SOLICIT)]
-
-    def _summary(mode: bool | None) -> tuple[ClausePosition, dict]:
-        positions, _, _ = compile_clause_positions(obs, template, deterministic_deviations=mode)
-        pos = next(p for p in positions if p.taxonomy_id == "non_solicit")
-        return pos, pos.to_dict()["summary"]
-
-    judged, summary = _summary(False)
-    assert not judged.rollup.deterministic_deviations
-    assert summary["historical_stance"] == "consistently_held"
-    assert summary["stance_detail"] == {"held": 2, "of": 2, "basis": "our_paper"}
-
-    for mode in (True, None):  # recorded consumer mode, or the legacy inference
-        consumer, summary = _summary(mode)
-        assert consumer.rollup.deterministic_deviations
-        assert summary["historical_stance"] == "no_signal"
-        assert summary["stance_detail"] == {"held": 2, "of": 2, "basis": "all"}
+def test_consumer_path_corpus_compiles_one_clause_type_with_the_template_standard() -> None:
+    positions = _compile(_consumer_corpus(), [_template_obs("non_solicit", text=_STD_NON_SOLICIT)])
+    assert [p.taxonomy_id for p in positions] == ["non_solicit"]
+    assert positions[0].our_standard is not None
+    assert positions[0].our_standard.text == _STD_NON_SOLICIT
 
 
 def test_consumer_path_multi_node_clause_is_standard_as_a_whole() -> None:

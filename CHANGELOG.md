@@ -10,6 +10,33 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **One format: OPF 0.1–0.3, digest_version 2 and the 0.3 compiler surfaces
+  are retired (issue #238).** There are no installed consumers, so nothing
+  needs backward compatibility: the engine emits and validates exactly OPF
+  0.4 / digest_version 3. `playbook project` loses `--opf-version`; the
+  validator rejects any other `opf_version` (0.1, 0.2 and 0.3 included)
+  with one "unsupported opf_version" error, and `playbook digest`,
+  `playbook view bundle` and `render-prompt` refuse such a document with
+  the same error (exit 1) instead of rendering it. Deleted: the 0.3 assembler
+  branch, the digest 2 builder, `clause_library_compiler.py`, every 0.3-only
+  surface of `clause_position_compiler.py` (observed positions, the rollup,
+  `historical_stance` / `stance_detail`, `acceptable_if`, fallbacks,
+  rejected, `negotiation_trail`, the coherence judge), the 0.3 accessors in
+  `opf_accessors.py` and the 0.3 branches of every renderer that read them,
+  the 0.1–0.3 schema files, the 0.3 / digest 2 conformance set, the 0.1 and
+  0.2 example playbooks and validator fixtures, and the config key
+  `provenance.min_evidence_n` (it only capped the 0.3 stance; a config that
+  sets it is now rejected as an unknown key). The review HTML, the review
+  prompt and the after-action report drop their stance, confidence and
+  thin-evidence displays, which only a 0.3 document could fill. `playbook
+  view apply` loses `--corpus-dir` and no longer writes `hints.yaml`
+  (review items are clauses, which cite no single deal): `provenance`,
+  `signed_version` and `order` corrections are reported as not applied and
+  are set by hand in the deal's `hints.yaml`. OPF 0.4
+  output is unchanged: the NDA reference playbook's `evidence`, `digest`
+  and `floor` regenerate byte-identically. git history and contract-opf/opf
+  keep the retired formats.
+
 - **`playbook scorecard`: a counts-only scorecard of a derivation out-dir
   (issue #237).** Writes `<out-dir>/scorecard.json` and prints it as a
   table: documents, versions, signed and in-scope deals; template standards
@@ -403,6 +430,9 @@ adding warnings after the fact.
   a first run: silent, then stamped.
 
 ### Normative rule changes
+
+A conformant validator MUST reject every `opf_version` other than "0.4"
+(issue #238): 0.1, 0.2 and 0.3 documents are no longer accepted.
 
 For `opf_version` "0.4" a conformant validator MUST reject: a precedent id
 that is duplicated or differs from its recomputation; more than one

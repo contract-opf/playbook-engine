@@ -104,13 +104,13 @@ def _signed_observation(observation_id: str = "doc-a/2/1.1") -> dict[str, Any]:
     return obs
 
 
-def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
+def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": {"clauses": [], "precedent": []},
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},
@@ -1268,7 +1268,7 @@ def test_write_floor_candidates_reads_observations_and_posture(tmp_path: Path) -
         json.dumps(_reversal_observation()) + "\n",
         encoding="utf-8",
     )
-    doc = _minimal_v02_doc(
+    doc = _minimal_doc(
         posture={
             "generation": {
                 "interview": [
@@ -1347,7 +1347,7 @@ def test_write_floor_candidates_preserves_decision_across_repropose(tmp_path: Pa
     decision back to undecided."""
     obs_path = tmp_path / "observations.jsonl"
     obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
 
     write_floor_candidates(tmp_path)
@@ -1376,7 +1376,7 @@ def test_write_floor_candidates_drops_decision_when_statement_no_longer_recurs(
     same as the candidate itself; this is not a resurrection bug."""
     obs_path = tmp_path / "observations.jsonl"
     obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
 
     write_floor_candidates(tmp_path)
@@ -1405,7 +1405,7 @@ def _invoke(*args: str) -> tuple[int, str]:
 def test_no_auto_promotion(tmp_path: Path) -> None:
     obs_path = tmp_path / "observations.jsonl"
     obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_v02_doc(floor={"invariants": []})
+    doc = _minimal_doc(floor={"invariants": []})
     opf_path = tmp_path / "playbook.opf.json"
     original_bytes = json.dumps(doc).encode("utf-8")
     opf_path.write_bytes(original_bytes)
@@ -1447,7 +1447,7 @@ def test_cli_floor_propose_rejected_candidate_stays_rejected_on_second_run(
     proposal by a second `playbook floor propose` run."""
     obs_path = tmp_path / "observations.jsonl"
     obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
 
     # --min-deals 1: this fixture is a single-document reversal, unrelated
@@ -1476,7 +1476,7 @@ def test_cli_floor_propose_prints_q4_q5_contradiction_warning(tmp_path: Path) ->
     on (write_floor_candidates persisting the additive "warnings" key into
     floor.candidates.json, for propose_floor_candidates to have produced it
     from) round-trips through the real file, not just the pure function."""
-    doc = _minimal_v02_doc(
+    doc = _minimal_doc(
         posture={
             "generation": {
                 "interview": [
@@ -1644,7 +1644,7 @@ def test_promote_floor_candidate_refuses_to_overwrite_colliding_hand_authored_id
 
 def test_promote_floor_candidate_result_is_schema_shaped() -> None:
     """Only id/statement/rationale — additionalProperties: false in
-    spec/playbook.schema-0.3.json's floor.invariants[] item."""
+    spec/playbook.schema-0.4.json's floor.invariants[] item."""
     candidate = _floor_candidate()
     result = promote_floor_candidate(candidate, existing_invariants=[])
     assert set(result[0]) == {"id", "statement", "rationale"}
@@ -1825,7 +1825,7 @@ def test_promote_floor_candidate_taxonomy_none_unaffected_by_taxonomy_guard() ->
 
 def test_promote_floor_candidate_stamps_x_taxonomy_id_on_new_entry() -> None:
     """Promotion stamps taxonomy_id into the invariant entry it creates
-    (as x_taxonomy_id -- spec/playbook.schema-0.3.json's frozen
+    (as x_taxonomy_id -- spec/playbook.schema-0.4.json's frozen
     additionalProperties: false forbids a bare taxonomy_id key). This is
     what lets promote_floor_candidate's own taxonomy guard, and the
     viewer's classify_floor_candidates, suppress a later CANDIDATE for the
@@ -2286,7 +2286,7 @@ def test_sign_floor_invariant_custom_rationale() -> None:
 
 
 def test_sign_floor_invariant_taxonomy_id_stored_as_x_prefixed() -> None:
-    """Not a bare `taxonomy_id` — spec/playbook.schema-0.3.json's frozen
+    """Not a bare `taxonomy_id` — spec/playbook.schema-0.4.json's frozen
     floor.invariants[] item is `additionalProperties: false`; only the
     `^x_` escape hatch is schema-safe without a spec version bump."""
     result = sign_floor_invariant(
@@ -2505,7 +2505,7 @@ def test_sign_invariant_id_all_punctuation_statement_falls_back() -> None:
 
 
 def _write_signable_doc(tmp_path: Path, **doc_overrides: Any) -> Path:
-    doc = _minimal_v02_doc(floor={"invariants": []}, **doc_overrides)
+    doc = _minimal_doc(floor={"invariants": []}, **doc_overrides)
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
     return opf_path
@@ -2593,7 +2593,7 @@ def test_cli_floor_sign_refreshes_content_hash(tmp_path: Path) -> None:
     content_hash of the expected final document — the same proof pattern
     test_posture.py uses for apply_posture_interview."""
     doc_overrides: dict[str, Any] = {"floor": {"invariants": []}}
-    doc = _minimal_v02_doc(**doc_overrides)
+    doc = _minimal_doc(**doc_overrides)
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 

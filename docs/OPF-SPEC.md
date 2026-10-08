@@ -1,7 +1,7 @@
 # Open Playbook Format (OPF) — Specification
 
 **Version:** 1.0
-**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler now emits `opf_version` "0.4" (the verdict-free per-deal precedent record, §3.5.4, with a `digest_version` "3" digest, §3.12.1), shipped as a NEW schema file; 0.1/0.2/0.3 documents remain valid and their schemas are frozen. 0.4 removes and replaces 0.3's evidence fields, so whether it also calls for an OPF 2.0 stamp under the stability policy is an open question for the owner (§11, 0.3 → 0.4 migration note), not decided by this change.
+**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler emits and validates exactly one document shape, `opf_version` "0.4" (the verdict-free per-deal precedent record, §3.5.4, with a `digest_version` "3" digest, §3.12.1). The 0.1–0.3 shapes and digest 2 were retired (owner decision 2026-10-06: no installed consumer needs them); their schemas and text stay in git history and in contract-opf/opf.
 **Serialization:** JSON (canonical). YAML permitted for authoring; tools MUST accept both and treat them as equivalent.
 **Issue references:** #NNN citations throughout are design provenance from the project's original development tracker.
 **License:** This file is specification text and is additionally licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0), per the repository `LICENSE` — alongside the Apache-2.0 license covering this repository.
@@ -102,7 +102,7 @@ A playbook is a single JSON object:
 
 ```jsonc
 {
-  "opf_version": "0.2",
+  "opf_version": "0.4",
   "agreement_type": { "id": "...", "name": "...", "description": "...", "aliases": ["..."] },
   "baseline": { ... },          // §3.2
   "taxonomy": { ... },          // §3.3
@@ -110,20 +110,21 @@ A playbook is a single JSON object:
   "perspective": { ... },       // §3.1 — whose side this playbook reviews from (NEW)
   "de_minimis": [ "..." ],      // §3.1 — change categories accepted even if novel (NEW)
   "evidence": {                 // §3.5 — the compiled, cited knowledge
-    "clauses": [ ClausePosition ],        // template-anchored
-    "clause_library": [ ClauseConcept ]   // concept-indexed (counterparty paper)
+    "clauses": [ Clause ],                // one per clause type, with counts (§3.5.4)
+    "precedent": [ Precedent ]            // one verdict-free record per (deal, clause type)
   },
   "posture": { ... },           // §3.6 — generated negotiation intent (NEW)
   "floor": { ... },             // §3.7 — hard lines: judged NL invariants (NEW)
   "corpus": { ... },            // §3.8 — provenance/audit + content addresses
   "compiler": { ... },          // §3.9 — generation metadata
   "identity": { ... },          // §3.10 — content hash + section digests (NEW)
-  "curation": { ... }           // §3.11 — embedded attorney-pinned positions (NEW, OPTIONAL)
+  "curation": { ... },          // §3.11 — embedded attorney-pinned positions (NEW, OPTIONAL)
+  "digest": { ... }             // §3.12 — compact model-facing projection (OPTIONAL)
 }
 ```
 
 ### 3.1 Top-level fields
-- `opf_version` (string, required) — `"0.2"`.
+- `opf_version` (string, required) — `"0.4"`, the one supported version.
 - `agreement_type` (object, required) — `id` (slug), `name`, `description`, `aliases[]`.
 - `perspective` (object, OPTIONAL) — whose side this playbook is reviewed *as*: `party` (our legal entity/party name) and `counterparty_type` (what the other side typically is, e.g. `"Educational Institution"`). An open-standard OPF instance must say who "us" is — negotiation knowledge is meaningless without it. Owned by OPF (see `OPF-BUNDLE-BOUNDARY.md`).
 - `de_minimis` (array of strings, OPTIONAL) — categories of change accepted even when technically novel (e.g. `"typo fixes"`, `"renumbering with no substantive change"`). This is negotiation knowledge, not a runtime policy, so it lives in OPF rather than the consumer's bundle.
@@ -196,130 +197,25 @@ An OPF MAY compose external modules so it does not re-encode clause knowledge th
 
 ### 3.5 `evidence` — the compiled, cited knowledge
 
-`evidence` holds the two structures v0.1 carried at top level (`clauses`, `clause_library`), now grouped and reframed as **descriptive evidence**.
+`evidence` is the compiled, cited record of what the corpus shows —
+descriptive, never an instruction. Its shape is §3.5.4's verdict-free
+per-deal precedent record.
 
-#### 3.5.1 `ClausePosition` (template-anchored)
-```jsonc
-{
-  "id": "clause.indemnification",
-  "taxonomy_id": "indemnification",
-  "title": "Indemnification",
-  "our_standard": {
-    "text": "…canonical language…",
-    "source_ref": { "document_id": "template", "clause_path": "8", "char_span": [s, e] }
-  },
-  "observed_positions": [
-    {
-      "text_summary": "Mutual indemnification, negligence-based.",
-      "example_ref": { "document_id": "…", "version": 4, "clause_path": "8.1", "char_span": [s, e] },
-      "deviation": "substantive",
-      "risk_delta": { "direction": "worse", "magnitude": "minor" },
-      "provenance": "our_paper",
-      "outcome": "signed",
-      "precedent_count": 3
-    }
-  ],
-  "summary": {
-    "historical_stance": "usually_held",     // §2.2 — DESCRIPTIVE, not an instruction
-    "acceptable_if": [                       // cited tolerance conditions — {if,to,rationale} triples (#141)
-      { "if": "mutual, negligence-limited indemnification",
-        "to": "…the full accepted alternative clause language…",
-        "rationale": "Signed with neutral risk_delta; 3x precedent in the corpus.",
-        "observation_ref": { "document_id": "…", "version": 3, "clause_path": "8.1", "char_span": [s, e] } }
-    ],
-    "fallbacks": [ /* worse-risk signed observations, ordered least-to-most costly */ ],
-    "rejected": [ /* observations with outcome = proposed_then_reversed */ ],
-    "confidence": { "score": 0.0, "basis": "precedent_count + provenance_mix",
-                    "n_our_paper": 3, "n_counterparty_paper": 1 }
-  }
-}
-```
-- `summary` replaces v0.1's `rollup`. The only substantive change is `rollup.position` → `summary.historical_stance` and the renaming of `rollup` to `summary` to signal "this describes the corpus" rather than "this is your position."
-- `acceptable_if`, `fallbacks`, `rejected` are retained verbatim from v0.1's semantics, as **cited evidence summaries** the model reasons over.
-- All `*_ref` objects are **citations** (§4) and are REQUIRED wherever text is asserted.
-
-#### 3.5.2 `ClauseConcept` (concept library, for counterparty paper)
-Unchanged from v0.1. Used when reviewing a document drafted on the counterparty's template, matched by concept and risk rather than diffed against our template.
-```jsonc
-{
-  "concept_id": "concept.governing_law",
-  "taxonomy_id": "governing_law",
-  "description": "Which state's law governs and where disputes are heard.",
-  "risk_profile": "Venue/forum exposure; cost of litigating away from home.",
-  "accepted_forms": [
-    { "text_summary": "Counterparty's home state law, no forum clause.",
-      "example_ref": { "document_id": "…", "version": 5, "clause_path": "…", "char_span": [s, e] },
-      "provenance": "counterparty_paper",
-      "risk_delta_vs_our_standard": { "direction": "worse", "magnitude": "minor" } }
-  ],
-  "notes": "Tolerated in N of M counterparty-paper deals."
-}
-```
-
-#### 3.5.3 Negotiation dynamics (NEW in 0.2)
-
-Evidence carries the *dynamics* of how positions moved, not just what
-signed. All dynamics fields are OPTIONAL and omitted when underivable —
-they are never fabricated (same discipline as `identity`).
-
-Per **observation**:
-
-```jsonc
-{
-  "proposed_by": "counterparty",          // "us" | "counterparty" | "unknown" — who introduced the change
-  "observed_at": "2025-11-04",            // ISO-8601 date, for recency; never fabricated
-  "counterparty_ref": {                    // per-deal counterparty segment
-    "alias": "counterparty-007",           // entity-registry pseudonym (born-safe: raw names never appear)
-    "counterparty_type": "public university"
-  }
-}
-```
-
-- `proposed_by` derives from tracked-changes authorship mapped through both
-  the party aliases and the configured our-side author list, else from
-  which side's draft first carries the span — never guessed from
-  filenames. An author matching neither list is `"unknown"` — never
-  guessed as `"counterparty"`, since absence of a match is not evidence
-  in either direction.
-- `observed_at` precedence: e-sign certificate date on the signed copy >
-  embedded document metadata > trustworthy filename date.
-- `counterparty_ref` lets a consumer weight "we conceded this to a
-  hospital system, not a community college."
-
-Per **ClausePosition**:
-
-```jsonc
-"negotiation_trail": [                     // round-by-round ask→landing, one entry per round the clause changed
-  { "document_id": "university-of-example",
-    "round": 2,                            // version-transition ordinal (v2→v3 = round 2)
-    "moved_by": "counterparty",
-    "change_summary": "Cap raised from 1x fees to 2x fees.",
-    "risk_delta": { "direction": "worse", "magnitude": "minor" },
-    "ref": { "document_id": "university-of-example", "version": 3, "clause_path": "8.1", "char_span": [s, e] } }
-],
-"summary": {
-  "stance_detail": { "held": 7, "of": 9, "basis": "our_paper" }   // held-rate behind historical_stance (resolves Appendix A.3)
-}
-```
-
-- `negotiation_trail` surfaces the compiler's per-round diffs instead of
-  discarding them: each entry cites the post-move state (a §4 citation
-  that MUST resolve). Together with `outcome: "proposed_then_reversed"`,
-  the trail lets a consumer distinguish deal-breakers from trading chips
-  **without a prescriptive label** — the dynamics stay descriptive, per
-  §2.2.
-- `stance_detail` is the count pair behind the `historical_stance` enum
-  (`held` of `of` opportunities, on the stated `basis`); a validator
-  rejects `held > of` or inconsistency with the enum bucket.
+> **History (retired 2026-10-07, issue #238).** OPF 0.1–0.3 carried a
+> different evidence shape: per clause `observed_positions` and a `summary`
+> (`historical_stance`, `stance_detail`, `acceptable_if`, `fallbacks`,
+> `rejected`, `confidence`; v0.1's `rollup`), a `clause_library` of concepts
+> for counterparty paper, and a `negotiation_trail` (formerly §3.5.1–§3.5.3).
+> Those categories needed judged verdicts the consumer path no longer
+> carries, and the engine no longer reads or writes them. Their text and
+> schemas are in this repository's git history and in contract-opf/opf.
 
 #### 3.5.4 OPF 0.4 — the verdict-free per-deal precedent record (issue #223)
 
-From `opf_version` "0.4" (`spec/playbook.schema-0.4.json`) `evidence` is no
-longer §3.5.1–§3.5.3's shape. Judged deviation/risk verdicts left the
-consumer path (the consuming model does the judging) and the deal is the
-unit of precedent, so the 0.3 categories (`observed_positions`,
-`clause_library`, `summary.{historical_stance, acceptable_if, fallbacks,
-rejected, confidence}`, `negotiation_trail`) are replaced by facts:
+In `opf_version` "0.4" (`spec/playbook.schema-0.4.json`) judged
+deviation/risk verdicts are off the consumer path (the consuming model does
+the judging) and the deal is the unit of precedent, so `evidence` carries
+facts only:
 
 ```jsonc
 "evidence": {
@@ -641,38 +537,32 @@ consumer can treat it as authoritative over the recomputed
   digested separately as `identity.section_digests.curation` so a consumer
   can still track its lineage independently.
 
-### 3.12 `digest` (NEW in 0.3, OPTIONAL) — the compact model-facing projection
+### 3.12 `digest` (OPTIONAL) — the compact model-facing projection
 
-A full OPF document carries every observation's `full_text` and can run to
-millions of characters on a real corpus — far beyond a model context. The
-`digest` section is the compact projection designed to BE the system-prompt
-payload of a consuming review application. Per clause: `taxonomy_id`, `title`,
-`historical_stance` + `stance_detail`, `our_standard`, the `acceptable_if`
-entries verbatim (`preferred_variations`), and three deduplicated observation
-lists — `concessions` (from `fallbacks`), `unacceptable` (from `rejected`),
-and `exemplar_forms` (from `observed_positions`) — each grouped by normalized
-text with a deal count `n` (the number of distinct deals, i.e. distinct
-`example_ref.document_id` values, in the group), a frequency
-`band` (`often` n≥10 / `sometimes` 2–9 / `rare` 1), capped at the top 5
-groups by `n` plus every material-risk group, and carrying an `example_ref`
-citation resolving into the full playbook for on-demand drill-down.
+A full OPF document carries every precedent's text and can run to millions
+of characters on a real corpus — far beyond a model context. The `digest`
+section is the compact projection designed to BE the system-prompt payload
+of a consuming review application.
 
 Normative rules:
 
 - The digest MUST NOT contain `full_text` anywhere — drill-down goes through
-  `example_ref` against the full document.
+  its citations against the full document.
 - When present, `digest.clauses[].id` MUST exactly match
   `evidence.clauses[].id` (same set).
 - `digest_version` (string, required) versions the digest shape itself,
   independent of `opf_version`.
-- The digest is a pure function of `evidence` and participates in
+- The digest is a pure function of the document and participates in
   `identity.content_hash` like any other content section.
 - OPTIONAL in the schema; the reference compiler always emits it. Producers
   targeting ~40K tokens (chars/4) satisfy the intent.
 
-The rules above describe `digest_version` "2", the digest of an OPF 0.3
-document (frozen with 0.3). An OPF 0.4 document carries `digest_version`
-"3" (§3.12.1).
+An OPF 0.4 document carries `digest_version` "3" (§3.12.1).
+
+> **History (retired 2026-10-07, issue #238).** `digest_version` "2" was the
+> digest of an OPF 0.3 document (stances, preferred variations, frequency-
+> banded exemplar forms). It was retired with 0.3; its definition and
+> conformance vectors are in git history.
 
 #### 3.12.1 `digest_version` "3" (OPF 0.4, issue #223)
 
@@ -736,12 +626,10 @@ block and verifies `identity.content_hash` over the canonical serialization.
 
 ### 3.13 Identifier uniqueness (normative, effective 2026-07-29)
 
-Every sibling-scoped id below MUST be **unique among its siblings** — this
-applies to every OPF version (0.1's top-level `clauses`/`clause_library` and
-0.2/0.3's `evidence.clauses`/`evidence.clause_library` alike), not just 0.3:
+Every sibling-scoped id below MUST be **unique among its siblings**:
 
-- `evidence.clauses[].id` (v0.1: `clauses[].id`) — unique across the clause list.
-- `evidence.clause_library[].concept_id` (v0.1: `clause_library[].concept_id`) — unique across the clause-concept library.
+- `evidence.clauses[].id` — unique across the clause list.
+- `evidence.precedent[].id` — unique across the precedent record (§3.5.4).
 - `floor.invariants[].id` — unique across the Floor's invariant list.
 - `corpus.documents[].document_id` — unique across the corpus.
 
@@ -836,7 +724,7 @@ Confidence is advisory, not statistical authority. It is a function of precedent
 
 ## 10. Conformance
 
-- A **conformant playbook** validates against its version's schema — `spec/playbook.schema-0.2.json` for 0.2, `spec/playbook.schema-0.3.json` for 0.3, `spec/playbook.schema-0.4.json` for 0.4 — and obeys the normative rules in §2.2, §2.3, §3.4, §3.5.4 (0.4), §3.6, §3.7, §3.8, §3.12, and §5. (Validators dispatch on the document's `opf_version`: `"0.1"` documents validate against `spec/playbook.schema.json`, `"0.2"` against `spec/playbook.schema-0.2.json`, `"0.3"` against `spec/playbook.schema-0.3.json`, `"0.4"` against `spec/playbook.schema-0.4.json` — one validator, four schemas, as `playbook_engine/validator.py` implements. The §2.2 evidence-depth and our-paper rules apply to 0.2/0.3 only: 0.4 carries no stance, and paper side gates nothing.)
+- A **conformant playbook** carries `opf_version` "0.4", validates against `spec/playbook.schema-0.4.json`, and obeys the normative rules in §2.3, §3.4, §3.5.4, §3.6, §3.7, §3.8, §3.12, §3.13 and §5. A conformant validator rejects any other `opf_version` — including the retired "0.1", "0.2" and "0.3" — as unsupported (`playbook_engine/validator.py`). The §2.2 evidence-depth rule capped a stance that 0.4 no longer carries, and paper side gates nothing.
 - A **conformant producer** emits conformant playbooks, records out-of-scope documents, drafts the Posture from a recorded interview, and only *proposes* (never auto-promotes) Floor candidates.
 - A **conformant consumer** honors the determinism boundary (§5), honors provenance (§2.3), surfaces confidence (§9) and citations (§4), loads only pinned+verified composed modules (§3.4), and records the lineage fields (§8).
 
@@ -859,38 +747,34 @@ closed shape (`identity`, citations, `agreement_type`, `taxonomy` entries,
 
 ### 10.2 Conformance vectors — canonicalization and digest (normative)
 
-`spec/conformance/` is the **normative definition** of the two mechanical
-algorithms everything in §3.10 (`identity`) and §3.12 (`digest`) rests on:
-canonical serialization + content hashing (reference implementation
-`playbook_engine/canonicalize.py`) and `digest` section construction
-(reference implementation `playbook_engine/digest.py`).
-`spec/conformance/manifest.json` stamps the exact `opf_version` /
+`spec/conformance/0.4/` is the **normative definition** of the two
+mechanical algorithms everything in §3.10 (`identity`) and §3.12 (`digest`)
+rests on: canonical serialization + content hashing (reference
+implementation `playbook_engine/canonicalize.py`) and `digest` section
+construction (reference implementation `playbook_engine/digest.py`).
+`spec/conformance/0.4/manifest.json` stamps the exact `opf_version` /
 `digest_version` / reference `engine_version` the vectors bind to, per the
 §11 immutability rule below — a format-version bump gets a new,
 separately-stamped vector set, never an in-place edit of an existing one.
 
-Each vector under `spec/conformance/vectors/` is a self-contained,
+Each vector under `spec/conformance/0.4/vectors/` is a self-contained,
 plain-JSON `{input, expected}` pair (`canonical`, `content_hash`,
 `section_digests`, `digest`) — **an independent, non-Python implementation
 that reproduces every vector's `expected.*` from its `input` is conformant**
 with canonicalization and digest construction for that format version, with
 no dependency on this repo. `tests/test_conformance_vectors.py` is this
 engine's own check against the same frozen vectors; see
-`spec/conformance/README.md` for what edge case each vector isolates (key
-ordering, nested array order, Unicode literal emission and normalization,
-float/int formatting, empty-vs-absent fields, excluded run/curation
-metadata, and digest list dedupe/rank/top-N-plus-material capping with its
-"often"/"sometimes"/"rare" frequency-band boundaries).
-
-The OPF 0.4 / `digest_version` "3" vectors are a separate, separately
-stamped set under `spec/conformance/0.4/` (its own `manifest.json` and
-`vectors/`), added alongside the frozen 0.3 set — which is unchanged. They
-pin canonicalization of 0.4-shaped documents and digest 3 construction:
-variant grouping by §3.5.4's grouping key (including its counterparty-alias
-and `perspective.party` neutralization), the `n_deals`/`last_signed`
-ordering, the cap with uncapped totals, refused-ask grouping across deals,
-the sentence-boundary summary, and `perspective` carried as `null` when the
-document has none.
+`spec/conformance/0.4/README.md` for what each vector isolates: canonical
+serialization of 0.4-shaped documents and digest 3 construction — variant
+grouping by §3.5.4's grouping key (including its counterparty-alias and
+`perspective.party` neutralization), the `n_deals`/`last_signed` ordering,
+the cap with uncapped totals, refused-ask grouping across deals, the
+sentence-boundary summary, and `perspective` carried as `null` when the
+document has none. The canonical-serialization algorithm itself is stated in
+`spec/conformance/README.md`. (The OPF 0.3 / digest 2 vector set, which also
+pinned key ordering, Unicode emission and float/int formatting edge cases,
+was retired with that format, issue #238; those edge cases are unit-tested
+in `tests/test_canonicalize.py`.)
 
 This exists because a hand-maintained downstream port of `canonicalize.py`
 or `digest.py` (Contract Toaster carries one, pinned to an engine commit by
@@ -933,67 +817,40 @@ contents are selected — get a NEW `opf_version`, never an in-place edit of a
 released schema; "old data still validates" is not sufficient. The `digest`
 section's `digest_version` follows the same rule independently. Every
 spec-affecting change gets an entry in `spec/CHANGELOG.md`, whose schema-hash
-pins are CI-enforced (`tests/test_spec_consistency.py`). OPF 0.3 is frozen as
-of `digest_version` 2.
+pins are CI-enforced (`tests/test_spec_consistency.py`).
+
+**Retirement (2026-10-07, issue #238).** With no installed consumer, the
+owner retired OPF 0.1–0.3 and `digest_version` 2: the reference engine
+emits and validates only 0.4, and a conformant validator rejects any other
+`opf_version` as unsupported. Retirement removes a format from the
+reference implementation; it never edits one — the retired schemas and
+vectors are unchanged in git history and in contract-opf/opf.
 
 **How the 1.x series relates to `opf_version` (normative):** the engine's
 1.x series and the document shape's `opf_version` are versioned
 independently, and the stability policy and the immutability rule above
 compose as follows — an additive 1.x change (a new OPTIONAL field or `x_*`
 extension, permitted by the stability policy) ships as a NEW `opf_version`
-(e.g. 0.3 → 0.4), per the immutability rule; it is never an in-place edit
-of a frozen shape. A consumer pinned to `opf_version` 0.3 is unaffected by
-such a change and keeps validating against the frozen 0.3 schema; a
-consumer that wants the new field upgrades its pin to the new
-`opf_version`. "OPF 0.3 is frozen" and "1.x is additive-only" are therefore
-both true without conflict: 0.3 itself never changes in place, and the
-additive changes the 1.x series permits ship as later `opf_version`s.
+(e.g. 0.4 → 0.5), per the immutability rule; it is never an in-place edit
+of a frozen shape. A consumer pinned to the earlier `opf_version` is
+unaffected by such a change; a consumer that wants the new field upgrades
+its pin to the new `opf_version`. "A published version is frozen" and "1.x
+is additive-only" are therefore both true without conflict.
 
-**0.1 → 0.2 migration:**
-- `clauses` and `clause_library` move under a new `evidence` object.
-- `clauses[].rollup` → `clauses[].summary`; `rollup.position` (enum) → `summary.historical_stance` (descriptive enum, §2.2). `acceptable_if` / `fallbacks` / `rejected` / `confidence` carry over unchanged.
-- New top-level: `composes` (§3.4), `perspective` (§3.1), `de_minimis` (§3.1), `posture` (§3.6), `floor` (§3.7), `identity` (§3.10), `curation` (§3.11).
-- The §2.2 provenance rule now references `historical_stance` instead of `rollup.position`.
-
-**0.2 → 0.3 migration:**
-- Purely additive: a new OPTIONAL top-level `digest` section (§3.12) — the
-  compact model-facing projection of `evidence`. A 0.2 document is a valid
-  0.3 document once its `opf_version` is bumped (and its `content_hash`
-  recomputed if a digest is added). Validators MUST accept both 0.2 and 0.3;
-  schema: `playbook.schema-0.3.json`.
-
-**0.3 → 0.4 migration (issue #223):** 0.4 removes and replaces 0.3's
-evidence fields — not an additive change. It ships as a NEW `opf_version`
-and schema file under the immutability rule, by owner decision (2026-09-13,
-"a format version bump is acceptable"); a consumer pinned to 0.3 is
-unaffected, and the reference validator keeps accepting 0.3. Whether that
-removal also calls for an OPF 2.0 stamp under the stability policy above is
-recorded here as an open question for the owner, not decided by this
-change.
-- `evidence` becomes `{clauses, precedent}` (§3.5.4): `observed_positions`,
-  `clause_library`, `summary` and `negotiation_trail` are gone; each clause
-  keeps `id`/`taxonomy_id`/`title`/`our_standard` and gains the `n_*` counts;
-  `evidence.precedent` holds one verdict-free record per (deal, clause).
-- The digest moves to `digest_version` "3" (§3.12.1) and MUST equal the
-  reference construction over the document.
-- `posture`, `floor`, `perspective`, `de_minimis`, `corpus`, `compiler`,
-  `identity` and `curation` are unchanged (a curation pin's
-  `baseline_stance` reads `"unknown"` against a 0.4 clause, which carries
-  no stance). Judged verdicts from an opt-in judged run move to the root
-  `x_judgments` extension.
-- A 0.3 document is not re-labelled as 0.4: re-project the observation
-  store (`playbook project`). The reference compiler emits 0.4 by default;
-  `playbook project --opf-version 0.3` keeps the 0.3 shape for one release.
-  Validators MUST keep accepting 0.1/0.2/0.3; schema:
-  `playbook.schema-0.4.json`.
+**Migrations.** The 0.1 → 0.2, 0.2 → 0.3 and 0.3 → 0.4 migration notes
+described upgrade paths between formats the engine no longer reads (issue
+#238); they are in git history. A document in a retired format is not
+converted: re-project the observation store (`playbook project`), which
+emits 0.4.
 
 ## Appendix A — Open questions (for review, not yet decided)
 
 1. **Composition mechanics (§3.4).** The governance contract is fixed; the *module interface* is not. Needs one investigation pass against a real consuming application's module structure before composition alters runtime behavior. Until then, `composes` is recorded for lineage but inert.
 2. **Floor minimality (§3.7.1).** The admission test is the guard against the Floor regrowing into a rigid playbook. Worth pressure-testing on a mature production Floor: how many of its accumulated hard rejections survive *both* (a) categorical and (b) statable as a single judge-checkable invariant? The ones that fail (a) should become Posture; the ones that fail (b) should become Evidence guidance.
-3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved:** `summary.stance_detail` carries the held-rate alongside the enum — see §3.5.3.
+3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 carries no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
+- **Retirement (issue #238)** — The reference engine reads and writes only 0.4; OPF 0.1–0.3 and `digest_version` "2" are retired (validators reject them as unsupported). Not a new shape: 0.4 is unchanged. §3.5.1–§3.5.3 and §3.12's digest 2 rules are replaced by history notes.
 - **0.4** — Verdict-free per-deal precedent record as the evidence shape (§3.5.4): `evidence.{clauses, precedent}` with distinct-deal counts, deterministic `standard`, three-valued paper metadata that gates nothing, and recomputable precedent ids; `digest_version` "3" (§3.12.1) with `perspective`, grouped signed variants and refused asks, and a digest-equals-recomputation rule; judged verdicts only under `x_judgments`. New schema file `playbook.schema-0.4.json`; 0.3 frozen.
 - **1.0** — Stability commitment, not a shape change: the document shape (`opf_version` "0.3") is unchanged. New §11 stability policy (1.x changes are additive-only — new OPTIONAL fields and new `x_*` extensions permitted; no new REQUIRED field, no removing/retyping a field, no changing a normative MUST without a 2.0 release) and new §11 normative-rule-change policy (any new or changed MUST, whether or not it touches the schema, gets a `CHANGELOG.md` entry under a `### Normative rule changes` heading in the release it ships under).
 - **0.3** — `digest` section (§3.12): compact model-facing projection of `evidence` (stances, preferred variations verbatim, text_summary-only concession/unacceptable summaries, frequency-banded deduplicated exemplar forms with `example_ref` drill-down); single-file bundle artifact `playbook.opf.html` embedding the canonical JSON + digest; additive over 0.2.

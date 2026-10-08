@@ -90,44 +90,33 @@ def _make_obs(
 
 
 def _make_minimal_playbook(generated_at: str = "2026-01-15T09:00:00Z") -> dict:
-    """Build a minimal valid-enough playbook dict for testing."""
+    """Build a minimal OPF 0.4-shaped playbook dict for testing (the AAR reads
+    it tolerantly; it is not schema-complete)."""
+
+    def _clause(tid: str, title: str) -> dict:
+        return {
+            "id": f"clause.{tid}",
+            "taxonomy_id": tid,
+            "title": title,
+            "our_standard": {
+                "text": f"{title} standard language for testing.",
+                "source_ref": {"document_id": "template", "version": "template"},
+            },
+            "n_deals": 1,
+            "n_signed_standard": 1,
+            "n_variants": 0,
+            "n_refused": 0,
+        }
+
     return {
-        "opf_version": "0.1",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "test", "entries": []},
-        "clauses": [
-            {
-                "id": "clause.term",
-                "taxonomy_id": "TERM",
-                "title": "Term",
-                "observed_positions": [],
-                "rollup": {
-                    "position": "standard",
-                    "confidence": {
-                        "score": 0.9,
-                        "basis": "test",
-                        "n_our_paper": 5,
-                        "n_counterparty_paper": 0,
-                    },
-                },
-            },
-            {
-                "id": "clause.governing_law",
-                "taxonomy_id": "GOVERNING_LAW",
-                "title": "Governing Law",
-                "observed_positions": [],
-                "rollup": {
-                    "position": "negotiable",
-                    "confidence": {
-                        "score": 0.4,
-                        "basis": "test",
-                        "n_our_paper": 2,
-                        "n_counterparty_paper": 1,
-                    },
-                },
-            },
-        ],
+        "evidence": {
+            "clauses": [_clause("term", "Term"), _clause("governing_law", "Governing Law")],
+            "precedent": [],
+        },
         "corpus": {
             "documents": [
                 {
@@ -429,7 +418,7 @@ def test_honesty_section_lists_blank_fields(tmp_path: Path) -> None:
     _write_observations(out_dir, [_make_obs("deal-alice", "v1", "Clause.")])
     # Playbook with a clause that has no our_standard
     playbook = _make_minimal_playbook()
-    playbook["clauses"][0]["our_standard"] = None
+    playbook["evidence"]["clauses"][0]["our_standard"] = None
     _write_playbook(out_dir, playbook)
     report = build_after_action_report(out_dir)
     assert "our_standard" in report
@@ -448,7 +437,7 @@ def test_honesty_flags_zero_clause_playbook(tmp_path: Path) -> None:
     # them → zero clauses; the report must name that likely cause.
     _write_observations(out_dir, [_make_obs("deal-alice", "v1", "Clause.", outcome="unsigned")])
     playbook = _make_minimal_playbook()
-    playbook["clauses"] = []
+    playbook["evidence"]["clauses"] = []
     _write_playbook(out_dir, playbook)
 
     report = build_after_action_report(out_dir)
@@ -466,46 +455,44 @@ def test_honesty_flags_zero_clause_playbook(tmp_path: Path) -> None:
     assert "No needs-attention items detected" not in report
 
 
-def _make_empty_v02_playbook(generated_at: str = "2026-01-15T09:00:00Z") -> dict:
-    """OPF v0.2/v0.3 playbook with every top-level section empty — the exact
-    all-empty shape issue #17 documents for the quickstart's pre-fix failure
-    mode: ``evidence.clauses: []``, ``clause_library: []``, ``posture: {}``,
-    ``floor: {}`` (here also ``corpus.documents: []``, to exercise every
-    section issue #25's Honesty extension checks)."""
+def _make_empty_playbook(generated_at: str = "2026-01-15T09:00:00Z") -> dict:
+    """Playbook with every top-level section empty — the all-empty shape
+    issue #17 documents for the quickstart's pre-fix failure mode:
+    ``evidence.clauses: []``, ``posture: {}``, ``floor: {}`` (here also
+    ``corpus.documents: []``, to exercise every section issue #25's Honesty
+    extension checks)."""
     return {
-        "opf_version": "0.3",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "test", "entries": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": {"clauses": [], "precedent": []},
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},
         "compiler": {
             "name": "playbook-engine",
-            "version": "0.3.0",
+            "version": "1.0.0",
             "generated_at": generated_at,
         },
     }
 
 
 def test_honesty_flags_all_empty_top_level_sections(tmp_path: Path) -> None:
-    """Issue #25: on the OPF v0.2/v0.3 all-empty playbook shape, every empty
-    top-level section — not just evidence.clauses — must be named in the
-    Honesty section: evidence.clause_library, posture, floor, and
-    corpus.documents."""
+    """Issue #25: on the all-empty playbook shape, every empty top-level
+    section — not just evidence.clauses — must be named in the Honesty
+    section: posture, floor, corpus.documents and taxonomy.entries."""
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
     _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
     _write_observations(out_dir, [_make_obs("deal-alice", "v1", "Clause.", outcome="unsigned")])
-    _write_playbook(out_dir, _make_empty_v02_playbook())
+    _write_playbook(out_dir, _make_empty_playbook())
 
     data = build_after_action_data(out_dir)
     flagged_fields = {entry["field"] for entry in data["honesty"]["blank_or_defaulted_fields"]}
     assert flagged_fields == {
         "evidence.clauses",
-        "evidence.clause_library",
         "posture",
         "floor",
         "corpus.documents",
@@ -534,7 +521,7 @@ def test_zero_clause_reason_names_empty_taxonomy(tmp_path: Path) -> None:
         out_dir,
         [_make_obs("deal-alice", "v1", "Clause.", tid=None, outcome="signed")],
     )
-    _write_playbook(out_dir, _make_empty_v02_playbook())
+    _write_playbook(out_dir, _make_empty_playbook())
 
     data = build_after_action_data(out_dir)
     report = build_after_action_report(out_dir)
@@ -645,30 +632,6 @@ def test_honesty_reversal_count_line_does_not_assert_derivation(tmp_path: Path) 
     assert "Floor derivation requires attorney classification" not in report
     assert "1 reversal(s)" in report
     assert "2 invariant(s) already signed" in report
-
-
-def test_honesty_flags_under_grounded_standard_position(tmp_path: Path) -> None:
-    """Issue #107: "standard"/"acceptable_variants_exist" positions built on
-    too few our-paper citations are the more dangerous under-grounding case
-    (they read as settled guidance) — must be flagged, not just
-    negotiable/hold_firm."""
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    _write_trail(out_dir, "deal-alice", ordered_versions=["v1"], provenance="our_paper")
-    _write_scope(out_dir, [{"document_id": "deal-alice", "in_scope": True}])
-    _write_observations(out_dir, [_make_obs("deal-alice", "v1", "Clause.")])
-    playbook = _make_minimal_playbook()
-    # clause.term is position="standard" with n_our_paper=5 by default (safe);
-    # override to a single-citation "standard" — exactly the under-grounded
-    # case the AAR check must now catch.
-    playbook["clauses"][0]["rollup"]["position"] = "standard"
-    playbook["clauses"][0]["rollup"]["confidence"]["n_our_paper"] = 1
-    _write_playbook(out_dir, playbook)
-    data = build_after_action_data(out_dir)
-    human_required = data["honesty"]["human_input_required"]
-    flagged = [item for item in human_required if item["clause_id"] == "clause.term"]
-    assert len(flagged) == 1
-    assert flagged[0]["position"] == "standard"
 
 
 def test_honesty_reversal_count_in_data(tmp_path: Path) -> None:
@@ -1130,16 +1093,6 @@ def test_data_backbone_health_reversal_count_nonzero(tmp_path: Path) -> None:
     bh = data["backbone_health"]
     assert bh["reversal_count"] == 1
     assert bh["trails"][0]["reversals"]
-
-
-def test_data_rollup_position_histogram(tmp_path: Path) -> None:
-    """Rollup position histogram is built from the playbook clauses."""
-    out_dir = _make_out_dir(tmp_path)
-    data = build_after_action_data(out_dir)
-    hist = data["semantic_coverage"]["rollup_position_histogram"]
-    # Fixture playbook has 1 standard, 1 negotiable
-    assert hist.get("standard", 0) == 1
-    assert hist.get("negotiable", 0) == 1
 
 
 def test_data_deviation_distribution(tmp_path: Path) -> None:

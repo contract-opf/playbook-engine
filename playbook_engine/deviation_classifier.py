@@ -38,8 +38,8 @@ Consumer path (issue #220 — the default; no deviation judge at all):
     (:func:`is_standard_text` — after normalization, does its text equal the
     template clause for its taxonomy_id)? ``deviation="none"`` when it is, ``"substantive"``
     otherwise, always ``basis="deterministic"`` with a neutral/none
-    ``risk_delta`` placeholder (kept only so OPF 0.3 keeps validating; it is
-    not a risk assessment). Never ``needs_review``, never a judge call. The
+    ``risk_delta`` placeholder (the observation store's shape; it is not a
+    risk assessment). Never ``needs_review``, never a judge call. The
     consumer (a capable review model) does the judging; the playbook supplies
     precedent (owner decision 2026-09-13 (c)).
 
@@ -393,7 +393,7 @@ def standard_check_result(standard: bool) -> DeviationResult:
     """The consumer-path ``DeviationResult`` for one standard-check outcome
     (issue #220): ``"none"`` for standard text, ``"substantive"`` otherwise,
     always ``basis="deterministic"`` with the neutral/none placeholder
-    ``risk_delta`` OPF 0.3 requires. Never ``needs_review``."""
+    ``risk_delta`` the observation store carries. Never ``needs_review``."""
     return DeviationResult(
         deviation="none" if standard else "substantive",
         risk_delta=_NEUTRAL_ZERO,

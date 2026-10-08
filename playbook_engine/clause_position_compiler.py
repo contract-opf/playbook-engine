@@ -1,118 +1,55 @@
-"""ClausePosition compiler — L5 pipeline stage.
+"""Clause-type compiler — L5 pipeline stage.
 
-Aggregates ``Observation`` objects (L4 output) into ``ClausePosition`` records
-that serialise to the OPF v0.2 ``clausePosition`` shape (§3.5). Internally,
-each clause type's derivation still runs the v0.1-era 4-way ``position``
-cascade documented below (it already encodes every cap this module enforces);
-``ClausePosition.to_dict()`` translates the concluded ``position`` into the
-OPF v0.2-facing, descriptive ``summary.historical_stance`` via
-``_historical_stance()`` — see that function's docstring for the mapping.
+Decides which clause types a playbook carries and what each one's standard
+is. One ``ClausePosition`` per clause type — ``{id, taxonomy_id, title,
+our_standard}`` — which ``playbook_engine.precedent`` turns into
+``evidence.clauses`` and uses to key ``evidence.precedent``. Nothing here is
+derived from risk direction, paper side or a judged verdict: the per-deal
+facts live in the precedent record, and the consumer does the judging.
 
 Design invariants:
-  - OPF §2.2 provenance rule is structurally enforced: no code path can emit
-    ``our_standard`` or a ``rollup.position`` stronger than ``"negotiable"``
-    for a taxonomy_id that has zero our-paper observations.
-  - Mirroring §2.2: no code path can emit a ``rollup.position`` stronger than
-    ``"negotiable"`` for a taxonomy_id with any ``basis="stub"`` observation
-    (no judge configured at all — see ``_STUB_BASES``).
-  - Evidence-depth cap (issue #107): no code path can emit a
-    ``rollup.position`` stronger than ``"negotiable"`` for a taxonomy_id with
-    fewer than ``MIN_EVIDENCE_N`` our-paper observations. Confidence
-    ``score`` measures provenance quality, not evidence depth — a single
-    our-paper observation scores 1.0 the same as a hundred would, so the
-    position cap (not the score) is what protects against sparse-evidence
-    over-confidence.
-  - Every asserted text carries a citation (``source_ref`` or ``example_ref``).
+  - ``our_standard`` comes only from the canonical template (``document_id
+    "template"``, ``provenance="our_paper"``); a clause type with no
+    non-empty template clause carries ``our_standard: null``.
+  - Every asserted text carries a citation (``source_ref``).
   - Minimum-viable-observation floor (issue #210): an observation whose
     ``full_text`` is under ``MIN_OBSERVATION_TEXT_LEN`` characters after
     stripping leading/trailing whitespace (a segmentation fragment — a
-    page-number artifact, a bare heading) is excluded from
-    ``observed_positions``, ``precedent_count``, and rollup derivation for
-    its taxonomy_id — never silently: it is counted and surfaced as a
-    ``CoherenceFlag`` (severity ``"warn"``).
-  - Consumer path (issue #220): when the store's deviations are the
-    deterministic standard check rather than judged verdicts (the deviation
-    mode ``mine_corpus`` recorded for the store, issue #230 — inferred by
-    ``deviations_are_deterministic`` only for a store mined before the mode
-    was recorded), nothing is derived from risk
-    direction — ``historical_stance`` is ``"no_signal"``, ``acceptable_if``
-    and ``fallbacks`` stay empty, the internal position is capped at
-    ``"negotiable"``, and ``stance_detail`` reports the deterministic facts
-    ``{held: n_signed_standard, of: n_deals, basis: "all"}``. The consumer
-    (a review model) does the judging; the playbook supplies precedent.
+    page-number artifact, a bare heading) never makes a clause type appear
+    and never reaches precedent — never silently: it is counted and surfaced
+    as a ``CoherenceFlag`` (severity ``"warn"``).
   - Observations with ``taxonomy_id=None`` (unclassified clauses) cannot be
-    anchored to a template clause, so they are excluded from the ``clauses``
-    array — but they are never silently dropped (issue #113): every call
+    anchored to a template clause, so they are excluded from the clause
+    list — but they are never silently dropped (issue #113): every call
     also returns an ``UnclassifiedCoverage`` summary (count, per-document
     breakdown, example citations) so a consumer can see corpus coverage
     without cross-referencing the AAR.
 
-Position derivation (from our-paper observations only):
-  ``"standard"``                — all signed our-paper observations have
-                                  deviation ``"none"`` and neutral/better risk.
-  ``"acceptable_variants_exist"`` — neutral-risk signed variants exist.
-  ``"negotiable"``              — worse-risk signed observations exist (we have
-                                  conceded before), our standard language was
-                                  removed before signing in some deal
-                                  (``conceded_before_signing``, issue #216),
-                                  or no our-paper at all.
-  ``"hold_firm"``               — proposed_then_reversed observations exist with
-                                  no concessions.
-
-Confidence score:
-  ``(n_our_paper * 1.0 + n_counterparty_paper * 0.5) / total`` — our-paper
-  weighted 2× counterparty-paper; recorded in ``confidence.basis``.
+OPF 0.1-0.3's derived surfaces (observed positions, the clause library, the
+historical-stance rollup and its tolerances, fallbacks and negotiation
+trail) were retired with those formats (issue #238); git history has them.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal
 
 from playbook_engine.observation_builder import (
     OUTCOME_CONCEDED_BEFORE_SIGNING,
     Observation,
-    RoundMove,
 )
 
-# ---------------------------------------------------------------------------
-# CoherenceJudge — LLM seam for flagging unreliable clause positions
-# ---------------------------------------------------------------------------
-
-# Minimum number of our-paper citations for a clause to be considered
-# well-grounded; clauses below this threshold trigger CoherenceJudge.
-COHERENCE_MIN_CITATIONS: int = 3
-
-# Default minimum number of distinct our-paper observations required before a
-# clause may be assigned a position stronger than "negotiable" (issue #107).
-# Below this floor there is not enough independent evidence to call a clause
-# "standard"/"acceptable_variants_exist"/"hold_firm" — a single our-paper
-# agreement is one data point, not a pattern. This is a hard structural cap,
-# mirroring the §2.2 provenance cap and the stub-basis cap below: it applies
-# regardless of what CoherenceJudge (if any) would otherwise conclude.
-#
-# Producer-configurable (issue #144, config.provenance.min_evidence_n) —
-# this module-level constant is only the DEFAULT used when a caller does not
-# supply its own ``min_evidence_n``. ``validator.py`` imports this same
-# constant as its own default so the two stay aligned on one rule absent an
-# explicit override.
-MIN_EVIDENCE_N: int = 2
-
 # Minimum length (issue #210), after stripping leading/trailing whitespace,
-# for an observation's `full_text` to be admitted into `observed_positions`.
-# Segmentation occasionally emits
-# sub-sentence fragments as their own clause node — page-number artifacts
-# ("1 6"), a bare section heading with no body ("indemnification") — which
-# then ride into the compiled playbook as if they were real observed clause
-# language. Below this floor there is no clause language to show a GC
-# drilling into "the exact language we signed", and letting the fragment
-# through inflates precedent_count / n_our_paper for a taxonomy_id on text
-# nobody could act on. This is a hard exclusion from `observed_positions`,
-# `precedent_counts`, and rollup derivation alike — never a display-only
-# truncation like `_TEXT_SUMMARY_MAX` — but it is never silent: every
-# quarantined observation is counted per taxonomy_id and surfaced as a
+# for an observation's `full_text` to count as clause language. Segmentation
+# occasionally emits sub-sentence fragments as their own clause node —
+# page-number artifacts ("1 6"), a bare section heading with no body
+# ("indemnification") — which would otherwise ride into the compiled
+# playbook as if they were real observed clause language. This is a hard
+# exclusion (precedent applies the same floor), but it is never silent:
+# every quarantined observation is counted per taxonomy_id and surfaced as a
 # ``CoherenceFlag`` (severity "warn") in `coherence_flags.json`, mirroring
-# how `compute_unclassified_coverage` above surfaces taxonomy_id=None
+# how `compute_unclassified_coverage` below surfaces taxonomy_id=None
 # observations instead of just dropping them.
 MIN_OBSERVATION_TEXT_LEN: int = 25
 
@@ -124,11 +61,11 @@ def _is_degenerate_observation_text(text: str) -> bool:
 
 @dataclass(frozen=True)
 class CoherenceFlag:
-    """Flag emitted by CoherenceJudge for an unreliable clause position.
+    """A compile-time warning about one clause type (``coherence_flags.json``).
 
     Attributes:
         clause_id:  The ClausePosition.id (e.g. ``"clause.indemnification"``).
-        reason:     Human-readable explanation of the incoherence.
+        reason:     Human-readable explanation.
         severity:   ``"warn"`` — surfaced in the inspection report but does not
                     block the playbook; ``"block"`` — the playbook should not be
                     published without human review of this clause.
@@ -147,67 +84,13 @@ class CoherenceFlag:
         }
 
 
-@runtime_checkable
-class CoherenceJudge(Protocol):
-    """Protocol for LLM-assisted coherence review of assembled clause positions.
-
-    Implementations receive a minimal clause summary dict (not raw citation
-    text) and return ``None`` if the clause position is coherent, or a
-    ``CoherenceFlag`` describing the incoherence.  The judge is called only
-    for flagged clauses (10–20% of the playbook), not a full re-read.
-
-    The summary dict passed to ``judge()`` contains:
-        ``clause_id``     str   — ClausePosition.id
-        ``position``      str   — rollup position (standard/negotiable/…)
-        ``n_our_paper``   int   — number of distinct our-paper deals
-        ``risk_delta_directions``  list[str]  — risk_delta.direction values across citations
-        ``is_fallback``   bool  — True when position is "negotiable" due to a
-                                  fallback (position-vs-fallback tension indicator)
-    """
-
-    def judge(self, clause_summary: dict[str, Any]) -> CoherenceFlag | None:
-        """Review one clause summary and return a flag, or None if coherent."""
-        ...
-
-
-# ---------------------------------------------------------------------------
-# OPF output types (mirror the JSON shapes defined in spec/playbook.schema.json)
-# ---------------------------------------------------------------------------
-
-_POSITION_STRONGER_THAN_NEGOTIABLE = frozenset(
-    {"standard", "acceptable_variants_exist", "hold_firm"}
-)
-
-_VALID_POSITIONS = frozenset({"standard", "acceptable_variants_exist", "negotiable", "hold_firm"})
-
-# A signed clause counts as an "acceptable variant" only when its deviation was
-# actually assessed by a judge. These bases mean it was NOT: ``"needs_review"``
-# (judge raised / low-confidence), ``"judge_error"`` (judge raised), and
-# ``"stub"`` (no judge configured at all — see ``_STUB_BASES`` below). An
-# observation carrying one of these must never manufacture an
-# ``acceptable_variants_exist`` position or an ``acceptable_if`` entry — its
-# neutral risk_delta is a placeholder, not a real assessment.
-_UNJUDGED_BASES = frozenset({"needs_review", "judge_error", "stub"})
-
-# "stub" observations are stricter than the other _UNJUDGED_BASES values:
-# a "needs_review"/"judge_error" observation may still fall through to
-# "standard" when it's the only signal for a clause (nothing else claims a
-# deviation, so "standard" is the intentional fallback — see
-# test_unjudged_deviation_does_not_fabricate_acceptable_variants). A "stub"
-# observation gets no such benefit of the doubt: it means NO judge was
-# configured at all (systemic, not a one-off failure), so any clause type
-# with a stub-basis observation is capped at "negotiable" — mirroring the
-# §2.2 provenance cap — and can never reach "standard", "acceptable_variants_
-# exist", or "hold_firm".
-_STUB_BASES = frozenset({"stub"})
-
-# The only OPF-conformant observation outcomes (spec/playbook.schema.json's
-# observation.outcome enum). An internal Observation may carry a third value
-# such as "unsigned" (issue #83 — no version of the document was detected as
-# the executed copy); such observations are real corpus evidence but not
-# position-defining OPF outcomes and must be withheld from observed_positions
-# / rollups rather than reach the schema-validated playbook output.
-_OPF_OUTCOMES = frozenset({"signed", "proposed_then_reversed"})
+# Observation outcomes that make a clause type appear in the playbook: a
+# signed (or last-draft) text and a refused ask. "unsigned" rows (issue #83 —
+# no version of the document was detected as the executed copy) are real
+# corpus evidence but never on their own make a clause type appear;
+# ``conceded_before_signing`` rows (our standard struck before signing,
+# issue #216) do, and are handled separately below.
+_CLAUSE_DEFINING_OUTCOMES = frozenset({"signed", "proposed_then_reversed"})
 
 
 @dataclass(frozen=True)
@@ -215,9 +98,7 @@ class OPFCitation:
     """Citation anchor (OPF §4).
 
     ``version`` should be an integer for deal documents or the string
-    ``"template"`` for the canonical template.  The schema validator (issue
-    #25) will enforce this; passing a raw version string through is acceptable
-    for internal use.
+    ``"template"`` for the canonical template.
     """
 
     document_id: str
@@ -238,103 +119,6 @@ class OPFCitation:
 
 
 @dataclass(frozen=True)
-class ObservedPosition:
-    """One observed clause variant for an OPF ClausePosition.
-
-    Mirrors the ``observation`` sub-schema defined in §3.4.
-
-    ``full_text`` (issue #105) carries the untruncated clause text alongside
-    the ≤ 300-char ``text_summary`` — fallback/rejected language in particular
-    is exactly the "acceptable alternative language" lawyers need verbatim,
-    not a fragment. Optional in the OPF schema; defaults to ``text_summary``
-    when not supplied.
-
-    ``search_snippet`` (issue #95) carries a short, already-pseudonymized,
-    already-truncated verbatim excerpt (see ``Observation.search_snippet``)
-    for a reviewer to Ctrl+F in the source document. Serialised as
-    ``x_search_snippet`` — the sanctioned ``^x_`` extension point on the OPF
-    ``observation`` schema (``$defs.observation`` — closed, but its
-    ``patternProperties`` accepts any ``x_``-prefixed key with no schema
-    edit) — since the citation this observation points at
-    (``$defs.citation``) is itself closed with no such escape hatch.
-    """
-
-    text_summary: str
-    example_ref: OPFCitation
-    deviation: str
-    risk_delta: dict[str, str]
-    provenance: str
-    outcome: str
-    precedent_count: int = 1
-    full_text: str = ""
-    search_snippet: str = ""
-    # Negotiation dynamics (issue #177, OPF §3.5.3) — copied from the source
-    # Observation; optional-when-underivable, so to_dict() emits the keys
-    # only when set (never null placeholders).
-    proposed_by: str | None = None
-    observed_at: str | None = None
-    counterparty_ref: dict[str, str] | None = None
-
-    def __post_init__(self) -> None:
-        if not self.full_text:
-            object.__setattr__(self, "full_text", self.text_summary)
-
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "text_summary": self.text_summary,
-            "full_text": self.full_text,
-            "example_ref": self.example_ref.to_dict(),
-            "deviation": self.deviation,
-            "risk_delta": self.risk_delta,
-            "provenance": self.provenance,
-            "outcome": self.outcome,
-            "precedent_count": self.precedent_count,
-        }
-        if self.proposed_by is not None:
-            d["proposed_by"] = self.proposed_by
-        if self.observed_at is not None:
-            d["observed_at"] = self.observed_at
-        if self.counterparty_ref is not None:
-            d["counterparty_ref"] = self.counterparty_ref
-        # search_snippet is optional/best-effort (issue #95) — omitted
-        # (never a null/"" placeholder) when there was no clause text to
-        # excerpt from, mirroring the dynamics fields above.
-        if self.search_snippet:
-            d["x_search_snippet"] = self.search_snippet
-        return d
-
-
-@dataclass(frozen=True)
-class AcceptableIfEntry:
-    """Structured tolerance-condition triple (issue #141, OPF v0.2 §3.5).
-
-    Replaces v0.1/early-v0.2's free-text ``acceptable_if`` entries with the
-    ``{if, to, rationale}`` shape consuming review applications already
-    prove out as ``acceptable_variations`` — this is what lets a consumer
-    run the acceptable-variations-vs-Floor consistency lint (see issue #127)
-    instead of reasoning over bare strings. ``observation_ref`` cites the observation
-    this entry was derived from, so the tolerance is traceable evidence, not
-    an assertion.
-
-    ``if_`` (not ``if``, a Python keyword) serialises to the schema's ``if``
-    key in ``to_dict()``.
-    """
-
-    if_: str
-    to: str
-    rationale: str
-    observation_ref: OPFCitation
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "if": self.if_,
-            "to": self.to,
-            "rationale": self.rationale,
-            "observation_ref": self.observation_ref.to_dict(),
-        }
-
-
-@dataclass(frozen=True)
 class OurStandard:
     """Our canonical clause text and its source citation."""
 
@@ -343,139 +127,6 @@ class OurStandard:
 
     def to_dict(self) -> dict[str, Any]:
         return {"text": self.text, "source_ref": self.source_ref.to_dict()}
-
-
-@dataclass(frozen=True)
-class ClauseRollup:
-    """Internal derivation state for one clause type (v0.1-era 4-way cascade).
-
-    Not emitted directly. OPF v0.2's OUTPUT shape is the descriptive
-    ``summary.historical_stance`` (see ``_historical_stance()`` below and
-    ``ClausePosition.to_dict()``, which translates this internal state into
-    that OPF-facing block) rather than this prescriptive ``position`` enum.
-    The cascade itself is retained unchanged because it already encodes every
-    cap this module must enforce (§2.2 provenance, stub-basis, evidence-depth)
-    — the translation only relabels the *conclusion*, not the derivation.
-    """
-
-    position: str  # standard|acceptable_variants_exist|negotiable|hold_firm
-    acceptable_if: tuple[AcceptableIfEntry, ...]
-    fallbacks: tuple[ObservedPosition, ...]
-    rejected: tuple[ObservedPosition, ...]
-    confidence: dict[str, Any]
-    # Held-rate behind the historical_stance enum (issue #177, resolves spec
-    # Appendix A.3): {"held": H, "of": N, "basis": "our_paper"|"all"} —
-    # computed in _derive_rollup from the same observation group the stance
-    # derives from. None only for legacy construction paths (tests) that
-    # never computed it.
-    stance_detail: dict[str, Any] | None = None
-    # Set when >=1 observation in this clause's group had basis="stub" (no
-    # judge configured at all). Mirrors the cap already applied to `position`
-    # in `_derive_rollup`; carried here too because `_historical_stance()`
-    # needs it to distinguish "no reliable signal" (no_signal) from a genuine
-    # observed concession pattern (usually_conceded/mixed) when translating.
-    stub_basis_present: bool = False
-    # Issue #220: this clause's deviations are the deterministic standard
-    # check (the consumer path), not judged verdicts — so no stance may be
-    # read out of them; `_historical_stance()` returns "no_signal".
-    deterministic_deviations: bool = False
-
-    def __post_init__(self) -> None:
-        if self.position not in _VALID_POSITIONS:
-            raise ValueError(
-                f"ClauseRollup.position must be one of {sorted(_VALID_POSITIONS)!r}; "
-                f"got {self.position!r}"
-            )
-
-
-# historical_stance values stronger than "mixed" (mirrors
-# validator._STANCES_STRONGER_THAN_MIXED) — kept local so this module does not
-# import from validator.py just to reuse a literal set.
-_STANCE_FOR_POSITION: dict[str, str] = {
-    # "standard" (all signed our-paper observations match our_standard, no
-    # deviation) and "hold_firm" (asks were made and refused, no concessions)
-    # both describe the same historical fact: our position was never
-    # conceded — so both collapse to "consistently_held".
-    "standard": "consistently_held",
-    "hold_firm": "consistently_held",
-    # Neutral-risk signed variants exist alongside our_standard — we usually
-    # hold, but some tolerated variation is on record.
-    "acceptable_variants_exist": "usually_held",
-}
-
-
-# historical_stance values that OPF §2.2 requires an ``our_standard`` to back
-# (mirrors validator._STANCES_STRONGER_THAN_MIXED). A clause with no our_standard
-# (no template clause for this taxonomy) may not emit any of these.
-_STANCES_REQUIRING_OUR_STANDARD: frozenset[str] = frozenset(
-    {"usually_conceded", "usually_held", "consistently_held"}
-)
-
-
-def _historical_stance(rollup: ClauseRollup, *, has_our_standard: bool = True) -> str:
-    """Translate ``rollup`` (internal 4-way position cascade) into OPF v0.2's
-    descriptive ``summary.historical_stance`` (§3.5, §2.2/§2.3).
-
-    ``has_our_standard`` (issue #182): OPF §2.2 requires any stance stronger than
-    "mixed" to reference an ``our_standard`` clause. When this clause has none
-    (our-paper observations exist but no template clause covers this taxonomy),
-    such a stance is capped to "no_signal" — we have evidence but no standard to
-    characterise a settled stance against. Defaults ``True`` so template-grounded
-    callers are unaffected.
-
-    historical_stance answers "what has the corpus shown", never "what must
-    you do" — see OPF-SPEC.md §2.2 and the opf-v0.2-redesign
-    rationale. The five values:
-
-      "no_signal"           — the consumer path (issue #220: deterministic
-                              deviations, nothing judged — always), or no
-                              reliable our-paper signal: either the §2.2
-                              provenance cap applies (zero/insufficient
-                              our-paper evidence — ``evidence_sufficient`` is
-                              False) or a stub-basis observation means no
-                              judge ever assessed this clause type. Both are
-                              carried on ``rollup`` already (confidence dict
-                              and ``stub_basis_present``).
-      "usually_conceded"    — has_our_paper evidence exists, a real judge
-                              assessed it, and the corpus shows we have
-                              conceded before — fallbacks present, OR some
-                              deal struck our standard language before
-                              signing (``conceded_before_signing``, issue
-                              #216) — with no our-paper rejections on record.
-      "mixed"               — genuinely contradictory evidence: the corpus
-                              shows BOTH a concession (fallback) AND an
-                              our-paper rejection (proposed_then_reversed)
-                              for the same clause type.
-      "consistently_held" / "usually_held" — see ``_STANCE_FOR_POSITION``.
-
-    Note: within the reachable ``position == "negotiable"`` branch of
-    ``_derive_rollup``/``_derive_position``, "negotiable" is *only* ever
-    returned once evidence is sufficient and non-stub for a genuine
-    concession pattern — ``fallback_obs`` truthy, or a
-    ``conceded_before_signing`` row (issue #216) — the "no signal" reasons
-    for "negotiable" are already filtered out by the ``evidence_sufficient``/
-    ``stub_basis_present`` checks above. ``rollup.fallbacks`` is therefore
-    NOT guaranteed non-empty here: a clause whose only concession is our
-    standard struck before signing reaches "usually_conceded" with
-    ``fallbacks == ()``; its concession is carried by ``stance_detail``.
-    """
-    evidence_sufficient = bool(rollup.confidence.get("evidence_sufficient", False))
-    if rollup.deterministic_deviations:
-        # Issue #220: a stance is a judged category (it reads risk direction);
-        # the consumer path carries only the deterministic facts, in
-        # stance_detail. Until OPF 0.4 (#223) deletes the field, no_signal.
-        return "no_signal"
-    if rollup.stub_basis_present or not evidence_sufficient:
-        return "no_signal"
-    if rollup.position == "negotiable":
-        our_paper_rejected = any(op.provenance == "our_paper" for op in rollup.rejected)
-        stance = "mixed" if our_paper_rejected else "usually_conceded"
-    else:
-        stance = _STANCE_FOR_POSITION.get(rollup.position, "no_signal")
-    # §2.2 (issue #182): a stronger-than-"mixed" stance needs an our_standard.
-    if not has_our_standard and stance in _STANCES_REQUIRING_OUR_STANDARD:
-        return "no_signal"
-    return stance
 
 
 # Maximum number of example citations surfaced per UnclassifiedCoverage
@@ -490,11 +141,11 @@ class UnclassifiedCoverage:
     """Coverage summary for observations that could not be classified.
 
     Issue #113: ``taxonomy_id=None`` observations (unclassified clauses) are
-    excluded from ``clauses``/``clause_library`` because they cannot be
-    anchored to a taxonomy entry — but that exclusion must never be silent.
-    This summary is returned alongside the compiled output so a consumer can
-    see corpus coverage (counts, per-document breakdown, example citations)
-    without hunting through the AAR.
+    excluded from ``evidence.clauses`` because they cannot be anchored to a
+    taxonomy entry — but that exclusion must never be silent. This summary
+    is returned alongside the compiled output so a consumer can see corpus
+    coverage (counts, per-document breakdown, example citations) without
+    hunting through the AAR.
     """
 
     count: int
@@ -510,12 +161,7 @@ class UnclassifiedCoverage:
 
 
 def compute_unclassified_coverage(observations: list[Observation]) -> UnclassifiedCoverage:
-    """Summarise the ``taxonomy_id=None`` observations in *observations*.
-
-    Shared by ``compile_clause_positions`` and ``compile_clause_library``
-    (issue #113) so both L5 stages surface the same coverage shape instead of
-    each silently filtering unclassified observations out of its own output.
-    """
+    """Summarise the ``taxonomy_id=None`` observations in *observations*."""
     unclassified = [obs for obs in observations if obs.taxonomy_id is None]
     by_document: dict[str, int] = {}
     for obs in unclassified:
@@ -539,55 +185,12 @@ def compute_unclassified_coverage(observations: list[Observation]) -> Unclassifi
 
 @dataclass(frozen=True)
 class ClausePosition:
-    """Template-anchored clause position (OPF §3.4)."""
+    """One clause type of the playbook: id, title and our standard (if any)."""
 
     id: str
     taxonomy_id: str
     title: str
     our_standard: OurStandard | None
-    observed_positions: tuple[ObservedPosition, ...]
-    rollup: ClauseRollup
-    # Round-by-round ask→landing trajectory for this clause type (issue
-    # #177, OPF §3.5.3) — RoundMove records grouped by taxonomy_id in
-    # compile_clause_positions. Empty for single-version deals or legacy
-    # stores with no round_moves.jsonl.
-    negotiation_trail: tuple[RoundMove, ...] = ()
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to the OPF v0.2 ``clausePosition`` shape (§3.5).
-
-        ``rollup`` (this module's internal 4-way position cascade) is
-        translated into the OPF-facing ``summary`` block here —
-        ``historical_stance`` replaces the prescriptive ``position``;
-        ``fallbacks``/``rejected``/``confidence`` carry over unchanged (only
-        their wrapper key changed, v0.1's ``rollup`` → v0.2's ``summary``).
-        ``acceptable_if`` entries are serialised as ``{if,to,rationale,
-        observation_ref}`` triples (issue #141), not bare strings.
-        """
-        summary: dict[str, Any] = {
-            "historical_stance": _historical_stance(
-                self.rollup, has_our_standard=self.our_standard is not None
-            ),
-            "acceptable_if": [entry.to_dict() for entry in self.rollup.acceptable_if],
-            "fallbacks": [fb.to_dict() for fb in self.rollup.fallbacks],
-            "rejected": [rej.to_dict() for rej in self.rollup.rejected],
-            "confidence": self.rollup.confidence,
-        }
-        # stance_detail / negotiation_trail (issue #177, §3.5.3): emitted
-        # only when derived — absent keys signal "not computed", never null.
-        if self.rollup.stance_detail is not None:
-            summary["stance_detail"] = self.rollup.stance_detail
-        d: dict[str, Any] = {
-            "id": self.id,
-            "taxonomy_id": self.taxonomy_id,
-            "title": self.title,
-            "our_standard": self.our_standard.to_dict() if self.our_standard else None,
-            "observed_positions": [op.to_dict() for op in self.observed_positions],
-            "summary": summary,
-        }
-        if self.negotiation_trail:
-            d["negotiation_trail"] = [m.to_opf_dict() for m in self.negotiation_trail]
-        return d
 
 
 # ---------------------------------------------------------------------------
@@ -599,17 +202,16 @@ def compile_clause_positions(
     observations: list[Observation],
     template_observations: list[Observation],
     taxonomy_titles: dict[str, str] | None = None,
-    *,
-    coherence_judge: CoherenceJudge | None = None,
-    min_evidence_n: int = MIN_EVIDENCE_N,
-    round_moves: list[RoundMove] | None = None,
-    deterministic_deviations: bool | None = None,
 ) -> tuple[list[ClausePosition], list[CoherenceFlag], UnclassifiedCoverage]:
-    """Aggregate observations into OPF-conformant ClausePosition records.
+    """Decide the playbook's clause types and each one's ``our_standard``.
+
+    A clause type appears when the template has a clause of it, or a deal
+    observation of it is a signed text, a refused ask
+    (``proposed_then_reversed``) or our standard struck before signing
+    (``conceded_before_signing``) — sub-sentence fragments excluded.
 
     Args:
-        observations:        All L4 observations from deal corpus (signed +
-                             proposed_then_reversed), any provenance mix.
+        observations:        All L4 observations from the deal corpus.
         template_observations: Observations extracted from the canonical
                              template document.  Must have
                              ``citation.document_id`` set to ``"template"``
@@ -617,62 +219,20 @@ def compile_clause_positions(
                              for ``our_standard``.
         taxonomy_titles:     Optional mapping ``{taxonomy_id: human_title}``.
                              Falls back to ``_title_from_id()`` when absent.
-        coherence_judge:     Optional judge called for clauses where the
-                             position cascade is unreliable (low n_our_paper,
-                             contradictory risk_delta, or fallback tension).
-                             When ``None``, coherence checks are skipped.
-        min_evidence_n:      Producer-configurable evidence-depth floor
-                             (issue #144, config.provenance.min_evidence_n) —
-                             the minimum number of distinct our-paper
-                             observations required before a clause may be
-                             assigned a position/historical_stance stronger
-                             than "negotiable"/"mixed". Defaults to
-                             ``MIN_EVIDENCE_N`` (2).
-        round_moves:         Per-round clause moves from the L4 store
-                             (``round_moves.jsonl``, issue #177) — grouped by
-                             taxonomy_id into each ClausePosition's
-                             ``negotiation_trail``, ordered by (document_id,
-                             round). ``None``/empty (single-version corpora,
-                             legacy stores) emits no trail.
-        deterministic_deviations: Whether *observations* carry the consumer
-                             path's deterministic standard-check deviations
-                             (issue #220) instead of judged verdicts — then
-                             no stance, tolerance or fallback is derived from
-                             risk direction (see ``_derive_rollup``).
-                             ``project_playbook`` always passes it
-                             explicitly — the mode ``mine_corpus`` recorded
-                             for the store (issue #230). ``None`` (the
-                             default) infers it from the observations
-                             themselves (``deviations_are_deterministic``),
-                             which is a fallback only: an opt-in judged run
-                             whose every clause matched the template carries
-                             only deterministic rows and would be inferred
-                             as the consumer path.
 
     Returns:
         Tuple of (positions, coherence_flags, unclassified_coverage):
-          - ``positions``: One ``ClausePosition`` per distinct non-None
-            ``taxonomy_id`` in sorted order.
-          - ``coherence_flags``: ``CoherenceFlag`` entries emitted by the
-            judge for risky clauses; empty list when no judge is configured
-            or all clauses pass.
-          - ``unclassified_coverage``: Summary (count, per-document
-            breakdown, example citations) of ``observations`` entries with
-            ``taxonomy_id=None`` (issue #113) — these are excluded from
-            ``positions`` but never silently dropped from the return value.
+          - ``positions``: One ``ClausePosition`` per clause type, sorted by
+            ``taxonomy_id``.
+          - ``coherence_flags``: one ``"warn"`` flag per clause type that had
+            sub-sentence fragments quarantined (issue #210).
+          - ``unclassified_coverage``: Summary of ``observations`` entries
+            with ``taxonomy_id=None`` (issue #113).
 
     Raises:
         ValueError:  If a template observation has provenance other than
                      ``"our_paper"``.
-
-    OPF §2.2 guarantee:
-        taxonomy_ids with zero our-paper observations will have
-        ``our_standard=None`` and ``rollup.position="negotiable"``.
-        No code path can produce a stronger position for them.
     """
-    if deterministic_deviations is None:
-        deterministic_deviations = deviations_are_deterministic(observations)
-
     for tmpl_obs in template_observations:
         if tmpl_obs.provenance != "our_paper":
             raise ValueError(
@@ -680,114 +240,58 @@ def compile_clause_positions(
                 f"got {tmpl_obs.provenance!r} for taxonomy_id={tmpl_obs.taxonomy_id!r}."
             )
 
-    # --- build template map (taxonomy_id → first template observation) ---
+    # --- template map (taxonomy_id → first template observation) ---
     template_map: dict[str, Observation] = {}
     for tmpl in template_observations:
         if tmpl.taxonomy_id is not None and tmpl.taxonomy_id not in template_map:
             template_map[tmpl.taxonomy_id] = tmpl
 
-    # --- group deal observations by taxonomy_id (skip None) ---
-    #
-    # Only "signed" and "proposed_then_reversed" are OPF-conformant outcomes
-    # (spec/playbook.schema.json's observation.outcome enum) — the two
-    # position-defining buckets the spec actually models. An observation with
-    # any other outcome (e.g. "unsigned" — issue #83: no version of this
-    # document was detected as the executed copy) is real corpus evidence but
-    # not a position-defining OPF outcome; it must be withheld here rather
-    # than fabricate/relabel it to fit the schema. It remains visible in
-    # observations.jsonl and the inspection report for human review.
-    groups: dict[str, list[Observation]] = {}
-    # Issue #216: our standard language removed before signing
-    # (outcome="conceded_before_signing") is our concession. It is not an OPF
-    # outcome, so it never enters `groups` (observed_positions, rejected,
-    # precedent counts); it is kept per taxonomy_id only to count its deal
-    # as conceded in stance_detail and the position.
-    conceded_by_tid: dict[str, list[Observation]] = {}
-    # Sub-sentence fragments (issue #210) are quarantined here — before they
-    # ever reach `groups` — so they cannot inflate precedent_count or
-    # n_our_paper for the taxonomy_id they'd otherwise land under. Counted
-    # per taxonomy_id so the loop below can surface a CoherenceFlag per
-    # affected clause rather than dropping them silently.
+    # --- clause types evidenced by the deals (skip None and fragments) ---
+    deal_tids: set[str] = set()
+    # Sub-sentence fragments (issue #210) are counted per taxonomy_id so a
+    # CoherenceFlag can name each affected clause rather than dropping them
+    # silently.
     quarantined_by_tid: dict[str, int] = {}
     for obs in observations:
         if obs.taxonomy_id is None:
             continue
         if obs.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING:
             if not _is_degenerate_observation_text(obs.full_text):
-                conceded_by_tid.setdefault(obs.taxonomy_id, []).append(obs)
+                deal_tids.add(obs.taxonomy_id)
             continue
-        if obs.outcome not in _OPF_OUTCOMES:
+        if obs.outcome not in _CLAUSE_DEFINING_OUTCOMES:
             continue
         if _is_degenerate_observation_text(obs.full_text):
             quarantined_by_tid[obs.taxonomy_id] = quarantined_by_tid.get(obs.taxonomy_id, 0) + 1
             continue
-        groups.setdefault(obs.taxonomy_id, []).append(obs)
+        deal_tids.add(obs.taxonomy_id)
 
-    # taxonomy_id=None observations are excluded from `groups` above (they
-    # cannot be anchored to a template clause) but are never silently
-    # dropped — issue #113: summarised into unclassified_coverage below and
-    # returned alongside positions/coherence_flags.
     unclassified_coverage = compute_unclassified_coverage(observations)
 
-    # --- group round moves by taxonomy_id (issue #177) ---
-    # Unclassified moves (taxonomy_id=None) cannot anchor to a ClausePosition;
-    # like unclassified observations they stay visible in the L4 store
-    # (round_moves.jsonl) rather than reach the playbook.
-    trail_by_tid: dict[str, list[RoundMove]] = {}
-    for move in round_moves or []:
-        if move.taxonomy_id is None:
-            continue
-        trail_by_tid.setdefault(move.taxonomy_id, []).append(move)
-    for moves in trail_by_tid.values():
-        moves.sort(key=lambda m: (m.document_id, m.round))
-
-    # Collect all taxonomy_ids (from both deal observations and template).
-    all_tids = sorted(groups.keys() | template_map.keys() | conceded_by_tid.keys())
+    coherence_flags = [
+        CoherenceFlag(
+            clause_id=f"clause.{tid}",
+            reason=(
+                f"{count} observation(s) excluded from precedent: "
+                f"full_text shorter than {MIN_OBSERVATION_TEXT_LEN} "
+                "character(s) — a segmentation fragment "
+                "(e.g. a page-number artifact or bare heading), not usable "
+                "clause language"
+            ),
+            severity="warn",
+        )
+        for tid, count in sorted(quarantined_by_tid.items())
+    ]
 
     positions: list[ClausePosition] = []
-    coherence_flags: list[CoherenceFlag] = []
-
-    # Surface every quarantined-fragment taxonomy_id (issue #210) as a "warn"
-    # CoherenceFlag, unconditionally — this never depends on a CoherenceJudge
-    # being configured, same as unclassified_coverage above. Iterated ahead
-    # of `all_tids` on purpose: a taxonomy_id whose observations were ALL
-    # fragments has nothing left in `groups` and may not appear in
-    # `all_tids` at all (no ClausePosition is emitted for it), so this is
-    # the only place such a clause is visible.
-    for tid, count in sorted(quarantined_by_tid.items()):
-        coherence_flags.append(
-            CoherenceFlag(
-                clause_id=f"clause.{tid}",
-                reason=(
-                    f"{count} observation(s) excluded from observed_positions: "
-                    f"full_text shorter than {MIN_OBSERVATION_TEXT_LEN} "
-                    "character(s) — a segmentation fragment "
-                    "(e.g. a page-number artifact or bare heading), not usable "
-                    "clause language"
-                ),
-                severity="warn",
-            )
-        )
-
-    for tid in all_tids:
-        group = groups.get(tid, [])
+    for tid in sorted(deal_tids | template_map.keys()):
         t_obs = template_map.get(tid)
-
-        our_paper_obs = [obs for obs in group if obs.provenance == "our_paper"]
-        # An empty-text template observation is not a usable standard (issue
-        # #182), so it must not count as "we have our paper" for this clause —
-        # otherwise the rollup could claim a standard the playbook can't show.
-        has_our_paper = bool(our_paper_obs) or (t_obs is not None and t_obs.full_text.strip() != "")
-
-        # ---------------------------------------------------------------
-        # §2.2 enforcement — our_standard
-        # ---------------------------------------------------------------
         our_standard: OurStandard | None = None
-        if has_our_paper and t_obs is not None and t_obs.full_text.strip():
+        # An empty-text template observation is not a usable standard
+        # (issue #182).
+        if t_obs is not None and t_obs.full_text.strip():
             our_standard = OurStandard(
-                # Full clause text (issue #105) — text_summary is a ≤ 300-char
-                # display fragment, useless as a drafting standard for any
-                # real indemnification/insurance clause.
+                # Full clause text (issue #105).
                 text=t_obs.full_text,
                 source_ref=OPFCitation(
                     document_id=t_obs.citation.document_id,
@@ -796,80 +300,14 @@ def compile_clause_positions(
                     char_span=t_obs.citation.char_span,
                 ),
             )
-        # If has_our_paper is False, our_standard stays None — §2.2 enforced.
-
-        # ---------------------------------------------------------------
-        # Build observed_positions
-        # ---------------------------------------------------------------
-        # precedent_count (issue #107): identical clause texts across deals
-        # are aggregated by normalized text rather than left at the dataclass
-        # default of 1 for every observation.
-        precedent_counts = _count_precedents(group)
-        observed_positions = tuple(
-            _obs_to_observed_position(obs, precedent_counts) for obs in group
-        )
-
-        # ---------------------------------------------------------------
-        # Derive rollup
-        # ---------------------------------------------------------------
-        rollup = _derive_rollup(
-            group,
-            our_paper_obs,
-            has_our_paper,
-            precedent_counts,
-            min_evidence_n=min_evidence_n,
-            conceded_before_signing=conceded_by_tid.get(tid, []),
-            # §2.2 (issue #182): a strong position needs an our_standard to point
-            # at; without one (no template clause for this taxonomy) cap at
-            # negotiable so historical_stance stays validator-consistent.
-            has_our_standard=our_standard is not None,
-            deterministic_deviations=deterministic_deviations,
-        )
-
-        title = (taxonomy_titles or {}).get(tid) or _title_from_id(tid)
-        clause_id = f"clause.{tid}"
         positions.append(
             ClausePosition(
-                id=clause_id,
+                id=f"clause.{tid}",
                 taxonomy_id=tid,
-                title=title,
+                title=(taxonomy_titles or {}).get(tid) or _title_from_id(tid),
                 our_standard=our_standard,
-                observed_positions=observed_positions,
-                rollup=rollup,
-                negotiation_trail=tuple(trail_by_tid.get(tid, ())),
             )
         )
-
-        # ---------------------------------------------------------------
-        # CoherenceJudge gate — call for risky ~10–20% of clauses only
-        # ---------------------------------------------------------------
-        if coherence_judge is not None:
-            n_our_paper = rollup.confidence["n_our_paper"]
-            risk_directions = [obs.risk_delta.get("direction", "neutral") for obs in group]
-            # Trigger conditions (issue #54):
-            # 1. Low citation count — position is under-grounded.
-            # 2. Contradictory risk_delta directions across citations.
-            # 3. Position is "negotiable" due to a fallback despite high-
-            #    confidence citations (position-vs-fallback tension).
-            low_citations = n_our_paper < COHERENCE_MIN_CITATIONS
-            contradictory_risk = (
-                len(set(risk_directions)) > 1
-                and "worse" in risk_directions
-                and "better" in risk_directions
-            )
-            fallback_tension = rollup.position == "negotiable" and bool(rollup.fallbacks)
-
-            if low_citations or contradictory_risk or fallback_tension:
-                summary: dict[str, Any] = {
-                    "clause_id": clause_id,
-                    "position": rollup.position,
-                    "n_our_paper": n_our_paper,
-                    "risk_delta_directions": risk_directions,
-                    "is_fallback": fallback_tension,
-                }
-                flag = coherence_judge.judge(summary)
-                if flag is not None:
-                    coherence_flags.append(flag)
 
     return positions, coherence_flags, unclassified_coverage
 
@@ -894,501 +332,6 @@ def _normalize_version(version: str | int) -> str | int:
         return int(stripped)
     except ValueError:
         return version  # pass through; schema validator will report if invalid
-
-
-def _normalize_for_dedup(text: str) -> str:
-    """Collapse whitespace and casefold for identical-precedent matching.
-
-    Deliberately conservative: only whitespace and case differences are
-    treated as "identical" (e.g. line-wrapping artifacts from extraction).
-    Genuinely different wording is left as a distinct precedent.
-    """
-    return " ".join(text.split()).casefold()
-
-
-def _count_precedents(group: list[Observation]) -> dict[str, int]:
-    """Count DISTINCT DEALS per normalized full_text within one taxonomy group.
-
-    Issue #107: ``ObservedPosition.precedent_count`` was always 1 — identical
-    clause texts across deals were never aggregated into a strength signal.
-    This counts, across ALL observations in the group (any provenance), how
-    many distinct documents carry the same normalized text, so a variant
-    seen in 5 agreements is distinguishable from one seen in exactly 1.
-
-    Issue #216: the deal is the unit of precedent — the count is of distinct
-    ``citation.document_id`` values, never of observation rows, so the same
-    text surfacing more than once in one deal (several nodes, or a signed
-    and a reversed row) is still one precedent.
-    """
-    docs: dict[str, set[str]] = {}
-    for obs in group:
-        key = _normalize_for_dedup(obs.full_text)
-        docs.setdefault(key, set()).add(obs.citation.document_id)
-    return {key: len(ids) for key, ids in docs.items()}
-
-
-def _obs_to_observed_position(
-    obs: Observation, precedent_counts: dict[str, int] | None = None
-) -> ObservedPosition:
-    precedent_count = 1
-    if precedent_counts is not None:
-        precedent_count = precedent_counts.get(_normalize_for_dedup(obs.full_text), 1)
-    # Deferred: provenance_detector -> config -> clause_position_compiler.
-    from playbook_engine.provenance_detector import two_valued_side  # noqa: PLC0415
-
-    return ObservedPosition(
-        text_summary=obs.text_summary,
-        full_text=obs.full_text,
-        search_snippet=obs.search_snippet,
-        example_ref=OPFCitation(
-            document_id=obs.citation.document_id,
-            version=obs.citation.version,
-            clause_path=obs.citation.clause_path,
-            char_span=obs.citation.char_span,
-        ),
-        deviation=obs.deviation,
-        risk_delta=obs.risk_delta,
-        # The 0.2/0.3 observed_positions enum is frozen two-valued; an
-        # undetermined ("unknown") paper side is written the §2.3 way
-        # (issue #225). It never counted as our paper above either.
-        provenance=two_valued_side(obs.provenance),
-        outcome=obs.outcome,
-        precedent_count=precedent_count,
-        proposed_by=obs.proposed_by,
-        observed_at=obs.observed_at,
-        counterparty_ref=obs.counterparty_ref,
-    )
-
-
-_MAGNITUDE_ORDER: dict[str, int] = {"minor": 0, "material": 1}
-
-
-def deviations_are_deterministic(observations: list[Observation]) -> bool:
-    """Whether a store's deviations are the consumer path's deterministic
-    standard check (issue #220) rather than judged verdicts.
-
-    A FALLBACK only (issue #230): the mode is recorded at mine time
-    (``run_manifest.record_deviation_mode``) and ``project_playbook`` passes
-    it explicitly; this inference is used (with a WARNING) only for a store
-    mined before the mode was recorded. It cannot tell an opt-in judged run
-    whose every clause matched the template — every row then carries the
-    unchanged fast path's ``basis="deterministic"`` — from a consumer run.
-
-    True when there is at least one observation and EVERY one carries
-    ``basis="deterministic"`` and a computed ``standard`` fact — exactly what
-    ``mine_corpus`` writes with no deviation judge configured (the default).
-    Any judged row (``"judge"``), judge fallback (``"needs_review"``,
-    ``"judge_error"``, ``"stub"``), judged-path fast path
-    (``"reworded_equivalent"``, ``"alignment"``), or a legacy store that
-    never computed ``standard`` keeps the judged derivation unchanged.
-    """
-    return bool(observations) and all(
-        obs.basis == "deterministic" and obs.standard is not None for obs in observations
-    )
-
-
-def _derive_rollup(
-    group: list[Observation],
-    our_paper_obs: list[Observation],
-    has_our_paper: bool,
-    precedent_counts: dict[str, int] | None = None,
-    *,
-    min_evidence_n: int = MIN_EVIDENCE_N,
-    has_our_standard: bool = True,
-    conceded_before_signing: list[Observation] | None = None,
-    deterministic_deviations: bool = False,
-) -> ClauseRollup:
-    """Derive rollup guidance from the observation group.
-
-    ``deterministic_deviations`` (issue #220): the group's deviations are the
-    consumer path's deterministic standard check, not judged verdicts, and
-    every risk_delta is a neutral/none placeholder. Nothing is derived from
-    risk direction then: ``acceptable_if`` and ``fallbacks`` are empty (both
-    are judged categories), the position is capped at "negotiable" and
-    ``historical_stance`` is "no_signal"; ``rejected`` (refused asks — a
-    deterministic outcome fact) is kept; and ``stance_detail`` is
-    ``{held: n_signed_standard, of: n_deals, basis: "all"}`` — the distinct
-    deals that signed our standard text for this clause, out of every
-    distinct deal with an observation of it (including a deal that struck our
-    standard before signing). ``basis`` is "all" because every deal counts
-    whatever its paper side (owner decision 2026-09-13 (b)); "all" is the
-    OPF 0.3 spelling of that pool (its enum has no "deals").
-
-    §2.2 cap: if not has_our_paper, position is capped at ``"negotiable"``.
-
-    ``has_our_standard`` (issue #182): a strong position/historical_stance
-    ("standard"/"hold_firm" → "consistently_held") must be backed by an
-    ``our_standard`` clause per OPF §2.2 — the validator rejects a strong
-    stance with ``our_standard: null``. our-paper observations can exist for a
-    taxonomy that has NO template clause (emergent, or a template that doesn't
-    cover this clause type), which yields ``has_our_paper=True`` but no
-    ``our_standard``; capping at "negotiable" in that case keeps the rollup
-    §2.2-consistent. Defaults to ``True`` so callers grounding every strong
-    position in a template are unaffected.
-
-    ``conceded_before_signing`` (issue #216): this clause's
-    ``outcome="conceded_before_signing"`` observations — our standard
-    language removed before signing. Each is our concession: its deal counts
-    as conceded (never held) in ``stance_detail``, and any one of them
-    makes the position "negotiable". They are not OPF observations, so they
-    never reach ``rejected``/``fallbacks``/``acceptable_if`` or the
-    ``n_our_paper``/``n_counterparty_paper`` counts, which describe the
-    published ``observed_positions``.
-
-    Confidence (§6) is published as two orthogonal numbers (issue #107):
-      - ``score`` — provenance QUALITY: weighted = n_our_paper * 1.0 +
-        n_counterparty_paper * 0.5; score = weighted / total. Our-paper
-        observations are weighted 2× counterparty-paper because they
-        represent positive choices (we proposed or accepted against our own
-        template), not mere tolerance. This is NOT a measure of how much
-        evidence exists — a single our-paper observation scores 1.0 here,
-        same as a hundred.
-      - ``evidence_sufficient`` — evidence DEPTH: whether ``n_our_paper``
-        meets ``min_evidence_n`` (issue #144: producer-configurable,
-        default ``MIN_EVIDENCE_N``=2). This is the number that gates
-        ``rollup.position`` below (see the position-cap section) — a high
-        ``score`` cannot rescue a clause with too few observations. The
-        threshold actually applied is recorded in ``confidence.basis`` so a
-        consumer reading one playbook document (without the producer's
-        config) can see what N was enforced.
-    """
-    # Issue #216: the deal is the unit of precedent — n_our_paper /
-    # n_counterparty_paper count DISTINCT deals (citation.document_id), never
-    # observation rows, so a deal carrying both its signed row and a reversal
-    # row for this clause is one data point, not two.
-    # Issue #225: counted through the same two_valued_side mapping that
-    # _obs_to_observed_position emits with, so an "unknown" paper side counts
-    # as the counterparty_paper the published observed_positions list it as.
-    # Deferred: provenance_detector -> config -> clause_position_compiler.
-    from playbook_engine.provenance_detector import two_valued_side  # noqa: PLC0415
-
-    n_our_paper = len(
-        {
-            obs.citation.document_id
-            for obs in group
-            if two_valued_side(obs.provenance) == "our_paper"
-        }
-    )
-    n_counterparty_paper = len(
-        {
-            obs.citation.document_id
-            for obs in group
-            if two_valued_side(obs.provenance) == "counterparty_paper"
-        }
-    )
-    total = n_our_paper + n_counterparty_paper
-    if total > 0:
-        weighted = n_our_paper * 1.0 + n_counterparty_paper * 0.5
-        confidence_score = round(weighted / total, 3)
-    else:
-        confidence_score = 0.0
-
-    confidence: dict[str, Any] = {
-        "score": confidence_score,
-        "basis": (
-            "provenance_mix (quality, not depth); raw counts in "
-            "n_our_paper / n_counterparty_paper; evidence_sufficient requires "
-            f"n_our_paper >= min_evidence_n={min_evidence_n} "
-            "(producer-configurable, see config.provenance.min_evidence_n)"
-        ),
-        "n_our_paper": n_our_paper,
-        "n_counterparty_paper": n_counterparty_paper,
-        "evidence_sufficient": n_our_paper >= min_evidence_n,
-    }
-
-    if deterministic_deviations:
-        return _derive_rollup_deterministic(
-            group,
-            confidence,
-            precedent_counts,
-            conceded_before_signing=list(conceded_before_signing or []),
-            has_stub_basis=any(obs.basis in _STUB_BASES for obs in group),
-        )
-
-    # ---------------------------------------------------------------
-    # acceptable_if: neutral-risk signed variants (OPF §2.1)
-    # Our-paper first (stronger endorsement signal), then counterparty-paper.
-    # §2.2 Appendix B: counterparty-paper MAY inform tolerance bounds here.
-    # ---------------------------------------------------------------
-    neutral_signed = sorted(
-        (
-            obs
-            for obs in group
-            if obs.outcome == "signed"
-            and obs.risk_delta.get("direction") == "neutral"
-            and obs.deviation != "none"
-            and obs.basis not in _UNJUDGED_BASES
-        ),
-        key=lambda o: 0 if o.provenance == "our_paper" else 1,
-    )
-    # Full clause text (issue #105) — acceptable_if.to is the "acceptable
-    # alternative language" lawyers act on directly; a ≤ 300-char text_summary
-    # fragment is not actually usable drafting language.
-    #
-    # issue #141: each entry is a {if,to,rationale} triple, not a bare
-    # string — `to` is the accepted language (obs.full_text); `if` is the
-    # recognizable short-form pattern a reviewer matches a counterparty draft
-    # against (obs.text_summary — deliberately distinct from `to` so the
-    # entry reads as "if you see something like THIS, THIS full text is what
-    # we've accepted before"); `rationale` cites the precedent basis
-    # (deviation + precedent_count) that grounds the tolerance; observation_ref
-    # is the citation this entry is derived from (OPF §4 — resolvable evidence,
-    # not an assertion).
-    seen_texts: set[str] = set()
-    acceptable_if_list: list[AcceptableIfEntry] = []
-    for obs in neutral_signed:
-        if obs.full_text not in seen_texts:
-            seen_texts.add(obs.full_text)
-            precedent_count = 1
-            if precedent_counts is not None:
-                precedent_count = precedent_counts.get(_normalize_for_dedup(obs.full_text), 1)
-            acceptable_if_list.append(
-                AcceptableIfEntry(
-                    if_=obs.text_summary,
-                    to=obs.full_text,
-                    rationale=(
-                        f"Signed with neutral risk_delta (deviation={obs.deviation}); "
-                        f"{precedent_count}x precedent in the corpus."
-                    ),
-                    observation_ref=OPFCitation(
-                        document_id=obs.citation.document_id,
-                        version=obs.citation.version,
-                        clause_path=obs.citation.clause_path,
-                        char_span=obs.citation.char_span,
-                    ),
-                )
-            )
-
-    # ---------------------------------------------------------------
-    # fallbacks: worse-risk signed our-paper, ordered least→most costly
-    # ---------------------------------------------------------------
-    fallback_obs = tuple(
-        sorted(
-            (
-                _obs_to_observed_position(obs, precedent_counts)
-                for obs in group
-                if obs.provenance == "our_paper"
-                and obs.outcome == "signed"
-                and obs.risk_delta.get("direction") == "worse"
-            ),
-            key=lambda op: _MAGNITUDE_ORDER.get(op.risk_delta.get("magnitude", "minor"), 0),
-        )
-    )
-
-    # ---------------------------------------------------------------
-    # rejected: proposed_then_reversed observations
-    # ---------------------------------------------------------------
-    rejected_obs = tuple(
-        _obs_to_observed_position(obs, precedent_counts)
-        for obs in group
-        if obs.outcome == "proposed_then_reversed"
-    )
-
-    # ---------------------------------------------------------------
-    # stance_detail — held-rate behind the historical_stance enum
-    # (issue #177, OPF §3.5.3, resolves spec Appendix A.3)
-    # ---------------------------------------------------------------
-    # "Held" mirrors the cascade's own semantics: an observation where our
-    # position did NOT give ground — a refusal (proposed_then_reversed) or a
-    # signing with no worse-risk shift. "Conceded" is exactly the fallbacks
-    # definition above (signed, direction="worse"). Basis is our_paper when
-    # any our-paper evidence exists (the §2.2-preferred pool the stance is
-    # actually derived from), else the whole group. Outcomes outside the OPF
-    # enum (e.g. "unsigned", issue #83) are not opportunities and count in
-    # neither number.
-    # Basis follows the DEAL evidence, not has_our_paper: has_our_paper is
-    # true for template-only grounding (t_obs), which would emit a vacuous
-    # "held 0 of 0, basis our_paper" while real counterparty concessions
-    # exist in the group — basis "all" over the group is the derivable truth
-    # there (review finding, 2026-07-13).
-    conceded_rows = list(conceded_before_signing or [])
-    # A conceded_before_signing row from a non-our-paper deal forces basis
-    # "all": counting that deal's concession under an our_paper label would
-    # count non-our-paper deals only when they concede and never when they
-    # hold — a one-directional paper-side weighting (owner decision
-    # 2026-09-13 (b)). Under "all" the whole group is the pool, so such deals
-    # count whether they held or conceded.
-    detail_basis = (
-        "our_paper"
-        if (our_paper_obs or any(obs.provenance == "our_paper" for obs in conceded_rows))
-        and all(obs.provenance == "our_paper" for obs in conceded_rows)
-        else "all"
-    )
-    detail_pool = [
-        obs
-        for obs in (our_paper_obs if detail_basis == "our_paper" else group)
-        if obs.outcome in _OPF_OUTCOMES
-    ]
-    # Every conceded_before_signing row joins the pool: these rows are
-    # identified by ORIGIN (our standard language struck before signing),
-    # never by paper side (owner decision 2026-09-13 (b), applied on #216).
-    # The basis rule above guarantees the pool's label stays true.
-    # _derive_position below receives the same set, so the position and
-    # stance_detail cannot disagree about whether a concession exists.
-    conceded_pool = conceded_rows
-    # Issue #216: held/of count DISTINCT deals (citation.document_id), not
-    # rows — a deal's signed row and its reversal rows are one opportunity.
-    # A deal is "held" unless any of its rows conceded (signed, worse) or it
-    # struck our standard language before signing (conceded_before_signing
-    # — a concession even when the clause was struck outright and the deal
-    # has no signed row for it): the signed outcome is what the deal settled
-    # on, so a reversal earlier in the same trail never offsets a concession.
-    pool_deals = {obs.citation.document_id for obs in detail_pool + conceded_pool}
-    conceded_deals = {
-        obs.citation.document_id
-        for obs in detail_pool
-        if obs.outcome != "proposed_then_reversed" and obs.risk_delta.get("direction") == "worse"
-    } | {obs.citation.document_id for obs in conceded_pool}
-    held = len(pool_deals - conceded_deals)
-    stance_detail: dict[str, Any] = {"held": held, "of": len(pool_deals), "basis": detail_basis}
-
-    # ---------------------------------------------------------------
-    # §2.2 enforcement — position cap
-    # ---------------------------------------------------------------
-    has_stub_basis = any(obs.basis in _STUB_BASES for obs in group)
-    has_insufficient_evidence = n_our_paper < min_evidence_n
-    if not has_our_paper:
-        # Provenance rule: counterparty-paper-only → must not exceed "negotiable".
-        position = "negotiable"
-    elif not has_our_standard:
-        # §2.2 (issue #182): a strong position/stance must point at an
-        # our_standard clause. our-paper observations exist here but no template
-        # clause covers this taxonomy, so there is no standard to hold — cap at
-        # negotiable rather than emit a "consistently_held" stance the validator
-        # (correctly) rejects for having our_standard: null.
-        position = "negotiable"
-    elif has_stub_basis:
-        # Stub cap: at least one observation in this clause type was never
-        # assessed by any judge (no judge configured at all) — the position
-        # cannot be trusted beyond "negotiable", regardless of what the other
-        # (possibly judged) observations in the group would otherwise derive.
-        position = "negotiable"
-    elif has_insufficient_evidence:
-        # Evidence-depth cap (issue #107): fewer than MIN_EVIDENCE_N our-paper
-        # observations is not enough independent evidence to call a clause
-        # "standard"/"acceptable_variants_exist"/"hold_firm" — one agreement
-        # is one data point, not a pattern, regardless of confidence.score.
-        position = "negotiable"
-    else:
-        position = _derive_position(
-            our_paper_obs, fallback_obs, rejected_obs, conceded_before_signing=bool(conceded_rows)
-        )
-
-    # Post-condition: structural guarantee that §2.2 was not violated.
-    assert not (not has_our_paper and position in _POSITION_STRONGER_THAN_NEGOTIABLE), (
-        f"BUG: §2.2 violated — position={position!r} emitted with no our-paper signal"
-    )
-    assert not (not has_our_standard and position in _POSITION_STRONGER_THAN_NEGOTIABLE), (
-        f"BUG: §2.2 violated — position={position!r} emitted with our_standard: null"
-    )
-    assert not (has_stub_basis and position in _POSITION_STRONGER_THAN_NEGOTIABLE), (
-        f"BUG: stub-basis cap violated — position={position!r} emitted from a "
-        "clause type with a stub-basis observation"
-    )
-    assert not (has_insufficient_evidence and position in _POSITION_STRONGER_THAN_NEGOTIABLE), (
-        f"BUG: evidence-depth cap violated — position={position!r} emitted with "
-        f"n_our_paper={n_our_paper} < min_evidence_n={min_evidence_n}"
-    )
-
-    return ClauseRollup(
-        position=position,
-        acceptable_if=tuple(acceptable_if_list),
-        fallbacks=fallback_obs,
-        rejected=rejected_obs,
-        confidence=confidence,
-        stub_basis_present=has_stub_basis,
-        stance_detail=stance_detail,
-    )
-
-
-def _derive_rollup_deterministic(
-    group: list[Observation],
-    confidence: dict[str, Any],
-    precedent_counts: dict[str, int] | None,
-    *,
-    conceded_before_signing: list[Observation],
-    has_stub_basis: bool,
-) -> ClauseRollup:
-    """The consumer-path rollup (issue #220) — see ``_derive_rollup``.
-
-    Deterministic facts only: refused asks (``proposed_then_reversed``) and
-    the held-rate ``n_signed_standard / n_deals``, both counted in distinct
-    deals (issue #216). No tolerance, fallback or stance is read out of the
-    placeholder risk_delta.
-    """
-    rejected_obs = tuple(
-        _obs_to_observed_position(obs, precedent_counts)
-        for obs in group
-        if obs.outcome == "proposed_then_reversed"
-    )
-    pool = [obs for obs in group if obs.outcome in _OPF_OUTCOMES] + conceded_before_signing
-    n_deals = len({obs.citation.document_id for obs in pool})
-    n_signed_standard = len(
-        {obs.citation.document_id for obs in group if obs.outcome == "signed" and obs.standard}
-    )
-    return ClauseRollup(
-        position="negotiable",
-        acceptable_if=(),
-        fallbacks=(),
-        rejected=rejected_obs,
-        confidence=confidence,
-        stub_basis_present=has_stub_basis,
-        stance_detail={"held": n_signed_standard, "of": n_deals, "basis": "all"},
-        deterministic_deviations=True,
-    )
-
-
-def _derive_position(
-    our_paper_obs: list[Observation],
-    fallback_obs: tuple[ObservedPosition, ...],
-    rejected_obs: tuple[ObservedPosition, ...],
-    *,
-    conceded_before_signing: bool = False,
-) -> str:
-    """Derive position string from our-paper deal signal.
-
-    ``conceded_before_signing`` (issue #216): some deal removed our standard
-    language before signing — a concession, so the position is at most
-    "negotiable", exactly as a worse-risk signed fallback makes it.
-
-    Note: when ``our_paper_obs`` is empty (only template grounding, no deal
-    evidence), we conservatively return ``"negotiable"`` — a template alone
-    is not sufficient to assert a strong position without deal confirmation.
-    The validator enforces the same constraint (§2.2).
-    """
-    # Strong positions (> negotiable) require our-paper DEAL signal (§2.2).
-    # Counterparty-paper reversals inform tolerance/clause_library only; they
-    # must not, together with a template match, manufacture a hold_firm.
-    our_paper_rejected = [op for op in rejected_obs if op.provenance == "our_paper"]
-    if not our_paper_obs:
-        # No our-paper deal evidence (template-only or counterparty-only) — cap.
-        return "negotiable"
-
-    if fallback_obs or conceded_before_signing:
-        # We have conceded before — negotiable.
-        return "negotiable"
-
-    # Check for neutral-risk signed variants whose deviation was actually judged.
-    signed_our = [obs for obs in our_paper_obs if obs.outcome == "signed"]
-    neutral_variants = [
-        obs
-        for obs in signed_our
-        if obs.risk_delta.get("direction") == "neutral"
-        and obs.deviation != "none"
-        and obs.basis not in _UNJUDGED_BASES
-    ]
-    if neutral_variants:
-        return "acceptable_variants_exist"
-
-    if our_paper_rejected:
-        # We have explicitly rejected asks on our paper with no concessions.
-        return "hold_firm"
-
-    # All signed our-paper observations are deviation=none or strictly better-risk.
-    # A "better" risk_delta with deviation != "none" still maps to "standard" here —
-    # it means we achieved a more favourable variant, not that there are variants to
-    # negotiate. Issue #24 may surface these in acceptable_if as positive examples.
-    return "standard"
 
 
 def _title_from_id(taxonomy_id: str) -> str:

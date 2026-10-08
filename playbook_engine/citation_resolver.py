@@ -1,8 +1,8 @@
 """Citation resolver — the reference implementation of OPF §4 resolution
 (issue #185, format half of #117).
 
-Given a playbook, a clause id, an observation index, and a directory holding
-the corpus source files, resolve the observation's ``example_ref`` to the
+Given a playbook, a clause id, a precedent index, and a directory holding
+the corpus source files, resolve that precedent record's citation to the
 actual cited file and verify its bytes by content address:
 
 1. Read the citation ``(document_id, version, clause_path, char_span)``.
@@ -20,12 +20,12 @@ actual cited file and verify its bytes by content address:
 ``ResolvedCitation`` also exposes an optional ``page``, but that is a
 consumer-side convenience, not part of the compiled OPF citation shape:
 OPF-SPEC §10.1 excludes citations from the ``x_*`` extension mechanism, so
-no producer in this codebase ever writes ``page`` into ``example_ref`` —
+no producer in this codebase ever writes ``page`` into a citation —
 it stays ``None`` from real data (see ``test_resolve_citation_roundtrip``)
 unless a non-conformant/foreign playbook dict happens to carry the key.
 
-On an OPF 0.4 document a precedent record can also be addressed directly
-by its stable id (:func:`resolve_precedent_citation`, issue #224).
+A precedent record can also be addressed directly by its stable id
+(:func:`resolve_precedent_citation`, issue #224).
 
 Consumers copy this algorithm; ``playbook resolve-citation`` (cli.py) is
 its command-line face.
@@ -40,7 +40,6 @@ from typing import Any
 from playbook_engine.canonicalize import file_sha256
 from playbook_engine.opf_accessors import (
     clause_precedent,
-    is_precedent_shape,
     playbook_clauses,
     precedent_by_id,
 )
@@ -110,14 +109,14 @@ def resolve_citation(
     obs_index: int,
     corpus_dir: Path,
 ) -> ResolvedCitation:
-    """Resolve one observation's citation to a hash-verified source file.
+    """Resolve one precedent record's citation to a hash-verified source file.
 
     Args:
-        playbook:   Parsed playbook document (OPF 0.2-0.4).
+        playbook:   Parsed OPF 0.4 playbook document.
         clause_id:  ``evidence.clauses[].id`` (e.g. ``"clause.indemnification"``).
-        obs_index:  Index into that clause's ``observed_positions`` (OPF
-                    0.2/0.3), or into its ``evidence.precedent`` records
-                    (OPF 0.4).
+        obs_index:  Index into that clause's ``evidence.precedent`` records;
+                    each cites its signed text, else the text it opened
+                    with, else its first refused ask.
         corpus_dir: Directory holding the corpus source files.
 
     Raises:
@@ -131,13 +130,7 @@ def resolve_citation(
         known = ", ".join(c.get("id", "?") for c in playbook_clauses(playbook))
         raise CitationResolutionError(f"no clause with id {clause_id!r} (known: {known})")
 
-    if is_precedent_shape(playbook):
-        # OPF 0.4 (issue #223): obs_index indexes the clause's precedent
-        # records; each cites its signed text, else the text it opened with,
-        # else its first refused ask.
-        refs = [_precedent_ref(p) for p in clause_precedent(playbook, clause)]
-    else:
-        refs = [o.get("example_ref") or {} for o in clause.get("observed_positions", [])]
+    refs = [_precedent_ref(p) for p in clause_precedent(playbook, clause)]
     if not 0 <= obs_index < len(refs):
         raise CitationResolutionError(
             f"observation index {obs_index} out of range for {clause_id!r} "
@@ -151,18 +144,17 @@ def resolve_precedent_citation(
     precedent_id: str,
     corpus_dir: Path,
 ) -> ResolvedCitation:
-    """Resolve one OPF 0.4 precedent record's citation by its stable id (issue #224).
+    """Resolve one precedent record's citation by its stable id (issue #224).
 
     The record is addressed by ``evidence.precedent[].id`` (``prec.<sha>``,
     as the digest's ``precedent_ids`` and ``precedent.jsonl`` carry it)
     rather than by a clause and an index. It cites its signed text, else
     the text it opened with, else its first refused ask — the same rule
-    :func:`resolve_citation` applies on a 0.4 document.
+    :func:`resolve_citation` applies.
 
     Raises:
-        CitationResolutionError: no precedent record with that id (including
-            any pre-0.4 document), or any failure :func:`resolve_citation`
-            documents.
+        CitationResolutionError: no precedent record with that id, or any
+            failure :func:`resolve_citation` documents.
     """
     record = precedent_by_id(playbook, precedent_id)
     if record is None:
@@ -228,10 +220,10 @@ def _resolve_ref(
 
     char_span = ref.get("char_span")
     # ``page`` is permanently outside the compiled OPF citation shape: spec/
-    # playbook.schema-0.3.json's $defs.citation is closed
+    # playbook.schema-0.4.json's $defs.citation is closed
     # (additionalProperties: false), OPF-SPEC §10.1 excludes citations from
-    # the x_* extension mechanism, and §11 freezes 0.3 against shape
-    # changes — no producer in this codebase sets it, and none conformantly
+    # the x_* extension mechanism, and §11 freezes a published format
+    # against shape changes — no producer in this codebase sets it, and none conformantly
     # can (see the module docstring). Read defensively only so a
     # non-conformant/foreign playbook dict carrying a stray "page" key
     # degrades to None instead of raising; a wrong-typed or out-of-range

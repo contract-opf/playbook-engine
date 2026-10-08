@@ -25,9 +25,8 @@ Hermetic, same guarantees as test_nda_smoke.py:
 This is deliberately NOT byte-identical reproduction: `compiler.generated_at`
 and `posture.generation.generated_at` are wall-clock timestamps, and
 `baseline.template_ref.source` is the deriving machine's own absolute
-filesystem path, so `identity.content_hash` legitimately differs run to run
-(same rule the `our-paper-baseline.v0.2.playbook.json` fixture documents for
-its own frozen provenance strings). What must be reproducible is the
+filesystem path, so `identity.content_hash` legitimately differs run to run.
+What must be reproducible is the
 *semantic* content:
 same clause/observation counts, same reversal, same Floor invariants, same
 populated Posture -- asserted below by diffing the reproduced document

@@ -45,7 +45,6 @@ from unittest.mock import patch
 
 import yaml
 
-from playbook_engine.clause_position_compiler import CoherenceFlag
 from playbook_engine.config import load_config
 from playbook_engine.pipeline import compile_corpus
 from playbook_engine.provenance_detector import AMBIGUITY_THRESHOLD, ProvenanceResult
@@ -154,7 +153,7 @@ _V2_SIGNED_BODY = (
 # this as a genuinely signed copy — otherwise, per issue #83, the pipeline
 # correctly records outcome="unsigned" and withholds these observations from
 # OPF-conformant clause positions entirely, which would starve out the
-# coherence-judge tests below that need at least one real position.
+# coherence_flags.json tests below that need at least one real position.
 _AMBIG_BODY = (
     r"1. Parties\par "
     r"This Agreement is entered into by and between Alpha Corp and Beta University.\par "
@@ -530,47 +529,6 @@ def test_ambiguous_our_paper_lean_is_never_relabelled(tmp_path: Path) -> None:
     assert {(r["paper"], r["paper_basis"]) for r in records} == {("unknown", "alias_present")}
 
 
-def test_v03_unknown_paper_counts_match_the_listed_observed_positions(tmp_path: Path) -> None:
-    """Issue #225: in 0.3 output an "unknown" paper side is emitted through
-    two_valued_side, and summary.confidence's counts (and the clause-library
-    note) are counted through the same mapping — the document never says one
-    thing in observed_positions and another in its counts."""
-    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path, body=_AMBIG_OUR_LEAN_BODY)
-    config = load_config(config_path)
-    taxonomy = load_taxonomy(config.taxonomy_path)
-
-    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False, opf_version="0.3")
-
-    playbook = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert playbook["opf_version"] == "0.3"
-    assert validate_document(playbook).ok
-    corpus_doc = _corpus_doc(playbook, "deal-ambig")
-    assert corpus_doc["provenance"] == "counterparty_paper"
-    assert corpus_doc["provenance_is_ambiguous"] is True
-
-    clauses = playbook["evidence"]["clauses"]
-    assert clauses, "no clauses compiled -- nothing would be checked"
-    for clause in clauses:
-        positions = clause["observed_positions"]
-        assert positions
-        confidence = clause["summary"]["confidence"]
-        for side, key in (
-            ("our_paper", "n_our_paper"),
-            ("counterparty_paper", "n_counterparty_paper"),
-        ):
-            listed = {p["example_ref"]["document_id"] for p in positions if p["provenance"] == side}
-            assert confidence[key] == len(listed), (key, confidence, positions)
-        assert confidence["n_counterparty_paper"] == 1
-        assert confidence["score"] == 0.5
-
-    library = playbook["evidence"]["clause_library"]
-    assert library
-    for concept in library:
-        n_cp = sum(1 for f in concept["accepted_forms"] if f["provenance"] == "counterparty_paper")
-        assert n_cp == 1
-        assert concept["notes"] == f"Accepted in {n_cp} signed counterparty-paper observation(s)."
-
-
 def test_store_backed_judge_miss_is_unknown_never_counterparty(tmp_path: Path) -> None:
     """Issue #225: a store-backed provenance judge with no verdict returns
     "unknown" at 0.0 (basis needs_review) -- previously counterparty_paper at
@@ -746,7 +704,7 @@ def test_stop_after_intermediates_status_dict_document_count(tmp_path: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# P3.2 — ProvenanceJudge/SignedJudge/CoherenceJudge injection (issue #56)
+# P3.2 — ProvenanceJudge/SignedJudge injection (issue #56)
 # ---------------------------------------------------------------------------
 
 
@@ -783,21 +741,6 @@ class _RecordingSignedJudge:
         return SignedStatus(signed=False, basis="llm", confidence=0.50)
 
 
-class _RecordingCoherenceJudge:
-    """Recording stub: captures all clause summaries; flags all with severity=warn."""
-
-    def __init__(self) -> None:
-        self.received_summaries: list[dict] = []
-
-    def judge(self, clause_summary: dict) -> CoherenceFlag | None:
-        self.received_summaries.append(clause_summary)
-        return CoherenceFlag(
-            clause_id=clause_summary["clause_id"],
-            reason="stub flag",
-            severity="warn",
-        )
-
-
 class _RaisingProvenanceJudge:
     """Judge that always raises — simulates LLM timeout / network failure."""
 
@@ -809,13 +752,6 @@ class _RaisingSignedJudge:
     """Judge that always raises."""
 
     def judge(self, signature_subtree: str) -> None:
-        raise RuntimeError("LLM service unavailable")
-
-
-class _RaisingCoherenceJudge:
-    """Judge that always raises."""
-
-    def judge(self, clause_summary: dict) -> None:
         raise RuntimeError("LLM service unavailable")
 
 
@@ -876,56 +812,9 @@ def test_signed_judge_called_via_compile_corpus(tmp_path: Path) -> None:
     assert call_count[0] >= 1, "signed_judge was not forwarded to detect_signed via compile_corpus."
 
 
-def test_coherence_judge_called_via_compile_corpus(tmp_path: Path) -> None:
-    """AC: coherence_judge passed to compile_corpus is called during L5 compile.
-
-    The _RecordingCoherenceJudge is called for every clause with low n_our_paper
-    (< COHERENCE_MIN_CITATIONS = 3).  The test corpus has only one document so
-    all clause positions have n_our_paper < 3 — guaranteeing judge invocations.
-    """
-    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
-    config = load_config(config_path)
-    taxonomy = load_taxonomy(config.taxonomy_path)
-
-    judge = _RecordingCoherenceJudge()
-    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False, coherence_judge=judge)
-
-    assert len(judge.received_summaries) >= 1, (
-        "coherence_judge was never called — the judge was not threaded through compile_corpus. "
-        "With a single-document corpus every clause has n_our_paper < COHERENCE_MIN_CITATIONS."
-    )
-    for summary in judge.received_summaries:
-        assert "clause_id" in summary
-
-
-def test_coherence_flags_written_to_json(tmp_path: Path) -> None:
-    """AC: coherence_flags.json is written when coherence_judge is set.
-
-    The file must be a JSON array of flag dicts, each with clause_id/reason/severity.
-    """
-    corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
-    config = load_config(config_path)
-    taxonomy = load_taxonomy(config.taxonomy_path)
-
-    judge = _RecordingCoherenceJudge()
-    compile_corpus(corpus_dir, config, taxonomy, out_dir, resume=False, coherence_judge=judge)
-
-    flags_path = out_dir / "coherence_flags.json"
-    assert flags_path.exists(), "coherence_flags.json was not written"
-
-    flags = json.loads(flags_path.read_text())
-    assert isinstance(flags, list), "coherence_flags.json must be a JSON array"
-    assert len(flags) >= 1, "Expected at least one flag from the recording judge"
-
-    flag = flags[0]
-    assert "clause_id" in flag
-    assert "reason" in flag
-    assert "severity" in flag
-    assert flag["severity"] == "warn"
-
-
-def test_coherence_flags_written_empty_when_no_judge(tmp_path: Path) -> None:
-    """Coherence_flags.json is written as an empty array when no judge is configured."""
+def test_coherence_flags_written_empty_when_nothing_quarantined(tmp_path: Path) -> None:
+    """coherence_flags.json is always written — an empty array when no
+    sub-sentence fragment was quarantined (issue #210)."""
     corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
     config = load_config(config_path)
     taxonomy = load_taxonomy(config.taxonomy_path)
@@ -936,7 +825,7 @@ def test_coherence_flags_written_empty_when_no_judge(tmp_path: Path) -> None:
     assert flags_path.exists(), "coherence_flags.json must always be written (even empty)"
 
     flags = json.loads(flags_path.read_text())
-    assert flags == [], f"Expected empty list when no judge, got {flags!r}"
+    assert flags == [], f"Expected empty list, got {flags!r}"
 
 
 def test_no_judges_behavior_unchanged(tmp_path: Path) -> None:

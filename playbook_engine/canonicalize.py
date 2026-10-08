@@ -1,6 +1,6 @@
 """Canonical serialization + content hashing for OPF playbooks — issue #143.
 
-Gives an OPF v0.2 document artifact identity: a deterministic canonical
+Gives an OPF document artifact identity: a deterministic canonical
 serialization, a whole-document ``content_hash``, and per-section digests
 (evidence/posture/floor) — so a consumer can record which exact playbook
 governed which review, and lineage across compiles is reconstructible
@@ -18,7 +18,7 @@ output with:
     this string, so this only affects the human-readable form, not the hash.
 
 Array element order is NOT touched — order is semantic (e.g.
-``observed_positions`` order, taxonomy entry order) and reordering would
+``evidence.precedent`` order, taxonomy entry order) and reordering would
 silently change meaning.
 
 Whole-document ``content_hash`` excludes three things so it isn't
@@ -47,7 +47,7 @@ needing the whole document (OPF-SPEC.md §7's ``grounded_in:
 "evidence@<digest>"``).
 
 Hash format: ``"sha256:" + hexdigest``, matching the pattern already used by
-``composes[].integrity`` in ``spec/playbook.schema-0.2.json``
+``composes[].integrity`` in ``spec/playbook.schema-0.4.json``
 (``^sha256:[0-9a-f]{64}$``).
 """
 

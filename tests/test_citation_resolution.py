@@ -29,7 +29,7 @@ from playbook_engine.pipeline import compile_corpus
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.validator import validate_document
 
-FIXTURES = Path(__file__).parent.parent / "examples" / "fixtures"
+NDA_PLAYBOOK = Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json"
 
 _RTF_PROLOGUE = (
     r"{\rtf1\ansi\deff0"
@@ -84,9 +84,7 @@ def _make_corpus(tmp_path: Path) -> tuple[Path, Path]:
     return corpus_dir, config_path
 
 
-def _compile(
-    corpus_dir: Path, config_path: Path, out_dir: Path, *, opf_version: str = "0.4"
-) -> dict[str, Any]:
+def _compile(corpus_dir: Path, config_path: Path, out_dir: Path) -> dict[str, Any]:
     cfg = load_config(config_path)
     taxonomy = load_taxonomy(cfg.taxonomy_path)
     compile_corpus(
@@ -94,19 +92,16 @@ def _compile(
         config=cfg,
         taxonomy=taxonomy,
         out_dir=out_dir,
-        opf_version=opf_version,
     )
     return json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, Any], Path]:
-    """An OPF 0.3 compile: these tests index observed_positions directly (the
-    0.3 shape, kept for one release); the 0.4 precedent path is covered by
-    test_resolve_citation_roundtrip_opf_04 below."""
+    """An OPF 0.4 compile of the synthetic corpus."""
     tmp_path = tmp_path_factory.mktemp("citation-resolution")
     corpus_dir, config_path = _make_corpus(tmp_path)
-    playbook = _compile(corpus_dir, config_path, tmp_path / "out", opf_version="0.3")
+    playbook = _compile(corpus_dir, config_path, tmp_path / "out")
     playbook_path = tmp_path / "out" / "playbook.opf.json"
     return corpus_dir, playbook, playbook_path
 
@@ -136,12 +131,23 @@ def test_version_files_emitted(tmp_path: Path) -> None:
     assert snap_a == snap_b, "snapshot must be stable across identical compiles"
 
 
+def _first_precedent_ref(playbook: dict[str, Any]) -> dict[str, Any]:
+    """The citation precedent 0 of the first clause resolves to (its signed
+    text, else its opening text — citation_resolver._precedent_ref)."""
+    clause = playbook["evidence"]["clauses"][0]
+    record = next(
+        p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == clause["taxonomy_id"]
+    )
+    ref: dict[str, Any] = (record["signed_text"] or record["opening_text"])["ref"]
+    return ref
+
+
 def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path]) -> None:
-    """Observation 0 of the first clause resolves to the staged file whose
+    """Precedent 0 of the first clause resolves to the staged file whose
     sha256 matches, carrying the citation's clause_path/char_span."""
     corpus_dir, playbook, _ = compiled
     clause = playbook["evidence"]["clauses"][0]
-    ref = clause["observed_positions"][0]["example_ref"]
+    ref = _first_precedent_ref(playbook)
 
     resolved = resolve_citation(playbook, clause["id"], 0, corpus_dir)
 
@@ -152,7 +158,7 @@ def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path])
     assert resolved.clause_path == ref["clause_path"]
     if ref.get("char_span"):
         assert list(resolved.char_span) == ref["char_span"]
-    # #86: the compiled citation object (spec/playbook.schema-0.3.json's
+    # #86: the compiled citation object (spec/playbook.schema-0.4.json's
     # closed $defs.citation) never carries a "page" key (see
     # citation_resolver's module docstring) — resolve_citation() must
     # default to None rather than crash or fabricate a value.
@@ -272,13 +278,13 @@ def test_resolved_citation_describe_unchanged_when_page_absent() -> None:
 
 
 def _with_example_ref_page(playbook: dict[str, Any], page_value: Any) -> dict[str, Any]:
-    """Deep-copy *playbook* with a raw ``page`` key injected into the first
-    clause's first observation's ``example_ref`` — simulating a hand-edited/
-    foreign playbook dict (the compiled schema is closed, so no producer in
-    this codebase ever writes this key) to exercise resolve_citation()'s
-    defensive page gate."""
+    """Deep-copy *playbook* with a raw ``page`` key injected into the
+    citation the first clause's precedent 0 resolves through — simulating a
+    hand-edited/foreign playbook dict (the compiled schema is closed, so no
+    producer in this codebase ever writes this key) to exercise
+    resolve_citation()'s defensive page gate."""
     doc: dict[str, Any] = json.loads(json.dumps(playbook))
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["example_ref"]["page"] = page_value
+    _first_precedent_ref(doc)["page"] = page_value
     return doc
 
 
@@ -314,15 +320,19 @@ def test_resolve_citation_accepts_valid_page(
 
 
 def _load_minimal() -> dict[str, Any]:
-    with (FIXTURES / "valid_v0_2_minimal.json").open() as f:
-        return json.load(f)
+    """The compiled NDA example, identity dropped so a corpus edit trips only
+    the rule under test."""
+    doc: dict[str, Any] = json.loads(NDA_PLAYBOOK.read_text(encoding="utf-8"))
+    del doc["identity"]
+    return doc
 
 
 def test_validator_rejects_unlisted_citation() -> None:
     """A citation to a (doc, version) absent from version_files must fail."""
     doc = _load_minimal()
-    # The fixture's citations cite university-of-example v2/v3; publish
-    # version_files listing only v1 → every cited version is unaddressable.
+    # The example's citations cite its first deal's later drafts; publish
+    # version_files listing only v1 → every such cited version is
+    # unaddressable.
     doc["corpus"]["documents"][0]["version_files"] = [
         {"version": 1, "sha256": "sha256:" + "a" * 64, "media_type": "application/pdf"}
     ]

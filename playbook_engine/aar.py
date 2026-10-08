@@ -9,13 +9,13 @@ compiled playbook, covering:
   3. **Judgment economics** — unique items judged, dedup/cache ratio,
      rough token estimate from ``<out>/judge/*``.
   4. **Semantic coverage** — % clauses classified, deviation distribution,
-     provenance distribution, rollup-position histogram.
+     provenance distribution.
   5. **Needs attention** — quarantined documents (from ``quarantine.json``),
      degenerate deviation distributions (rubber-stamp judging), corpus-level
      provenance ambiguity flips, low-confidence/``needs_review``/
      ``judge_error`` items, each with its item number.
   6. **Honesty** — blank/defaulted fields enumerated; human-input-required
-     v0.2 items (GC-authored Posture, Floor from classified reversals).
+     items (GC-authored Posture, Floor from classified reversals).
 
 Usage::
 
@@ -39,13 +39,7 @@ from playbook_engine.inspection_report import (
     _load_scope,
     _load_trails,
 )
-from playbook_engine.opf_accessors import (
-    clause_confidence,
-    clause_stance,
-    is_precedent_shape,
-    playbook_clause_library,
-    playbook_clauses,
-)
+from playbook_engine.opf_accessors import playbook_clauses
 from playbook_engine.pipeline import _LLM_SEGMENTER_CONFIDENCE
 
 _log = logging.getLogger(__name__)
@@ -469,7 +463,7 @@ def _build_semantic_coverage(
     all_obs: list[dict[str, Any]],
     playbook: dict[str, Any],
 ) -> dict[str, Any]:
-    """Semantic coverage: classification %, deviation dist, provenance dist, position hist."""
+    """Semantic coverage: classification %, deviation dist, provenance dist."""
     total_obs = len(all_obs)
     classified_count = sum(
         1 for obs in all_obs if isinstance(obs, dict) and obs.get("taxonomy_id") is not None
@@ -493,20 +487,7 @@ def _build_semantic_coverage(
         prov = obs.get("provenance", "unknown")
         provenance_dist[prov] = provenance_dist.get(prov, 0) + 1
 
-    # Rollup-position histogram from playbook clauses (shape-agnostic —
-    # reads v0.2 evidence.clauses / summary.historical_stance or v0.1
-    # clauses / rollup.position via playbook_clauses()/clause_stance()).
-    position_hist: dict[str, int] = {}
-    clauses: list[dict[str, Any]] = []
-    if playbook:
-        clauses = playbook_clauses(playbook)
-        # OPF 0.4 (issue #223) carries no stance at all — a histogram of
-        # "unknown" would read as a defect, so it is simply not drawn.
-        for clause in [] if is_precedent_shape(playbook) else clauses:
-            if not isinstance(clause, dict):
-                continue
-            position = clause_stance(clause)
-            position_hist[position] = position_hist.get(position, 0) + 1
+    clauses: list[dict[str, Any]] = playbook_clauses(playbook) if playbook else []
 
     return {
         "total_observations": total_obs,
@@ -515,7 +496,6 @@ def _build_semantic_coverage(
         "classification_pct": round(classification_pct, 1),
         "deviation_distribution": deviation_dist,
         "provenance_distribution": provenance_dist,
-        "rollup_position_histogram": position_hist,
         "total_clauses_in_playbook": len(clauses),
     }
 
@@ -535,7 +515,7 @@ def _zero_clause_reason(
          empty, e.g. an all-unsigned fixture built from a minimal/empty
          taxonomy).
       2. Empty clause taxonomy (issue #25 fix round 2): taxonomy.entries
-         is schema-legal to be empty (spec/playbook.schema-0.3.json has no
+         is schema-legal to be empty (spec/playbook.schema-0.4.json has no
          minItems on it — see playbook_engine/taxonomy.py's loader), and a
          zero-entry taxonomy leaves nothing to classify any observation
          into regardless of signing status.
@@ -877,13 +857,10 @@ def _build_honesty(
     all_obs: list[dict[str, Any]],
     playbook: dict[str, Any],
 ) -> dict[str, Any]:
-    """Honesty: blank/defaulted fields; human-input-required v0.2 items."""
+    """Honesty: blank/defaulted fields; human-input-required items."""
     blank_fields: list[dict[str, Any]] = []
-    human_required: list[dict[str, Any]] = []
 
-    # Enumerate blank/defaulted OPF clause fields (shape-agnostic — see
-    # opf_accessors for the v0.2 evidence.clauses/summary vs v0.1
-    # clauses/rollup fallback).
+    # Enumerate blank/defaulted OPF clause fields.
     if playbook:
         clauses: list[dict[str, Any]] = playbook_clauses(playbook)
         # A ZERO-clause playbook is the biggest possible gap and previously
@@ -907,24 +884,13 @@ def _build_honesty(
             # healthy, fully-populated playbook too. The unconditional
             # honesty_notes below already disclose that standing fact; this
             # block instead answers "is THIS playbook empty end to end?".
-            if not playbook_clause_library(playbook):
-                blank_fields.append(
-                    {
-                        "clause_id": "—",
-                        "field": "evidence.clause_library",
-                        "reason": (
-                            "no clause concepts were extracted — the compiled "
-                            "clause-concept library is empty"
-                        ),
-                    }
-                )
             if not playbook.get("posture"):
                 blank_fields.append(
                     {
                         "clause_id": "—",
                         "field": "posture",
                         "reason": (
-                            "GC-authored Posture is a v0.2 human-input field not yet "
+                            "GC-authored Posture is a human-input field not yet "
                             "generated by the engine — no interview has been run"
                         ),
                     }
@@ -952,12 +918,12 @@ def _build_honesty(
                     }
                 )
             # Issue #25 fix round 2: taxonomy is a required top-level section
-            # (spec/playbook.schema-0.3.json `required`) but taxonomy.entries
+            # (spec/playbook.schema-0.4.json `required`) but taxonomy.entries
             # carries no minItems, so `entries: []` is schema-legal — and a
             # zero-entry taxonomy is itself a likely root cause of the
             # zero-clause playbook this whole block is reporting on (nothing
             # to classify observations into). Same reasoning as the
-            # clause_library/posture/floor/corpus.documents checks above:
+            # posture/floor/corpus.documents checks above:
             # scoped inside `if not clauses:` so a healthy, non-empty
             # taxonomy on a fully-populated playbook never flags here.
             if not (playbook.get("taxonomy") or {}).get("entries"):
@@ -975,7 +941,6 @@ def _build_honesty(
             if not isinstance(clause, dict):
                 continue
             clause_id = clause.get("id", "?")
-            conf = clause_confidence(clause)
 
             # Blank our_standard
             if clause.get("our_standard") is None:
@@ -986,35 +951,6 @@ def _build_honesty(
                         "reason": "no template clause found",
                     }
                 )
-
-            # Low-confidence rollup
-            score = conf.get("score")
-            if score is not None and score < 0.5:
-                blank_fields.append(
-                    {
-                        "clause_id": clause_id,
-                        "field": "rollup.confidence.score",
-                        "reason": f"low score ({score:.2f})",
-                    }
-                )
-
-            # Under-grounded positions require human review (issue #107): this
-            # previously only checked negotiable/hold_firm, but "standard" and
-            # "acceptable_variants_exist" built on a handful of our-paper
-            # citations are the more dangerous case — they read as settled
-            # guidance rather than a live negotiation point. Check ALL
-            # positions, not just negotiable/hold_firm.
-            position = clause_stance(clause)
-            if position and position != "unknown":
-                n_our = conf.get("n_our_paper", 0) or 0
-                if n_our < 3:
-                    human_required.append(
-                        {
-                            "clause_id": clause_id,
-                            "position": position,
-                            "reason": f"position={position!r} with n_our_paper={n_our} (< 3 citations)",
-                        }
-                    )
 
     # needs_review observations require human input
     needs_review_obs = [
@@ -1038,12 +974,12 @@ def _build_honesty(
 
     if posture_present:
         posture_note = (
-            "GC-authored Posture is present in this playbook (a v0.2 "
+            "GC-authored Posture is present in this playbook (a "
             "human-input field, generated from an interview)."
         )
     else:
         posture_note = (
-            "GC-authored Posture is a v0.2 human-input field not yet generated "
+            "GC-authored Posture is a human-input field not yet generated "
             "by the engine — no interview has been run."
         )
 
@@ -1067,7 +1003,6 @@ def _build_honesty(
 
     return {
         "blank_or_defaulted_fields": blank_fields,
-        "human_input_required": human_required,
         "needs_review_observation_count": len(needs_review_obs),
         "reversal_observation_count": len(reversal_obs),
         "floor_invariant_count": len(floor_invariants),
@@ -1205,18 +1140,6 @@ def _render_semantic_coverage(data: dict[str, Any]) -> list[str]:
             lines.append(f"| `{prov}` | {count} |")
         lines.append("")
 
-    # Rollup position histogram
-    if data["rollup_position_histogram"]:
-        lines.append("### Rollup-position histogram")
-        lines.append("")
-        lines.append(f"*(from {data['total_clauses_in_playbook']} clause(s) in playbook)*")
-        lines.append("")
-        lines.append("| Position | Count |")
-        lines.append("|----------|-------|")
-        for pos, count in sorted(data["rollup_position_histogram"].items()):
-            lines.append(f"| `{pos}` | {count} |")
-        lines.append("")
-
     return lines
 
 
@@ -1276,18 +1199,6 @@ def _render_honesty(data: dict[str, Any]) -> list[str]:
         lines.append("No blank or defaulted fields detected in the compiled playbook.")
         lines.append("")
 
-    human = data.get("human_input_required", [])
-    if human:
-        lines.append(f"**{len(human)} clause(s) require human sign-off:**")
-        lines.append("")
-        lines.append("| Clause | Position | Reason |")
-        lines.append("|--------|----------|--------|")
-        for entry in human:
-            lines.append(
-                f"| `{entry['clause_id']}` | `{entry['position']}` | {_md_escape(entry['reason'])} |"
-            )
-        lines.append("")
-
     nr = data.get("needs_review_observation_count", 0)
     if nr > 0:
         lines.append(
@@ -1327,7 +1238,7 @@ def _render_honesty(data: dict[str, Any]) -> list[str]:
 
 
 def _build_artifacts(out_dir: Path, playbook: dict[str, Any] | None) -> dict[str, Any]:
-    """Artifacts: what shipped in out_dir, incl. the OPF 0.3 digest/bundle."""
+    """Artifacts: what shipped in out_dir, incl. the digest/bundle."""
     digest = (playbook or {}).get("digest") or {}
     token_estimate = None
     if digest:
@@ -1337,9 +1248,7 @@ def _build_artifacts(out_dir: Path, playbook: dict[str, Any] | None) -> dict[str
     return {
         "opf_version": (playbook or {}).get("opf_version"),
         "digest_present": bool(digest),
-        # digest_version 3 (OPF 0.4) has no clause_count key; its clause
-        # list length is the same number.
-        "digest_clause_count": digest.get("clause_count", len(digest.get("clauses") or [])),
+        "digest_clause_count": len(digest.get("clauses") or []),
         "digest_token_estimate": token_estimate,
         "files": {
             name: (out_dir / name).exists()
@@ -1365,9 +1274,7 @@ def _render_artifacts(data: dict[str, Any]) -> list[str]:
             f"- **Digest:** present — {data.get('digest_clause_count', '?')} clauses, {est_str}"
         )
     else:
-        lines.append(
-            "- **Digest:** absent (pre-0.3 playbook — run `playbook digest` to derive one)"
-        )
+        lines.append("- **Digest:** absent — run `playbook digest` to derive one")
     present = [name for name, ok in data.get("files", {}).items() if ok]
     missing = [name for name, ok in data.get("files", {}).items() if not ok]
     if present:

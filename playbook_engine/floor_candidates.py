@@ -976,7 +976,7 @@ def promote_interview_q4_invariants(
                              freshly-written or freshly-updated invariant's
                              ``rationale`` is attributed to.
         existing_invariants: The playbook's current ``floor.invariants``
-                             list (schema-0.2/0.3 shape: dicts with
+                             list (schema shape: dicts with
                              ``id``/``statement``/``rationale``), or
                              ``None``/``[]`` for a first-ever promotion.
 
@@ -1192,7 +1192,7 @@ def _floor_invariant_entry(
     place / append) share this so they can never drift on the key name or
     the "only when present" rule. NOT a bare ``taxonomy_id`` key: see the
     module comment above :func:`sign_floor_invariant` for why
-    ``spec/playbook.schema-0.3.json``'s frozen, ``additionalProperties:
+    ``spec/playbook.schema-0.4.json``'s frozen, ``additionalProperties:
     false`` invariant-entry shape forces the ``x_`` prefix.
     """
     entry: dict[str, Any] = {"id": inv_id, "statement": statement, "rationale": rationale}
@@ -1365,13 +1365,13 @@ def promote_floor_candidate(
 # ---------------------------------------------------------------------------
 
 # Storing a bare "taxonomy_id" key on a floor.invariants entry would violate
-# spec/playbook.schema-0.3.json's `additionalProperties: false` (only
+# spec/playbook.schema-0.4.json's `additionalProperties: false` (only
 # id/statement/rationale/`^x_.*` are allowed there) — and OPF-SPEC.md's
-# versioning policy (spec/CHANGELOG.md: "opf_version 0.3 ... frozen ... any
-# further spec-affecting change goes to 0.4") forbids widening that FROZEN
-# schema in place. The schema already ships an escape hatch for exactly this
+# versioning policy (spec/CHANGELOG.md: a published opf_version is frozen;
+# any further spec-affecting change goes to a new version) forbids widening
+# that FROZEN schema in place. The schema already ships an escape hatch for exactly this
 # situation (`patternProperties: {"^x_": true}`), the same one
-# clause_position_compiler.py's `x_search_snippet`, pipeline.py's
+# pipeline.py's
 # `x_quarantined`, and publisher.py's `x_publication` already use — so the
 # clause taxonomy id this function records goes in under that prefix,
 # `x_taxonomy_id`, never a bare `taxonomy_id`. A schema-version bump (or a

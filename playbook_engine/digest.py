@@ -1,42 +1,32 @@
 """Model-facing digest of an OPF playbook — the top-level `digest` section.
 
-Two shapes, dispatched on ``opf_version`` by :func:`build_digest`:
+**digest_version 3** (OPF 0.4, issue #223; the only digest the engine
+builds — digest 2 was retired with OPF 0.3, issue #238): the verdict-free
+projection of the per-deal precedent record. Per clause: our standard, how
+many deals signed it, and the non-standard signed variants and refused asks,
+grouped by OPF-SPEC §3.5.4's exact grouping key
+(``precedent.normalize_variant_text``) with distinct-deal counts, citations
+and precedent ids; plus ``perspective``, ``agreement_type`` and corpus
+counts. No stance, band or risk field.
 
-- **digest_version 3** (OPF 0.4, issue #223, :func:`build_digest_v3`) — the
-  verdict-free projection of the per-deal precedent record: per clause, our
-  standard, how many deals signed it, and the non-standard signed variants
-  and refused asks, grouped by OPF-SPEC §3.5.4's exact grouping key
-  (``precedent.normalize_variant_text``) with distinct-deal counts,
-  citations and precedent ids; plus ``perspective``,
-  ``agreement_type`` and corpus counts. No stance, band or risk field.
-- **digest_version 2** (OPF 0.3 and older, frozen) — described below.
-
-The full OPF document carries every observation's ``full_text`` and measures
-in the millions of characters on a real corpus — far beyond what a consuming
+The full OPF document carries every precedent's full text and measures in
+the millions of characters on a real corpus — far beyond what a consuming
 review application can put in a model's context. The digest is the compact
-projection designed for exactly that use: per clause, the stance, the
-preferred/concession/unacceptable variation summaries, and a deduplicated,
-frequency-annotated sample of exemplar forms, each carrying an
-``example_ref`` citation that resolves into the full playbook for on-demand
-drill-down (a consumer fetches ``full_text`` from the full OPF when needed —
-the digest itself never contains ``full_text``).
+projection designed for exactly that use: every variant and ask carries a
+``ref`` citation and its ``precedent_ids``, which resolve into the full
+playbook for on-demand drill-down (the digest itself never contains
+``full_text``).
 
-Emitted by ``assemble_playbook`` as the top-level ``digest`` section of an
-OPF 0.3 document, and extractable standalone via ``playbook digest``. The
-digest is a pure function of the evidence section, so it participates in
-``identity.content_hash`` like any other content section.
+Emitted by ``assemble_playbook`` as the top-level ``digest`` section, and
+extractable standalone via ``playbook digest``. The digest is a pure
+function of the document, so it participates in ``identity.content_hash``
+like any other content section.
 
 Size discipline: the budget is ~40K tokens (chars/4 rule of thumb — this
 codebase has no tokenizer dependency) and is ENFORCED by construction, not
-aspirational: every list — preferred variations, concessions, unacceptable
-variations, exemplar forms — is deduplicated by normalized text and capped
-at the top-N by evidentiary weight (``n`` = distinct deals) plus
-every material-risk group; if the digest still exceeds the budget,
-``build_digest`` tightens the cap stepwise (5 → 4 → 3) until it fits.
-Surviving entries are never truncated or paraphrased — a preferred
-variation's ``if``/``to`` language ships verbatim; only the compiler-
-generated ``rationale`` narration is left to the full OPF (reachable via
-``observation_ref``).
+aspirational: both lists start capped at ``EXEMPLAR_TOP_N`` and the cap
+tightens stepwise until the digest fits; ``n_variants_total`` /
+``n_refused_total`` always report the uncapped totals.
 """
 
 from __future__ import annotations
@@ -45,308 +35,23 @@ import re
 from typing import Any
 
 from playbook_engine.canonicalize import canonicalize
-from playbook_engine.opf_accessors import clause_stance, perspective_party, playbook_clauses
+from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 
 #: Schema version of the digest section itself — bump on any shape change so
 #: consumers can dispatch (the digest is consumed outside this repo).
-#: v2: preferred_variations deduped/ranked/capped like the other lists; digest
-#: entries carry {if, to, observation_ref, n, band} (rationale stays in the
-#: full OPF). ``n`` is the number of distinct deals (``document_id``) behind an
-#: entry — changed in place 2026-09-25 (issue #216, owner-authorized exception
-#: recorded in spec/CHANGELOG.md); it previously summed ``precedent_count``.
 DIGEST_VERSION = "3"
 
-#: The digest version an OPF 0.3 (or older) document's digest carries. A 0.3
-#: document keeps digest_version 2 forever — 0.3 is frozen (spec/CHANGELOG.md);
-#: ``build_digest`` dispatches on ``opf_version`` (issue #223).
-DIGEST_VERSION_V2 = "2"
-
-#: OPF versions whose evidence is the verdict-free per-deal precedent record
-#: (issue #223) — their digest is digest_version 3.
-_PRECEDENT_OPF_VERSIONS = frozenset({"0.4"})
-
-#: Digest 3 per-list cap (signed_variants, refused_asks): the loosest cap,
-#: tightened stepwise down to ``_MIN_TOP_N_V3`` until the digest fits the
-#: token budget. Unlike digest 2 there is no material-risk exception — risk
-#: is a judged verdict and never reaches the consumer path.
-_MIN_TOP_N_V3 = 1
-
-#: List selection (all four lists): keep the top N deduplicated entries by
-#: observation count, plus every entry carrying material risk regardless of
-#: rank. This is the default/loosest cap; build_digest tightens it to fit
-#: the token budget.
+#: Per-list cap (signed_variants, refused_asks): the default/loosest cap,
+#: tightened stepwise down to ``_MIN_TOP_N`` until the digest fits the
+#: token budget. There is no material-risk exception — risk is a judged
+#: verdict and never reaches the consumer path.
 EXEMPLAR_TOP_N = 5
+
+#: build_digest never tightens the per-list cap below this.
+_MIN_TOP_N = 1
 
 #: The hard size budget build_digest enforces (chars/4 rule of thumb).
 DIGEST_TOKEN_BUDGET = 40_000
-
-#: build_digest never tightens the per-list cap below this.
-_MIN_TOP_N = 3
-
-#: Frequency bands for exemplar forms — coarse language a reviewing model can
-#: use directly ("often signed as…") without re-deriving statistics.
-_BAND_OFTEN_MIN = 10
-_BAND_SOMETIMES_MIN = 2
-
-
-def _normalize_text(text: str) -> str:
-    """Normalization used to dedupe exemplar forms (case/punct/ws-insensitive)."""
-    s = text.lower()
-    s = re.sub(r"[^\w\s]", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def _band(n: int) -> str:
-    if n >= _BAND_OFTEN_MIN:
-        return "often"
-    if n >= _BAND_SOMETIMES_MIN:
-        return "sometimes"
-    return "rare"
-
-
-def _is_material(obs: dict[str, Any]) -> bool:
-    risk = obs.get("risk_delta") or {}
-    return isinstance(risk, dict) and risk.get("magnitude") == "material"
-
-
-def _deal_key(ref: Any) -> tuple[str, str]:
-    """The deal a digest row counts toward: its citation's ``document_id``.
-
-    Issue #216: the deal is the unit of precedent, so every digest ``n`` is
-    the number of DISTINCT deals in a group — never a sum of
-    ``precedent_count``, which the compiler stamps on every row of a text
-    (summing it reported a text signed in k deals as n = k*k). Every OPF
-    observation carries ``example_ref.document_id`` (required by every
-    playbook schema), so a row without one is not a conforming observation
-    and raises rather than being counted as a guessed deal.
-    """
-    if isinstance(ref, dict) and ref.get("document_id") is not None:
-        return ("doc", str(ref["document_id"]))
-    raise ValueError(
-        "digest: observation has no example_ref.document_id — every OPF "
-        "observation must cite the deal it was observed in"
-    )
-
-
-def _dedupe_rank(
-    observations: list[dict[str, Any]], *, include_deviation: bool, top_n: int = EXEMPLAR_TOP_N
-) -> list[dict[str, Any]]:
-    """Dedupe observations by normalized text and rank by frequency.
-
-    The digest's one size discipline, applied uniformly to exemplar forms,
-    concessions, and unacceptable variations: group by the normalized
-    ``full_text`` (falling back to ``text_summary``); ``n`` is the number of
-    distinct deals (``example_ref.document_id``, see ``_deal_key``) among the
-    group's members — never a sum of ``precedent_count`` (issue #216); keep
-    the top ``EXEMPLAR_TOP_N`` groups by ``n`` plus every group containing
-    material risk, in rank order. Output entries carry ``text_summary``
-    ONLY — never ``full_text``; ``example_ref`` is the drill-down path.
-    """
-    groups: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for obs in observations:
-        key = _normalize_text(str(obs.get("full_text") or obs.get("text_summary") or ""))
-        if not key:
-            continue
-        if key not in groups:
-            groups[key] = {"n": 0, "deals": set(), "rep": obs, "material": False}
-            order.append(key)
-        g = groups[key]
-        g["deals"].add(_deal_key(obs.get("example_ref")))
-        g["n"] = len(g["deals"])
-        if _is_material(obs):
-            g["material"] = True
-            # A material observation is the most informative representative.
-            g["rep"] = obs
-
-    first_seen = {k: i for i, k in enumerate(order)}
-    ranked = sorted(order, key=lambda k: (-groups[k]["n"], first_seen[k]))
-    keep = set(ranked[:top_n]) | {k for k in ranked if groups[k]["material"]}
-
-    forms: list[dict[str, Any]] = []
-    for key in ranked:
-        if key not in keep:
-            continue
-        g = groups[key]
-        rep = g["rep"]
-        form: dict[str, Any] = {
-            "text_summary": rep.get("text_summary", ""),
-            "n": g["n"],
-            "band": _band(g["n"]),
-        }
-        if include_deviation and rep.get("deviation") is not None:
-            form["deviation"] = rep["deviation"]
-        if rep.get("risk_delta") is not None:
-            form["risk_delta"] = rep["risk_delta"]
-        if rep.get("example_ref") is not None:
-            form["example_ref"] = rep["example_ref"]
-        forms.append(form)
-    return forms
-
-
-def _exemplar_forms(
-    observed_positions: list[dict[str, Any]], top_n: int = EXEMPLAR_TOP_N
-) -> list[dict[str, Any]]:
-    return _dedupe_rank(observed_positions, include_deviation=True, top_n=top_n)
-
-
-def _preferred_variations(clause: dict[str, Any], top_n: int) -> list[Any]:
-    """Project acceptable_if entries to the digest: dedupe, rank, cap.
-
-    Same discipline as the other three lists. Grouping key: the normalized
-    ``if``+``to`` text (or the whole entry for legacy bare strings). Rank
-    weight ``n``: the number of distinct deals (issue #216) behind the group
-    — each entry's own ``observation_ref`` deal plus every deal among the
-    clause's ``observed_positions`` whose normalized text equals the entry's
-    ``to`` language and whose ``outcome`` is ``"signed"`` (the compiler
-    lists each accepted text once, so its deals are read off the signed
-    positions carrying it; a deal that refused the text is not acceptance
-    precedent); never a sum of
-    ``precedent_count``. The underlying observation (for the material-risk
-    check) is resolved by matching ``observation_ref`` against
-    ``observed_positions``. Surviving dict entries ship
-    ``if``/``to`` VERBATIM plus ``observation_ref``, ``n``, and ``band`` —
-    the compiler-generated ``rationale`` narration stays in the full OPF.
-    Legacy bare-string entries pass through as strings.
-    """
-    entries = (clause.get("summary") or {}).get("acceptable_if") or []
-    if not entries:
-        return []
-
-    obs_by_ref: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
-    # Normalized observed text -> the distinct deals carrying it (issue #216).
-    deals_by_text: dict[str, set[tuple[str, Any]]] = {}
-    for pos in clause.get("observed_positions") or []:
-        pos_ref = pos.get("example_ref") or {}
-        obs_by_ref[
-            (pos_ref.get("document_id"), pos_ref.get("version"), pos_ref.get("clause_path"))
-        ] = pos
-        # Only SIGNED positions are acceptance precedent (the compiler builds
-        # acceptable_if from signed rows only): a deal where the same text
-        # was proposed_then_reversed refused it, and never counts here.
-        if pos.get("outcome") != "signed":
-            continue
-        text_key = _normalize_text(str(pos.get("full_text") or pos.get("text_summary") or ""))
-        if text_key:
-            deals_by_text.setdefault(text_key, set()).add(_deal_key(pos_ref))
-
-    groups: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for i, entry in enumerate(entries):
-        obs: dict[str, Any] = {}
-        deals: set[tuple[str, Any]] = set()
-        if isinstance(entry, str):
-            key = _normalize_text(entry)
-            deals |= deals_by_text.get(key, set())
-        else:
-            key = _normalize_text(f"{entry.get('if', '')} {entry.get('to', '')}")
-            ref = entry.get("observation_ref") or {}
-            obs = obs_by_ref.get(
-                (ref.get("document_id"), ref.get("version"), ref.get("clause_path")), {}
-            )
-            deals |= deals_by_text.get(_normalize_text(str(entry.get("to") or "")), set())
-            if isinstance(ref, dict) and ref.get("document_id") is not None:
-                deals.add(_deal_key(ref))
-        if not key:
-            continue
-        if not deals:
-            # Nothing resolvable (a legacy bare-string entry, which the
-            # schema allows, with no signed position carrying its text): the
-            # entry itself is one deal's evidence.
-            deals.add(("entry", i))
-        n = len(deals)
-        if key not in groups:
-            groups[key] = {"n": 0, "deals": set(), "rep": entry, "rep_n": -1, "material": False}
-            order.append(key)
-        g = groups[key]
-        g["deals"] |= deals
-        g["n"] = len(g["deals"])
-        if _is_material(obs):
-            g["material"] = True
-        if n > g["rep_n"]:
-            g["rep"], g["rep_n"] = entry, n
-
-    first_seen = {k: i for i, k in enumerate(order)}
-    ranked = sorted(order, key=lambda k: (-groups[k]["n"], first_seen[k]))
-    keep = set(ranked[:top_n]) | {k for k in ranked if groups[k]["material"]}
-
-    out: list[Any] = []
-    for key in ranked:
-        if key not in keep:
-            continue
-        g = groups[key]
-        rep = g["rep"]
-        if isinstance(rep, str):
-            out.append(rep)
-            continue
-        projected: dict[str, Any] = {"if": rep.get("if"), "to": rep.get("to")}
-        if rep.get("observation_ref") is not None:
-            projected["observation_ref"] = rep["observation_ref"]
-        projected["n"] = g["n"]
-        projected["band"] = _band(g["n"])
-        out.append(projected)
-    return out
-
-
-def _build_digest_at(playbook: dict[str, Any], top_n: int) -> dict[str, Any]:
-    """Build the digest with a fixed per-list cap of *top_n*."""
-    digest_clauses: list[dict[str, Any]] = []
-    for clause in playbook_clauses(playbook):
-        summary = clause.get("summary") or {}
-        our_standard = clause.get("our_standard")
-        entry: dict[str, Any] = {
-            "id": clause.get("id"),
-            "taxonomy_id": clause.get("taxonomy_id"),
-            "title": clause.get("title"),
-            "historical_stance": clause_stance(clause),
-            "stance_detail": summary.get("stance_detail"),
-            "our_standard": our_standard if isinstance(our_standard, dict) else None,
-            "preferred_variations": _preferred_variations(clause, top_n),
-            "concessions": _dedupe_rank(
-                summary.get("fallbacks") or [], include_deviation=False, top_n=top_n
-            ),
-            "unacceptable": _dedupe_rank(
-                summary.get("rejected") or [], include_deviation=False, top_n=top_n
-            ),
-            "exemplar_forms": _exemplar_forms(clause.get("observed_positions") or [], top_n),
-        }
-        digest_clauses.append(entry)
-
-    return {
-        "digest_version": DIGEST_VERSION_V2,
-        "clause_count": len(digest_clauses),
-        "clauses": digest_clauses,
-    }
-
-
-def build_digest(
-    playbook: dict[str, Any], *, token_budget: int | None = DIGEST_TOKEN_BUDGET
-) -> dict[str, Any]:
-    """Build the digest section from an assembled playbook's evidence.
-
-    Dispatches on ``opf_version``: an OPF 0.4 document (the verdict-free
-    per-deal precedent record, issue #223) gets a digest_version 3 digest
-    (:func:`build_digest_v3`); every older document (0.1/0.2/0.3) gets the
-    frozen digest_version 2 shape, so the CLI can still derive a digest from
-    a pre-0.4 artifact and a 0.3 document's digest never changes.
-
-    Enforces *token_budget* by construction: starts at the default per-list
-    cap (``EXEMPLAR_TOP_N``) and tightens it stepwise until the digest fits.
-    Pass ``token_budget=None`` for the loosest cap unconditionally. For
-    digest 2 the cap stops at ``_MIN_TOP_N`` and material-risk entries are
-    never dropped, so an extreme corpus can still exceed the budget — the
-    CLI warns in that case.
-    """
-    if playbook.get("opf_version") in _PRECEDENT_OPF_VERSIONS:
-        return build_digest_v3(playbook, token_budget=token_budget)
-    digest = _build_digest_at(playbook, EXEMPLAR_TOP_N)
-    if token_budget is None:
-        return digest
-    for top_n in range(EXEMPLAR_TOP_N - 1, _MIN_TOP_N - 1, -1):
-        if digest_token_estimate(digest) <= token_budget:
-            break
-        digest = _build_digest_at(playbook, top_n)
-    return digest
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +98,7 @@ def _latest_first_key(record: dict[str, Any]) -> tuple[bool, tuple[int, ...], st
 
 
 def playbook_precedent_records(playbook: dict[str, Any]) -> list[dict[str, Any]]:
-    """``evidence.precedent`` of an OPF 0.4 document (``[]`` when absent)."""
+    """``evidence.precedent`` of the document (``[]`` when absent)."""
     evidence = playbook.get("evidence")
     records = evidence.get("precedent") if isinstance(evidence, dict) else None
     return [p for p in records if isinstance(p, dict)] if isinstance(records, list) else []
@@ -524,7 +229,7 @@ def _corpus_summary(playbook: dict[str, Any], precedent: list[dict[str, Any]]) -
     }
 
 
-def _build_digest_v3_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, Any]:
+def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, Any]:
     """Digest 3 with a fixed per-list cap of *top_n* (``None`` = uncapped)."""
     precedent = playbook_precedent_records(playbook)
     party = perspective_party(playbook)
@@ -564,10 +269,10 @@ def _build_digest_v3_at(playbook: dict[str, Any], top_n: int | None) -> dict[str
     }
 
 
-def build_digest_v3(
+def build_digest(
     playbook: dict[str, Any], *, token_budget: int | None = DIGEST_TOKEN_BUDGET
 ) -> dict[str, Any]:
-    """Build a digest_version 3 digest from an OPF 0.4 document (issue #223).
+    """Build the digest_version 3 digest of an OPF 0.4 document (issue #223).
 
     Verdict-free: per clause, our standard, how many deals signed it, the
     non-standard signed variants and the refused asks, each grouped by
@@ -579,17 +284,18 @@ def build_digest_v3(
     it from elsewhere.
 
     The token budget is enforced by construction: both lists start capped
-    at ``EXEMPLAR_TOP_N`` and the cap tightens stepwise to ``_MIN_TOP_N_V3``
+    at ``EXEMPLAR_TOP_N`` and the cap tightens stepwise to ``_MIN_TOP_N``
     until the digest fits. ``n_variants_total``/``n_refused_total`` always
     report the uncapped totals, so a consumer knows what the cap left out.
+    Pass ``token_budget=None`` for the loosest cap unconditionally.
     """
-    digest = _build_digest_v3_at(playbook, EXEMPLAR_TOP_N)
+    digest = _build_digest_at(playbook, EXEMPLAR_TOP_N)
     if token_budget is None:
         return digest
-    for top_n in range(EXEMPLAR_TOP_N - 1, _MIN_TOP_N_V3 - 1, -1):
+    for top_n in range(EXEMPLAR_TOP_N - 1, _MIN_TOP_N - 1, -1):
         if digest_token_estimate(digest) <= token_budget:
             break
-        digest = _build_digest_v3_at(playbook, top_n)
+        digest = _build_digest_at(playbook, top_n)
     return digest
 
 

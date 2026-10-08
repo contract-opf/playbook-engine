@@ -272,16 +272,12 @@ class Observation:
                          or ``"conceded_before_signing"`` (issue #216: OUR
                          standard language removed before signing — our
                          concession, never a refused ask; engine-internal
-                         like ``"unsigned"``, so it never reaches
-                         ``observed_positions``, and the position compiler
-                         counts it only as a conceded deal).
+                         like ``"unsigned"``; the precedent record carries
+                         its text as the clause's ``opening_text``).
                          ``"unsigned"`` marks a clause from a document with no
-                         detected executed copy (issue #83) — the position
-                         compiler and clause library only ever treat
-                         ``outcome == "signed"`` as accepted-position evidence,
-                         so ``"unsigned"`` observations are excluded from
-                         those rollups by construction, not by a separate
-                         filter.
+                         detected executed copy (issue #83) — the precedent
+                         record carries it as ``signed: false``; only
+                         ``outcome == "signed"`` is signed precedent.
         confidence:      Classification confidence in [0, 1], or ``None`` when
                          the clause is unclassified or confidence is unavailable.
         basis:           How the deviation assessment was reached (e.g.
@@ -800,10 +796,9 @@ DROPPED_REFUSED_UNSIGNED = "refused_ask_no_signed_copy"
 #: decides, never the deal's paper side). Striking our own standard before
 #: signing is a concession we made, not an ask we refused, so it is never
 #: ``proposed_then_reversed``. Engine-internal like ``"unsigned"``: the OPF
-#: ``observation.outcome`` enum does not carry it, so the position compiler
-#: keeps it out of ``observed_positions`` / ``rollup.rejected`` (and hence
-#: the digest's ``unacceptable`` list and Floor candidates) and counts it
-#: only as a conceded deal in ``stance_detail`` and the position. Emitted
+#: ``observation.outcome`` enum does not carry it, so it never becomes a
+#: refused ask (nor a Floor candidate); the precedent record carries its
+#: text as the clause's ``opening_text``. Emitted
 #: only for a deal with a detected executed copy; otherwise the row is
 #: dropped under ``DROPPED_STANDARD_REMOVED_UNSIGNED`` (issue #83).
 OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
@@ -1595,11 +1590,11 @@ def build_observations(
                 proposed_by="unknown" if our_party_aliases is not None else None,
                 confidence=None,
                 # "deterministic": detected by detect_reversals' retained-
-                # token ratio (issue #222), not a judge call — but NOT one of the
-                # _UNJUDGED_BASES/_STUB_BASES values, since this is a real,
-                # fully-verified signal (unlike the stub judges' placeholder
-                # basis values) and must not cap the clause's rollup position
-                # to "negotiable".
+                # token ratio (issue #222), not a judge call — and not an
+                # unjudged placeholder basis ("stub"/"needs_review"/
+                # "judge_error"), since this is a real, fully-verified signal
+                # that must not trip the playbook's stub_basis_present
+                # watermark.
                 basis="deterministic",
                 standard=reversal_standard,
                 alignment_confidence=r.alignment_confidence,

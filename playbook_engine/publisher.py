@@ -23,15 +23,12 @@ does all of that, in order:
      ``baseline.template_ref.source`` — paths/URIs leak DMS structure;
      ``sha256`` hashes are kept (they leak nothing and preserve
      verifiability, per OPF-SPEC.md §4).
-  3. Coarsens ``observed_positions[].observed_at`` (OPF 0.4:
-     ``evidence.precedent[].signed_at``) to ``YYYY-Qn``
+  3. Coarsens ``evidence.precedent[].signed_at`` to ``YYYY-Qn``
      (``keep_dates=True`` opts out) — an exact date can identify a
-     counterparty. On an OPF 0.4 document the precedent ids, clause counts
-     and digest are then re-derived from the transformed text
-     (``precedent.refresh_derived``), so the digest never carries a stale
-     copy of the real party name or pre-scrub text. ``negotiation_trail[]`` carries no date field of its own
-     (only a ``round`` ordinal) as of OPF-SPEC.md §3.5.3, so there is
-     nothing else to coarsen there.
+     counterparty. The precedent ids, clause counts and digest are then
+     re-derived from the transformed text (``precedent.refresh_derived``),
+     so the digest never carries a stale copy of the real party name or
+     pre-scrub text.
   4. Deterministic no-known-entity backstop: every string in the doc
      (recursively) is scanned, case/punctuation-normalized, against
      *known_entity_names* (the entity registry's real names — the
@@ -103,7 +100,7 @@ from playbook_engine.export_profile import (
     _extract_text_samples,
     export_profile,
 )
-from playbook_engine.opf_accessors import playbook_clauses, playbook_precedent
+from playbook_engine.opf_accessors import playbook_precedent
 from playbook_engine.precedent import refresh_derived
 
 DEFAULT_PARTY_LABEL = "the company"
@@ -260,22 +257,14 @@ def _coarsen_to_quarter(date_str: str) -> str:
 
 
 def _coarsen_dates(doc: dict[str, Any]) -> None:
-    """Mutate *doc* in place, coarsening every ``observed_at`` to ``YYYY-Qn``.
+    """Mutate *doc* in place, coarsening every precedent ``signed_at`` to ``YYYY-Qn``.
 
-    ``negotiation_trail[]`` entries carry no independent date field of their
-    own (only a ``round`` ordinal, per OPF-SPEC.md §3.5.3) — the only actual
-    date signal on a clause is ``observed_positions[].observed_at``, which
-    this coarsens. No-ops per-observation when ``observed_at`` is absent or
-    not a well-formed ISO date (never fabricates, never raises on odd data).
+    A precedent's ``signed_at`` is the document's one date signal (issue
+    #223). The digest's last_signed/first_signed derive from it and are
+    rebuilt from the coarsened values (refresh_derived). No-ops per record
+    when ``signed_at`` is absent or not a well-formed ISO date (never
+    fabricates, never raises on odd data).
     """
-    for clause in playbook_clauses(doc):
-        for obs in clause.get("observed_positions", []):
-            observed_at = obs.get("observed_at")
-            if isinstance(observed_at, str) and _ISO_DATE_RE.match(observed_at):
-                obs["observed_at"] = _coarsen_to_quarter(observed_at)
-    # OPF 0.4 (issue #223): a precedent's signed_at is the same identifying
-    # date signal. The digest's last_signed/first_signed derive from it and
-    # are rebuilt from the coarsened values (refresh_derived).
     for record in playbook_precedent(doc):
         signed_at = record.get("signed_at")
         if isinstance(signed_at, str) and _ISO_DATE_RE.match(signed_at):
@@ -1128,11 +1117,11 @@ def publish_playbook(
     # the GC's residue-review output for anything the registry didn't know.
     published = _scrub_publication_noise(published)
     published = _apply_redact_terms(published, redact_terms)
-    # OPF 0.4 (issue #223): the digest is a function of the document — it
-    # copies perspective and summarizes precedent text — so re-derive it
-    # (and the text-hashed precedent ids/counts) from the transformed
-    # document. Without this the digest would still carry the real
-    # perspective.party and pre-scrub text. No-op before 0.4.
+    # The digest is a function of the document (issue #223) — it copies
+    # perspective and summarizes precedent text — so re-derive it (and the
+    # text-hashed precedent ids/counts) from the transformed document.
+    # Without this the digest would still carry the real perspective.party
+    # and pre-scrub text.
     refresh_derived(published)
 
     # --- step 4: deterministic no-known-entity backstop (hard, unconditional) ---

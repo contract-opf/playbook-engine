@@ -77,7 +77,7 @@ not the full control ladder above.
 
 ## What a playbook knows
 
-OPF 1.0 (document shape `opf_version` "0.4"; 0.1–0.3 documents still validate) is **one document with three
+OPF 1.0 (document shape `opf_version` "0.4", the one format the engine reads and writes) is **one document with three
 sections**, each with a different runtime binding — this is the design
 that makes it safe to point a stochastic model at high-stakes legal work:
 
@@ -100,10 +100,10 @@ Some things adopters tend to care about, built in from the start:
   resolve-citation` verifies a citation against your own corpus copy
   byte-for-byte. A playbook's `corpus.snapshot.manifest_hash` names the
   exact corpus state it was compiled from.
-- **Negotiation dynamics, not just outcomes.** Who proposed each change,
-  when, against which counterparty segment, and the round-by-round
-  ask→landing trail — so a reviewer can tell deal-breakers from trading
-  chips.
+- **Negotiation dynamics, not just outcomes.** For each deal and clause:
+  how many rounds the clause changed in and whether it moved at all, the
+  text it opened with, and the counterparty asks refused before signing —
+  so a reviewer can tell deal-breakers from trading chips.
 - **Confidentiality is architectural, not aspirational.** Known
   counterparty names are pseudonymized at ingest (*born-safe*), but
   `known_entities` matching is best-effort (whole-word, contiguous-sequence)
@@ -139,7 +139,8 @@ L1  ingest + segment      DOCX/PDF/RTF → normalized clause trees (+ tracked-ch
 L2  order versions        edit-distance chain anchored on the detected signed copy
 L3  classify              clause → taxonomy entry (deterministic fast path, judge on the ambiguous band)
 L4  diff + attribute      per-round diffs, reversals, who-proposed-what → cited observations
-L5  compile + assemble    positions, fallbacks, trails, held-rates → validated playbook.opf.json
+L5  compile + assemble    clause types + template our_standard, per-deal precedent,
+                          distinct-deal counts → OPF 0.4 playbook.opf.json + digest 3
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers each layer;
@@ -239,22 +240,20 @@ Two guards run without being asked:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
-| [`spec/`](spec/) | JSON Schemas — current: `playbook.schema-0.4.json`; frozen and still validated: v0.3, v0.2, v0.1 — and shipped taxonomies |
-| [`examples/`](examples/) | The flagship v0.2 example playbook, fixtures, the quickstart corpus, and a second agreement type (NDA) at [`examples/nda/`](examples/nda/) |
+| [`spec/`](spec/) | The JSON Schema — `playbook.schema-0.4.json`, the one format the engine reads and writes — and shipped taxonomies |
+| [`examples/`](examples/) | The reference playbook (a Mutual NDA) at [`examples/nda/`](examples/nda/), validator fixtures, and the quickstart corpus |
 
 ## Status
 
-**Engine 1.0.1; OPF 1.0 (stable).** The compiler emits `opf_version` 0.4
-— the verdict-free per-deal precedent record with a `digest_version` 3
-digest (issue #223), shipped as a new schema file; `playbook project
---opf-version 0.3` keeps the previous shape for one release. Published
-shapes are never edited in place: 0.3 (additive over 0.2, the `digest`
-section) is frozen and still validates. A shape or semantic change ships
-under a new `opf_version` rather than an in-place edit; a breaking shape or
-normative-rule change requires 2.0 (see the spec's §11). 0.4 removes and
-replaces 0.3's evidence fields, so whether it also calls for an OPF 2.0
-stamp under that policy is an open question for the owner, recorded in the
-spec's §11 0.3 → 0.4 migration note — not decided by this change.
+**Engine 1.0.1; OPF 1.0 (stable).** The engine reads and writes exactly one
+format, `opf_version` 0.4 — the verdict-free per-deal precedent record with
+a `digest_version` 3 digest (issue #223). The 0.1–0.3 formats, their
+schemas and the digest 2 builder were retired (issue #238): there is no
+installed consumer to stay compatible with, so a 0.1–0.3 document is
+rejected as an unsupported version; git history and
+[contract-opf/opf](https://github.com/contract-opf/opf) keep them. A shape
+or semantic change ships under a new `opf_version` rather than an in-place
+edit (see the spec's §11).
 The engine's full pipeline is exercised end-to-end in CI — currently ~2,600
 tests, all offline. Real-world derivation runs on a private educational-
 affiliation corpus; a synthetic public showcase corpus ships at

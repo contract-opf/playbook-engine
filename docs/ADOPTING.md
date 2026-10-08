@@ -213,18 +213,20 @@ deal, or your risk tolerance, calls for.
   nothing is inferred into force.
 
 - **Rung 3 — correct the record (open-ended, optional).** The same
-  review HTML's per-clause audit surface, collapsed by default and sorted
-  attention-first: thin evidence, confidence below 0.6, or a pinned
-  position that conflicts with freshly recomputed evidence all sort to
-  the top, with why stated right in the summary line before you expand
-  anything. Four correction kinds round-trip through `feedback.json` and
-  `playbook view apply`: **pin** an attorney-asserted position (it
-  survives recompiles, and evidence that later disagrees is flagged,
-  never silently dropped or silently kept); correct **provenance** (who
-  proposed a change, which version is the signed one); correct
-  **classification** (which taxonomy entry a clause belongs to); or leave
-  a free-text **note**. There's no finish line — audit one clause or
-  every clause, once or after every recompile.
+  review HTML's per-clause audit surface, collapsed by default and
+  sorted attention-first: a pinned position that conflicts with freshly
+  recomputed evidence sorts to the top, with why stated right in the
+  summary line before you expand anything. Three correction kinds
+  round-trip through `feedback.json` and `playbook view apply`: **pin**
+  an attorney-asserted position (it survives recompiles, and evidence
+  that later disagrees is flagged, never silently dropped or silently
+  kept); correct **classification** (which taxonomy entry a clause
+  belongs to); or leave a free-text **note**. A document-level
+  correction (provenance, which version is the signed one, version
+  order) is reported as not applied, because a clause item cites no
+  single deal; set it by hand in that deal's `hints.yaml` and re-mine.
+  There's no finish line — audit one clause or every clause, once or
+  after every recompile.
 
 **Which rung do you need?** Only Rungs 1 and 2 create binding content — a
 Posture (soft) or a signed Floor invariant (hard); Rung 3 only improves
