@@ -24,18 +24,44 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema.json` | `c1a25b477eeb71c9a6daa2d2d390793301df5e4e6539503e622b72d2f8276962` |
-| `playbook.schema-0.2.json` | `eae5f882f9289f2144cc784109d3dd04de7673d6e563d195fd693fd38ae1138d` |
-| `playbook.schema-0.3.json` | `d2d81ca1c4f7547b508b2a22310906ce9a3bf43a2436e8730f0b1e4c9b0a0e15` |
 | `playbook.schema-0.4.json` | `14359a861088a100cbf5e9345b9bd92c185f73d1016939030edb867876f81e7f` |
-| `spec/conformance/` (manifest.json + vectors/*.json, concatenated) | `9a9a9ee2cceff98226e7b11db83b847396e1a9e33b79ada1c78b92b554eeab2b` |
 | `spec/conformance/0.4/` (manifest.json + vectors/*.json, concatenated) | `1abb133bf3b3b9c9583fb33501b0994941de4cf5f264843e2334db13922c54af` |
 
-Current `DIGEST_VERSION`: **3** (`playbook_engine/digest.py`). An OPF 0.3 (or
-older) document's digest is digest_version **2** (`DIGEST_VERSION_V2`),
-frozen with 0.3.
+Current `DIGEST_VERSION`: **3** (`playbook_engine/digest.py`) — the only
+digest the engine builds.
 
 ## History
+
+### 2026-10-07 — retire OPF 0.1–0.3 and digest 2: one format (issue #238)
+
+Owner decision (2026-10-06, epic #236): there are zero installed consumers,
+so nothing needs backward compatibility. The engine now emits and validates
+exactly one format, OPF 0.4 / digest_version 3.
+
+- **Removed from this repository** (they stay in git history and in
+  contract-opf/opf): `playbook.schema.json` (0.1),
+  `playbook.schema-0.2.json`, `playbook.schema-0.3.json`, and the
+  OPF 0.3 / digest_version 2 conformance set
+  (`spec/conformance/manifest.json` + `spec/conformance/vectors/`). Their
+  pins are gone from the table above; the history entries below still
+  record them. `playbook.schema-0.4.json` and `spec/conformance/0.4/` are
+  byte-identical (pins unchanged).
+- **Validator.** A document whose `opf_version` is anything but "0.4" —
+  including "0.1", "0.2" and "0.3" — gets one blocking "unsupported
+  opf_version" error and no other check (previously 0.1–0.3 validated
+  against their frozen schemas).
+- **Compiler.** `playbook project` has no `--opf-version`; the 0.3
+  assembler, the digest_version 2 builder, the clause-library compiler and
+  every 0.3-only surface of the clause-position compiler (observed
+  positions, rollup, `historical_stance` / `stance_detail`,
+  `acceptable_if`, fallbacks, rejected, `negotiation_trail`) are deleted.
+  `provenance.min_evidence_n`, which only capped the 0.3 stance, is no
+  longer a config key. OPF 0.4 output is unchanged: the NDA reference
+  playbook's `evidence`, `digest` and `floor` regenerate byte-identically.
+- `docs/OPF-SPEC.md` §3.5.1–§3.5.3 and §3.12's digest 2 rules are replaced
+  by a history note. The normative rule change (the validator rejects every
+  `opf_version` but "0.4") is recorded under `### Normative rule changes` in
+  the root `CHANGELOG.md`.
 
 ### 2026-10-05 — OPF 0.4 + digest_version 3: the verdict-free per-deal precedent record (issue #223)
 

@@ -1,20 +1,15 @@
 """CI guard for the shipped examples (issue #164).
 
-The flagship examples are the reference artifacts adopters pattern-match
-against, so every `examples/*.playbook.json` must pass the engine's own
-validator under its declared `opf_version`, the v0.2 flagship must actually
-demonstrate the headline sections (Posture, Floor, curation, dynamics), its
-internal counts must agree with its lists, and no example may carry real
-company branding.
+The reference playbook is the artifact adopters pattern-match against, so it
+must pass the engine's own validator, actually demonstrate the headline
+sections (Posture, Floor, precedent with moves, openings and refused asks),
+keep its internal counts consistent with its precedent, and carry no real
+company branding or machine paths.
 
-The NDA second-agreement-type worked example (issue #9) is committed as
-`examples/nda/playbook.opf.json` rather than `examples/*.playbook.json` (it
-lives alongside its corpus/config/canned-verdicts, not at the examples/ top
-level), so it is added to `EXAMPLE_PATHS` explicitly below — every generic
-check in this file (schema validation, no-real-branding) then covers it for
-free, and `test_nda_example_has_populated_posture_and_floor` /
-`test_nda_example_confidence_counts_consistent` add the NDA-specific
-headline-section guard the v0.2 flagship already gets above.
+The reference playbook is the NDA worked example (issue #9),
+`examples/nda/playbook.opf.json`. The OPF 0.1 and 0.2 worked examples were
+retired with those formats (issue #238); any future top-level
+`examples/*.playbook.json` is covered by the generic checks too.
 """
 
 from __future__ import annotations
@@ -31,7 +26,6 @@ from playbook_engine.digest import build_digest
 from playbook_engine.validator import validate_document
 
 ROOT = Path(__file__).parent.parent
-V02_FLAGSHIP = ROOT / "examples" / "our-paper-baseline.v0.2.playbook.json"
 NDA_PLAYBOOK = ROOT / "examples" / "nda" / "playbook.opf.json"
 EXAMPLE_PATHS = sorted((ROOT / "examples").glob("*.playbook.json")) + [NDA_PLAYBOOK]
 
@@ -41,8 +35,6 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 def test_examples_exist() -> None:
-    assert EXAMPLE_PATHS, "no examples/*.playbook.json found"
-    assert V02_FLAGSHIP in EXAMPLE_PATHS
     assert NDA_PLAYBOOK in EXAMPLE_PATHS
     assert NDA_PLAYBOOK.exists(), (
         "examples/nda/playbook.opf.json is missing — the NDA second-agreement-type "
@@ -60,56 +52,14 @@ def test_all_examples_validate(path: Path) -> None:
     assert result.ok, f"{path.name} fails its own engine's validation: {blocking}"
 
 
-def test_v02_example_demonstrates_headline_sections() -> None:
-    """The v0.2 flagship must demonstrate what defines v0.2 — not ship
-    empty posture/floor."""
-    doc = _load(V02_FLAGSHIP)
-
-    invariants = doc["floor"].get("invariants", [])
-    assert len(invariants) >= 2, "flagship must demonstrate >=2 floor.invariants"
-
-    posture = doc["posture"]
-    assert posture.get("system_prompt", "").strip(), "flagship posture must be populated"
-    interview = posture.get("generation", {}).get("interview", [])
-    assert len(interview) >= 3, "flagship must carry >=3 interview entries"
-
-    pins = doc.get("curation", {}).get("pins", [])
-    assert len(pins) >= 1, "flagship must demonstrate a curation pin"
-
-    clauses = doc["evidence"]["clauses"]
-    assert any(
-        obs.get("full_text") for clause in clauses for obs in clause.get("observed_positions", [])
-    ), "flagship must demonstrate full_text on at least one observation"
-    assert any(clause.get("negotiation_trail") for clause in clauses), (
-        "flagship must demonstrate a negotiation_trail (§3.5.3)"
-    )
-    # Recompute and compare — not just prefix-match — so a future prose edit
-    # to the flagship that forgets to regenerate identity can't silently ship
-    # a document that fails its own published integrity contract (issue #88
-    # fix round 1 finding 1; OPF-SPEC §3.4 rule 1 is fail-closed on mismatch).
-    identity = doc.get("identity", {})
-    assert identity.get("content_hash") == content_hash(doc), (
-        "flagship identity.content_hash is stale — regenerate with "
-        "playbook_engine.canonicalize.content_hash() after any content edit"
-    )
-    assert identity.get("section_digests") == compute_section_digests(doc), (
-        "flagship identity.section_digests is stale — regenerate with "
-        "playbook_engine.canonicalize.compute_section_digests() after any content edit"
-    )
-
-
-def test_v02_example_confidence_counts_consistent() -> None:
-    """confidence.n_our_paper / n_counterparty_paper must equal the actual
-    provenance counts of observed_positions — the flagship previously
-    claimed counts its own lists contradicted."""
-    doc = _load(V02_FLAGSHIP)
-    for clause in doc["evidence"]["clauses"]:
-        confidence = clause["summary"]["confidence"]
-        observed = clause.get("observed_positions", [])
-        n_ours = sum(1 for o in observed if o.get("provenance") == "our_paper")
-        n_theirs = sum(1 for o in observed if o.get("provenance") == "counterparty_paper")
-        assert confidence.get("n_our_paper") == n_ours, clause["id"]
-        assert confidence.get("n_counterparty_paper") == n_theirs, clause["id"]
+def test_retired_format_examples_are_gone() -> None:
+    """Issue #238: the 0.1/0.2 worked examples were retired with those formats."""
+    for name in (
+        "our-paper-baseline.v0.2.playbook.json",
+        "our-paper-baseline.playbook.json",
+        "emergent-no-template.playbook.json",
+    ):
+        assert not (ROOT / "examples" / name).exists(), name
 
 
 def test_nda_example_has_populated_posture_and_floor() -> None:

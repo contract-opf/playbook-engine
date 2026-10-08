@@ -60,11 +60,10 @@ def test_validate_blocking_error_goes_to_stderr_not_stdout(tmp_path: Path) -> No
     """Issue #62: validate must route each blocking ValidationError's line to
     stderr (joining the FAIL summary there) and advisory warnings to stdout
     (joining the OK output) — not the reverse."""
-    fixture_path = (
-        Path(__file__).parent.parent / "examples" / "fixtures" / "valid_v0_2_minimal.json"
-    )
+    fixture_path = Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json"
     doc = json.loads(fixture_path.read_text(encoding="utf-8"))
-    doc["evidence"]["clauses"][0]["our_standard"]["text"] = None
+    clause = next(c for c in doc["evidence"]["clauses"] if c["our_standard"])
+    clause["our_standard"]["text"] = None
     doc_path = tmp_path / "invalid.json"
     doc_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -517,8 +516,8 @@ def test_project_corpus_stats_correct(tmp_path: Path) -> None:
 
 
 def test_project_playbook_opf_version(tmp_path: Path) -> None:
-    """Projected playbook has opf_version='0.4' by default (issue #223), and
-    ``--opf-version 0.3`` keeps the 0.3 shape for one release."""
+    """Projected playbook has opf_version='0.4' (issue #223), the one format
+    the engine emits: ``project`` has no ``--opf-version`` (issue #238)."""
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
     runner.invoke(
@@ -535,21 +534,15 @@ def test_project_playbook_opf_version(tmp_path: Path) -> None:
     assert pb["digest"]["digest_version"] == "3"
     assert "precedent" in pb["evidence"]
 
-    result = runner.invoke(
-        cli,
-        ["project", str(out_dir), "--config", str(config_path), "--opf-version", "0.3"],
-    )
-    assert result.exit_code == 0, result.output
-    pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert pb["opf_version"] == "0.3"
-    assert pb["digest"]["digest_version"] == "2"
-    assert "precedent" not in pb["evidence"]
-
-    result = runner.invoke(
-        cli,
-        ["project", str(out_dir), "--config", str(config_path), "--opf-version", "0.2"],
-    )
-    assert result.exit_code != 0
+    for version in ("0.3", "0.4"):
+        result = runner.invoke(
+            cli,
+            ["project", str(out_dir), "--config", str(config_path), "--opf-version", version],
+        )
+        assert result.exit_code == 2, result.output
+        assert "No such option '--opf-version'" in result.output
+    help_result = runner.invoke(cli, ["project", "--help"])
+    assert "--opf-version" not in help_result.output
 
 
 def test_compile_is_unknown_command() -> None:
@@ -1525,12 +1518,12 @@ _FAKE_HASH = "a" * 64
 
 
 def _minimal_publishable_doc() -> dict[str, Any]:
-    """Smallest schema-valid OPF v0.2 doc that ``publish_playbook`` accepts.
+    """Smallest schema-valid OPF 0.4 doc that ``publish_playbook`` accepts.
 
     Synthetic names only (Alpha Corp / Beta University) — no real corpus data.
     """
     return {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "taxonomy": {
             "source": "test",
@@ -1574,7 +1567,7 @@ def _minimal_publishable_doc() -> dict[str, Any]:
             ]
         },
         "curation": {"pins": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": {"clauses": [], "precedent": []},
         "corpus": {
             "documents": [],
             "stats": {"documents_total": 0, "documents_in_scope": 0, "versions_total": 0},
@@ -1990,6 +1983,23 @@ def test_render_prompt_out_no_tmp_left_after_success(tmp_path: Path) -> None:
     assert result.exit_code == 0, f"expected success:\n{result.output}"
     assert out_path.exists()
     assert not out_path.with_suffix(out_path.suffix + ".tmp").exists()
+
+
+def test_render_prompt_refuses_a_retired_opf_version(tmp_path: Path) -> None:
+    """`render-prompt` refuses a 0.3 document instead of rendering an empty
+    prompt from it (issue #238)."""
+    doc_path = tmp_path / "playbook.opf.json"
+    doc_path.write_text(
+        json.dumps({"opf_version": "0.3", "evidence": {"clauses": [], "clause_library": []}}),
+        encoding="utf-8",
+    )
+    out_path = tmp_path / "prompt.md"
+
+    result = CliRunner().invoke(cli, ["render-prompt", str(doc_path), "--out", str(out_path)])
+
+    assert result.exit_code == 1
+    assert "unsupported opf_version '0.3'" in result.output
+    assert not out_path.exists()
 
 
 # ---------------------------------------------------------------------------

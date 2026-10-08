@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 from click.testing import CliRunner
 
 from playbook_engine.cli import cli
@@ -22,8 +21,64 @@ from playbook_engine.viewer import _build_index, apply_feedback, render_review_h
 # ---------------------------------------------------------------------------
 
 
+def _to_v04_evidence(clauses: list[dict]) -> dict:
+    """Project the compact clause descriptions these tests use (each with
+    ``deal_rows``: text, citation, outcome, paper) into the OPF
+    0.4 evidence shape the engine emits — one precedent record per (deal,
+    clause): a signed row becomes the record's ``signed_text`` (``standard``
+    when its deviation is "none"), a ``proposed_then_reversed`` row a refused
+    ask. Ids and counts are stamped by ``precedent.restamp_evidence``, the
+    producer's own function."""
+    from playbook_engine.precedent import restamp_evidence
+
+    out_clauses: list[dict] = []
+    records: dict[tuple[str, str], dict] = {}
+    for clause in clauses:
+        tid = clause["taxonomy_id"]
+        out_clauses.append(
+            {
+                "id": clause["id"],
+                "taxonomy_id": tid,
+                "title": clause.get("title", ""),
+                "our_standard": clause.get("our_standard"),
+            }
+        )
+        for obs in clause.get("deal_rows", []):
+            ref = dict(obs["example_ref"])
+            record = records.setdefault(
+                (ref["document_id"], tid),
+                {
+                    "id": "",
+                    "taxonomy_id": tid,
+                    "document_id": ref["document_id"],
+                    "paper": "ours" if obs.get("provenance") == "our_paper" else "theirs",
+                    "paper_basis": "provenance_detection",
+                    "paper_confidence": None,
+                    "signed": True,
+                    "rounds": 0,
+                    "signed_text": None,
+                    "opening_text": None,
+                    "standard": False,
+                    "moved": False,
+                    "refused_asks": [],
+                },
+            )
+            text = obs.get("full_text") or obs["text_summary"]
+            if obs.get("outcome") == "proposed_then_reversed":
+                version = ref.get("version")
+                round_ = version - 1 if isinstance(version, int) and version >= 1 else 0
+                record["refused_asks"].append({"text": text, "round": round_, "ref": ref})
+                record["moved"] = True
+            else:
+                record["signed_text"] = {"text": text, "ref": ref}
+                record["standard"] = obs.get("deviation") == "none"
+    evidence = {"clauses": out_clauses, "precedent": [records[k] for k in sorted(records)]}
+    restamp_evidence(evidence, "educational-affiliation", party=None)
+    return evidence
+
+
 def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
-    """Build a minimal valid OPF dict and write playbook.opf.json to tmp_path."""
+    """Build a minimal OPF 0.4 dict and write playbook.opf.json to tmp_path."""
     if clauses is None:
         clauses = [
             {
@@ -38,7 +93,7 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                         "clause_path": "8",
                     },
                 },
-                "observed_positions": [
+                "deal_rows": [
                     {
                         "text_summary": "Mutual indemnification, negligence-based.",
                         "example_ref": {
@@ -66,22 +121,13 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                         "precedent_count": 3,
                     },
                 ],
-                "rollup": {
-                    "position": "negotiable",
-                    "confidence": {
-                        "score": 0.82,
-                        "basis": "precedent_count",
-                        "n_our_paper": 10,
-                        "n_counterparty_paper": 0,
-                    },
-                },
             },
             {
                 "id": "clause.governing_law",
                 "taxonomy_id": "governing_law",
                 "title": "Governing Law",
                 "our_standard": None,
-                "observed_positions": [
+                "deal_rows": [
                     {
                         "text_summary": "Institution home-state law.",
                         "example_ref": {
@@ -96,20 +142,11 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                         "precedent_count": 2,
                     },
                 ],
-                "rollup": {
-                    "position": "negotiable",
-                    "confidence": {
-                        "score": 0.55,
-                        "basis": "precedent_count",
-                        "n_our_paper": 9,
-                        "n_counterparty_paper": 0,
-                    },
-                },
             },
         ]
 
     doc = {
-        "opf_version": "0.1",
+        "opf_version": "0.4",
         "agreement_type": {"id": "educational-affiliation", "name": "Educational Affiliation"},
         "baseline": {"has_canonical_template": True},
         "taxonomy": {
@@ -119,7 +156,7 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
                 {"id": "governing_law", "label": "Governing Law", "status": "active"},
             ],
         },
-        "clauses": clauses,
+        "evidence": _to_v04_evidence(clauses),
         "corpus": {
             "documents": [
                 {
@@ -139,33 +176,6 @@ def _make_opf(tmp_path: Path, clauses: list[dict] | None = None) -> dict:
     out_dir = tmp_path / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-    # Write normalized clause trees for every cited corpus document so that
-    # classification feedback can source the full clause text the judge hashes
-    # (issue #70). Node text/heading mirror what the engine would have produced.
-    nodes_by_doc: dict[str, list[dict]] = {}
-    for clause in clauses:
-        title = clause.get("title", "")
-        for obs in clause.get("observed_positions", []):
-            ref = obs.get("example_ref") or {}
-            cdoc, cpath = ref.get("document_id"), ref.get("clause_path")
-            if not (cdoc and cpath):
-                continue
-            full_text = f"{obs.get('text_summary', '')} Full synthetic body for clause {cpath}."
-            nodes_by_doc.setdefault(cdoc, []).append(
-                {
-                    "clause_path": cpath,
-                    "heading": title,
-                    "text": full_text,
-                    "char_span": [0, len(full_text)],
-                    "children": [],
-                }
-            )
-    for cdoc, nodes in nodes_by_doc.items():
-        tree = {"document_id": cdoc, "version": "v1", "source_file": "v1.rtf", "nodes": nodes}
-        tree_path = out_dir / "normalized" / cdoc / "v1.clauses.json"
-        tree_path.parent.mkdir(parents=True, exist_ok=True)
-        tree_path.write_text(json.dumps(tree), encoding="utf-8")
 
     return doc
 
@@ -235,21 +245,6 @@ def test_build_index_clause_numbers(tmp_path: Path) -> None:
     assert clause_nums == ["C1", "C2"]
 
 
-def test_build_index_observation_numbers(tmp_path: Path) -> None:
-    """Observation items are numbered C1.1, C2.1, C2.2, … under their clause.
-
-    Clauses are sorted by (taxonomy_id, id): governing_law < indemnification.
-    governing_law has 1 observation (C1.1); indemnification has 2 (C2.1, C2.2).
-    """
-    _make_opf(tmp_path)
-    doc = json.loads((tmp_path / "out" / "playbook.opf.json").read_text())
-    index = _build_index(doc)
-    obs_nums = [num for num, kind, _ in index if kind == "observation"]
-    assert "C1.1" in obs_nums
-    assert "C2.1" in obs_nums
-    assert "C2.2" in obs_nums
-
-
 def test_build_index_deterministic(tmp_path: Path) -> None:
     """Same playbook → same item numbering on every call."""
     _make_opf(tmp_path)
@@ -268,17 +263,6 @@ def test_build_index_clause_id_in_payload(tmp_path: Path) -> None:
         if kind == "clause":
             assert "_clause_id" in payload
             assert "_clause_num" in payload
-
-
-def test_build_index_observation_payload_has_clause_ref(tmp_path: Path) -> None:
-    """Each observation item payload carries _clause_id and _obs_num."""
-    _make_opf(tmp_path)
-    doc = json.loads((tmp_path / "out" / "playbook.opf.json").read_text())
-    index = _build_index(doc)
-    for _num, kind, payload in index:
-        if kind == "observation":
-            assert "_clause_id" in payload
-            assert "_obs_num" in payload
 
 
 # ---------------------------------------------------------------------------
@@ -308,20 +292,6 @@ def test_render_html_contains_clause_number_c1(tmp_path: Path) -> None:
     assert "C1" in html
 
 
-def test_render_html_contains_observation_number_c1_1(tmp_path: Path) -> None:
-    """HTML contains the numbered observation item C1.1."""
-    _make_opf(tmp_path)
-    html = render_review_html(tmp_path / "out")
-    assert "C1.1" in html
-
-
-def test_render_html_contains_observation_number_c2_2(tmp_path: Path) -> None:
-    """HTML contains the numbered observation C2.2 (indemnification's second obs)."""
-    _make_opf(tmp_path)
-    html = render_review_html(tmp_path / "out")
-    assert "C2.2" in html
-
-
 def test_render_html_embeds_json(tmp_path: Path) -> None:
     """HTML contains the embedded playbook JSON."""
     _make_opf(tmp_path)
@@ -346,7 +316,7 @@ def test_render_html_escapes_script_breakout_in_embedded_json(tmp_path: Path) ->
             "taxonomy_id": "indemnification",
             "title": "Indemnification",
             "our_standard": None,
-            "observed_positions": [
+            "deal_rows": [
                 {
                     "text_summary": "Mutual indemnification.",
                     "full_text": breakout,
@@ -362,15 +332,6 @@ def test_render_html_escapes_script_breakout_in_embedded_json(tmp_path: Path) ->
                     "precedent_count": 7,
                 },
             ],
-            "rollup": {
-                "position": "negotiable",
-                "confidence": {
-                    "score": 0.82,
-                    "basis": "precedent_count",
-                    "n_our_paper": 10,
-                    "n_counterparty_paper": 0,
-                },
-            },
         },
     ]
     _make_opf(tmp_path, clauses=clauses)
@@ -395,7 +356,7 @@ def test_render_html_escapes_script_breakout_with_alias_map(tmp_path: Path) -> N
             "taxonomy_id": "indemnification",
             "title": "Indemnification",
             "our_standard": None,
-            "observed_positions": [
+            "deal_rows": [
                 {
                     "text_summary": "Mutual indemnification.",
                     "full_text": breakout,
@@ -411,15 +372,6 @@ def test_render_html_escapes_script_breakout_with_alias_map(tmp_path: Path) -> N
                     "precedent_count": 7,
                 },
             ],
-            "rollup": {
-                "position": "negotiable",
-                "confidence": {
-                    "score": 0.82,
-                    "basis": "precedent_count",
-                    "n_our_paper": 10,
-                    "n_counterparty_paper": 0,
-                },
-            },
         },
     ]
     _make_opf(tmp_path, clauses=clauses)
@@ -453,61 +405,6 @@ def test_render_html_contains_clause_title(tmp_path: Path) -> None:
     html = render_review_html(tmp_path / "out")
     assert "Indemnification" in html
     assert "Governing Law" in html
-
-
-def test_render_html_contains_rollup_position(tmp_path: Path) -> None:
-    """HTML shows the rollup position."""
-    _make_opf(tmp_path)
-    html = render_review_html(tmp_path / "out")
-    assert "negotiable" in html
-
-
-def test_render_html_v02_historical_stance_gets_non_default_color(tmp_path: Path) -> None:
-    """A v0.2 ``summary.historical_stance`` value renders a non-default
-    (non-gray) stance color — issue #155. Before the fix, v0.2 stance values
-    were absent from ``_POSITION_COLORS`` and fell through to the default
-    gray (``#374151``)."""
-    doc = {
-        "opf_version": "0.2",
-        "agreement_type": {"id": "educational-affiliation", "name": "Educational Affiliation"},
-        "baseline": {"has_canonical_template": False},
-        "taxonomy": {
-            "source": "custom",
-            "entries": [{"id": "governing_law", "label": "Governing Law", "status": "active"}],
-        },
-        "evidence": {
-            "clauses": [
-                {
-                    "id": "clause.governing_law",
-                    "taxonomy_id": "governing_law",
-                    "title": "Governing Law",
-                    "our_standard": None,
-                    "observed_positions": [],
-                    "summary": {
-                        "historical_stance": "usually_conceded",
-                        "confidence": {"score": 0.6},
-                    },
-                }
-            ],
-            "documents": [],
-        },
-        "corpus": {"documents": [], "stats": {}},
-        "compiler": {
-            "name": "playbook-engine",
-            "version": "0.1.0",
-            "generated_at": "2026-01-01T00:00:00Z",
-        },
-    }
-    out_dir = tmp_path / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-    html = render_review_html(out_dir)
-    assert "usually_conceded" in html
-    # The mapped color for usually_conceded must appear, and the fallback
-    # default gray must NOT be the color used for this clause's stance span.
-    assert 'color:#dc2626;font-weight:700">usually_conceded' in html
-    assert 'color:#374151;font-weight:700">usually_conceded' not in html
 
 
 def test_render_html_contains_export_button(tmp_path: Path) -> None:
@@ -564,20 +461,18 @@ def test_render_html_numbering_stable_different_input_order(tmp_path: Path) -> N
             "taxonomy_id": "governing_law",
             "title": "Governing Law",
             "our_standard": None,
-            "observed_positions": [],
-            "rollup": {"position": "standard", "confidence": {"score": 0.9}},
+            "deal_rows": [],
         },
         {
             "id": "clause.indemnification",
             "taxonomy_id": "indemnification",
             "title": "Indemnification",
             "our_standard": None,
-            "observed_positions": [],
-            "rollup": {"position": "negotiable", "confidence": {"score": 0.7}},
+            "deal_rows": [],
         },
     ]
     doc = {
-        "opf_version": "0.1",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test", "name": "Test"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {
@@ -587,7 +482,7 @@ def test_render_html_numbering_stable_different_input_order(tmp_path: Path) -> N
                 {"id": "indemnification", "label": "Indemnification", "status": "active"},
             ],
         },
-        "clauses": clauses,
+        "evidence": _to_v04_evidence(clauses),
         "corpus": {"documents": [], "stats": {}},
         "compiler": {"name": "pe", "version": "0.1.0", "generated_at": "2026-01-01T00:00:00Z"},
     }
@@ -1048,333 +943,8 @@ def test_render_html_floor_candidate_different_taxonomy_still_live_control(
 
 
 # ---------------------------------------------------------------------------
-# apply_feedback — hints.yaml
-# ---------------------------------------------------------------------------
-
-
-def test_apply_feedback_provenance_writes_hints_yaml(tmp_path: Path) -> None:
-    """Provenance correction in feedback → hints.yaml for cited document.
-
-    C2.1 is the first observation of the indemnification clause, whose
-    example_ref points to state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    # Create a corpus directory for the cited doc
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    # C2.1 = first obs of indemnification clause → state-university-2023
-    feedback = {
-        "C2.1": {"provenance": "counterparty_paper"},
-    }
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    # Check hints.yaml was written somewhere relevant
-    assert "state-university-2023" in result.hints_written
-    # Find the written hints.yaml
-    hints_path = doc_dir / "hints.yaml"
-    assert hints_path.exists()
-    data = yaml.safe_load(hints_path.read_text(encoding="utf-8"))
-    assert data["provenance"] == "counterparty_paper"
-
-
-def test_apply_feedback_signed_version_writes_hints_yaml(tmp_path: Path) -> None:
-    """signed_version correction → hints.yaml for cited document.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {"C2.1": {"signed_version": "v3"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert "state-university-2023" in result.hints_written
-    hints_path = doc_dir / "hints.yaml"
-    data = yaml.safe_load(hints_path.read_text(encoding="utf-8"))
-    assert data["signed_version"] == "v3"
-
-
-def test_apply_feedback_order_writes_hints_yaml(tmp_path: Path) -> None:
-    """order correction → hints.yaml for cited document.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {"C2.1": {"order": ["v1", "v2", "v3"]}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert "state-university-2023" in result.hints_written
-    hints_path = doc_dir / "hints.yaml"
-    data = yaml.safe_load(hints_path.read_text(encoding="utf-8"))
-    assert data["order"] == ["v1", "v2", "v3"]
-
-
-def test_apply_feedback_merges_with_existing_hints(tmp_path: Path) -> None:
-    """Feedback merges with (does not overwrite) existing hints.yaml content.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-    (doc_dir / "hints.yaml").write_text(
-        yaml.dump({"signed_version": "v2", "timestamps": {"v1": "2022-01-01"}}),
-        encoding="utf-8",
-    )
-
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-    apply_feedback(out_dir, fp)
-
-    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
-    # Existing keys preserved
-    assert data["signed_version"] == "v2"
-    # New key added
-    assert data["provenance"] == "counterparty_paper"
-
-
-def test_apply_feedback_hints_fallback_to_out_dir_hints(tmp_path: Path) -> None:
-    """When no corpus doc dir can be found, the correction is parked at
-    out_dir/hints/<doc_id>.yaml and reported as SKIPPED, not a success
-    (issue #169) — a dead file no engine code reads back must never be
-    counted in hints_written, which the CLI treats as "applied".
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-    # Do NOT create a doc dir this time
-
-    feedback = {"C2.1": {"provenance": "our_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    # Not a success: the doc_id must NOT appear in hints_written.
-    assert "state-university-2023" not in result.hints_written
-    # It IS reported as not-applied, with a message a human can act on.
-    assert "hints:state-university-2023" in result.skipped
-    message = " ".join(result.skipped["hints:state-university-2023"])
-    assert "state-university-2023" in message
-    assert "not read by any pipeline stage" in message.lower()
-
-    # The best-effort fallback copy still exists, for manual recovery.
-    fallback_path = out_dir / "hints" / "state-university-2023.yaml"
-    assert fallback_path.exists()
-    data = yaml.safe_load(fallback_path.read_text(encoding="utf-8"))
-    assert data["provenance"] == "our_paper"
-
-
-def test_apply_feedback_hints_uses_explicit_corpus_dir(tmp_path: Path) -> None:
-    """corpus_dir, when given, is searched even when it is not out_dir's
-    parent/grandparent — the documented Docker layout, where the corpus is
-    mounted as a SIBLING of out_dir (/work/corpus vs. /work/out), not its
-    parent (issue #169).
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "work" / "out"
-    out_dir.mkdir(parents=True)
-    corpus_dir = tmp_path / "work" / "corpus"
-    doc_dir = corpus_dir / "state-university-2023"
-    doc_dir.mkdir(parents=True)
-
-    # Re-point the OPF we just wrote at the new out_dir location.
-    opf_src = tmp_path / "out" / "playbook.opf.json"
-    (out_dir / "playbook.opf.json").write_text(
-        opf_src.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp, corpus_dir=corpus_dir)
-
-    assert "state-university-2023" in result.hints_written
-    assert result.skipped == {}
-    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
-    assert data["provenance"] == "counterparty_paper"
-
-
-def test_apply_feedback_hints_reverses_pseudonymized_document_id(tmp_path: Path) -> None:
-    """When the cited document_id is a pseudonymized alias (issue #153), the
-    held-out out_dir/alias_map.json sidecar is used to reverse it back to the
-    real corpus folder name before searching (issue #169) — without this,
-    the alias matches no raw-named corpus folder anywhere and the correction
-    silently no-ops into the dead out_dir/hints/ fallback.
-
-    C2.1 = first obs of indemnification → state-university-2023, aliased to
-    Counterparty-1-2023.
-    """
-    doc = _make_opf(tmp_path)
-    doc["clauses"][0]["observed_positions"][0]["example_ref"]["document_id"] = "counterparty-1-2023"
-    out_dir = tmp_path / "out"
-    (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-    (out_dir / "alias_map.json").write_text(
-        json.dumps({"Counterparty-1": "State University"}), encoding="utf-8"
-    )
-
-    # Raw-named corpus folder, exactly as a human would find it on disk.
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {"C2.1": {"provenance": "our_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert "counterparty-1-2023" in result.hints_written
-    assert result.skipped == {}
-    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
-    assert data["provenance"] == "our_paper"
-
-
-def test_apply_feedback_hints_unwritable_corpus_dir_reported_as_skipped(
-    tmp_path: Path,
-) -> None:
-    """A corpus document directory that exists but cannot be written (the
-    Docker corpus mount is read-only) must be reported as skipped, not
-    counted as a success — issue #169's other failure mode, distinct from
-    "directory not found".
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-    doc_dir.chmod(0o500)  # read + execute, no write — simulates a ro mount
-    try:
-        feedback = {"C2.1": {"provenance": "our_paper"}}
-        fp = _write_feedback(tmp_path, feedback)
-        result = apply_feedback(out_dir, fp)
-
-        assert "state-university-2023" not in result.hints_written
-        assert "hints:state-university-2023" in result.skipped
-        fallback_path = out_dir / "hints" / "state-university-2023.yaml"
-        assert fallback_path.exists()
-    finally:
-        doc_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
-
-
-# ---------------------------------------------------------------------------
 # apply_feedback — VerdictStore
 # ---------------------------------------------------------------------------
-
-
-def test_apply_feedback_classification_writes_verdict_store(tmp_path: Path) -> None:
-    """classification correction → VerdictStore entry in judge/verdicts.jsonl."""
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    feedback = {"C1": {"classification": "governing_law"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert result.verdicts_written >= 1
-    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
-    assert verdicts_path.exists()
-    lines = [
-        json.loads(line)
-        for line in verdicts_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(lines) >= 1
-    # The verdict should carry the classification correction
-    verdicts = [rec["verdict"] for rec in lines]
-    assert any(v.get("taxonomy_id") == "governing_law" for v in verdicts)
-
-
-def test_apply_feedback_classification_verdict_basis_is_judge(tmp_path: Path) -> None:
-    """Classification verdict carries basis='judge' so classify_tree accepts it on replay."""
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    feedback = {"C1": {"classification": "indemnification"}}
-    fp = _write_feedback(tmp_path, feedback)
-    apply_feedback(out_dir, fp)
-
-    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
-    lines = [
-        json.loads(line)
-        for line in verdicts_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert lines, "expected a verdict to be written"
-    assert all(rec["verdict"].get("basis") == "judge" for rec in lines)
-
-
-def test_apply_feedback_classification_round_trips_through_judge(tmp_path: Path) -> None:
-    """Regression for #70: a reclassification must replay through the judge.
-
-    apply_feedback writes a verdict whose key must match exactly what
-    StoreBackedClassificationJudge computes for the same clause node — otherwise
-    the correction is a silent no-op. Apply a reclassification, then run the real
-    judge over the same node and assert a store HIT (the human verdict), not a
-    needs_review miss.
-    """
-    from types import SimpleNamespace  # noqa: PLC0415
-
-    from playbook_engine.agent_judge import (  # noqa: PLC0415
-        PendingQueue,
-        StoreBackedClassificationJudge,
-        VerdictStore,
-    )
-    from playbook_engine.clause_tree import ClauseTree  # noqa: PLC0415
-
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    # Reclassify C1 (governing_law clause; cites pacific-state-college-2022/12).
-    feedback = {"C1": {"classification": "indemnification"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-    assert result.verdicts_written >= 1
-
-    # Load the exact node the engine would classify, and run the real judge.
-    tree = ClauseTree.load(
-        out_dir / "normalized" / "pacific-state-college-2022" / "v1.clauses.json"
-    )
-    node = tree.resolve_path("12")
-    assert node is not None
-
-    # Must mirror the taxonomy embedded in playbook.opf.json field-for-field:
-    # apply_feedback stamps its verdict with the classify rubric digested from
-    # the OPF's taxonomy (id + label + description of classifier-eligible
-    # entries), and a mismatched rubric would re-queue the correction as stale
-    # rather than replay it.
-    tax = SimpleNamespace(
-        entries=[
-            SimpleNamespace(id="governing_law", label="Governing Law", status="active"),
-            SimpleNamespace(id="indemnification", label="Indemnification", status="active"),
-        ]
-    )
-    judge = StoreBackedClassificationJudge(
-        store=VerdictStore(out_dir / "judge" / "verdicts.jsonl"),
-        pending=PendingQueue(tmp_path / "pending.jsonl"),
-    )
-    results = judge.classify_batch([node], tax)
-
-    # Store HIT: the human verdict replays, with a judge-accepted basis.
-    assert results[0].taxonomy_id == "indemnification"
-    assert results[0].basis == "judge"
-    # And nothing was queued for review (no miss).
-    pending = tmp_path / "pending.jsonl"
-    assert not pending.exists() or pending.read_text(encoding="utf-8").strip() == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1420,52 +990,17 @@ def test_apply_feedback_note_appends_to_existing_notes(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_apply_feedback_combined_provenance_and_classification(tmp_path: Path) -> None:
-    """Single feedback.json with both provenance flip and classification correction.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    C2 = indemnification clause → classification correction.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    # Create corpus doc dir
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {
-        "C2.1": {"provenance": "counterparty_paper"},
-        "C2": {"classification": "governing_law"},
-    }
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    # hints.yaml written
-    assert "state-university-2023" in result.hints_written
-    hints_data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
-    assert hints_data["provenance"] == "counterparty_paper"
-
-    # VerdictStore entry written
-    assert result.verdicts_written >= 1
-    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
-    lines = [
-        json.loads(line)
-        for line in verdicts_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(v["verdict"].get("taxonomy_id") == "governing_law" for v in lines)
-
-
 def test_apply_feedback_unknown_item_number_skipped(tmp_path: Path) -> None:
     """Unknown item numbers (e.g. C99) are silently skipped — no crash."""
     _make_opf(tmp_path)
     out_dir = tmp_path / "out"
 
-    feedback = {"C99": {"provenance": "counterparty_paper"}, "C99.5": {"note": "skip me"}}
+    feedback = {"C99": {"provenance": "counterparty_paper"}, "C100": {"note": "skip me"}}
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
-    # No crash; no hints written for unknown item
-    assert "state-university-2023" not in result.hints_written
+    # No crash; nothing applied or reported for an unknown item
+    assert result.skipped == {}
+    assert result.notes_written is False
 
 
 def test_apply_feedback_missing_opf_raises(tmp_path: Path) -> None:
@@ -1493,7 +1028,6 @@ def test_apply_feedback_empty_feedback_no_changes(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     fp = _write_feedback(tmp_path, {})
     result = apply_feedback(out_dir, fp)
-    assert result.hints_written == []
     assert result.verdicts_written == 0
     assert result.notes_written is False
     assert result.skipped == {}
@@ -1519,16 +1053,14 @@ def test_apply_feedback_matching_content_hash_applies_normally(tmp_path: Path) -
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:abc123")
     out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:abc123", "generated_at": "2026-01-01T00:00:00Z"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
-    assert "state-university-2023" in result.hints_written
+    assert result.notes_written is True
     assert "_export" not in result.skipped
 
 
@@ -1539,18 +1071,16 @@ def test_apply_feedback_mismatched_content_hash_raises(tmp_path: Path) -> None:
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:current")
     out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:stale", "generated_at": "2025-01-01T00:00:00Z"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
     with pytest.raises(ValueError, match="stale"):
         apply_feedback(out_dir, fp)
-    # Refused BEFORE any correction was applied — no hints.yaml written.
-    assert not (doc_dir / "hints.yaml").exists()
+    # Refused BEFORE any correction was applied — no reviewer note written.
+    assert not (out_dir / "viewer_notes.md").exists()
 
 
 def test_apply_feedback_mismatched_content_hash_force_applies(tmp_path: Path) -> None:
@@ -1558,16 +1088,14 @@ def test_apply_feedback_mismatched_content_hash_force_applies(tmp_path: Path) ->
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:current")
     out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:stale", "generated_at": "2025-01-01T00:00:00Z"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp, force=True)
-    assert "state-university-2023" in result.hints_written
+    assert result.notes_written is True
 
 
 def test_apply_feedback_no_export_key_applies_without_error(tmp_path: Path) -> None:
@@ -1577,13 +1105,11 @@ def test_apply_feedback_no_export_key_applies_without_error(tmp_path: Path) -> N
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:current")
     out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
+    feedback = {"C2": {"comment": "looks right"}}
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
-    assert "state-university-2023" in result.hints_written
+    assert result.notes_written is True
 
 
 def test_apply_feedback_no_identity_on_doc_applies_without_error(tmp_path: Path) -> None:
@@ -1591,16 +1117,14 @@ def test_apply_feedback_no_identity_on_doc_applies_without_error(tmp_path: Path)
     document) makes the binding unverifiable, not stale — still applies."""
     _make_opf(tmp_path)  # no identity block written
     out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:whatever", "generated_at": "2026-01-01T00:00:00Z"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
-    assert "state-university-2023" in result.hints_written
+    assert result.notes_written is True
 
 
 def test_render_html_export_button_embeds_content_hash_binding(tmp_path: Path) -> None:
@@ -1619,12 +1143,10 @@ def test_view_apply_cmd_stale_export_exits_nonzero(tmp_path: Path) -> None:
     """CLI ``view apply`` refuses a stale feedback.json without --force."""
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:current")
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:stale"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
 
@@ -1638,12 +1160,10 @@ def test_view_apply_cmd_stale_export_with_force_succeeds(tmp_path: Path) -> None
     """CLI ``view apply --force`` applies a stale feedback.json anyway."""
     _make_opf(tmp_path)
     _set_identity_content_hash(tmp_path, "sha256:current")
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
     feedback = {
         "_export": {"content_hash": "sha256:stale"},
-        "C2.1": {"provenance": "counterparty_paper"},
+        "C2": {"comment": "looks right"},
     }
     fp = _write_feedback(tmp_path, feedback)
 
@@ -1712,7 +1232,6 @@ def test_apply_feedback_override_only_embeds_curation_pin(tmp_path: Path) -> Non
     fp = _write_feedback(tmp_path, feedback)
     result = apply_feedback(out_dir, fp)
 
-    assert result.hints_written == []
     assert result.verdicts_written == 0
     assert result.notes_written is False
     assert result.skipped == {}
@@ -1722,10 +1241,9 @@ def test_apply_feedback_override_only_embeds_curation_pin(tmp_path: Path) -> Non
     pin = doc["curation"]["pins"][0]
     assert pin["position"] == "usually_conceded"
     assert pin["item_id"] == "C1"
-    # baseline_stance records what the pin overrides FROM — this fixture's
-    # governing_law clause carries a v0.1 rollup.position of "negotiable"
-    # (clause_stance() falls back to rollup.position when summary is absent).
-    assert pin["baseline_stance"] == "negotiable"
+    # The document carries no stance (issue #223): every pin's baseline is
+    # curation.NO_STANCE, the value every recompile compares against.
+    assert pin["baseline_stance"] == "unknown"
     assert "pinned_at" in pin
 
 
@@ -2150,13 +1668,13 @@ def test_view_render_cmd_tolerates_non_utf8_floor_candidates_sidecar(tmp_path: P
 
 
 def test_view_render_html_contains_numbered_items(tmp_path: Path) -> None:
-    """Rendered HTML from CLI contains C1 and C1.1 items."""
+    """Rendered HTML from CLI contains the numbered clause items."""
     _make_opf(tmp_path)
     runner = CliRunner()
     runner.invoke(cli, ["view", "render", str(tmp_path / "out")])
     html = (tmp_path / "out" / "playbook.review.html").read_text(encoding="utf-8")
-    assert "C1" in html
-    assert "C1.1" in html
+    assert 'id="C1"' in html
+    assert 'id="C2"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -2165,42 +1683,16 @@ def test_view_render_html_contains_numbered_items(tmp_path: Path) -> None:
 
 
 def test_view_apply_cmd_success(tmp_path: Path) -> None:
-    """``playbook view apply <out_dir> <feedback.json>`` exits 0.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
+    """``playbook view apply <out_dir> <feedback.json>`` exits 0."""
     _make_opf(tmp_path)
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
 
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
+    feedback = {"C2": {"comment": "looks right"}}
     fp = _write_feedback(tmp_path, feedback)
 
     runner = CliRunner()
     result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
-
-
-def test_view_apply_cmd_writes_hints(tmp_path: Path) -> None:
-    """CLI apply writes hints.yaml for provenance correction.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-
-    runner = CliRunner()
-    runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
-
-    hints_path = doc_dir / "hints.yaml"
-    assert hints_path.exists()
-    data = yaml.safe_load(hints_path.read_text(encoding="utf-8"))
-    assert data["provenance"] == "counterparty_paper"
 
 
 def test_view_apply_cmd_missing_opf_exits_nonzero(tmp_path: Path) -> None:
@@ -2296,17 +1788,41 @@ def test_view_apply_cmd_floor_malformed_reports_not_applied(tmp_path: Path) -> N
     assert "NOTE  no feedback applied" in result.output
 
 
+def test_view_apply_cmd_document_hints_reported_not_applied(tmp_path: Path) -> None:
+    """provenance/signed_version/order are reported as not applied and no
+    hints.yaml is written anywhere; the retired --corpus-dir flag is gone
+    (issue #238)."""
+    _make_opf(tmp_path)
+    feedback = {"C2": {"provenance": "counterparty_paper", "signed_version": "v3", "order": ["v1"]}}
+    fp = _write_feedback(tmp_path, feedback)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["view", "apply", str(tmp_path / "out"), str(fp)])
+    assert result.exit_code == 0, result.output
+    assert result.output.count("C2: not applied") == 3
+    assert "NOTE  no feedback applied" in result.output
+    assert "hints.yaml updated" not in result.output
+    assert not list(tmp_path.rglob("hints.yaml"))
+    assert not (tmp_path / "out" / "hints").exists()
+
+    retired = runner.invoke(
+        cli, ["view", "apply", str(tmp_path / "out"), str(fp), "--corpus-dir", str(tmp_path)]
+    )
+    assert retired.exit_code == 2
+    assert "No such option" in retired.output
+
+
 # ---------------------------------------------------------------------------
 # Acceptance criteria — explicit AC checks
 # ---------------------------------------------------------------------------
 
 
 def test_ac_html_contains_numbered_clause_items(tmp_path: Path) -> None:
-    """AC: HTML rendered from fixture contains numbered clause items C1, C1.1."""
+    """AC: HTML rendered from fixture contains numbered clause items C1, C2."""
     _make_opf(tmp_path)
     html = render_review_html(tmp_path / "out")
-    assert "C1" in html
-    assert "C1.1" in html
+    assert 'id="C1"' in html
+    assert 'id="C2"' in html
 
 
 def test_ac_html_contains_embedded_json(tmp_path: Path) -> None:
@@ -2335,44 +1851,6 @@ def test_ac_html_requires_no_network(tmp_path: Path) -> None:
     assert external_urls == [], f"Found external URLs: {external_urls}"
 
 
-def test_ac_apply_writes_hints_yaml_for_provenance(tmp_path: Path) -> None:
-    """AC: view --apply on a provenance flip writes the expected hints.yaml.
-
-    C2.1 = first obs of indemnification → state-university-2023.
-    """
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-    doc_dir = tmp_path / "state-university-2023"
-    doc_dir.mkdir()
-
-    feedback = {"C2.1": {"provenance": "counterparty_paper"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert "state-university-2023" in result.hints_written
-    data = yaml.safe_load((doc_dir / "hints.yaml").read_text(encoding="utf-8"))
-    assert data["provenance"] == "counterparty_paper"
-
-
-def test_ac_apply_writes_verdict_store_for_classification(tmp_path: Path) -> None:
-    """AC: view --apply on a reclassification writes the expected VerdictStore entry."""
-    _make_opf(tmp_path)
-    out_dir = tmp_path / "out"
-
-    feedback = {"C1": {"classification": "governing_law"}}
-    fp = _write_feedback(tmp_path, feedback)
-    result = apply_feedback(out_dir, fp)
-
-    assert result.verdicts_written >= 1
-    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
-    lines = [
-        json.loads(line)
-        for line in verdicts_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(rec["verdict"].get("taxonomy_id") == "governing_law" for rec in lines)
-
-
 def test_ac_item_numbering_deterministic(tmp_path: Path) -> None:
     """AC: item numbering is deterministic and stable for the same playbook input."""
     _make_opf(tmp_path)
@@ -2395,7 +1873,7 @@ _ALIAS_CLAUSES = [
             "text": "Each party shall indemnify the other.",
             "source_ref": {"document_id": "template", "version": "template", "clause_path": "8"},
         },
-        "observed_positions": [
+        "deal_rows": [
             {
                 "text_summary": "Counterparty-1 requested mutual indemnification.",
                 "example_ref": {
@@ -2410,15 +1888,6 @@ _ALIAS_CLAUSES = [
                 "precedent_count": 7,
             }
         ],
-        "rollup": {
-            "position": "standard",
-            "confidence": {
-                "score": 0.9,
-                "basis": "precedent_count",
-                "n_our_paper": 10,
-                "n_counterparty_paper": 1,
-            },
-        },
     }
 ]
 
@@ -2519,72 +1988,9 @@ def test_review_html_has_user_guide(tmp_path: Path) -> None:
     assert "User guide" in html
     assert "How to use this page" in html
     assert "toggleGuide" in html
-    # variation vocabulary explained
-    assert "preferred variations" in html
-    assert "unacceptable variations" in html
-
-
-def test_review_html_badges_carry_help_titles(tmp_path: Path) -> None:
-    _make_opf(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["view", "render", str(tmp_path / "out")])
-    assert result.exit_code == 0, result.output
-    html = (tmp_path / "out" / "playbook.review.html").read_text(encoding="utf-8")
-    assert 'title="This form survived to the signed copy."' in html
-
-
-def _add_clause_summary(tmp_path: Path) -> None:
-    """Populate summary.* on the first clause so the Preferred / concessions /
-    Unacceptable sections actually render (the base fixture has no summary)."""
-    opf_path = tmp_path / "out" / "playbook.opf.json"
-    doc = json.loads(opf_path.read_text(encoding="utf-8"))
-    clauses = (doc.get("evidence") or {}).get("clauses") or doc["clauses"]
-    clauses[0]["summary"] = {
-        "historical_stance": "negotiable",
-        "acceptable_if": [
-            {
-                "if": "Each party shall indemnify the other.",
-                "to": "Each party shall indemnify the other for negligence.",
-                "rationale": "signed at neutral risk",
-                "observation_ref": {
-                    "document_id": "state-university-2023",
-                    "version": 3,
-                    "clause_path": "8",
-                },
-            }
-        ],
-        # Conforming OPF observations (every playbook schema requires
-        # example_ref.document_id — the digest counts distinct deals by it).
-        "fallbacks": [
-            {
-                "text_summary": "Cap indemnity at fees paid.",
-                "example_ref": {
-                    "document_id": "state-university-2023",
-                    "version": 3,
-                    "clause_path": "8",
-                },
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                "provenance": "our_paper",
-                "outcome": "signed",
-            }
-        ],
-        "rejected": [
-            {
-                "text_summary": "Uncapped one-way indemnity in our disfavour.",
-                "example_ref": {
-                    "document_id": "state-university-2023",
-                    "version": 2,
-                    "clause_path": "8",
-                },
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "material"},
-                "provenance": "our_paper",
-                "outcome": "proposed_then_reversed",
-            }
-        ],
-    }
-    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+    # the retired 0.3 variation vocabulary is gone (issue #238)
+    assert "preferred variations" not in html
+    assert "refused asks" in html
 
 
 def test_bundle_is_superset_of_document(tmp_path: Path) -> None:
@@ -2593,7 +1999,6 @@ def test_bundle_is_superset_of_document(tmp_path: Path) -> None:
     render_bundle_html seam — a future edit to the document template must not
     be able to silently drop content out of the bundle."""
     _make_opf(tmp_path)
-    _add_clause_summary(tmp_path)
     runner = CliRunner()
     result = runner.invoke(cli, ["view", "bundle", str(tmp_path / "out")])
     assert result.exit_code == 0, result.output
@@ -2609,20 +2014,19 @@ def test_bundle_is_superset_of_document(tmp_path: Path) -> None:
     assert '<nav class="toc">' in html
     assert "<strong>Clauses</strong>" in html
 
-    # per-clause sections, with stance chips and confidence hover help
+    # per-clause sections: facts only (issue #223) — deal counts, our
+    # standard, signed variants; no stance chip, no confidence score
     assert '<section class="clause" id="clause-1">' in html
     assert 'href="#clause-1"' in html
     assert "Indemnification" in html
     assert "Governing Law" in html
-    assert "cursor:help" in html  # stance chip
-    assert 'title="confidence = evidence-depth score' in html
-
-    # variation terminology — new labels present, old ones gone
-    assert "Preferred variations" in html
-    assert "Acceptable variations — concessions" in html
-    assert "Unacceptable variations — rejected/reversed asks" in html
+    assert "signed variants" in html
+    assert "Signed variants</h3>" in html
+    assert "Our standard</h3>" in html
+    assert "cursor:help" not in html
+    assert "confidence = evidence-depth score" not in html
+    assert "Preferred variations" not in html
     assert "Fallback positions" not in html
-    assert "Rejected / reversed asks" not in html
 
     # posture / floor pending notices
     assert "Posture:</strong> pending" in html
@@ -2659,7 +2063,6 @@ def test_bundle_embeds_document_body_verbatim(tmp_path: Path) -> None:
     from playbook_engine.document_renderer import render_bundle_html, render_document_html
 
     _make_opf(tmp_path)
-    _add_clause_summary(tmp_path)
     out_dir = tmp_path / "out"
     document = render_document_html(out_dir)
     bundle = render_bundle_html(out_dir)
@@ -2746,21 +2149,16 @@ def test_floor_checklist_round_trip_accept_reject_idempotent(tmp_path: Path) -> 
     floor.invariants and validate passes; rejected never reappears as
     proposed on re-render; re-applying the same feedback is a no-op.
 
-    Uses a hand-built, schema-conformant OPF v0.2 doc rather than this
-    file's v0.1-shaped ``_make_opf()`` fixture: OPF v0.1 predates the Floor
-    section entirely (OPF-SPEC.md §3.7 is "NEW" in v0.2), so a v0.1 doc
-    carrying a top-level ``"floor"`` key is schema-invalid by construction
-    — every OTHER test in this file exercises ``apply_feedback``/
-    ``render_review_html`` directly without ever running ``playbook
-    validate``, but this test's acceptance criterion explicitly requires
-    validation to pass.
+    Uses a hand-built, schema-conformant OPF 0.4 doc with no clauses rather
+    than ``_make_opf()``: this test's acceptance criterion requires
+    ``playbook validate`` to pass, and the floor checklist needs no evidence.
     """
     doc = {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
-        "evidence": {"clauses": [], "clause_library": []},
+        "evidence": {"clauses": [], "precedent": []},
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},
@@ -2840,68 +2238,6 @@ def test_floor_checklist_round_trip_accept_reject_idempotent(tmp_path: Path) -> 
 
 
 # ---------------------------------------------------------------------------
-# opf_accessors.clause_is_thin — shared "thin evidence" trigger (issue #91)
-# ---------------------------------------------------------------------------
-
-
-def test_clause_is_thin_evidence_insufficient() -> None:
-    from playbook_engine.opf_accessors import clause_is_thin
-
-    clause = {
-        "observed_positions": [{"precedent_count": 4}],
-        "rollup": {"confidence": {"evidence_sufficient": False}},
-    }
-    assert clause_is_thin(clause) is True
-
-
-def test_clause_is_thin_single_precedent_only() -> None:
-    from playbook_engine.opf_accessors import clause_is_thin
-
-    clause = {
-        "observed_positions": [{"precedent_count": 1}, {"precedent_count": 1}],
-        "rollup": {"confidence": {"evidence_sufficient": True}},
-    }
-    assert clause_is_thin(clause) is True
-
-
-def test_clause_is_thin_false_when_recurring_and_sufficient() -> None:
-    """A clause with at least one recurring (precedent_count > 1) position
-    and evidence_sufficient not False is not thin, even though one of its
-    OTHER positions was seen only once."""
-    from playbook_engine.opf_accessors import clause_is_thin
-
-    clause = {
-        "observed_positions": [{"precedent_count": 4}, {"precedent_count": 1}],
-        "rollup": {"confidence": {"evidence_sufficient": True}},
-    }
-    assert clause_is_thin(clause) is False
-
-
-def test_clause_is_thin_false_when_no_positions_and_no_explicit_flag() -> None:
-    """Vacuous case: zero observed positions and no explicit
-    evidence_sufficient: false — not thin by this rule alone (a
-    compiler-produced playbook already sets evidence_sufficient False
-    whenever n_our_paper falls short; see clause_position_compiler.py)."""
-    from playbook_engine.opf_accessors import clause_is_thin
-
-    clause = {"observed_positions": [], "rollup": {"confidence": {"score": 0.9}}}
-    assert clause_is_thin(clause) is False
-
-
-def test_clause_is_thin_v02_summary_confidence_shape() -> None:
-    """clause_is_thin is version-agnostic like every other opf_accessors
-    helper — OPF v0.2's summary.confidence works the same as v0.1's
-    rollup.confidence."""
-    from playbook_engine.opf_accessors import clause_is_thin
-
-    clause = {
-        "observed_positions": [{"precedent_count": 1}],
-        "summary": {"confidence": {"evidence_sufficient": True}},
-    }
-    assert clause_is_thin(clause) is True
-
-
-# ---------------------------------------------------------------------------
 # Control-ladder restructure — triage header, decisions, audit (issue #91)
 # ---------------------------------------------------------------------------
 
@@ -2918,14 +2254,15 @@ def _set_posture_version(tmp_path: Path, version: int) -> None:
 def test_render_html_triage_header_present_with_zero_state(tmp_path: Path) -> None:
     """Triage header renders even with no Floor/Posture state at all — real,
     honest zero counts, not a hidden/absent section (default _make_opf
-    fixture: 2 clauses, neither thin, no floor.candidates.json, no posture)."""
+    fixture: 2 clauses, no floor.candidates.json, no posture)."""
     _make_opf(tmp_path)
     html = render_review_html(tmp_path / "out")
     assert 'id="triage-header"' in html
     assert "Hard lines: 0 signed" in html
     assert "0 proposed awaiting sign-off" in html
     assert "Posture: not authored" in html
-    assert "Evidence: 2 clauses, 0 thin" in html
+    assert "Evidence: 2 clauses" in html
+    assert "thin" not in html.split('id="triage-header"', 1)[1].split("</div>", 1)[0]
     # The "no empty shell" rule for the checklist itself (issue #90) is
     # unaffected: still no section when there are no candidates.
     assert 'id="floor-candidates"' not in html
@@ -3062,132 +2399,13 @@ def test_render_html_clauses_collapsed_by_default(tmp_path: Path) -> None:
     assert not re.search(r"<details\b[^>]*\bopen\b", html)
 
 
-_ATTENTION_SORT_CLAUSES = [
-    {
-        "id": "clause.alpha",
-        "taxonomy_id": "aaa_alpha",
-        "title": "Alpha Clean Clause",
-        "our_standard": None,
-        "observed_positions": [
-            {
-                "text_summary": "Alpha form, recurring.",
-                "example_ref": {
-                    "document_id": "state-university-2023",
-                    "version": 1,
-                    "clause_path": "1",
-                },
-                "deviation": "none",
-                "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                "provenance": "our_paper",
-                "outcome": "signed",
-                "precedent_count": 5,
-            },
-        ],
-        "rollup": {
-            "position": "standard",
-            "confidence": {
-                "score": 0.9,
-                "basis": "precedent_count",
-                "n_our_paper": 5,
-                "n_counterparty_paper": 0,
-                "evidence_sufficient": True,
-            },
-        },
-    },
-    {
-        "id": "clause.omega",
-        "taxonomy_id": "zzz_omega",
-        "title": "Omega Thin Clause",
-        "our_standard": None,
-        "observed_positions": [
-            {
-                "text_summary": "Omega form, seen once.",
-                "example_ref": {
-                    "document_id": "state-university-2023",
-                    "version": 1,
-                    "clause_path": "2",
-                },
-                "deviation": "none",
-                "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                "provenance": "our_paper",
-                "outcome": "signed",
-                "precedent_count": 1,
-            },
-        ],
-        "rollup": {
-            "position": "standard",
-            "confidence": {
-                "score": 0.9,
-                "basis": "precedent_count",
-                "n_our_paper": 1,
-                "n_counterparty_paper": 0,
-                "evidence_sufficient": True,
-            },
-        },
-    },
-]
-
-
-def test_render_html_attention_first_sort_overrides_taxonomy_order(tmp_path: Path) -> None:
-    """A thin clause (Omega, taxonomy-sorted LAST -> numbered C2) must
-    render BEFORE a clean clause (Alpha, taxonomy-sorted FIRST -> numbered
-    C1) in the collapsed audit section — proving the attention-first sort
-    actually reorders rendering, not just coincides with taxonomy order.
-    Item numbering itself is untouched: Alpha is still C1, Omega still C2.
-    """
-    _make_opf(tmp_path, clauses=_ATTENTION_SORT_CLAUSES)
-    html = render_review_html(tmp_path / "out")
-
-    idx_c1_tag = html.index('<details class="clause" id="C1"')
-    idx_c2_tag = html.index('<details class="clause" id="C2"')
-    assert idx_c2_tag < idx_c1_tag, "thin clause C2 must render before clean clause C1"
-
-    # Confirm titles inside each <details> block, scoped to that block —
-    # NOT a bare html.index() on the title text, which would find the TOC's
-    # sidebar link first: the TOC intentionally still lists clauses in
-    # taxonomy order (issue #91 only reorders the audit section itself).
-    end_c2 = html.index("</details>", idx_c2_tag)
-    assert "Omega Thin Clause" in html[idx_c2_tag:end_c2]
-    end_c1 = html.index("</details>", idx_c1_tag)
-    assert "Alpha Clean Clause" in html[idx_c1_tag:end_c1]
-
-
-def test_render_html_attention_reason_visible_on_collapsed_summary_line(tmp_path: Path) -> None:
-    """The reason a clause wants attention is visible on its <summary> line
-    without expanding; a clean clause's summary says "no flags"."""
-    _make_opf(tmp_path, clauses=_ATTENTION_SORT_CLAUSES)
-    html = render_review_html(tmp_path / "out")
-
-    start_c2 = html.index('<details class="clause" id="C2"')
-    end_c2 = html.index("</summary>", start_c2)
-    assert "thin evidence" in html[start_c2:end_c2]
-
-    start_c1 = html.index('<details class="clause" id="C1"')
-    end_c1 = html.index("</summary>", start_c1)
-    assert "no flags" in html[start_c1:end_c1]
-
-
-def test_render_html_low_confidence_flags_attention(tmp_path: Path) -> None:
-    """confidence.score < 0.6 is its own independent attention trigger,
-    distinct from thin evidence — the default fixture's governing_law
-    clause (score 0.55, not thin: 1 observation with precedent_count=2)
-    demonstrates it in isolation."""
-    _make_opf(tmp_path)
-    html = render_review_html(tmp_path / "out")
-    start = html.index('<details class="clause" id="C1"')  # governing_law, score 0.55
-    end = html.index("</summary>", start)
-    summary = html[start:end]
-    assert "low confidence (55%)" in summary
-    assert "thin evidence" not in summary
-
-
 _PIN_CONFLICT_CLAUSES = [
     {
         "id": "clause.alpha",
         "taxonomy_id": "aaa_alpha",
         "title": "Alpha Clean Clause",
         "our_standard": None,
-        "observed_positions": [
+        "deal_rows": [
             {
                 "text_summary": "Alpha form, recurring.",
                 "example_ref": {
@@ -3202,23 +2420,13 @@ _PIN_CONFLICT_CLAUSES = [
                 "precedent_count": 5,
             },
         ],
-        "rollup": {
-            "position": "standard",
-            "confidence": {
-                "score": 0.9,
-                "basis": "precedent_count",
-                "n_our_paper": 5,
-                "n_counterparty_paper": 0,
-                "evidence_sufficient": True,
-            },
-        },
     },
     {
         "id": "clause.omega",
         "taxonomy_id": "zzz_omega",
         "title": "Omega Pinned Clause",
         "our_standard": None,
-        "observed_positions": [
+        "deal_rows": [
             {
                 "text_summary": "Omega form, recurring too.",
                 "example_ref": {
@@ -3233,16 +2441,6 @@ _PIN_CONFLICT_CLAUSES = [
                 "precedent_count": 4,
             },
         ],
-        "rollup": {
-            "position": "standard",
-            "confidence": {
-                "score": 0.95,
-                "basis": "precedent_count",
-                "n_our_paper": 4,
-                "n_counterparty_paper": 0,
-                "evidence_sufficient": True,
-            },
-        },
     },
 ]
 
@@ -3320,9 +2518,7 @@ def test_review_html_guide_contains_ladder_framing(tmp_path: Path) -> None:
     assert "optional" in normalized
     assert "natural language" in normalized
     assert "signing proposals and correcting the record" in normalized
-    # Pre-existing, still-required guide content (unchanged assertions).
-    assert "preferred variations" in html
-    assert "unacceptable variations" in html
+    assert "signed variants" in normalized
 
 
 def test_guide_html_is_under_half_its_pre_91_length() -> None:
@@ -3331,3 +2527,16 @@ def test_guide_html_is_under_half_its_pre_91_length() -> None:
     from playbook_engine.viewer import _GUIDE_HTML
 
     assert len(_GUIDE_HTML) < 3643 / 2
+
+
+def test_apply_feedback_document_hints_on_a_clause_item_are_reported_skipped(
+    tmp_path: Path,
+) -> None:
+    """A clause item aggregates precedent from many deals and cites no single
+    document, so a provenance/signed_version/order hint on it cannot be
+    applied — it is reported back, never silently dropped (issue #138)."""
+    _make_opf(tmp_path)
+    feedback = {"C2": {"provenance": "counterparty_paper", "signed_version": "v3", "order": ["v1"]}}
+    result = apply_feedback(tmp_path / "out", _write_feedback(tmp_path, feedback))
+    assert len(result.skipped["C2"]) == 3
+    assert all("cites none" in message for message in result.skipped["C2"])

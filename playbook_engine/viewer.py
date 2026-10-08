@@ -2,7 +2,8 @@
 
 Provides a self-contained static HTML review surface for non-engineer
 reviewers, plus a feedback-apply path that translates reviewer corrections
-into engine-actionable hints and verdict-store entries.
+into verdict-store entries, reviewer notes, curation pins and Floor
+decisions.
 
 Public API
 ----------
@@ -38,17 +39,15 @@ inert "rejected" row. No candidates -> no section at all (no empty shell).
 #91), three regions in order:
 
 1. A triage header: a compact "state of control" line (hard lines signed vs.
-   still proposed, Posture version, Evidence clause/thin counts) plus the
+   still proposed, Posture version, Evidence clause count) plus the
    three ways to act, from cheapest to most open-ended.
 2. The "Proposed hard lines" checklist above (unchanged, now directly under
    the header).
 3. The per-clause audit surface: every clause collapsed by default
    (``<details>``/``<summary>`` — no JS needed), sorted attention-first —
-   any clause that is thin (``opf_accessors.clause_is_thin``), low-confidence
-   (``summary.confidence.score < 0.6``), or carries a pinned position that
-   conflicts with freshly recomputed evidence (``curation.pins[].conflict``)
-   sorts above the rest; ties keep the existing taxonomy+id order. Item
-   numbering (``C1``, ``C1.1``, ...) is unaffected by this render order —
+   any clause that carries a pinned position that conflicts with freshly
+   recomputed evidence (``curation.pins[].conflict``) sorts above the rest; ties keep the existing taxonomy+id order. Item
+   numbering (``C1``, ``C2``, ...) is unaffected by this render order —
    numbers still come from the canonical taxonomy+id sort in
    :func:`_build_index`, so ``apply_feedback`` and a reviewer's muscle
    memory both stay stable across a re-render.
@@ -57,7 +56,6 @@ inert "rejected" row. No candidates -> no section at all (no empty shell).
     Read *feedback_path* (a ``feedback.json`` produced by the HTML viewer) and
     translate corrections into:
 
-    - ``hints.yaml`` per-document entries (provenance / signed / order overrides)
     - ``VerdictStore`` entries (classification corrections via the agent-judge
       bridge from issue #64)
     - ``viewer_notes.md`` for free-text notes and reviewer comments
@@ -65,7 +63,8 @@ inert "rejected" row. No candidates -> no section at all (no empty shell).
       #147) for ``override`` — an attorney-pinned clause position. Unlike
       every other correction key, this one rewrites ``playbook.opf.json``
       itself: the pin records the asserted position, the clause's
-      ``historical_stance`` at pin time (``baseline_stance``, so a later
+      stance at pin time (``baseline_stance`` — always ``curation.NO_STANCE``
+      since OPF 0.4 carries none, so a later
       recompile can tell whether evidence has actually moved), and refreshes
       ``identity.content_hash``/``section_digests`` if the document already
       carries an ``identity`` block. A pipeline recompile
@@ -80,7 +79,10 @@ inert "rejected" row. No candidates -> no section at all (no empty shell).
 
     Any correction key ``apply_feedback`` cannot honor is recorded in
     ``ApplyResult.skipped`` instead of being silently dropped, so callers
-    never report false success (issue #138).
+    never report false success (issue #138). That includes the
+    document-level ``provenance`` / ``signed_version`` / ``order`` keys: a
+    clause item cites no single document, so they are reported as not
+    applied and must be set by hand in the deal's ``hints.yaml``.
 
 Feedback JSON schema (produced by the viewer's **Export feedback** button)::
 
@@ -91,22 +93,22 @@ Feedback JSON schema (produced by the viewer's **Export feedback** button)::
         "cand-002": {"decision": "reject", "comment": "too broad as worded"}
       },
       "C1": {"comment": "...", "override": null},
-      "C1.1": {
+      "C2": {
         "comment": "looks correct",
-        "provenance": "counterparty_paper",
         "classification": "governing_law",
-        "signed_version": "v3",
-        "order": ["v1", "v2", "v3"],
         "note": "free-text note"
       }
     }
 
-Every key EXCEPT ``"floor"`` is an item number (``Cx`` for a clause, ``Cx.y``
-for an observation). Recognised per-item correction keys:
+Every key EXCEPT ``"floor"`` is an item number (``Cx``, one per clause).
+Recognised per-item correction keys:
 
-- ``provenance``    → ``hints.yaml`` for the cited document
-- ``signed_version``→ ``hints.yaml`` for the cited document
-- ``order``         → ``hints.yaml`` for the cited document
+- ``provenance``    → not applied: a clause item cites no single
+                      document, so this is reported back via
+                      ``ApplyResult.skipped``; set it by hand in the deal's
+                      ``hints.yaml``
+- ``signed_version``→ likewise
+- ``order``         → likewise
 - ``classification``→ VerdictStore entry (``taxonomy_id`` correction)
 - ``note``          → appended to ``viewer_notes.md``
 - ``comment``       → appended to ``viewer_notes.md`` (same sink as ``note``)
@@ -137,7 +139,7 @@ playbook's identity.content_hash, or null>, "generated_at": <its
 compiler.generated_at, or null>}``. It exists so a ``feedback.json``
 collected against one render can never be silently applied to a
 DIFFERENT ``playbook.opf.json`` (e.g. the out-dir was re-mined/re-projected
-between render and apply, shifting which clause a still-valid ``Cx``/``Cx.y``
+between render and apply, shifting which clause a still-valid ``Cx``
 number refers to) — see the module's audit-finding history for #174.
 ``apply_feedback`` compares ``_export["content_hash"]`` against the
 CURRENT ``playbook.opf.json``'s ``identity.content_hash`` whenever both are
@@ -159,13 +161,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_tree import ClauseTree
-from playbook_engine.curation import CurationPin
-from playbook_engine.entity_registry import entity_slug
+from playbook_engine.curation import NO_STANCE, CurationPin
 from playbook_engine.floor_candidates import (
     _Q5_REJECTION_COMMENT,
     apply_floor_review,
@@ -174,10 +173,6 @@ from playbook_engine.floor_candidates import (
     read_floor_candidates,
 )
 from playbook_engine.opf_accessors import (
-    clause_confidence,
-    clause_is_thin,
-    clause_stance,
-    is_precedent_shape,
     perspective_party,
     playbook_clauses,
     playbook_precedent,
@@ -197,12 +192,6 @@ class ApplyResult:
     """Summary of what ``apply_feedback`` wrote.
 
     Attributes:
-        hints_written:    Document IDs for which ``hints.yaml`` was written
-                          or updated **in the corpus document directory**.
-                          A document whose corpus directory could not be
-                          located or written (issue #169) is NOT included
-                          here even though a fallback copy was parked under
-                          ``out_dir/hints/`` — see ``skipped``.
         verdicts_written: Number of VerdictStore entries written.
         notes_written:    ``True`` if ``viewer_notes.md`` was updated.
         pins_written:     Item numbers whose ``override`` was embedded as a
@@ -222,13 +211,10 @@ class ApplyResult:
                           ``apply_feedback`` recognised as unsupported.
                           Also carries malformed/unknown ``"floor"`` entries,
                           keyed ``"floor"`` (malformed top-level block) or
-                          ``f"floor:{candidate_id}"`` (issue #90), and a
-                          hints.yaml correction that could not reach the
-                          corpus, keyed ``f"hints:{doc_id}"`` (issue #169).
+                          ``f"floor:{candidate_id}"`` (issue #90).
                           Empty if every key was applied.
     """
 
-    hints_written: list[str] = field(default_factory=list)
     verdicts_written: int = 0
     notes_written: bool = False
     pins_written: list[str] = field(default_factory=list)
@@ -243,52 +229,36 @@ class ApplyResult:
 
 
 def _build_index(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
-    """Return a flat list of (number, kind, payload) for all clauses and observations.
+    """Return a flat list of (number, kind, payload) for all clauses.
 
     Clause items are numbered ``C1``, ``C2``, … (ordered by taxonomy_id then id
-    for determinism).  Observation items within a clause are numbered
-    ``C1.1``, ``C1.2``, … preserving the order they appear in
-    ``observed_positions``.
+    for determinism).
 
     Args:
         doc: The parsed OPF ``playbook.opf.json`` dict.
 
     Returns:
-        List of ``(item_number, kind, payload)`` where *kind* is ``"clause"``
-        or ``"observation"`` and *payload* holds the clause/observation dict
-        plus extra keys ``_clause_id``, ``_clause_num``, and (for observations)
-        ``_obs_num``.
+        List of ``(item_number, "clause", payload)`` where *payload* holds the
+        clause dict plus extra keys ``_clause_id``, ``_clause_num`` and
+        ``_precedent_groups`` (the clause's signed variants and refused asks,
+        issue #223).
     """
+    from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
+
     clauses = playbook_clauses(doc)
     # Sort clauses deterministically: by taxonomy_id then id
     sorted_clauses = sorted(clauses, key=lambda c: (c.get("taxonomy_id", ""), c.get("id", "")))
-    # OPF 0.4 (issue #223): no observed_positions — each clause item carries
-    # its grouped precedent (signed variants + refused asks) for display.
-    precedent = playbook_precedent(doc) if is_precedent_shape(doc) else None
+    precedent = playbook_precedent(doc)
+    party = perspective_party(doc)
 
     index: list[tuple[str, str, dict[str, Any]]] = []
     for clause_num, clause in enumerate(sorted_clauses, start=1):
         cnum = f"C{clause_num}"
         clause_payload = {**clause, "_clause_id": clause.get("id"), "_clause_num": cnum}
-        if precedent is not None:
-            from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
-
-            clause_payload["_precedent_groups"] = clause_precedent_groups(
-                clause.get("taxonomy_id"), precedent, party=perspective_party(doc)
-            )
+        clause_payload["_precedent_groups"] = clause_precedent_groups(
+            clause.get("taxonomy_id"), precedent, party=party
+        )
         index.append((cnum, "clause", clause_payload))
-
-        obs_list = clause.get("observed_positions", [])
-        for obs_num, obs in enumerate(obs_list, start=1):
-            onum = f"{cnum}.{obs_num}"
-            obs_payload = {
-                **obs,
-                "_clause_id": clause.get("id"),
-                "_clause_num": cnum,
-                "_obs_num": onum,
-                "_clause_title": clause.get("title", ""),
-            }
-            index.append((onum, "observation", obs_payload))
 
     return index
 
@@ -296,40 +266,6 @@ def _build_index(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
 # ---------------------------------------------------------------------------
 # HTML rendering
 # ---------------------------------------------------------------------------
-
-_POSITION_COLORS = {
-    # OPF v0.1 rollup.position (prescriptive) — kept for back-compat.
-    "standard": "#2563eb",
-    "acceptable_variants_exist": "#059669",
-    "negotiable": "#d97706",
-    "hold_firm": "#dc2626",
-    # OPF v0.2 summary.historical_stance (descriptive) — issue #155.
-    "consistently_held": "#2563eb",
-    "usually_held": "#059669",
-    "mixed": "#d97706",
-    "usually_conceded": "#dc2626",
-    "no_signal": "#9ca3af",
-}
-
-_DEVIATION_BADGES = {
-    "none": ("none", "#d1fae5", "#065f46"),
-    "reworded_equivalent": ("reworded", "#dbeafe", "#1e40af"),
-    "substantive": ("substantive", "#fee2e2", "#991b1b"),
-    "needs_review": ("needs review", "#fef3c7", "#92400e"),
-}
-
-_RISK_BADGES = {
-    ("better", "none"): ("better/none", "#d1fae5", "#065f46"),
-    ("better", "minor"): ("better/minor", "#d1fae5", "#065f46"),
-    ("better", "material"): ("better/material", "#d1fae5", "#065f46"),
-    ("neutral", "none"): ("neutral", "#f3f4f6", "#374151"),
-    ("neutral", "minor"): ("neutral/minor", "#f3f4f6", "#374151"),
-    ("neutral", "material"): ("neutral/material", "#f3f4f6", "#374151"),
-    ("worse", "none"): ("worse/none", "#fef3c7", "#92400e"),
-    ("worse", "minor"): ("worse/minor", "#fef3c7", "#92400e"),
-    ("worse", "material"): ("worse/material", "#fee2e2", "#991b1b"),
-}
-
 
 # ---------------------------------------------------------------------------
 # Feedback correction keys — which are honored vs. reported as skipped
@@ -360,52 +296,6 @@ def _badge(text: str, bg: str, fg: str, help_text: str = "") -> str:
     )
 
 
-_DEVIATION_HELP = {
-    "none": "Substantively identical to the compared form (formatting/renumbering only).",
-    "reworded_equivalent": "Different wording, same legal effect.",
-    "substantive": "A real change in obligation, right, or risk — see the risk badge.",
-}
-
-
-def _deviation_badge(deviation: str) -> str:
-    label, bg, fg = _DEVIATION_BADGES.get(deviation, (deviation, "#f3f4f6", "#374151"))
-    return _badge(
-        label,
-        bg,
-        fg,
-        _DEVIATION_HELP.get(deviation, "How this text differs from the compared form."),
-    )
-
-
-def _risk_badge(risk_delta: dict[str, str]) -> str:
-    direction = risk_delta.get("direction", "neutral")
-    magnitude = risk_delta.get("magnitude", "none")
-    label, bg, fg = _RISK_BADGES.get(
-        (direction, magnitude), (f"{direction}/{magnitude}", "#f3f4f6", "#374151")
-    )
-    return _badge(
-        label,
-        bg,
-        fg,
-        "Judged risk shift from OUR perspective: direction (worse = more risk "
-        "for us, better = less) / magnitude (minor or material).",
-    )
-
-
-def _outcome_badge(outcome: str) -> str:
-    if outcome == "signed":
-        return _badge("signed", "#d1fae5", "#065f46", "This form survived to the signed copy.")
-    if outcome == "proposed_then_reversed":
-        return _badge(
-            "reversed",
-            "#fee2e2",
-            "#991b1b",
-            "Proposed in a draft, then reversed/removed before signing — a "
-            "successful pushback (an 'unacceptable variation').",
-        )
-    return _badge(outcome, "#f3f4f6", "#374151", "Final status of this observed form.")
-
-
 def _citation_str(ref: dict[str, Any] | None) -> str:
     if not ref:
         return ""
@@ -427,49 +317,29 @@ def _render_clause_section(
     taxonomy_label: str,
     attention_reasons: list[str] | None = None,
 ) -> str:
-    """Render one clause block with its observations.
+    """Render one clause block with its signed variants and refused asks.
 
     Collapsed by default (issue #91): the outer element is a plain
     ``<details>``/``<summary>`` pair (no JS — the page must stay a
     self-contained, no-network single file), so the browser handles
-    show/hide natively. The ``<summary>`` carries exactly what the
-    pre-#91 always-visible header carried (item number, title, taxonomy
-    tag, stance chip) PLUS *attention_reasons* — why a reviewer might want
-    to open this one, or "no flags" when *attention_reasons* is empty/None
-    — visible without expanding. Everything else (confidence meta,
-    our_standard, the comment/pin controls, observations) is unchanged,
-    just nested inside the ``<details>`` body rather than a bare ``<div>``.
+    show/hide natively. The ``<summary>`` carries the item number, title,
+    taxonomy tag and the clause's standard-signed fact PLUS
+    *attention_reasons* — why a reviewer might want to open this one, or
+    "no flags" when *attention_reasons* is empty/None — visible without
+    expanding. our_standard, the comment/pin controls and the precedent
+    groups are nested inside the ``<details>`` body.
     """
     lines: list[str] = []
     title = html_lib.escape(clause.get("title", ""))
     precedent_groups = clause.get("_precedent_groups")
-    position = clause_stance(clause)
-    if isinstance(precedent_groups, dict):
-        # OPF 0.4 carries no stance (issue #223): show the fact instead.
-        position = (
-            f"{clause.get('n_signed_standard', 0)}/{clause.get('n_deals', 0)} signed standard"
-        )
-    pos_color = _POSITION_COLORS.get(position, "#374151")
-    confidence = clause_confidence(clause)
-    conf_score = confidence.get("score")
-    n_our = confidence.get("n_our_paper")
-    n_cp = confidence.get("n_counterparty_paper")
+    # The document carries no stance (issue #223): show the fact instead.
+    position = f"{clause.get('n_signed_standard', 0)}/{clause.get('n_deals', 0)} signed standard"
+    pos_color = "#374151"
     clause_id = clause.get("id", "")
-
-    conf_str = ""
-    if conf_score is not None:
-        conf_str = f"confidence {conf_score:.0%}"
-    if n_our is not None:
-        conf_str += f" | n_our={n_our}"
-    if n_cp is not None:
-        conf_str += f" | n_cp={n_cp}"
 
     our_standard = clause.get("our_standard") or {}
     our_std_text = our_standard.get("text", "")
-
-    # Needs-review or low-confidence highlight
-    needs_review = position in ("needs_review",) or (conf_score is not None and conf_score < 0.5)
-    highlight_style = "border-left:4px solid #f59e0b;background:#fffbeb" if needs_review else ""
+    highlight_style = ""
 
     reasons = attention_reasons or []
     attention_html = (
@@ -488,9 +358,6 @@ def _render_clause_section(
         f"{attention_html}"
         f"</summary>"
     )
-    if conf_str:
-        lines.append(f'<div class="clause-meta">{html_lib.escape(conf_str)}</div>')
-
     if our_std_text:
         lines.append(
             f'<div class="our-standard">'
@@ -508,9 +375,8 @@ def _render_clause_section(
         f'<select class="override-select" data-item="{html_lib.escape(cnum)}" '
         f'data-clause-id="{html_lib.escape(clause_id)}">'
         f'<option value="">—</option>'
-        # Values mirror OPF v0.2 summary.historical_stance (issue #155) so a
-        # pin is directly comparable to the recomputed stance on recompile
-        # (issue #147) rather than a different, incompatible vocabulary.
+        # Free-form position labels (issue #155); the engine preserves a
+        # pin's position and never interprets it (issue #147).
         f'<option value="consistently_held">consistently_held</option>'
         f'<option value="usually_held">usually_held</option>'
         f'<option value="mixed">mixed</option>'
@@ -544,44 +410,6 @@ def _render_clause_section(
                 )
             lines.append("</div>")
 
-    # Observations
-    obs_list = clause.get("observed_positions", [])
-    if obs_list:
-        lines.append('<div class="observations">')
-        for i, obs in enumerate(obs_list, start=1):
-            onum = f"{cnum}.{i}"
-            text_summary = obs.get("text_summary", "")
-            deviation = obs.get("deviation", "")
-            risk_delta = obs.get("risk_delta", {})
-            provenance = obs.get("provenance", "")
-            outcome = obs.get("outcome", "")
-            example_ref = obs.get("example_ref")
-            citation = _citation_str(example_ref)
-
-            lines.append(
-                f'<div class="observation" id="{html_lib.escape(onum)}">'
-                f'<span class="item-num obs-num">{html_lib.escape(onum)}</span> '
-                f"{html_lib.escape(text_summary)} "
-                f"{_deviation_badge(deviation)} "
-                f"{_risk_badge(risk_delta)} "
-                f"{_outcome_badge(outcome)} "
-                f'<span class="prov-tag">{html_lib.escape(provenance)}</span>'
-            )
-            if citation:
-                lines.append(
-                    f'<span class="citation-tag" title="{html_lib.escape(citation)}">'
-                    f"{html_lib.escape(citation)}"
-                    f"</span>"
-                )
-            lines.append(
-                f'<div class="feedback-row">'
-                f'<label>Comment: <input class="comment-input" data-item="{html_lib.escape(onum)}" '
-                f'type="text" placeholder="Note on this observation…" style="width:50%"></label>'
-                f"</div>"
-            )
-            lines.append("</div>")  # .observation
-        lines.append("</div>")  # .observations
-
     lines.append("</details>")  # .clause
     return "\n".join(lines)
 
@@ -590,35 +418,21 @@ def _render_clause_section(
 # Attention-first audit sort (issue #91)
 # ---------------------------------------------------------------------------
 
-# Below this, a clause's stance/rollup confidence.score counts as "low
-# confidence" for attention-sort purposes. Deliberately independent of
-# _render_clause_section's own pre-#91 "needs_review" highlight threshold
-# (0.5) — that highlight is unchanged; this is the new, ticket-specified
-# trigger (#91) for sort order + the collapsed summary line's reason text.
-_LOW_CONFIDENCE_THRESHOLD = 0.6
-
 
 def _clause_attention_reasons(
     clause: dict[str, Any], pin_conflict_clause_ids: set[str]
 ) -> list[str]:
     """Why *clause* sorts above the rest in the collapsed audit section.
 
-    Three independent, ticket-specified triggers: thin evidence
-    (:func:`opf_accessors.clause_is_thin`), low confidence
-    (``summary.confidence.score < 0.6``), and a pinned position that now
-    conflicts with freshly recomputed evidence (this clause's id present
-    in *pin_conflict_clause_ids* — derived by the caller from
+    One trigger: a pinned position that now conflicts with freshly
+    recomputed evidence (this clause's id present in
+    *pin_conflict_clause_ids* — derived by the caller from
     ``curation.pins[].conflict``; see ``curation.merge_curation``). Returns
-    every applicable reason label, in this fixed order, for display on the
-    collapsed summary line without expanding; ``[]`` when none apply (the
-    caller renders "no flags" instead).
+    the reason label for display on the collapsed summary line without
+    expanding; ``[]`` when it does not apply (the caller renders "no flags"
+    instead).
     """
     reasons: list[str] = []
-    if clause_is_thin(clause):
-        reasons.append("thin evidence")
-    score = clause_confidence(clause).get("score")
-    if isinstance(score, (int, float)) and score < _LOW_CONFIDENCE_THRESHOLD:
-        reasons.append(f"low confidence ({score:.0%})")
     if clause.get("id") in pin_conflict_clause_ids:
         reasons.append("pinned position conflicts with evidence")
     return reasons
@@ -895,7 +709,6 @@ def _render_triage_header(
     floor_section_html: str,
     posture_version: int | None,
     total_clauses: int,
-    thin_count: int,
 ) -> str:
     """The state-of-control banner (issue #91) — the first thing a reviewer
     sees, above the "Proposed hard lines" checklist and the per-clause
@@ -921,7 +734,7 @@ def _render_triage_header(
     status_line = (
         f"Hard lines: {signed_count} signed &middot; {pending_count} proposed awaiting "
         f"sign-off | Posture: {html_lib.escape(posture_label)} | "
-        f"Evidence: {total_clauses} clauses, {thin_count} thin"
+        f"Evidence: {total_clauses} clauses"
     )
     # The "Proposed hard lines" checklist section only renders when there is
     # at least one candidate row, regardless of status (issue #90 — no empty
@@ -955,8 +768,8 @@ _AUDIT_SECTION_HEADER_HTML = (
     '<div class="audit-section-header">'
     "<h2>Evidence audit</h2>"
     '<p class="audit-section-help">Every clause, collapsed by default. '
-    "Thin, low-confidence, or pin-conflicted clauses are listed first — "
-    "expand any clause for its citations, badges, and comment box.</p>"
+    "Pin-conflicted clauses are listed first — "
+    "expand any clause for its citations and comment box.</p>"
     "</div>"
 )
 
@@ -973,19 +786,16 @@ _GUIDE_HTML = """
   and correcting the record.</p>
   <ol>
    <li><b>State of control</b> (banner) — hard lines signed vs. proposed,
-     Posture version, how much Evidence is thin.</li>
+     Posture version, how many Evidence clauses.</li>
    <li><b>Decisions</b> (~minutes) — accept/reject each proposed hard
      line. Accept signs it into <code>floor.invariants</code>, never
      automatic (OPF-SPEC.md &sect;3.7 rule 4); undecided ones keep
      reappearing.</li>
-   <li><b>Audit</b> (optional) — every clause, collapsed. Thin,
-     low-confidence, or pin-conflicted clauses sort first and say why;
-     expand any clause for citations, badges, and a comment box.</li>
+   <li><b>Audit</b> (optional) — every clause, collapsed. Pin-conflicted
+     clauses sort first and say why; expand any clause for its signed
+     variants, refused asks, citations, and a comment box.</li>
   </ol>
-  <p>Badges roll up into <i>preferred variations</i> (signed, neutral
-  risk), <i>acceptable variations</i> (concessions), and
-  <i>unacceptable variations</i> (asks we reversed) in the companion
-  document. Comment, pin, or decide, then <b>Export feedback</b> and hand
+  <p>Comment, pin, or decide, then <b>Export feedback</b> and hand
   <code>feedback.json</code> to
   <code>playbook view apply &lt;out_dir&gt; feedback.json</code>.</p>
  </div>
@@ -1168,7 +978,7 @@ def render_review_html(
 ) -> str:
     """Render a self-contained HTML review page from ``playbook.opf.json``.
 
-    Groups clauses by taxonomy, numbers them ``C1``, ``C1.1``, etc.  Embeds
+    Groups clauses by taxonomy, numbers them ``C1``, ``C2``, etc.  Embeds
     the full playbook JSON in a ``<script>`` tag for drill-down access.  Adds a
     per-item comment box and an **Export feedback** button that produces
     ``feedback.json``. When ``out_dir/floor.candidates.json`` carries at
@@ -1211,7 +1021,7 @@ def render_review_html(
     # map was supplied.
     render_doc = _resolve_aliases_in_doc(doc, alias_map) if alias_map else doc
     embedded_json_raw = json.dumps(render_doc, indent=2, ensure_ascii=False) if alias_map else raw
-    # Corpus-derived strings (e.g. observed_positions[].full_text) may contain
+    # Corpus-derived strings (e.g. evidence.precedent[].signed_text) may contain
     # "</script><script>..." which would close this block and execute
     # attacker JavaScript in the DOM (document_renderer._escape_json_for_script
     # solves the same problem for the public bundle). JSON.parse/json.loads
@@ -1250,7 +1060,7 @@ def render_review_html(
     toc_html = "\n".join(toc_lines)
 
     # Build clause sections — collapsed by default, sorted attention-first
-    # (issue #91): thin / low-confidence / pin-conflicted clauses first,
+    # (issue #91): pin-conflicted clauses first,
     # ties keeping the canonical taxonomy+id order (_build_index's order,
     # unaffected by this — see _sort_clauses_attention_first). A clause's
     # pinned position "conflicts with evidence" per curation.merge_curation:
@@ -1276,7 +1086,6 @@ def render_review_html(
     clauses_html = _AUDIT_SECTION_HEADER_HTML + "\n".join(clause_sections)
 
     total_clauses = len(clause_entries)
-    thin_clause_count = sum(1 for _, payload in clause_entries if clause_is_thin(payload))
 
     # "Proposed hard lines" checklist (issue #90) — candidates get the same
     # alias resolution as everything else on the page (reversal candidates
@@ -1334,7 +1143,6 @@ def render_review_html(
         floor_section_html=floor_section_html,
         posture_version=posture_version if isinstance(posture_version, int) else None,
         total_clauses=total_clauses,
-        thin_count=thin_clause_count,
     )
 
     agreement_type = render_doc.get("agreement_type", {}).get("name", "Playbook Review")
@@ -1392,7 +1200,7 @@ def _check_export_binding(
     viewer's Export button) against ``doc["identity"]["content_hash"]`` — the
     hash of the ``playbook.opf.json`` ``apply_feedback`` is about to apply
     corrections to. A mismatch means *feedback_path* was collected against a
-    different render, so ``Cx``/``Cx.y`` item numbers may now resolve to
+    different render, so ``Cx`` item numbers may now resolve to
     different clauses; raises ``ValueError`` unless *force* is set. Either
     side being absent (a pre-#174 export, or a document with no ``identity``
     block) makes the binding unverifiable rather than mismatched — this
@@ -1429,7 +1237,6 @@ def _check_export_binding(
 def apply_feedback(
     out_dir: Path,
     feedback_path: Path,
-    corpus_dir: Path | None = None,
     force: bool = False,
 ) -> ApplyResult:
     """Translate reviewer feedback into engine-actionable corrections.
@@ -1437,8 +1244,10 @@ def apply_feedback(
     Reads *feedback_path* (``feedback.json`` produced by the HTML viewer)
     and applies corrections to the out-directory:
 
-    - ``provenance`` / ``signed_version`` / ``order`` → per-document
-      ``hints.yaml`` entries alongside the corpus document.
+    - ``provenance`` / ``signed_version`` / ``order`` → NOT applied. Each
+      names one document, and a clause item aggregates precedent from many
+      deals and cites none, so each is reported in ``ApplyResult.skipped``;
+      set it by hand in that deal's ``hints.yaml``.
     - ``classification`` → ``VerdictStore`` entry at
       ``out_dir/judge/verdicts.jsonl``.
     - ``note`` → appended to ``out_dir/viewer_notes.md``.
@@ -1453,7 +1262,7 @@ def apply_feedback(
     stamped by the viewer's Export button) AND the current
     ``playbook.opf.json`` carries ``identity.content_hash``, the two hashes
     must match. A mismatch means *feedback_path* was collected against a
-    DIFFERENT render — item numbers (``Cx``/``Cx.y``) may now point at
+    DIFFERENT render — item numbers (``Cx``) may now point at
     different clauses — so ``apply_feedback`` raises ``ValueError`` instead
     of applying corrections to the wrong clause. Pass ``force=True`` to
     apply anyway (a warning is logged either way). If either side of the
@@ -1461,36 +1270,10 @@ def apply_feedback(
     warning and proceeds — see the module docstring's ``"_export"``
     paragraph.
 
-    Locating the corpus document directory for a hints.yaml write (issue
-    #169): the cited ``document_id`` may be a pseudonymized alias (when the
-    corpus was mined with ``known_entities`` configured — issue #153), which
-    never matches a raw-named corpus folder. If ``<out_dir>/alias_map.json``
-    (the held-out ``alias -> real name`` sidecar written by
-    ``entity_registry.write_holdout_map``) exists, it is used to reverse the
-    alias span embedded in ``document_id`` back to the real folder name
-    before searching. *corpus_dir*, when given, is searched first (needed
-    under the documented Docker flow, where the corpus is mounted at
-    ``/work/corpus`` — a sibling of ``/work/out``, not a parent — so the
-    legacy ``out_dir.parent``/``out_dir.parent.parent`` search never finds
-    it). When no corpus document directory can be located or found writable
-    (the Docker corpus mount is read-only — SKILL.md's "Running commands"
-    section), the correction is written to
-    ``out_dir/hints/<doc_id>.yaml`` as a last-resort capture that no engine
-    code reads back, and is reported via ``ApplyResult.skipped`` (key
-    ``"hints:<doc_id>"``) rather than counted in ``hints_written`` — do not
-    mistake a populated ``out_dir/hints/`` for the correction having reached
-    the corpus.
-
     Args:
-        out_dir:       Directory containing ``playbook.opf.json`` and corpus
-                       staging (to locate ``hints.yaml`` files).
+        out_dir:       Directory containing ``playbook.opf.json``.
         feedback_path: Path to the ``feedback.json`` file produced by the
                        viewer's Export button.
-        corpus_dir:    Optional corpus root to search first when locating a
-                       cited document's directory (see above). Defaults to
-                       ``None``, preserving the legacy out_dir-relative
-                       search for callers that share a parent directory
-                       between corpus and out (the non-Docker host layout).
         force:         If ``True``, apply *feedback_path* even when its
                        ``"_export"`` binding does not match the current
                        ``playbook.opf.json`` (issue #174) — a warning is
@@ -1521,16 +1304,13 @@ def apply_feedback(
 
     _check_export_binding(doc, feedback, feedback_path, force=force)
 
-    index = _build_index(doc)
-    # Build item_num → (kind, payload) map
-    item_map: dict[str, tuple[str, dict[str, Any]]] = {
-        item_num: (kind, payload) for item_num, kind, payload in index
+    # Every item is a clause item (C1, C2, ...): item_num -> clause payload.
+    item_map: dict[str, dict[str, Any]] = {
+        item_num: payload for item_num, _kind, payload in _build_index(doc)
     }
 
     result = ApplyResult()
 
-    # Accumulate hints by document_id
-    hints_by_doc: dict[str, dict[str, Any]] = {}
     # Accumulate VerdictStore entries: list of (payload, verdict) pairs
     verdict_entries: list[tuple[dict[str, Any], dict[str, Any]]] = []
     # Accumulate notes
@@ -1544,24 +1324,22 @@ def apply_feedback(
     for item_num, corrections in feedback.items():
         if item_num == "floor":
             # Reserved top-level key (issue #90) — a map of candidate_id ->
-            # decision, not a Cx/Cx.y item number. Handled separately below
+            # decision, not a Cx item number. Handled separately below
             # (_apply_floor_feedback), after this loop.
             continue
         if item_num == "_export":
             # Reserved top-level key (issue #174) — the render-time binding
             # already consumed by _check_export_binding() above, not a
-            # Cx/Cx.y item number.
+            # Cx item number.
             continue
 
         if not isinstance(corrections, dict):
             continue
 
-        kind_payload = item_map.get(item_num)
-        if kind_payload is None:
+        payload = item_map.get(item_num)
+        if payload is None:
             _log.warning("apply_feedback: unknown item number %s; skipping", item_num)
             continue
-
-        kind, payload = kind_payload
 
         # --- Unsupported keys: report, don't silently drop (issue #138) ------
         unsupported_keys = [k for k in corrections if k not in _RECOGNIZED_FEEDBACK_KEYS]
@@ -1570,36 +1348,16 @@ def apply_feedback(
                 _unsupported_message(k) for k in unsupported_keys
             )
 
-        # --- Document-level hint corrections (from observation level) --------
-        # For observation-level items, the cited document is in example_ref.
-        # For clause-level items, we look at the first observation's example_ref.
-        cited_doc_id: str | None = None
-        if kind == "observation":
-            example_ref = payload.get("example_ref") or {}
-            cited_doc_id = example_ref.get("document_id")
-        elif kind == "clause":
-            # Use first observation for document reference
-            obs_list = payload.get("observed_positions", [])
-            if obs_list:
-                cited_doc_id = (obs_list[0].get("example_ref") or {}).get("document_id")
-
-        # provenance override
-        if "provenance" in corrections and cited_doc_id:
-            if cited_doc_id not in hints_by_doc:
-                hints_by_doc[cited_doc_id] = {}
-            hints_by_doc[cited_doc_id]["provenance"] = corrections["provenance"]
-
-        # signed_version override
-        if "signed_version" in corrections and cited_doc_id:
-            if cited_doc_id not in hints_by_doc:
-                hints_by_doc[cited_doc_id] = {}
-            hints_by_doc[cited_doc_id]["signed_version"] = corrections["signed_version"]
-
-        # order override
-        if "order" in corrections and cited_doc_id:
-            if cited_doc_id not in hints_by_doc:
-                hints_by_doc[cited_doc_id] = {}
-            hints_by_doc[cited_doc_id]["order"] = corrections["order"]
+        # --- Document-level hint corrections ---------------------------------
+        # A hint names one document. A clause item aggregates precedent from
+        # many deals and cites none, so these are reported back, never
+        # silently dropped (issue #138).
+        for hint_key in ("provenance", "signed_version", "order"):
+            if hint_key in corrections:
+                result.skipped.setdefault(item_num, []).append(
+                    f"{hint_key!r} needs a cited document; a clause item cites none — "
+                    "set it in that deal's hints.yaml"
+                )
 
         # --- Classification correction ----------------------------------------
         # Rebuild the EXACT payload key that StoreBackedClassificationJudge
@@ -1610,93 +1368,65 @@ def apply_feedback(
         # so the correction was a silent no-op (issue #70).
         if "classification" in corrections:
             new_tid = corrections["classification"]
-            # Resolve the parent clause for this item.
-            if kind == "clause":
-                clause_obj: dict[str, Any] | None = payload
-            else:
-                clause_id = payload.get("_clause_id")
-                clause_obj = next(
-                    (p for _, k, p in index if k == "clause" and p.get("id") == clause_id),
-                    None,
-                )
+            # Collect (document_id, clause_path) for every underlying node:
+            # our_standard if it cites a corpus document (the template is
+            # not written to normalized/).
+            cited: set[tuple[str, str]] = set()
+            std_ref = (payload.get("our_standard") or {}).get("source_ref") or {}
+            if (
+                std_ref.get("document_id")
+                and std_ref.get("clause_path")
+                and std_ref.get("version") != "template"
+            ):
+                cited.add((std_ref["document_id"], std_ref["clause_path"]))
 
-            if clause_obj is not None:
-                # Collect (document_id, clause_path) for every underlying node:
-                # all observed positions, plus our_standard if it cites a corpus
-                # document (the template is not written to normalized/).
-                cited: set[tuple[str, str]] = set()
-                for obs in clause_obj.get("observed_positions", []):
-                    ref = obs.get("example_ref") or {}
-                    cdoc, cpath = ref.get("document_id"), ref.get("clause_path")
-                    if cdoc and cpath:
-                        cited.add((cdoc, cpath))
-                std_ref = (clause_obj.get("our_standard") or {}).get("source_ref") or {}
-                if (
-                    std_ref.get("document_id")
-                    and std_ref.get("clause_path")
-                    and std_ref.get("version") != "template"
-                ):
-                    cited.add((std_ref["document_id"], std_ref["clause_path"]))
-
-                tax_ids = sorted(
-                    e.get("id", "") for e in doc.get("taxonomy", {}).get("entries", [])
-                )
-                # The same clause_path can appear across versions with different
-                # text; override every distinct node so the correction lands
-                # whichever version the judge classifies.
-                for cdoc, cpath in sorted(cited):
-                    norm_dir = out_dir / "normalized" / cdoc
-                    for tree_path in sorted(norm_dir.glob("*.clauses.json")):
-                        try:
-                            tree = ClauseTree.load(tree_path)
-                        except Exception:  # noqa: BLE001
-                            continue
-                        node = tree.resolve_path(cpath)
-                        if node is None:
-                            continue
-                        judge_payload = {
-                            "stage": "classify",
-                            "text": node.text or "",
-                            "heading": node.heading or "",
-                            "taxonomy_ids": tax_ids,
-                        }
-                        verdict_entries.append(
-                            (
-                                judge_payload,
-                                # basis MUST be "judge": classify_tree rejects any
-                                # other basis returned by a ClassificationJudge.
-                                {"taxonomy_id": new_tid, "confidence": 1.0, "basis": "judge"},
-                            )
+            tax_ids = sorted(e.get("id", "") for e in doc.get("taxonomy", {}).get("entries", []))
+            # The same clause_path can appear across versions with different
+            # text; override every distinct node so the correction lands
+            # whichever version the judge classifies.
+            for cdoc, cpath in sorted(cited):
+                norm_dir = out_dir / "normalized" / cdoc
+                for tree_path in sorted(norm_dir.glob("*.clauses.json")):
+                    try:
+                        tree = ClauseTree.load(tree_path)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    node = tree.resolve_path(cpath)
+                    if node is None:
+                        continue
+                    judge_payload = {
+                        "stage": "classify",
+                        "text": node.text or "",
+                        "heading": node.heading or "",
+                        "taxonomy_ids": tax_ids,
+                    }
+                    verdict_entries.append(
+                        (
+                            judge_payload,
+                            # basis MUST be "judge": classify_tree rejects any
+                            # other basis returned by a ClassificationJudge.
+                            {"taxonomy_id": new_tid, "confidence": 1.0, "basis": "judge"},
                         )
-                if not cited:
-                    _log.warning(
-                        "apply_feedback: classification correction for %s has no corpus "
-                        "citation; cannot map to a clause node — skipping",
-                        item_num,
                     )
+            if not cited:
+                _log.warning(
+                    "apply_feedback: classification correction for %s has no corpus "
+                    "citation; cannot map to a clause node — skipping",
+                    item_num,
+                )
 
         # --- Position override -> embedded curation pin (issue #147) ---------
-        # Resolves to the parent clause the same way "classification" does
-        # above. baseline_stance records THIS clause's historical_stance
-        # right now — what the attorney is overriding FROM — so a later
-        # recompile can flag a conflict only when the evidence-driven stance
-        # actually moves, not merely because it differs from the pin.
+        # Pins the item's own clause. baseline_stance is NO_STANCE — the
+        # document carries no stance (issue #223) — the same value every
+        # recompile compares, so a pin never conflicts with its own document.
         if "override" in corrections:
-            if kind == "clause":
-                override_clause_obj: dict[str, Any] | None = payload
-            else:
-                override_clause_id = payload.get("_clause_id")
-                override_clause_obj = next(
-                    (p for _, k, p in index if k == "clause" and p.get("id") == override_clause_id),
-                    None,
-                )
-            if override_clause_obj is not None and override_clause_obj.get("id"):
+            if payload.get("id"):
                 comment_val = corrections.get("comment") or corrections.get("note")
-                pins_by_clause_id[override_clause_obj["id"]] = CurationPin(
-                    clause_id=override_clause_obj["id"],
+                pins_by_clause_id[payload["id"]] = CurationPin(
+                    clause_id=payload["id"],
                     item_id=item_num,
                     position=str(corrections["override"]),
-                    baseline_stance=clause_stance(override_clause_obj),
+                    baseline_stance=NO_STANCE,
                     pinned_at=pinned_at,
                     comment=str(comment_val).strip() if comment_val else None,
                 )
@@ -1713,7 +1443,7 @@ def apply_feedback(
         for text_key in ("comment", "note"):
             text_val = corrections.get(text_key, "")
             if text_val and str(text_val).strip():
-                clause_title = payload.get("title") or payload.get("_clause_title", "")
+                clause_title = payload.get("title") or ""
                 notes.append(f"**{item_num}** ({clause_title}): {str(text_val).strip()}")
 
     # --- Floor candidate accept/reject decisions (issue #90) ---------------
@@ -1737,63 +1467,6 @@ def apply_feedback(
             floor_section["invariants"] = floor_result.invariants
             doc["floor"] = floor_section
             floor_invariants_changed = True
-
-    # Write hints.yaml files
-    # Locate document directories: search corpus_dir (if given), then scan
-    # out_dir and one level up for doc dirs. The hints.yaml lives alongside
-    # the corpus document folder. Convention from version_orderer.py: hints
-    # live at <corpus_dir>/<doc_id>/hints.yaml. document_id may be a
-    # pseudonymized alias (issue #153) that matches no raw corpus folder, so
-    # try reversing it through <out_dir>/alias_map.json first (issue #169).
-    alias_map: dict[str, str] = {}
-    try:
-        alias_map = load_alias_map(out_dir / "alias_map.json")
-    except FileNotFoundError:
-        pass
-    except (json.JSONDecodeError, OSError):  # noqa: BLE001
-        alias_map = {}
-
-    hints_written: list[str] = []
-    for doc_id, hint_updates in hints_by_doc.items():
-        hints_path = _find_hints_path(out_dir, doc_id, corpus_dir=corpus_dir, alias_map=alias_map)
-        wrote_to_corpus = False
-        skip_reason: str | None = None
-
-        if hints_path is not None:
-            try:
-                hints_path.parent.mkdir(parents=True, exist_ok=True)
-                _merge_write_hints_file(hints_path, hint_updates)
-                wrote_to_corpus = True
-            except OSError as exc:
-                # Most commonly the Docker corpus mount, which is read-only
-                # by design (SKILL.md's "Running commands" section) — the
-                # directory was found but cannot be written from here.
-                skip_reason = (
-                    f"found the corpus document directory ({hints_path.parent}) but "
-                    f"could not write hints.yaml there ({exc}) — likely a read-only "
-                    "corpus mount; apply this correction directly on the host "
-                    "corpus tree instead"
-                )
-        else:
-            searched = [str(p) for p in (corpus_dir, out_dir.parent, out_dir.parent.parent) if p]
-            skip_reason = (
-                f"no corpus document directory found for '{doc_id}' "
-                f"(searched: {', '.join(searched)})"
-            )
-
-        if wrote_to_corpus:
-            hints_written.append(doc_id)
-        else:
-            fallback_path = out_dir / "hints" / f"{doc_id}.yaml"
-            fallback_path.parent.mkdir(parents=True, exist_ok=True)
-            _merge_write_hints_file(fallback_path, hint_updates)
-            result.skipped.setdefault(f"hints:{doc_id}", []).append(
-                f"{skip_reason}; correction parked at {fallback_path} instead — this "
-                f"file is NOT read by any pipeline stage, copy it onto "
-                f"<corpus>/{doc_id}/hints.yaml by hand"
-            )
-
-    result.hints_written = hints_written
 
     # Write VerdictStore entries (deduplicated by content key — the same clause
     # node can be reached via multiple citations / versions).
@@ -1865,94 +1538,3 @@ def apply_feedback(
         write_playbook(doc, opf_path)
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _reverse_alias_document_id(document_id: str, alias_map: dict[str, str]) -> str:
-    """Reverse a pseudonymized ``document_id``'s alias span back to a real name slug.
-
-    Mirrors ``entity_registry.pseudonymize_document_id`` in the opposite
-    direction: matches each alias's normalized token sequence against
-    *document_id*'s normalized tokens and substitutes the real entity name's
-    slug tokens in place, leaving the rest of the slug (e.g. a trailing
-    year) untouched. Longest aliases are tried first so a shorter alias that
-    happens to prefix a longer one never partially shadows it. Returns
-    *document_id* unchanged when no alias's slug form appears in it (issue
-    #169).
-    """
-    if not document_id or not alias_map:
-        return document_id
-    tokens = entity_slug(document_id).split("-")
-    for alias, real_name in sorted(alias_map.items(), key=lambda kv: len(kv[0]), reverse=True):
-        alias_tokens = entity_slug(alias).split("-")
-        n = len(alias_tokens)
-        if n == 0:
-            continue
-        for i in range(len(tokens) - n + 1):
-            if tokens[i : i + n] == alias_tokens:
-                real_tokens = entity_slug(real_name).split("-")
-                tokens = tokens[:i] + real_tokens + tokens[i + n :]
-                break
-    return "-".join(tokens)
-
-
-def _find_hints_path(
-    out_dir: Path,
-    doc_id: str,
-    corpus_dir: Path | None = None,
-    alias_map: dict[str, str] | None = None,
-) -> Path | None:
-    """Search for an existing or natural hints.yaml location for *doc_id*.
-
-    *doc_id* may be a pseudonymized alias (issue #153); when *alias_map*
-    (``alias -> real entity name``, as loaded from ``alias_map.json``) is
-    given, both the alias-form and the reversed real-name-form of *doc_id*
-    are tried.
-
-    Search order (first existing directory wins):
-    1. ``corpus_dir/<doc_id>/hints.yaml`` and its alias-reversed form, if
-       *corpus_dir* is given — needed under the documented Docker flow,
-       where the corpus is a sibling of out_dir (``/work/corpus`` vs.
-       ``/work/out``), not its parent (issue #169).
-    2. ``out_dir/../<doc_id>/hints.yaml`` (standard host layout: corpus and
-       out share a parent) and its alias-reversed form.
-    3. ``out_dir/../../<doc_id>/hints.yaml`` (two-level layout) and its
-       alias-reversed form.
-
-    Returns the path to use, or ``None`` if no canonical location is found.
-    """
-    candidate_ids = [doc_id]
-    reversed_id = _reverse_alias_document_id(doc_id, alias_map or {})
-    if reversed_id != doc_id:
-        candidate_ids.append(reversed_id)
-
-    search_roots: list[Path] = []
-    if corpus_dir is not None:
-        search_roots.append(corpus_dir)
-    search_roots.extend([out_dir.parent, out_dir.parent.parent])
-    for parent in search_roots:
-        for candidate_id in candidate_ids:
-            candidate = parent / candidate_id / "hints.yaml"
-            if candidate.parent.exists():
-                return candidate
-    return None
-
-
-def _merge_write_hints_file(path: Path, updates: dict[str, Any]) -> None:
-    """Merge *updates* into the hints.yaml at *path*, creating/overwriting it.
-
-    Existing keys not present in *updates* are preserved (issue #68's
-    "merges with, does not overwrite" contract).
-    """
-    existing: dict[str, Any] = {}
-    if path.exists():
-        try:
-            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001
-            existing = {}
-    existing.update(updates)
-    path.write_text(yaml.dump(existing, allow_unicode=True, sort_keys=True), encoding="utf-8")

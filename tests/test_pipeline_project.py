@@ -26,8 +26,7 @@ from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import load_config
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.floor_candidates import sign_floor_invariant
-from playbook_engine.observation_builder import Observation, ObservationCitation
-from playbook_engine.pipeline import _NullDeviationJudge, mine_corpus, project_playbook
+from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.posture import apply_posture_interview
 from playbook_engine.taxonomy import load_taxonomy
 
@@ -1204,57 +1203,6 @@ def _inject_pin(out_dir: Path, clause_id: str, position: str, baseline_stance: s
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
 
-def _add_our_paper_observations(out_dir: Path, taxonomy_id: str, n: int) -> None:
-    """Append *n* synthetic our-paper, deviation=none, signed observations for
-    *taxonomy_id* to the observation store, and register their (synthetic)
-    document ids in ``corpus_manifest.json`` so citation validation resolves.
-
-    This is how the tests below simulate "new evidence was mined" between two
-    ``project_playbook`` calls, without invoking the full ingest/judge
-    pipeline (project_playbook's own contract is "given the store, recompile"
-    — manipulating the store directly is a legitimate way to exercise that).
-    """
-    manifest_path = out_dir / "corpus_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    obs_path = out_dir / "observations.jsonl"
-
-    new_obs: list[Observation] = []
-    with obs_path.open("a", encoding="utf-8") as f:
-        for i in range(1, n + 1):
-            doc_id = f"synthetic-our-paper-{i}"
-            manifest.append(
-                {
-                    "document_id": doc_id,
-                    "provenance": "our_paper",
-                    "in_scope": True,
-                    "versions": 1,
-                    "versions_mined": 1,
-                    "versions_found": 1,
-                    "version_ingest": [
-                        {"version": "v1", "status": "ok", "error": None, "extractor": "rtf"}
-                    ],
-                }
-            )
-            obs = Observation(
-                observation_id=f"{doc_id}/1/2",
-                taxonomy_id=taxonomy_id,
-                text_summary="Synthetic matching clause text.",
-                citation=ObservationCitation(
-                    document_id=doc_id, version=1, clause_path="2", char_span=(0, 10)
-                ),
-                deviation="none",
-                risk_delta={"direction": "neutral", "magnitude": "none"},
-                provenance="our_paper",
-                outcome="signed",
-                confidence=0.9,
-                basis="judge",
-            )
-            new_obs.append(obs)
-            f.write(json.dumps(obs.to_dict()) + "\n")
-
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-
 def test_curation_pin_survives_recompile_with_unchanged_evidence(tmp_path: Path) -> None:
     """A pinned position survives a recompile when evidence is unchanged:
     the pin is preserved verbatim and no conflict is raised.
@@ -1264,120 +1212,43 @@ def test_curation_pin_survives_recompile_with_unchanged_evidence(tmp_path: Path)
     cfg = load_config(config_path)
 
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
+    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
 
     clause = next(
         c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
     )
-    baseline_stance = clause["summary"]["historical_stance"]
     _inject_pin(
         out_dir,
         clause_id=clause["id"],
         position="consistently_held",
-        baseline_stance=baseline_stance,
+        baseline_stance="unknown",  # curation.NO_STANCE — the document carries none
     )
 
     # Recompile with NO change to the observation store.
-    playbook_v2 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
+    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
 
     pins = playbook_v2["curation"]["pins"]
     assert len(pins) == 1
     pin = pins[0]
     assert pin["clause_id"] == clause["id"]
     assert pin["position"] == "consistently_held", "the pinned position must be preserved verbatim"
-    assert pin.get("conflict") is None, (
-        "no conflict should be raised when evidence (and thus historical_stance) is unchanged"
-    )
+    assert pin.get("conflict") is None, "no conflict when the pin's baseline is the document's"
 
     clause_v2 = next(
         c for c in playbook_v2["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
     )
-    assert clause_v2["summary"]["historical_stance"] == baseline_stance, (
-        "historical_stance itself must remain descriptive/unchanged — the pin does not overwrite it"
-    )
+    assert clause_v2 == clause, "the pin never rewrites the evidence it is pinned to"
 
 
-def test_curation_pin_flags_conflict_on_contradicting_evidence(tmp_path: Path) -> None:
-    """New evidence that changes a clause's historical_stance since a pin was
-    made raises a conflict flag on that pin — the pin is NOT silently
-    overridden or dropped.
-    """
-    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
-    taxonomy = load_taxonomy(_TAXONOMY_PATH)
-    cfg = load_config(config_path)
-
-    # Mined as an opt-in judged run (issue #230): the injected evidence below
-    # is judged rows (basis="judge"), which only a judged-mode store carries,
-    # and the mode recorded at mine time — not the rows — decides whether
-    # project derives a stance at all (the consumer path never does).
-    mine_corpus(
-        corpus_dir=corpus_dir,
-        config=cfg,
-        taxonomy=taxonomy,
-        out_dir=out_dir,
-        deviation_judge=_NullDeviationJudge(),
-    )
-    playbook_v1 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
-
-    clause = next(
-        c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
-    )
-    baseline_stance = clause["summary"]["historical_stance"]
-    assert baseline_stance == "no_signal", (
-        "premise: a single-document corpus has insufficient our-paper evidence "
-        f"(see clause_position_compiler.MIN_EVIDENCE_N); got {baseline_stance!r}"
-    )
-    _inject_pin(
-        out_dir,
-        clause_id=clause["id"],
-        position="consistently_held",
-        baseline_stance=baseline_stance,
-    )
-
-    # Simulate new evidence: enough our-paper, deviation=none, signed
-    # observations to push governing_law's historical_stance away from
-    # "no_signal" (evidence_sufficient flips True; see
-    # clause_position_compiler._historical_stance).
-    _add_our_paper_observations(out_dir, taxonomy_id="governing_law", n=2)
-
-    playbook_v2 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
-
-    clause_v2 = next(
-        c for c in playbook_v2["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
-    )
-    recomputed_stance = clause_v2["summary"]["historical_stance"]
-    assert recomputed_stance != baseline_stance, (
-        "premise: the injected evidence must actually move historical_stance"
-    )
-
-    pin = playbook_v2["curation"]["pins"][0]
-    assert pin["position"] == "consistently_held", (
-        "the pin's asserted position must survive even when flagged — it is "
-        "not silently overridden by the recomputed rollup"
-    )
-    conflict = pin.get("conflict")
-    assert conflict is not None, "contradicting evidence must raise a conflict flag"
-    assert conflict["recomputed_historical_stance"] == recomputed_stance
-    assert baseline_stance in conflict["reason"]
-
-
-def test_curation_pin_on_opf_04_survives_recompile_and_03_pin_is_flagged(
+def test_curation_pin_on_opf_04_survives_recompile_and_a_stance_pin_is_flagged(
     tmp_path: Path,
 ) -> None:
     """Issue #223: curation is unchanged in OPF 0.4, which carries no stance.
-    A pin made on a 0.4 document by the real producer (``playbook curate``)
-    records ``baseline_stance`` "unknown" — the same accessor the recompile
-    compares against — so it survives a 0.4 recompile with no conflict. A pin
-    carried over from a 0.3 compile (a real stance as its baseline) is flagged
-    once on the first 0.4 compile: its stance is no longer computed."""
+    A pin made by the real producer (``playbook curate``) records
+    ``baseline_stance`` "unknown" — the value the recompile compares
+    against — so it survives a recompile with no conflict. A pin whose
+    baseline is a real stance (stamped against a retired 0.3 document) is
+    flagged on the next compile: that stance is no longer computed."""
     from playbook_engine.chat_curate import apply_curate_commands
     from playbook_engine.validator import validate_document
 
@@ -1398,22 +1269,10 @@ def test_curation_pin_on_opf_04_survives_recompile_and_03_pin_is_flagged(
     assert pin_v2["position"] == "usually_held"
     assert pin_v2.get("conflict") is None
 
-    # A 0.3 pin (real stance baseline) carried into a 0.4 compile.
-    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3")
-    (out_dir / "playbook.opf.json").write_text(
-        json.dumps(
-            {
-                **json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8")),
-                "curation": {"pins": []},
-            }
-        ),
-        encoding="utf-8",
+    # A pin with a real-stance baseline (as a retired 0.3 document stamped).
+    _inject_pin(
+        out_dir, clause_id=pin["clause_id"], position="usually_held", baseline_stance="no_signal"
     )
-    apply_curate_commands(
-        out_dir, ["pin governing_law to usually_held"], now="2026-01-01T00:00:00Z"
-    )
-    pinned_03 = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    assert pinned_03["curation"]["pins"][0]["baseline_stance"] == "no_signal"
     playbook_v3 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
     conflict = playbook_v3["curation"]["pins"][0]["conflict"]
     assert conflict["recomputed_historical_stance"] == "unknown"
@@ -1497,9 +1356,7 @@ def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_pat
     cfg = load_config(config_path)
 
     mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
+    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
     hash_v1 = content_hash(playbook_v1)
     assert hash_v1 == playbook_v1["identity"]["content_hash"]
     curation_digest_v1 = playbook_v1["identity"]["section_digests"]["curation"]
@@ -1511,12 +1368,10 @@ def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_pat
         out_dir,
         clause_id=clause["id"],
         position="consistently_held",
-        baseline_stance=clause["summary"]["historical_stance"],
+        baseline_stance="unknown",
     )
 
-    playbook_v2 = project_playbook(
-        out_dir=out_dir, config=cfg, taxonomy=taxonomy, opf_version="0.3"
-    )
+    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
 
     assert playbook_v2["identity"]["content_hash"] == hash_v1, (
         "a curation-only change (no evidence change) must not perturb content_hash"
@@ -1719,14 +1574,15 @@ def test_removed_clause_with_no_template_is_dropped_as_origin_undetermined(
 
 
 def _mine_and_project_insurance(
-    root: Path, *, deal_001: str | None, opf_version: str = "0.3"
+    root: Path, *, deal_001: str | None
 ) -> tuple[list[dict], list[dict], dict, dict]:
     """Mine + project a corpus whose deal-002 is signed and keeps our
     template's Insurance clause. *deal_001* adds a deal-001 that starts from
     our template (v1) and strikes its Insurance clause in v2: ``"unsigned"``
     (no hints.yaml, so no detected executed copy), ``"signed"`` (hints.yaml
     names v2), or ``None`` (no deal-001 at all). Returns (observations,
-    corpus_manifest, the insurance evidence clause, corpus.stats)."""
+    corpus_manifest, the insurance evidence clause with its precedent under
+    ``_precedent``, corpus.stats)."""
     corpus_dir = root / "corpus"
     signed = corpus_dir / "deal-002"
     signed.mkdir(parents=True)
@@ -1760,18 +1616,15 @@ def _mine_and_project_insurance(
     obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
     observations = [json.loads(line) for line in obs_lines if line.strip()]
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
-    playbook = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version=opf_version
-    )
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
     clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
-    if opf_version == "0.4":
-        # The 0.4 clause plus its precedent, for the issue #223 assertions.
-        clause = {
-            **clause,
-            "_precedent": [
-                p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"
-            ],
-        }
+    # The clause plus its precedent, for the issue #223 assertions.
+    clause = {
+        **clause,
+        "_precedent": [
+            p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"
+        ],
+    }
     return observations, manifest, clause, playbook["corpus"]["stats"]
 
 
@@ -1779,10 +1632,10 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
     """Issue #216 + #83: a deal with no detected executed copy never counts
     as "we conceded". deal-001 strikes our standard Insurance clause but has
     no signed copy, so the strike produces no observation (counted under
-    removed_standard_no_signed_copy) and the Insurance clause's stance_detail,
-    position and observed_positions are exactly those of a corpus without
-    deal-001. The signed control proves the guard is what keeps it out: the
-    same strike in a signed deal-001 IS a conceded deal."""
+    removed_standard_no_signed_copy) and the Insurance clause's counts and
+    precedent are exactly those of a corpus without deal-001. The signed
+    control proves the guard is what keeps it out: the same strike in a
+    signed deal-001 IS a conceded deal."""
     from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
 
     observations, manifest, clause, stats = _mine_and_project_insurance(
@@ -1803,20 +1656,11 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
         {},
     ]
     assert stats["dropped_observations"]["by_reason"] == {"removed_standard_no_signed_copy": 1}
-    assert (
-        clause["summary"]["stance_detail"]["held"],
-        clause["summary"]["stance_detail"]["of"],
-    ) == (
-        1,
-        1,
-    )
-    assert [o["example_ref"]["document_id"] for o in clause["observed_positions"]] == ["deal-002"]
+    assert (clause["n_deals"], clause["n_signed_standard"]) == (1, 1)
+    assert [p["document_id"] for p in clause["_precedent"]] == ["deal-002"]
 
     _, _, without_deal_001, _ = _mine_and_project_insurance(tmp_path / "absent", deal_001=None)
-    assert clause["summary"] == without_deal_001["summary"], (
-        "an unsigned deal must not move stance_detail or the position"
-    )
-    assert clause["observed_positions"] == without_deal_001["observed_positions"]
+    assert clause == without_deal_001, "an unsigned deal must not move the clause's precedent"
 
     signed_obs, _, signed_clause, _ = _mine_and_project_insurance(
         tmp_path / "signed", deal_001="signed"
@@ -1826,8 +1670,7 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
         for o in signed_obs
         if o["outcome"] == OUTCOME_CONCEDED_BEFORE_SIGNING
     ] == ["deal-001"], "control: the same strike in a signed deal is our concession"
-    signed_detail = signed_clause["summary"]["stance_detail"]
-    assert (signed_detail["held"], signed_detail["of"]) == (1, 2)
+    assert (signed_clause["n_deals"], signed_clause["n_signed_standard"]) == (2, 1)
 
 
 def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) -> None:
@@ -1836,17 +1679,13 @@ def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) ->
     same strike in a signed deal is a precedent with no signed text, our
     standard as its opening text, ``standard: false``, ``moved: true`` — and
     never a refused ask. Counts are distinct deals."""
-    _, _, unsigned, _ = _mine_and_project_insurance(
-        tmp_path / "unsigned", deal_001="unsigned", opf_version="0.4"
-    )
+    _, _, unsigned, _ = _mine_and_project_insurance(tmp_path / "unsigned", deal_001="unsigned")
     assert [p["document_id"] for p in unsigned["_precedent"]] == ["deal-002"]
     (kept,) = unsigned["_precedent"]
     assert kept["signed"] is True and kept["standard"] is True
     assert (unsigned["n_deals"], unsigned["n_signed_standard"]) == (1, 1)
 
-    _, _, signed, _ = _mine_and_project_insurance(
-        tmp_path / "signed", deal_001="signed", opf_version="0.4"
-    )
+    _, _, signed, _ = _mine_and_project_insurance(tmp_path / "signed", deal_001="signed")
     by_deal = {p["document_id"]: p for p in signed["_precedent"]}
     assert set(by_deal) == {"deal-001", "deal-002"}
     struck = by_deal["deal-001"]
@@ -1857,109 +1696,6 @@ def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) ->
     assert struck["standard"] is False and struck["moved"] is True
     assert struck["refused_asks"] == []
     assert (signed["n_deals"], signed["n_signed_standard"], signed["n_refused"]) == (2, 1, 0)
-
-
-# ---------------------------------------------------------------------------
-# Issue #95 fix round 1: project_playbook must cap x_search_snippet even for
-# a legacy store that predates the search_snippet field (no key at all in
-# observations.jsonl).
-# ---------------------------------------------------------------------------
-
-# Indemnification body is deliberately long (> _SEARCH_SNIPPET_MAX) so the
-# premise -- that there is something to truncate -- is verifiable, not
-# assumed. A filled "By:" signature line (signed_detector.py's
-# single_signature basis) makes this single-version document detected as
-# executed: without it outcome != "signed" and compile_clause_positions
-# withholds the observation from observed_positions entirely, which would
-# make the assertions below pass vacuously on an empty list.
-_LEGACY_STORE_BODY = (
-    r"1. Indemnification\par "
-    r"Alpha Corp shall indemnify and hold harmless Beta University from and "
-    r"against any and all third-party claims, losses, damages, and expenses "
-    r"of every kind arising out of or relating to this agreement or the "
-    r"placement programme described herein.\par "
-    r"2. Governing Law\par "
-    r"This agreement is governed by the laws of the State of California.\par "
-    r"3. Signatures\par "
-    r"By: Alice Smith\par "
-)
-
-
-def test_project_playbook_caps_search_snippet_for_legacy_store_missing_key(
-    tmp_path: Path,
-) -> None:
-    """A store mined before search_snippet existed (no key in
-    observations.jsonl at all) must still compile a capped x_search_snippet.
-
-    Regression guard for issue #95 fix round 1: ``_restore_observations``
-    defaults a missing ``search_snippet`` to the UNTRUNCATED ``full_text``
-    (``Observation.__post_init__``). ``mine_corpus`` always caps before
-    writing (its two ``truncate_search_snippets`` call sites), but
-    ``project_playbook`` previously fed the restored observations straight
-    into ``compile_clause_positions``/``compile_clause_library`` with no
-    cap of its own. Running ``playbook project`` (a documented separate
-    workflow step, ``cli.py``'s ``project`` command) against such a legacy
-    store therefore emitted the ENTIRE clause text as ``x_search_snippet``
-    in the shareable OPF tier instead of a short phrase.
-    """
-    corpus_dir = tmp_path / "corpus"
-    deal_dir = corpus_dir / "deal-001"
-    deal_dir.mkdir(parents=True)
-    _write_rtf(deal_dir / "v1.rtf", _LEGACY_STORE_BODY)
-
-    cfg = {
-        "agreement_type": {
-            "id": "educational-affiliation",
-            "name": "Educational Affiliation Agreement",
-        },
-        "baseline": {},
-        "taxonomy": str(_TAXONOMY_PATH),
-        "provenance": {"our_party_aliases": ["Alpha Corp"]},
-    }
-    config_path = tmp_path / "playbook.config.yaml"
-    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
-    out_dir = tmp_path / "out"
-
-    taxonomy = load_taxonomy(_TAXONOMY_PATH)
-    config = load_config(config_path)
-
-    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
-
-    from playbook_engine.observation_builder import _SEARCH_SNIPPET_MAX
-
-    obs_path = out_dir / "observations.jsonl"
-    raw_observations = [
-        json.loads(line)
-        for line in obs_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(len(o["full_text"]) > _SEARCH_SNIPPET_MAX for o in raw_observations), (
-        "premise: at least one observation's full_text must exceed the snippet "
-        f"cap ({_SEARCH_SNIPPET_MAX}) or this test proves nothing"
-    )
-
-    # Simulate a pre-#95 store: strip the search_snippet key entirely, as a
-    # store mined by older code would never have written it.
-    for o in raw_observations:
-        o.pop("search_snippet", None)
-    obs_path.write_text("\n".join(json.dumps(o) for o in raw_observations) + "\n", encoding="utf-8")
-
-    playbook = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
-    )
-
-    snippet_values = [
-        op.get("x_search_snippet")
-        for clause in playbook["evidence"]["clauses"]
-        for op in clause.get("observed_positions", [])
-        if op.get("x_search_snippet")
-    ]
-    assert snippet_values, "expected at least one compiled x_search_snippet"
-    assert all(len(s) <= _SEARCH_SNIPPET_MAX for s in snippet_values), (
-        f"every compiled x_search_snippet must be capped at {_SEARCH_SNIPPET_MAX} "
-        f"chars, even when restored from a legacy store missing the "
-        f"search_snippet key; got lengths={[len(s) for s in snippet_values]}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -2049,20 +1785,6 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
     ]
     assert not [o for o in observations if o["outcome"] == "proposed_then_reversed"]
     assert derive_reversal_candidates(observations, min_deals=2) == []
-
-    playbook = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.3"
-    )
-    clause = next(c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "insurance")
-    assert clause["summary"].get("rejected", []) == []
-    assert _MULTI_NODE_INSURANCE_B not in [o.get("full_text") for o in clause["observed_positions"]]
-    stance = clause["summary"]["stance_detail"]
-    assert (stance["held"], stance["of"]) == (0, 2), stance
-    assert clause["summary"]["historical_stance"] != "consistently_held"
-    digest_clause = next(
-        c for c in playbook["digest"]["clauses"] if c["taxonomy_id"] == "insurance"
-    )
-    assert digest_clause["unacceptable"] == []
 
     # OPF 0.4 (issue #223): each deal's struck later node is its opening
     # text, never a refused ask, and neither deal signed our standard.
@@ -2271,9 +1993,7 @@ def test_unsigned_deal_striking_their_language_records_no_refused_ask(
     observations = [json.loads(line) for line in obs_lines if line.strip()]
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
     refused = [o for o in observations if o["outcome"] == "proposed_then_reversed"]
-    playbook = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.4"
-    )
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
     precedent = [p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal-001"]
     if signed:
         assert [d["signed_version"] for d in manifest] == [2]
@@ -2457,9 +2177,7 @@ def test_project_drops_refused_asks_of_unsigned_deal_from_pre_221_store(tmp_path
     with (out_dir / "observations.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(old_rows[0] + "\n")
 
-    playbook = project_playbook(
-        out_dir=out_dir, config=config, taxonomy=taxonomy, opf_version="0.4"
-    )
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
 
     deal = [p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal-001"]
     assert all(p["signed"] is False for p in deal), "premise: deal-001 is unsigned"

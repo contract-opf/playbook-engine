@@ -18,7 +18,8 @@ import jsonschema
 import pytest
 
 ROOT = Path(__file__).parent.parent
-SCHEMA_PATH = ROOT / "spec" / "playbook.schema-0.2.json"
+#: The one schema the engine ships (issue #238 retired 0.1-0.3).
+SCHEMA_PATH = ROOT / "spec" / "playbook.schema-0.4.json"
 
 # After #172 renames the draft, whatever OPF-SPEC*.md exists is in scope.
 SPEC_PATHS = sorted((ROOT / "docs").glob("OPF-SPEC*.md"))
@@ -131,14 +132,31 @@ def test_every_schema_toplevel_property_documented() -> None:
         )
 
 
-def test_conformance_section_names_v02_schema() -> None:
-    """§10 must point at the real v0.2 schema file, not the v0.1 one."""
+def test_conformance_section_names_the_shipped_schema() -> None:
+    """§10 must point at the schema file the engine ships (0.4), not a
+    retired one."""
     text = _draft_spec_text()
     start = text.index("## 10. Conformance")
     end = text.index("## 11.")
     section = text[start:end]
-    assert "playbook.schema-0.2.json" in section
-    assert "playbook.schema.json` (to be updated" not in section
+    assert "playbook.schema-0.4.json" in section
+    for retired in ("playbook.schema.json", "playbook.schema-0.2.json", "playbook.schema-0.3.json"):
+        assert retired not in section, retired
+
+
+def test_only_the_current_schema_ships() -> None:
+    """Issue #238: one format. The 0.1-0.3 schema files and the 0.3/digest 2
+    conformance set are retired (git history and contract-opf/opf keep
+    them), and the changelog pins only what ships."""
+    assert sorted(p.name for p in (ROOT / "spec").glob("playbook.schema*.json")) == [
+        "playbook.schema-0.4.json"
+    ]
+    assert not (ROOT / "spec" / "conformance" / "manifest.json").exists()
+    assert not (ROOT / "spec" / "conformance" / "vectors").exists()
+    changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
+    pins = changelog.split("## Current pins", 1)[1].split("## History", 1)[0]
+    for retired in ("playbook.schema.json", "playbook.schema-0.2.json", "playbook.schema-0.3.json"):
+        assert f"`{retired}`" not in pins, retired
 
 
 def test_content_hash_description_lists_curation() -> None:
@@ -168,14 +186,14 @@ def test_readme_links_resolve() -> None:
         assert target.exists(), f"README links to {link!r}, which does not exist on disk"
 
 
-def test_readme_claims_v02() -> None:
-    """README's Status section must state OPF is at 0.2, not the stale v0.1
-    draft claim."""
+def test_readme_claims_the_one_format() -> None:
+    """README's Status section must state the engine reads and writes OPF
+    0.4 only (issue #238), not a stale earlier version."""
     text = README_PATH.read_text(encoding="utf-8")
     start = text.index("## Status")
     end = text.index("## License")
     section = text[start:end]
-    assert "0.2" in section
+    assert "0.4" in section
     assert "OPF is at `v0.1`" not in section
 
 
@@ -212,52 +230,13 @@ def test_spec_changelog_pins_every_schema() -> None:
         )
 
 
-def _conformance_fixture_digest() -> str:
-    """A single sha256 over spec/conformance/manifest.json plus every
+def _conformance_fixture_digest_v04() -> str:
+    """A single sha256 over spec/conformance/0.4/manifest.json plus every
     vectors/*.json (sorted by filename, concatenated in that order), so an
     edit to the frozen conformance fixtures is covered by the same
     pin-and-changelog discipline as test_spec_changelog_pins_every_schema
-    above, rather than being outside it (schema*.json globs never match
-    anything under spec/conformance/)."""
-    import hashlib
-
-    conformance_dir = ROOT / "spec" / "conformance"
-    hasher = hashlib.sha256()
-    hasher.update((conformance_dir / "manifest.json").read_bytes())
-    for vector_file in sorted((conformance_dir / "vectors").glob("*.json")):
-        hasher.update(vector_file.read_bytes())
-    return hasher.hexdigest()
-
-
-def test_spec_changelog_pins_conformance_vectors() -> None:
-    """spec/conformance/README.md states the conformance vectors "are never
-    edited in place for the same format-version stamp" (issue #115), and
-    they are declared normative (docs/OPF-SPEC.md §10.2) — but nothing
-    mechanically enforced that: test_spec_changelog_pins_every_schema only
-    globs playbook.schema*.json, so no file under spec/conformance/ was
-    hashed anywhere, and no other test pinned a literal canonical hash
-    either. Without this guard, `python scripts/generate_conformance_vectors.py
-    && make all` goes fully green after a canonicalize.py/digest.py change
-    with no spec/CHANGELOG.md entry required — the silent-semantic-drift
-    path issue #115 exists to close, left to the generator docstring's
-    honor system (fix round 1, finding 2). This test fails on any change to
-    spec/conformance/manifest.json or spec/conformance/vectors/*.json until
-    spec/CHANGELOG.md's Current-pins table records the new digest."""
-    changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
-    digest = _conformance_fixture_digest()
-    assert digest in changelog, (
-        f"spec/conformance/ changed (sha256 {digest}) but spec/CHANGELOG.md "
-        "was not updated — spec/conformance/README.md declares these "
-        "vectors never edited in place for the same format-version stamp; "
-        "record the new digest in the Current-pins table alongside a "
-        "changelog entry describing what changed and why."
-    )
-
-
-def _conformance_fixture_digest_v04() -> str:
-    """The same single-sha256 pin as :func:`_conformance_fixture_digest`, over
-    the separately stamped OPF 0.4 set (spec/conformance/0.4/manifest.json +
-    vectors/*.json, issue #223). The 0.3 set's pin above is unchanged by it."""
+    above (schema*.json globs never match anything under spec/conformance/,
+    issue #115)."""
     import hashlib
 
     conformance_dir = ROOT / "spec" / "conformance" / "0.4"
@@ -269,8 +248,13 @@ def _conformance_fixture_digest_v04() -> str:
 
 
 def test_spec_changelog_pins_v04_conformance_vectors() -> None:
-    """The OPF 0.4 conformance set is pinned in spec/CHANGELOG.md exactly like
-    the 0.3 set: any edit fails CI until the changelog records it."""
+    """spec/conformance/README.md states the conformance vectors are never
+    edited in place for the same format-version stamp (issue #115), and they
+    are declared normative (docs/OPF-SPEC.md §10.2). Without this guard,
+    `python scripts/generate_conformance_vectors.py && make all` would go
+    green after a canonicalize.py/digest.py change with no
+    spec/CHANGELOG.md entry. Any edit fails CI until the changelog records
+    the new digest."""
     changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
     digest = _conformance_fixture_digest_v04()
     assert digest in changelog, (
@@ -429,10 +413,10 @@ def test_architecture_output_box_names_current_schema() -> None:
     rejects a superseded schema filename sitting in that same line, so an
     unrelated mention of the current filename elsewhere in the doc can't
     make this pass by accident."""
-    from playbook_engine.playbook_assembler import _OPF_VERSION
-    from playbook_engine.validator import _SCHEMA_PATH_BY_VERSION
+    from playbook_engine.playbook_assembler import OPF_VERSION as _OPF_VERSION
+    from playbook_engine.validator import _SCHEMA_PATH
 
-    schema_name = _SCHEMA_PATH_BY_VERSION[_OPF_VERSION].name
+    schema_name = _SCHEMA_PATH.name
     text = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
 
     box_line = next(
@@ -460,7 +444,9 @@ def test_architecture_output_box_names_current_schema() -> None:
     )
 
     superseded_names = {
-        path.name for version, path in _SCHEMA_PATH_BY_VERSION.items() if version != _OPF_VERSION
+        "playbook.schema.json",
+        "playbook.schema-0.2.json",
+        "playbook.schema-0.3.json",
     }
     for superseded_name in superseded_names:
         assert superseded_name not in box_line, (
@@ -478,10 +464,10 @@ def test_plan_first_validate_row_names_current_schema() -> None:
     emits, derived from the shipping code rather than hard-coded — and the
     same 0.2 -> 0.3 drift that hit ARCHITECTURE.md hit this row too, so it
     gets the same anchored (not "appears anywhere in the doc") check."""
-    from playbook_engine.playbook_assembler import _OPF_VERSION
-    from playbook_engine.validator import _SCHEMA_PATH_BY_VERSION
+    from playbook_engine.playbook_assembler import OPF_VERSION as _OPF_VERSION
+    from playbook_engine.validator import _SCHEMA_PATH
 
-    schema_name = _SCHEMA_PATH_BY_VERSION[_OPF_VERSION].name
+    schema_name = _SCHEMA_PATH.name
     text = (ROOT / "docs" / "PLAN-FIRST.md").read_text(encoding="utf-8")
 
     row = next(

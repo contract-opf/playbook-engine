@@ -57,7 +57,7 @@ _ANSWERS: dict[str, str] = {
 }
 
 
-_EMPTY_EVIDENCE_SECTION: dict[str, Any] = {"clauses": [], "clause_library": []}
+_EMPTY_EVIDENCE_SECTION: dict[str, Any] = {"clauses": [], "precedent": []}
 # Issue #132 review finding 1: self-consistent with `_EMPTY_EVIDENCE_SECTION`
 # above (rather than an arbitrary placeholder digest) so a re-run against an
 # unchanged `evidence` section is a genuine no-op on `grounded_in` too —
@@ -67,9 +67,9 @@ _EMPTY_EVIDENCE_SECTION: dict[str, Any] = {"clauses": [], "clause_library": []}
 _EVIDENCE_DIGEST = section_digest(_EMPTY_EVIDENCE_SECTION)
 
 
-def _minimal_v02_doc(**overrides: Any) -> dict[str, Any]:
+def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.2",
+        "opf_version": "0.4",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         # issue #212: carries a perspective so the "clean doc -> zero
@@ -513,7 +513,7 @@ def test_check_posture_floor_conflict_empty_prompt_no_warnings() -> None:
 
 
 def test_validator_surfaces_posture_floor_conflict_as_non_blocking_warning() -> None:
-    doc = _minimal_v02_doc(
+    doc = _minimal_doc(
         posture={"system_prompt": "The liability cap is flexible to close a deal."},
         floor={"invariants": [_LIABILITY_INVARIANT]},
     )
@@ -533,7 +533,7 @@ def test_validator_clean_posture_raises_no_warning() -> None:
     # this premise also isn't tripped by the (orthogonal) posture-provenance
     # SHOULD-warn added for that ticket.
     attributed_invariant = {**_LIABILITY_INVARIANT, "x_signed_by": "Test Legal Owner"}
-    doc = _minimal_v02_doc(
+    doc = _minimal_doc(
         posture={
             "system_prompt": "Hold firm on the liability cap; see Floor.",
             "generation": {
@@ -556,7 +556,7 @@ def test_validator_clean_posture_raises_no_warning() -> None:
 
 
 def test_validator_empty_posture_and_floor_still_valid() -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     result = validate_document(doc)
     assert result.ok
     assert result.errors == []
@@ -568,7 +568,7 @@ def test_validator_empty_posture_and_floor_still_valid() -> None:
 
 
 def test_apply_posture_interview_writes_versioned_posture(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -587,7 +587,7 @@ def test_apply_posture_interview_writes_versioned_posture(tmp_path: Path) -> Non
 
 
 def test_apply_posture_interview_rerun_with_changed_answers_bumps_version(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -609,7 +609,7 @@ def test_apply_posture_interview_byte_identical_rerun_is_a_noop(tmp_path: Path) 
     governance signal that a revision happened, and none did. Nothing is
     written on the second (no-op) run: identity.content_hash stays exactly
     what the first run computed."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -642,7 +642,7 @@ def test_apply_posture_interview_rerun_with_moved_evidence_digest_is_not_a_noop(
     refreshed to the current digest even though nothing about the
     answers/interview changed. `version` stays untouched: no textual
     revision happened, so this isn't a governed bump."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -670,7 +670,7 @@ def test_apply_posture_interview_rerun_with_moved_evidence_digest_is_not_a_noop(
 
 
 def test_apply_posture_interview_refreshes_identity_content_hash(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -685,7 +685,7 @@ def test_apply_posture_interview_refreshes_identity_content_hash(tmp_path: Path)
 
 
 def test_apply_posture_interview_surfaces_floor_conflict_warning(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
+    doc = _minimal_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -705,7 +705,7 @@ def test_apply_posture_interview_base_version_continues_counter_across_rederivat
     base_version the interview would silently restart at version=1 even
     though a prior playbook already reached a higher version. Passing the
     last known version as base_version keeps the counter monotonic."""
-    doc = _minimal_v02_doc()  # no "posture" key at all — a fresh re-derivation
+    doc = _minimal_doc()  # no "posture" key at all — a fresh re-derivation
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -729,7 +729,7 @@ def test_apply_posture_interview_missing_playbook_raises(tmp_path: Path) -> None
 
 
 def test_apply_posture_interview_promotes_q4_into_floor_invariants(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -751,7 +751,7 @@ def test_apply_posture_interview_sentence_shaped_q4_item_not_templated_or_promot
 ) -> None:
     """Fail-first (issue #104): a sentence-shaped sacred_clauses item must
     not be templated into a garbled floor.invariants entry."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -776,7 +776,7 @@ def test_apply_posture_interview_sentence_shaped_item_stays_verbatim_in_recorded
     """Fail-first (issue #104): the sentence-shaped item is untouched in
     posture.generation.interview -- only the Floor-promotion path skips
     it."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -797,7 +797,7 @@ def test_apply_posture_interview_mixed_q4_answer_promotes_name_skips_sentence(
 ) -> None:
     """Fail-first (issue #104): a mixed answer promotes the name-shaped item
     and skips (with a warning for) the sentence-shaped one."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -820,7 +820,7 @@ def test_apply_posture_interview_pure_name_q4_answer_yields_no_sentence_shaped_w
 ) -> None:
     """Regression (issue #104): pure-name Q4 answers behave exactly as
     before -- no sentence-shaped warning, normal promotion."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -845,7 +845,7 @@ def test_apply_posture_interview_ticket_demo_answers_yield_zero_warnings(tmp_pat
     renewal mechanics."), which contains the softening term "flexible" and
     overlaps the freshly-promoted invariant's content words — a
     false-positive SHOULD-warn on the exact invariant just promoted."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -877,7 +877,7 @@ def test_apply_posture_interview_concede_softening_phrase_does_not_warn_on_unrel
     Reproduces the reviewer's own end-to-end repro: a risk_appetite answer
     using "willing to concede" alongside three unrelated sacred_clauses
     items must promote three invariants and warn about none of them."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -913,7 +913,7 @@ def test_apply_posture_interview_colliding_hand_authored_id_raises_postureerror(
         "rationale": "Signed off by the GC 2026-03-01 after board review.",
         "x_signed_by": "gc@example.com",
     }
-    doc = _minimal_v02_doc(floor={"invariants": [hand_authored]})
+    doc = _minimal_doc(floor={"invariants": [hand_authored]})
     opf_path = tmp_path / "playbook.opf.json"
     original_bytes = json.dumps(doc).encode("utf-8")
     opf_path.write_bytes(original_bytes)
@@ -927,7 +927,7 @@ def test_apply_posture_interview_colliding_hand_authored_id_raises_postureerror(
 
 
 def test_apply_posture_interview_promotion_is_idempotent_on_rerun(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -950,7 +950,7 @@ def test_apply_posture_interview_promotion_is_idempotent_on_rerun(tmp_path: Path
 def test_apply_posture_interview_promotion_preserves_hand_authored_invariants(
     tmp_path: Path,
 ) -> None:
-    doc = _minimal_v02_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
+    doc = _minimal_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -964,7 +964,7 @@ def test_apply_posture_interview_promotion_preserves_hand_authored_invariants(
 
 
 def test_apply_posture_interview_promoted_invariants_pass_validation(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -986,7 +986,7 @@ def test_apply_posture_interview_promoted_invariants_pass_validation(tmp_path: P
 def test_apply_posture_interview_no_sacred_clauses_answer_leaves_floor_untouched(
     tmp_path: Path,
 ) -> None:
-    doc = _minimal_v02_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
+    doc = _minimal_doc(floor={"invariants": [_LIABILITY_INVARIANT]})
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1006,7 +1006,7 @@ def test_apply_posture_interview_no_promotion_leaves_floor_section_untouched(
     ``floor: {}`` must stay exactly ``{}``, not gain a fabricated
     ``{"invariants": []}`` that changes identity.content_hash for no
     reason."""
-    doc = _minimal_v02_doc()  # floor={}
+    doc = _minimal_doc()  # floor={}
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1023,7 +1023,7 @@ def test_apply_posture_interview_never_promotes_reversal_candidates(tmp_path: Pa
     ``floor.candidates.json`` (via 'playbook floor propose'), never
     auto-promoted — posture interview's Floor promotion is scoped to the Q4
     answer only and never reads observations.jsonl."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1085,7 +1085,7 @@ def test_cli_posture_questions_lists_canonical_ids() -> None:
 
 
 def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1126,7 +1126,7 @@ def test_cli_posture_interview_base_version_continues_counter_across_rederivatio
 ) -> None:
     """Issue #126: --base-version lets a re-derivation into a fresh/wiped
     out-dir continue the governed counter instead of restarting at 1."""
-    doc = _minimal_v02_doc()  # fresh out-dir: no prior posture of its own
+    doc = _minimal_doc()  # fresh out-dir: no prior posture of its own
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1147,7 +1147,7 @@ def test_cli_posture_interview_base_version_continues_counter_across_rederivatio
 
 
 def test_cli_posture_interview_base_version_rejects_non_positive(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1171,7 +1171,7 @@ def test_cli_posture_interview_rerun_does_not_duplicate_floor_invariants(tmp_pat
     """Issue #89 required verification: run the interview a second time with
     the same answers file; floor.invariants must be unchanged (no
     duplicates)."""
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -1207,7 +1207,7 @@ def test_cli_posture_interview_missing_out_dir_playbook_fails(tmp_path: Path) ->
 
 
 def test_cli_posture_interview_too_few_answers_fails(tmp_path: Path) -> None:
-    doc = _minimal_v02_doc()
+    doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 

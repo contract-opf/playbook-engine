@@ -4,8 +4,9 @@ With no deviation judge configured — ``mine_corpus``'s default — every
 deviation is the deterministic standard check: each observation carries a
 ``standard`` fact (does its text match our template clause?) and a deviation
 derived from it, never a judged or stub verdict, and ``project_playbook``
-reads no stance out of the placeholder risk_delta. A deviation judge is
-opt-in (the advisory layer), and wiring one keeps the judged derivation.
+carries it into the precedent record — no stance is ever read out of the
+placeholder risk_delta. A deviation judge is opt-in (the advisory layer):
+its verdicts never enter ``evidence``.
 
 Driven end-to-end through the real producers (``mine_corpus`` ->
 ``project_playbook``) over the wholly synthetic ``examples/nda`` corpus with
@@ -24,10 +25,6 @@ import pytest
 from click.testing import CliRunner
 
 from playbook_engine.clause_differ import ClauseDiff
-from playbook_engine.clause_position_compiler import (
-    _normalize_for_dedup,
-    deviations_are_deterministic,
-)
 from playbook_engine.cli import cli
 from playbook_engine.config import load_config
 from playbook_engine.observation_builder import (
@@ -38,12 +35,10 @@ from playbook_engine.observation_builder import (
 from playbook_engine.pipeline import (
     _assess_deviations_with_standards,
     _NullDeviationJudge,
-    _restore_observations,
     mine_corpus,
     project_playbook,
 )
 from playbook_engine.run_manifest import (
-    RUN_MANIFEST_FILENAME,
     read_deviation_mode,
     read_run_manifest,
 )
@@ -57,17 +52,12 @@ _CORPUS_DIR = _NDA_DIR / "corpus"
 _SMOKE_CONFIG = _NDA_DIR / "config.smoke.yaml"
 
 
-def _mine_and_project(
-    out_dir: Path, *, opf_version: str = "0.3", **judges: Any
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Mine + project. Defaults to the OPF 0.3 projection: these tests pin how
-    the 0.3 compiler reads the standard fact (stance_detail, summary), a
-    shape kept for one release. The OPF 0.4 projection of the same store is
-    pinned by ``test_default_project_04_is_the_verdict_free_precedent``."""
+def _mine_and_project(out_dir: Path, **judges: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Mine + project (OPF 0.4, the one format the engine emits)."""
     cfg = load_config(_SMOKE_CONFIG)
     taxonomy = load_taxonomy(cfg.taxonomy_path)
     mine_corpus(_CORPUS_DIR, cfg, taxonomy, out_dir, no_cache=True, **judges)
-    playbook = project_playbook(out_dir, cfg, taxonomy, opf_version=opf_version)
+    playbook = project_playbook(out_dir, cfg, taxonomy)
     return read_observations_jsonl(out_dir / "observations.jsonl"), playbook
 
 
@@ -102,49 +92,19 @@ def test_identical_signed_text_always_gets_the_same_standard_fact(consumer_run: 
     for obs in observations:
         if obs["outcome"] != "signed" or obs["taxonomy_id"] is None:
             continue
-        key = (obs["taxonomy_id"], _normalize_for_dedup(obs["full_text"]))
+        key = (obs["taxonomy_id"], " ".join(obs["full_text"].split()).casefold())
         answers[key].add(obs["standard"])
         deals[key].add(obs["citation"]["document_id"])
     assert any(len(ids) > 1 for ids in deals.values()), "corpus must repeat signed text"
     assert all(len(values) == 1 for values in answers.values())
 
 
-def test_default_project_reads_no_stance_and_validates(consumer_run: tuple) -> None:
+def test_default_project_is_the_verdict_free_precedent(consumer_run: tuple) -> None:
+    """Issue #223: the OPF 0.4 projection of the consumer-path store carries
+    each terminal row's deterministic standard fact as the precedent's
+    ``standard``, counts distinct deals, keeps refused asks, and has no
+    stance, risk, deviation or x_judgments anywhere."""
     observations, playbook = consumer_run
-    assert validate_document(playbook).ok
-    clauses = playbook["evidence"]["clauses"]
-    assert clauses
-    for clause in clauses:
-        summary = clause["summary"]
-        assert summary["historical_stance"] == "no_signal", clause["id"]
-        assert summary["acceptable_if"] == []
-        assert summary["fallbacks"] == []
-        detail = summary["stance_detail"]
-        assert detail["basis"] == "all"
-        signed_standard_deals = {
-            obs["citation"]["document_id"]
-            for obs in observations
-            if obs["taxonomy_id"] == clause["taxonomy_id"]
-            and obs["outcome"] == "signed"
-            and obs["standard"]
-        }
-        assert detail["held"] == len(signed_standard_deals), clause["id"]
-        assert detail["held"] <= detail["of"]
-    # Refused asks are a deterministic outcome fact and survive.
-    assert any(clause["summary"]["rejected"] for clause in clauses)
-    # The digest carries no judged concession/variation category either.
-    for clause in playbook["digest"]["clauses"]:
-        assert clause["historical_stance"] == "no_signal"
-        assert not clause.get("concessions")
-        assert not clause.get("preferred_variations")
-
-
-def test_default_project_04_is_the_verdict_free_precedent(tmp_path: Path) -> None:
-    """Issue #223: the default OPF 0.4 projection of the consumer-path store
-    carries each terminal row's deterministic standard fact as the
-    precedent's ``standard``, counts distinct deals, and has no stance,
-    risk, deviation or x_judgments anywhere."""
-    observations, playbook = _mine_and_project(tmp_path, opf_version="0.4")
     assert playbook["opf_version"] == "0.4"
     assert validate_document(playbook).ok
     precedent = playbook["evidence"]["precedent"]
@@ -157,7 +117,7 @@ def test_default_project_04_is_the_verdict_free_precedent(tmp_path: Path) -> Non
     assert terminal
     for obs in terminal:
         record = by_key.get((obs["citation"]["document_id"], obs["taxonomy_id"]))
-        if record is None:  # a sub-sentence fragment, excluded like 0.3 does
+        if record is None:  # a sub-sentence fragment, excluded from precedent
             assert len(obs["full_text"].strip()) < 25
             continue
         assert record["standard"] is obs["standard"]
@@ -171,6 +131,8 @@ def test_default_project_04_is_the_verdict_free_precedent(tmp_path: Path) -> Non
             and o["standard"]
         }
         assert clause["n_signed_standard"] == len(signed_standard), clause["id"]
+    # Refused asks are a deterministic outcome fact and survive.
+    assert any(clause["n_refused"] for clause in playbook["evidence"]["clauses"])
     # Struck standard language is our concession: an opening text, no signed text
     # for that clause unless the deal signed replacement text, never a refused ask.
     conceded = [o for o in observations if o["outcome"] == "conceded_before_signing"]
@@ -185,22 +147,21 @@ def test_default_project_04_is_the_verdict_free_precedent(tmp_path: Path) -> Non
     assert "x_judgments" not in playbook
 
 
-def test_opt_in_deviation_judge_keeps_the_judged_layer(tmp_path: Path) -> None:
+def test_opt_in_deviation_judge_never_enters_evidence(tmp_path: Path) -> None:
     """Wiring a deviation judge (here the stub) is the advisory layer: its
-    verdicts replace the standard check's deviation, and the compiler keeps
-    the judged derivation."""
+    verdicts replace the standard check's deviation in the store, the
+    standard fact is still recorded, and the playbook watermarks the
+    unjudged rows — but evidence.precedent still carries only the standard
+    fact, and a stub verdict is not a judgment (no x_judgments)."""
     observations, playbook = _mine_and_project(tmp_path, deviation_judge=_NullDeviationJudge())
     bases = {obs["basis"] for obs in observations}
     assert "needs_review" in bases
-    # The standard fact is still recorded alongside the judged verdict.
     assert all(isinstance(obs.get("standard"), bool) for obs in observations)
-    # Judged derivation: stance_detail is the judged held-rate on the
-    # our-paper pool again, not the consumer path's deterministic facts.
-    assert json.dumps(playbook)
-    assert any(
-        clause["summary"]["stance_detail"]["basis"] == "our_paper"
-        for clause in playbook["evidence"]["clauses"]
-    )
+    assert validate_document(playbook).ok
+    assert playbook["compiler"]["stub_basis_present"] is True
+    assert "x_judgments" not in playbook
+    for judged in ("risk_delta", "deviation", "historical_stance"):
+        assert f'"{judged}"' not in json.dumps(playbook["evidence"]), judged
 
 
 # -- the deviation mode is recorded at mine time, not inferred (issue #230) --
@@ -231,76 +192,31 @@ def _mine_all_template(out_dir: Path, corpus: Path, **judges: Any) -> dict[str, 
     return {"cfg": cfg, "taxonomy": taxonomy}
 
 
-def _stances(playbook: dict[str, Any]) -> tuple[set[str], set[str]]:
-    clauses = playbook["evidence"]["clauses"]
-    assert clauses
-    return (
-        {c["summary"]["historical_stance"] for c in clauses},
-        {c["summary"]["stance_detail"]["basis"] for c in clauses},
-    )
-
-
-def test_opt_in_run_where_every_clause_matches_the_template_compiles_judged(
-    tmp_path: Path,
-) -> None:
+def test_mine_records_the_deviation_mode_whatever_the_rows_look_like(tmp_path: Path) -> None:
     """The #220 review's failure scenario: a judge was configured but every
     clause was unchanged from the template, so the store's rows look exactly
-    like the consumer path's. The mode recorded at mine time — not the rows —
-    decides: the opt-in run compiles the judged rollup, the default run the
-    consumer path, over the very same corpus."""
+    like the consumer path's. The mode is recorded when they are written
+    (issue #230), not inferred from them."""
     corpus = _all_template_corpus(tmp_path)
 
     judged_out = tmp_path / "judged"
-    ctx = _mine_all_template(judged_out, corpus, deviation_judge=_NullDeviationJudge())
+    _mine_all_template(judged_out, corpus, deviation_judge=_NullDeviationJudge())
     rows = read_observations_jsonl(judged_out / "observations.jsonl")
     assert rows
     assert {o["outcome"] for o in rows} == {"signed"}
-    # The rows alone would be inferred as the consumer path ...
-    assert deviations_are_deterministic(_restore_observations(rows))
-    # ... but the mode was recorded when they were written.
+    assert all(o["basis"] == "deterministic" for o in rows)
     assert read_deviation_mode(judged_out) == "judged"
-    messages: list[str] = []
-    playbook = project_playbook(
-        judged_out, ctx["cfg"], ctx["taxonomy"], opf_version="0.3", progress=messages.append
-    )
-    assert not any("WARNING: no deviation mode" in m for m in messages)
-    stances, bases = _stances(playbook)
-    assert stances != {"no_signal"}, stances  # a judged stance is derived
-    assert "consistently_held" in stances
-    assert "our_paper" in bases  # the judged held-rate on the our-paper pool
 
     consumer_out = tmp_path / "consumer"
-    ctx = _mine_all_template(consumer_out, corpus)
+    _mine_all_template(consumer_out, corpus)
     assert read_deviation_mode(consumer_out) == "deterministic"
-    playbook = project_playbook(consumer_out, ctx["cfg"], ctx["taxonomy"], opf_version="0.3")
-    assert _stances(playbook) == ({"no_signal"}, {"all"})
 
 
-def test_store_without_a_recorded_mode_falls_back_to_inference_with_a_warning(
-    tmp_path: Path,
-) -> None:
-    """An out-dir mined before the mode was recorded has no ``deviation_mode``
-    in its manifest (or no manifest at all): project infers the mode from the
-    rows, as before, and says it did."""
-    corpus = _all_template_corpus(tmp_path)
-    out_dir = tmp_path / "legacy"
-    ctx = _mine_all_template(out_dir, corpus, deviation_judge=_NullDeviationJudge())
-    (out_dir / RUN_MANIFEST_FILENAME).unlink()
-    messages: list[str] = []
-    playbook = project_playbook(
-        out_dir, ctx["cfg"], ctx["taxonomy"], opf_version="0.3", progress=messages.append
-    )
-    warnings = [m for m in messages if "WARNING: no deviation mode recorded" in m]
-    assert len(warnings) == 1
-    assert "inferred deterministic" in warnings[0]
-    # Inference cannot see the opt-in here — exactly why the mode is recorded.
-    assert _stances(playbook) == ({"no_signal"}, {"all"})
-
-
-def test_cli_mine_records_the_mode_and_project_reads_it(tmp_path: Path) -> None:
+def test_cli_mine_records_the_mode_and_project_succeeds(tmp_path: Path) -> None:
     """Through the CLI: ``mine --with-deviation-judge`` stamps the run
     manifest with its environment AND keeps the recorded mode (the end-of-run
-    environment stamp must not erase it), and ``project`` compiles judged."""
+    environment stamp must not erase it), and ``project`` (which has no
+    ``--opf-version``: one format, issue #238) emits OPF 0.4."""
     corpus = _all_template_corpus(tmp_path)
     out_dir = tmp_path / "out"
     runner = CliRunner()
@@ -321,14 +237,11 @@ def test_cli_mine_records_the_mode_and_project_reads_it(tmp_path: Path) -> None:
     assert manifest is not None and manifest.written_by == "mine"
     assert manifest.deviation_mode == "judged"
 
-    result = runner.invoke(
-        cli, ["project", str(out_dir), "--config", str(_SMOKE_CONFIG), "--opf-version", "0.3"]
-    )
+    result = runner.invoke(cli, ["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
     assert result.exit_code == 0, result.output
-    assert "WARNING: no deviation mode" not in result.output
     playbook = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    stances, _ = _stances(playbook)
-    assert "consistently_held" in stances
+    assert playbook["opf_version"] == "0.4"
+    assert validate_document(playbook).ok
 
 
 # -- dynamics follow the emitted deviation, not the per-row one --------------

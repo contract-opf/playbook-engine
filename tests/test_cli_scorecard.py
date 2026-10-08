@@ -43,7 +43,7 @@ from playbook_engine.agent_segmenter import (
 )
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.cli import cli
-from playbook_engine.digest import build_digest_v3
+from playbook_engine.digest import build_digest
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.pipeline import _observation_classification_basis
@@ -654,7 +654,7 @@ def test_digest_capped_clauses_count_lists_shorter_than_their_totals(
     # The real digest builder under a budget it cannot meet tightens every
     # list to its floor of one entry, so clauses with more groups than that
     # show fewer than their uncapped *_total.
-    doc["digest"] = build_digest_v3(doc, token_budget=1)
+    doc["digest"] = build_digest(doc, token_budget=1)
     path.write_text(json.dumps(doc), encoding="utf-8")
     clauses = doc["digest"]["clauses"]
     capped = [

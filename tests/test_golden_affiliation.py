@@ -463,43 +463,35 @@ def test_golden_key_clauses_present_with_citations(tmp_path: Path) -> None:
 
 
 def test_golden_negotiation_dynamics(tmp_path: Path) -> None:
-    """Negotiation dynamics (issue #177, OPF §3.5.3) on the golden corpus.
+    """Negotiation dynamics (issue #177) on the golden corpus, in the store.
 
     deal-alpha is a 3-version negotiation, so its per-round diffs must
-    surface as negotiation_trail entries (round_moves.jsonl at L4, grouped
-    into clauses at L5), every clause summary carries a stance_detail whose
-    held-rate is arithmetically sane, and changed clauses carry proposed_by
-    ("unknown" here — the RTF corpus has no tracked-changes side-channel;
-    dynamics are derived, never fabricated).
+    surface as round moves (round_moves.jsonl at L4; OPF 0.4 derives each
+    precedent's ``rounds`` from them — see
+    test_golden_precedent_moves_on_multi_round_deal), and changed clauses
+    carry proposed_by ("unknown" here — the RTF corpus has no
+    tracked-changes side-channel; dynamics are derived, never fabricated).
     """
     corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
-    # stance_detail / negotiation_trail are the OPF 0.3 shape (kept for one
-    # release, issue #223) — the 0.4 analogue is
-    # test_golden_precedent_moves_on_multi_round_deal.
-    playbook = _run_pipeline(corpus_dir, config_path, out_dir, opf_version="0.3")
+    _run_pipeline(corpus_dir, config_path, out_dir)
 
-    assert (out_dir / "round_moves.jsonl").exists(), "L4 must persist round moves"
+    moves_path = out_dir / "round_moves.jsonl"
+    assert moves_path.exists(), "L4 must persist round moves"
+    moves = [json.loads(line) for line in moves_path.read_text().splitlines() if line.strip()]
+    alpha_moves = [m for m in moves if m["document_id"] == "deal-alpha"]
+    assert alpha_moves, "multi-round deal-alpha must produce at least one round move"
+    for move in alpha_moves:
+        assert move["round"] >= 1
+        assert move["moved_by"] in {"us", "counterparty", "unknown"}
+        assert move["change_summary"]
 
-    clauses = playbook["evidence"]["clauses"]
-    assert clauses
-    for clause in clauses:
-        detail = clause["summary"].get("stance_detail")
-        assert detail is not None, f"stance_detail missing on {clause['id']}"
-        assert 0 <= detail["held"] <= detail["of"]
-        assert detail["basis"] in {"our_paper", "all"}
-
-    trails = [c for c in clauses if c.get("negotiation_trail")]
-    assert trails, "multi-round deal-alpha must produce at least one negotiation_trail"
-    for clause in trails:
-        for entry in clause["negotiation_trail"]:
-            assert entry["round"] >= 1
-            assert entry["moved_by"] in {"us", "counterparty", "unknown"}
-            assert entry["change_summary"]
-            assert entry["ref"]["document_id"]
-
-    # RTF corpus → no tracked changes → changed clauses are 'unknown', and
-    # no observation may carry a fabricated observed_at.
-    for clause in clauses:
-        for obs in clause["observed_positions"]:
-            assert obs.get("proposed_by") in {None, "us", "counterparty", "unknown"}
-            assert obs.get("observed_at") is None or len(obs["observed_at"]) == 10
+    # RTF corpus → no tracked changes → no fabricated side or date.
+    observations = [
+        json.loads(line)
+        for line in (out_dir / "observations.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert observations
+    for obs in observations:
+        assert obs.get("proposed_by") in {None, "us", "counterparty", "unknown"}
+        assert obs.get("observed_at") is None or len(obs["observed_at"]) == 10

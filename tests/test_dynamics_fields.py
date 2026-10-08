@@ -1,55 +1,40 @@
 """Tests for the negotiation-dynamics fields (issue #177, OPF §3.5.3).
 
-Covers the five behaviors the issue names:
+Covers the observation-store side of the dynamics (the OPF 0.2/0.3
+``stance_detail`` / ``negotiation_trail`` surfaces were retired with those
+formats, issue #238; OPF 0.4 derives each precedent's ``rounds`` from the
+round moves built here):
   1. proposed_by derived from a DOCX tracked insertion's author, mapped
      through our_party_aliases/our_authors — "us" on a match, "unknown"
      otherwise (never "counterparty": absence of a match against our own
      side is not evidence of the other side, issue #119).
   2. proposed_by "unknown" / observed_at omitted on a PDF-only trail —
      dynamics are never fabricated.
-  3. stance_detail consistent with the counts feeding historical_stance;
-     validator rejects held > of.
-  4. negotiation_trail built from per-round diffs: a clause changed in
-     rounds 1 and 3 yields exactly two entries with correct ordinals and
-     resolvable refs.
-  5. A dangling trail ref fails validation.
+  3. round moves built from per-round diffs: a clause changed in rounds 1
+     and 3 yields exactly two moves with correct ordinals and refs.
 """
 
 from __future__ import annotations
 
-import copy
-import json
 from pathlib import Path
-from typing import Any
 
 from docx import Document
 from lxml import etree
 
 from playbook_engine.clause_differ import ClauseDiff, DocumentDiff, TextHunk, VersionDiff
-from playbook_engine.clause_position_compiler import compile_clause_positions
 from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.docx_ingester import TrackedChange, TrackedChanges, ingest_docx
 from playbook_engine.observation_builder import (
-    Observation,
-    ObservationCitation,
     build_observations,
     build_round_moves,
 )
 from playbook_engine.tracked_changes_overlay import enrich_clause_diff
-from playbook_engine.validator import validate_document
-
-FIXTURES = Path(__file__).parent.parent / "examples" / "fixtures"
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _w(tag: str) -> str:
     return f"{{{_W_NS}}}{tag}"
-
-
-def _load_minimal() -> dict[str, Any]:
-    with (FIXTURES / "valid_v0_2_minimal.json").open() as f:
-        return json.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -227,67 +212,7 @@ def test_unchanged_clause_carries_no_proposed_by() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. stance_detail
-# ---------------------------------------------------------------------------
-
-
-def _obs(
-    obs_id: str,
-    outcome: str = "signed",
-    direction: str = "neutral",
-    deviation: str = "none",
-) -> Observation:
-    return Observation(
-        observation_id=obs_id,
-        taxonomy_id="indemnification",
-        text_summary=f"Observation text for clause {obs_id}.",
-        citation=ObservationCitation(
-            document_id=f"deal-{obs_id}", version=2, clause_path="1", char_span=(0, 10)
-        ),
-        deviation=deviation,
-        risk_delta={
-            "direction": direction,
-            "magnitude": "minor" if direction == "worse" else "none",
-        },
-        provenance="our_paper",
-        outcome=outcome,
-        basis="deterministic",
-    )
-
-
-def test_stance_detail_consistent() -> None:
-    """stance_detail matches the counts feeding historical_stance: held =
-    refusals + non-worse signings, of = OPF-outcome our-paper observations."""
-    observations = [
-        _obs("a", outcome="signed", direction="neutral"),  # held
-        _obs("b", outcome="signed", direction="worse", deviation="substantive"),  # conceded
-        _obs(
-            "c", outcome="proposed_then_reversed", direction="worse", deviation="substantive"
-        ),  # held
-    ]
-    positions, _, _ = compile_clause_positions(observations, [])
-    assert len(positions) == 1
-    detail = positions[0].rollup.stance_detail
-    assert detail == {"held": 2, "of": 3, "basis": "our_paper"}
-    emitted = positions[0].to_dict()["summary"]["stance_detail"]
-    assert emitted == {"held": 2, "of": 3, "basis": "our_paper"}
-
-
-def test_stance_detail_held_exceeding_of_rejected() -> None:
-    """Validator rejects held > of (blocking)."""
-    doc = _load_minimal()
-    doc["evidence"]["clauses"][0]["summary"]["stance_detail"] = {
-        "held": 3,
-        "of": 2,
-        "basis": "our_paper",
-    }
-    result = validate_document(doc)
-    assert not result.ok
-    assert any("held" in str(e) for e in result.errors)
-
-
-# ---------------------------------------------------------------------------
-# 4./5. negotiation_trail
+# 3. round moves
 # ---------------------------------------------------------------------------
 
 
@@ -325,22 +250,7 @@ def test_negotiation_trail_from_rounds() -> None:
     # Post-move refs: round 1 cites version ordinal 2, round 3 cites 4.
     assert [m.citation.version for m in moves] == [2, 4]
     assert all(m.moved_by == "unknown" for m in moves)  # no side-channel given
-
-    positions, _, _ = compile_clause_positions([_obs("a"), _obs("b")], [], round_moves=moves)
-    clause_dict = positions[0].to_dict()
-    trail = clause_dict["negotiation_trail"]
-    assert len(trail) == 2
-    assert trail[0]["round"] == 1 and trail[1]["round"] == 3
-    for entry in trail:
-        assert entry["ref"]["document_id"] == "university-of-example"
-        assert "taxonomy_id" not in entry  # grouping key, not OPF surface
-
-    # Refs must resolve against corpus.documents (§4).
-    doc = _load_minimal()
-    doc["evidence"]["clauses"][0]["negotiation_trail"] = [m.to_opf_dict() for m in moves]
-    doc["corpus"]["documents"][0]["versions"] = 4
-    result = validate_document(doc)
-    assert result.ok, [str(e) for e in result.errors]
+    assert all(m.citation.document_id == "university-of-example" for m in moves)
 
 
 def test_build_round_moves_round_level_fallback_fires_with_single_author() -> None:
@@ -414,26 +324,6 @@ def test_build_round_moves_round_level_fallback_refuses_with_two_authors() -> No
     assert moves[0].moved_by == "unknown"
 
 
-def test_trail_ref_dangling_fails() -> None:
-    """A trail ref citing a version beyond the corpus record must fail."""
-    doc = _load_minimal()
-    entry = {
-        "document_id": "university-of-example",
-        "round": 1,
-        "moved_by": "unknown",
-        "change_summary": "Clause modified.",
-        "ref": {
-            "document_id": "university-of-example",
-            "version": 99,
-            "clause_path": "1",
-        },
-    }
-    doc["evidence"]["clauses"][0]["negotiation_trail"] = [entry]
-    result = validate_document(doc)
-    assert not result.ok
-    assert any("negotiation_trail" in (e.path or "") for e in result.errors)
-
-
 def test_removed_clause_cites_last_existing_state() -> None:
     """A removed clause's trail entry cites the before side — the last state
     where the clause existed — because a post-move ref would dangle."""
@@ -465,19 +355,6 @@ def test_removed_clause_cites_last_existing_state() -> None:
 # ---------------------------------------------------------------------------
 # content-hash participation (same discipline as x_* extensions)
 # ---------------------------------------------------------------------------
-
-
-def test_dynamics_fields_participate_in_content_hash() -> None:
-    from playbook_engine.canonicalize import content_hash
-
-    doc = _load_minimal()
-    extended = copy.deepcopy(doc)
-    extended["evidence"]["clauses"][0]["summary"]["stance_detail"] = {
-        "held": 1,
-        "of": 1,
-        "basis": "our_paper",
-    }
-    assert content_hash(doc) != content_hash(extended)
 
 
 # ---------------------------------------------------------------------------
@@ -613,45 +490,3 @@ def test_search_snippets_truncate_after_pseudonymization_boundary() -> None:
 
     truncated = truncate_search_snippets(observations)
     assert all(len(o.search_snippet) <= 100 for o in truncated)
-
-
-def test_export_profile_covers_negotiation_trail() -> None:
-    """negotiation_trail.change_summary quotes raw clause text and must be
-    in the export profile's judged free-text surface (issue #146 contract)."""
-    from playbook_engine.export_profile import _extract_text_samples
-
-    doc = _load_minimal()
-    doc["evidence"]["clauses"][0]["negotiation_trail"] = [
-        {
-            "document_id": "university-of-example",
-            "round": 1,
-            "moved_by": "counterparty",
-            "change_summary": "Cap raised from 1x fees to 2x fees.",
-            "ref": {"document_id": "university-of-example", "version": 2, "clause_path": "1"},
-        }
-    ]
-    samples, locations = _extract_text_samples(doc)
-    trail_paths = [s.path for s in samples if "negotiation_trail" in s.path]
-    assert trail_paths, "trail change_summary missing from the judged surface"
-    assert locations[trail_paths[0]][1] == "negotiation_trail"
-
-
-def test_export_profile_covers_search_snippet() -> None:
-    """observed_positions[].x_search_snippet quotes raw clause text near a
-    citation's location, exactly as residue-prone as text_summary/full_text
-    (issue #95's MANDATORY residue-judgment wiring) — must be in the export
-    profile's judged free-text surface alongside its two siblings."""
-    from playbook_engine.export_profile import _FREE_TEXT_FIELDS, _extract_text_samples
-
-    assert "x_search_snippet" in _FREE_TEXT_FIELDS
-
-    doc = _load_minimal()
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["x_search_snippet"] = (
-        "Mutual indemnification, negligence-based."
-    )
-    samples, locations = _extract_text_samples(doc)
-    snippet_paths = [s.path for s in samples if s.path.endswith("x_search_snippet")]
-    assert snippet_paths, "x_search_snippet missing from the judged free-text surface"
-    loc = locations[snippet_paths[0]]
-    assert loc[1] == "observed_positions"
-    assert loc[3] == "x_search_snippet"

@@ -24,9 +24,7 @@ from playbook_engine.floor_candidates import (
 )
 from playbook_engine.inspection_report import build_inspection_report, write_inspection_report
 from playbook_engine.pipeline import PipelineError, mine_corpus, project_playbook
-from playbook_engine.playbook_assembler import _OPF_VERSION as DEFAULT_OPF_VERSION
 from playbook_engine.playbook_assembler import (
-    EMITTABLE_OPF_VERSIONS,
     AssemblyError,
     write_playbook,
 )
@@ -46,11 +44,34 @@ from playbook_engine.segmentation_qa import SegmentationQAError
 from playbook_engine.taxonomy import Taxonomy, TaxonomyError, load_taxonomy, merge_taxonomy
 from playbook_engine.validator import SUPPORTED_OPF_VERSIONS, load_opf_file, validate_document
 
-# e.g. "0.1, 0.2" — engine version and OPF version drift independently
-# (engine 0.1.0 shipped OPF 0.2's predecessor), so `--version` reports both
+# e.g. "0.4" — engine version and OPF version drift independently, so
+# `--version` reports both
 # to keep bug reports unambiguous about which OPF schema a given engine
 # build validates against (issue #176).
 _OPF_VERSIONS_STR = ", ".join(sorted(SUPPORTED_OPF_VERSIONS))
+
+
+def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
+    """Exit 1 when *doc* does not claim a supported opf_version (issue #238).
+
+    The engine reads exactly one format. A command that reads a playbook
+    (digest, view bundle, render-prompt) must refuse a retired 0.1-0.3
+    document loudly rather than render it as an empty or stale artifact —
+    the same silent empty render opf_accessors exists to prevent (#154).
+    The message mirrors the validator's "unsupported opf_version" error.
+    """
+    version = doc.get("opf_version") if isinstance(doc, dict) else None
+    # isinstance first: a hand-edited list/dict value is unhashable.
+    if isinstance(version, str) and version in SUPPORTED_OPF_VERSIONS:
+        return
+    click.secho(
+        f"ERROR: {source}: unsupported opf_version {version!r} (supported: "
+        f"{_OPF_VERSIONS_STR}) — the engine reads and writes only OPF 0.4; the "
+        "0.1-0.3 formats were retired (spec/CHANGELOG.md)",
+        fg="red",
+        err=True,
+    )
+    raise SystemExit(1)
 
 
 def _llm_segmentation_kwargs(
@@ -705,6 +726,7 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     except Exception as exc:  # noqa: BLE001
         click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+    _refuse_unsupported_opf_version(doc, playbook_file)
 
     rendered = render_prompt(doc)
 
@@ -745,18 +767,13 @@ def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
     "obs_index",
     type=int,
     default=None,
-    help=(
-        "Index into that clause's observed_positions (OPF 0.2/0.3), or into its "
-        "evidence.precedent records (OPF 0.4)."
-    ),
+    help=("Index into that clause's evidence.precedent records."),
 )
 @click.option(
     "--precedent-id",
     "precedent_id",
     default=None,
-    help=(
-        "OPF 0.4: an evidence.precedent[].id (prec.<sha>) to resolve, instead of --clause/--obs."
-    ),
+    help=("An evidence.precedent[].id (prec.<sha>) to resolve, instead of --clause/--obs."),
 )
 @click.option(
     "--corpus-dir",
@@ -1698,27 +1715,16 @@ def mine_cmd(
 @click.option(
     "--config", "config_path", type=click.Path(exists=True, path_type=Path), required=True
 )
-@click.option(
-    "--opf-version",
-    "opf_version",
-    type=click.Choice(list(EMITTABLE_OPF_VERSIONS)),
-    default=DEFAULT_OPF_VERSION,
-    show_default=True,
-    help=(
-        "OPF version to emit. 0.4 is the verdict-free per-deal precedent record "
-        "(digest_version 3); 0.3 keeps the previous evidence shape (digest_version 2) "
-        "for one release."
-    ),
-)
-def project_cmd(out_dir: Path, config_path: Path, opf_version: str) -> None:
+def project_cmd(out_dir: Path, config_path: Path) -> None:
     """Project the observation store in OUT_DIR into a playbook (L5 only).
 
     Reads ``observations.jsonl`` and ``corpus_manifest.json`` from OUT_DIR
     (written by ``playbook mine``) and compiles them into a schema-valid
-    ``playbook.opf.json`` using purely deterministic rollup logic — zero
+    OPF 0.4 ``playbook.opf.json`` (the one format the engine emits) plus its
+    ``precedent.jsonl`` sidecar, using purely deterministic logic — zero
     ingest work, zero LLM calls.
 
-    Re-running ``project`` after tuning rollup / position logic changes the
+    Re-running ``project`` after changing the projection logic changes the
     playbook without re-mining the corpus.
 
     OUT_DIR must already contain the observation store produced by
@@ -1746,7 +1752,6 @@ def project_cmd(out_dir: Path, config_path: Path, opf_version: str) -> None:
             out_dir=out_dir_resolved,
             config=cfg,
             taxonomy=taxonomy,
-            opf_version=opf_version,
             progress=click.echo,
         )
     except (PipelineError, AssemblyError) as exc:
@@ -3467,10 +3472,10 @@ def report_cmd(out_dir: Path, report_path: Path | None) -> None:
 def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
     """Emit the compact model-facing digest of OUT_DIR/playbook.opf.json.
 
-    An OPF 0.3/0.4 playbook already carries the digest as its top-level
-    `digest` section (digest_version 2 for 0.3, 3 for 0.4) — this command
-    extracts it to a standalone sidecar (and derives it on the fly for a
-    pre-0.3 document). The sidecar is what a consuming
+    An OPF 0.4 playbook already carries the digest (digest_version 3) as its
+    top-level `digest` section — this command extracts it to a standalone
+    sidecar (and derives it on the fly when the section is absent). The
+    sidecar is what a consuming
     review application feeds a model as the system-prompt projection; the
     full playbook stays on disk for example_ref drill-down.
     """
@@ -3490,6 +3495,7 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
     except ValueError as exc:  # includes json.JSONDecodeError
         click.secho(f"ERROR: could not parse {opf_path}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+    _refuse_unsupported_opf_version(doc, opf_path)
     digest = doc.get("digest") or build_digest(doc)
     dest = digest_path.resolve() if digest_path else resolved / "playbook.digest.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -3503,7 +3509,7 @@ def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
 
     token_est = digest_token_estimate(digest)
     click.secho(f"OK  {dest}", fg="green")
-    n_clauses = digest.get("clause_count", len(digest.get("clauses") or []))
+    n_clauses = len(digest.get("clauses") or [])
     click.echo(f"  clauses: {n_clauses}  ~{token_est:,} tokens (chars/4)")
     if token_est > 40_000:
         click.secho(
@@ -3660,10 +3666,21 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
     matching is best-effort, so run the mandatory residue check (see the
     playbook-from-corpus skill) before treating the bundle as shareable.
     """
+    import json as _json  # noqa: PLC0415
+
     from playbook_engine.document_renderer import render_bundle_html  # noqa: PLC0415
 
     resolved = out_dir.resolve()
     dest = out_file.resolve() if out_file else resolved / "playbook.opf.html"
+
+    opf_path = resolved / "playbook.opf.json"
+    if opf_path.exists():
+        try:
+            doc = _json.loads(opf_path.read_text(encoding="utf-8"))
+        except ValueError as exc:  # includes json.JSONDecodeError
+            click.secho(f"ERROR: could not parse {opf_path}: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        _refuse_unsupported_opf_version(doc, opf_path)
 
     try:
         render_bundle_html(resolved, out_file=dest)
@@ -3678,17 +3695,6 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
 @click.argument("feedback_file", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--corpus-dir",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "Corpus root to search first when locating a cited document's "
-        "hints.yaml (e.g. /work/corpus under the Docker flow, where the "
-        "corpus is a sibling of OUT_DIR rather than its parent). Without "
-        "it, only OUT_DIR's parent/grandparent are searched."
-    ),
-)
-@click.option(
     "--force",
     is_flag=True,
     default=False,
@@ -3700,13 +3706,10 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
         "Corrections may land on the wrong clauses when forced."
     ),
 )
-def view_apply_cmd(
-    out_dir: Path, feedback_file: Path, corpus_dir: Path | None, force: bool
-) -> None:
+def view_apply_cmd(out_dir: Path, feedback_file: Path, force: bool) -> None:
     """Apply FEEDBACK_FILE corrections to OUT_DIR.
 
-    Translates provenance/signed/order corrections into per-document
-    hints.yaml entries, classification corrections into verdict-store
+    Translates classification corrections into verdict-store
     entries, free-text notes/comments into viewer_notes.md, ``override``
     (attorney-pinned position) corrections into a ``curation`` pin embedded
     directly in ``playbook.opf.json`` — it survives a later recompile and is
@@ -3717,11 +3720,9 @@ def view_apply_cmd(
     it cannot honor is reported as not applied rather than counted toward a
     false "OK".
 
-    A hints.yaml correction whose corpus document directory cannot be found
-    or written (e.g. the Docker corpus mount is read-only) is reported as
-    NOT applied rather than counted as a success — see "not applied" lines
-    in the output — even though a copy is parked under OUT_DIR/hints/ for
-    manual recovery.
+    provenance/signed_version/order corrections are reported as not
+    applied: each names one document, and a clause item cites none. Set
+    them by hand in that deal's hints.yaml, then re-mine.
 
     FEEDBACK_FILE carries an ``_export`` binding stamped by the viewer's
     Export button: if it does not match OUT_DIR's current playbook.opf.json
@@ -3737,19 +3738,13 @@ def view_apply_cmd(
     from playbook_engine.viewer import apply_feedback  # noqa: PLC0415
 
     resolved = out_dir.resolve()
-    corpus_resolved = corpus_dir.resolve() if corpus_dir is not None else None
 
     try:
-        result = apply_feedback(
-            resolved, feedback_file.resolve(), corpus_dir=corpus_resolved, force=force
-        )
+        result = apply_feedback(resolved, feedback_file.resolve(), force=force)
     except (FileNotFoundError, ValueError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
-    if result.hints_written:
-        for doc_id in result.hints_written:
-            click.secho(f"  hints.yaml updated for {doc_id}", fg="cyan")
     if result.verdicts_written:
         click.secho(
             f"  {result.verdicts_written} verdict(s) written to judge/verdicts.jsonl", fg="cyan"
@@ -3779,8 +3774,7 @@ def view_apply_cmd(
             click.secho(f"  {item_num}: not applied — {message}", fg="yellow")
 
     applied = bool(
-        result.hints_written
-        or result.verdicts_written
+        result.verdicts_written
         or result.notes_written
         or result.pins_written
         or result.floor_promoted

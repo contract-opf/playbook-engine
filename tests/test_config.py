@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from playbook_engine.clause_position_compiler import MIN_EVIDENCE_N
 from playbook_engine.config import ConfigError, EngineConfig, load_config
 from playbook_engine.llm_segmenter import DEFAULT_MODEL
 
@@ -345,20 +344,14 @@ segmentation:
 
 
 # ---------------------------------------------------------------------------
-# provenance.min_evidence_n (issue #144)
+# provenance.min_evidence_n — retired with OPF 0.3's stance (issue #238)
 # ---------------------------------------------------------------------------
 
 
-def test_no_min_evidence_n_defaults_to_compiler_constant(tmp_path: Path) -> None:
-    """No ``provenance.min_evidence_n`` key -> defaults to
-    ``clause_position_compiler.MIN_EVIDENCE_N`` so an existing config keeps
-    enforcing the same evidence-depth floor it always has."""
-    path = _minimal_config(tmp_path)
-    cfg = load_config(path)
-    assert cfg.provenance.min_evidence_n == MIN_EVIDENCE_N
-
-
-def test_min_evidence_n_override_parsed(tmp_path: Path) -> None:
+def test_retired_min_evidence_n_key_is_rejected(tmp_path: Path) -> None:
+    """``provenance.min_evidence_n`` only capped OPF 0.3's historical_stance;
+    with that format retired it is an unknown key, rejected like any other
+    rather than silently ignored."""
     tax = tmp_path / "taxonomy.yaml"
     tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
     path = _write_config(
@@ -374,47 +367,7 @@ provenance:
   min_evidence_n: 3
 """,
     )
-    cfg = load_config(path)
-    assert cfg.provenance.min_evidence_n == 3
-
-
-def test_min_evidence_n_zero_raises(tmp_path: Path) -> None:
-    tax = tmp_path / "taxonomy.yaml"
-    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
-    path = _write_config(
-        tmp_path,
-        """
-agreement_type:
-  id: test-type
-  name: "Test Agreement"
-baseline:
-  template: null
-taxonomy: taxonomy.yaml
-provenance:
-  min_evidence_n: 0
-""",
-    )
-    with pytest.raises(ConfigError, match="min_evidence_n must be a positive integer"):
-        load_config(path)
-
-
-def test_min_evidence_n_not_an_integer_raises(tmp_path: Path) -> None:
-    tax = tmp_path / "taxonomy.yaml"
-    tax.write_text(TAXONOMY_PATH.read_text(), encoding="utf-8")
-    path = _write_config(
-        tmp_path,
-        """
-agreement_type:
-  id: test-type
-  name: "Test Agreement"
-baseline:
-  template: null
-taxonomy: taxonomy.yaml
-provenance:
-  min_evidence_n: "two"
-""",
-    )
-    with pytest.raises(ConfigError, match="min_evidence_n must be a positive integer"):
+    with pytest.raises(ConfigError, match="min_evidence_n"):
         load_config(path)
 
 
@@ -862,7 +815,7 @@ def test_extraction_max_fallback_not_an_integer_raises(tmp_path: Path) -> None:
 
 def test_extraction_max_fallback_bool_raises(tmp_path: Path) -> None:
     """``True``/``False`` must not silently pass the ``int`` check — Python's
-    ``bool`` is an ``int`` subclass (mirrors the ``min_evidence_n``/
+    ``bool`` is an ``int`` subclass (mirrors the
     ``ambiguity_threshold`` bool guards above)."""
     path = _extraction_config(tmp_path, "extraction:\n  max_fallback: true\n")
     with pytest.raises(ConfigError, match="max_fallback"):

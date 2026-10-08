@@ -175,7 +175,7 @@ Open `./out/` to review what the engine inferred:
 | `normalized/*/*.clauses.json` | Extracted clause trees — useful for debugging ingestion. |
 | `observations.jsonl` | One row per clause observation feeding the playbook. |
 | `quarantine.json` | Documents `mine` excluded entirely (failed segmentation/ingest) — rewritten fresh every run. Any entry here is a document the playbook silently lost; triage it before trusting the result. |
-| `coherence_flags.json` | Clauses the coherence judge flagged as unreliable — empty (`[]`) when no `coherence_judge` is configured, but always written by `playbook project`. |
+| `coherence_flags.json` | The fragment-quarantine warn list: one `warn` flag per clause type whose sub-sentence fragments (page-number artifacts, bare headings) were excluded from the playbook. Always written by `playbook project`; `[]` when nothing was quarantined. |
 | `playbook.opf.json` | The final playbook. |
 
 Review `scope.json` and `trail/` before trusting the playbook. If the engine got the signed copy wrong or misidentified provenance, add a `hints.yaml` to the relevant subfolder:
@@ -238,7 +238,7 @@ ADOPTING.md.
 
 **"no .docx/.pdf/.rtf files found"** — Check that your files are in a *subfolder*, not directly in the corpus root. Each agreement needs its own subfolder.
 
-**"Only 1 version file"** — The engine can still compile with a single version, but cannot show negotiation history. Positions will be marked low-confidence (`historical_stance: no_signal`) without a signed-vs-draft comparison.
+**"Only 1 version file"** — The engine can still compile with a single version, but cannot show negotiation history: every precedent records `rounds: 0` and no refused asks, since there is no draft to compare the signed copy against.
 
 **Playbook has no clauses** — If all clauses are unclassified (taxonomy_id=None), the compiled clauses list will be empty. This usually means the taxonomy doesn't match the document content. Check that your taxonomy covers the agreement type, or switch to a more appropriate taxonomy.
 

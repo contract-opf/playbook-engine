@@ -38,7 +38,6 @@ _NDA = _NDA_DIR / "playbook.opf.json"
 _NDA_SIDECAR = _NDA_DIR / "precedent.jsonl"
 _CORPUS_DIR = _NDA_DIR / "corpus"
 _SMOKE_CONFIG = _NDA_DIR / "config.smoke.yaml"
-_V02_FIXTURE = _ROOT / "examples" / "fixtures" / "valid_v0_2_minimal.json"
 
 
 def _invoke(args: list[str]) -> CliResult:
@@ -157,8 +156,14 @@ def test_precedent_errors(args: list[str], exit_code: int, message: str) -> None
     assert message in result.output
 
 
-def test_precedent_refuses_a_pre_0_4_playbook() -> None:
-    result = _invoke(["precedent", str(_V02_FIXTURE), "--clause", "x"])
+def test_precedent_refuses_a_document_without_a_precedent_record(tmp_path: Path) -> None:
+    """A retired-format (here 0.3-shaped) document has no evidence.precedent."""
+    doc_path = tmp_path / "old.json"
+    doc_path.write_text(
+        json.dumps({"opf_version": "0.3", "evidence": {"clauses": [], "clause_library": []}}),
+        encoding="utf-8",
+    )
+    result = _invoke(["precedent", str(doc_path), "--clause", "x"])
     assert result.exit_code == 1
     assert "OPF 0.4" in result.output
 
@@ -223,10 +228,8 @@ def test_resolve_citation_argument_errors(args: list[str], exit_code: int, messa
 def test_project_writes_the_precedent_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`project` writes precedent.jsonl next to playbook.opf.json, its sha256
-    is the one x_sidecars records, and a 0.3 projection into the same
-    directory removes the sidecar rather than leaving a stale one beside a
-    playbook it does not belong to."""
+    """`project` writes precedent.jsonl next to playbook.opf.json, and its
+    sha256 is the one x_sidecars records."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     out_dir = tmp_path / "out"
     mine = _invoke(
@@ -248,12 +251,3 @@ def test_project_writes_the_precedent_sidecar(
     assert [json.loads(line) for line in lines] == sorted(
         playbook["evidence"]["precedent"], key=lambda p: p["id"]
     )
-
-    older = _invoke(
-        ["project", str(out_dir), "--config", str(_SMOKE_CONFIG), "--opf-version", "0.3"]
-    )
-    assert older.exit_code == 0, older.output
-    playbook_03 = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    assert playbook_03["opf_version"] == "0.3"
-    assert SIDECARS_KEY not in playbook_03
-    assert not sidecar.exists()

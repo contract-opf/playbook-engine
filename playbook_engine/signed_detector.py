@@ -541,7 +541,7 @@ def _count_slash_s(text: str) -> int:
 # lines, signatory names — to the body of whatever clause preceded it,
 # usually the last one (counterparts, entire agreement). That text is not
 # clause language: it is prompt noise for every judge that reads the clause,
-# it rides into our_standard / observed_positions / acceptable_if, and the
+# it rides into our_standard / signed_text / the digest, and the
 # signatories' names are a pseudonymization residue path (people's names are
 # not in known_entities). ``strip_signature_block`` cuts it out of the clause
 # text deterministically and reports where it was, so the pipeline can

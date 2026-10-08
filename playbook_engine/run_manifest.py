@@ -316,7 +316,6 @@ def compute_config_hash(config: EngineConfig) -> str:
             "our_party_aliases": sorted(config.provenance.our_party_aliases),
             "our_authors": sorted(config.provenance.our_authors),
             "known_entities": sorted(config.provenance.known_entities),
-            "min_evidence_n": config.provenance.min_evidence_n,
         },
         "segmentation": {
             "llm": config.segmentation.llm,

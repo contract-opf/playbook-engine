@@ -1,11 +1,10 @@
 """OPF 0.4 evidence — the verdict-free per-deal precedent record (issue #223).
 
-OPF 0.3's evidence shape (``observed_positions``, ``clause_library``,
-``summary.{historical_stance, acceptable_if, fallbacks, rejected,
-confidence}``, ``negotiation_trail``) describes categories the engine can no
+The evidence shapes of OPF 0.1-0.3 described categories the engine could no
 longer honestly fill once judged deviation verdicts left the consumer path
-(issue #220) and the deal became the unit of precedent (issue #216). OPF 0.4
-replaces it with two lists:
+(issue #220) and the deal became the unit of precedent (issue #216); they
+were retired (issue #238 — git history has them). OPF 0.4's evidence is two
+lists:
 
 ``evidence.clauses[]``
     One entry per clause type: ``{id, taxonomy_id, title, our_standard,
@@ -327,9 +326,9 @@ def build_precedent_evidence(
     output. The optional field exists for a third-party producer that
     records signing dates; the 0.4 conformance vectors that set it model one.
 
-    Sub-sentence fragments are excluded exactly as the 0.3 compiler excludes
-    them (``MIN_OBSERVATION_TEXT_LEN``); unclassified observations and clause
-    types with no compiled position never reach precedent.
+    Sub-sentence fragments are excluded exactly as the clause-type compiler
+    excludes them (``MIN_OBSERVATION_TEXT_LEN``); unclassified observations
+    and clause types with no compiled position never reach precedent.
 
     *party* is the document's ``perspective.party`` (``None`` when it has
     none) — the clause counts group texts by :func:`normalize_variant_text`,
@@ -477,13 +476,13 @@ def refresh_derived(doc: dict[str, Any]) -> None:
     with the transformed ``perspective.party``), and the ``precedent.jsonl``
     sha256 under ``x_sidecars`` when the document records one (issue #224).
     ``identity`` is left to the
-    caller, which re-stamps it last. A no-op on any pre-0.4 document.
+    caller, which re-stamps it last. A no-op on a document without a
+    precedent record.
     """
     evidence = doc.get("evidence")
     agreement_type = doc.get("agreement_type")
     if (
-        doc.get("opf_version") != "0.4"
-        or not isinstance(evidence, dict)
+        not isinstance(evidence, dict)
         or not isinstance(evidence.get("precedent"), list)
         or not isinstance(evidence.get("clauses"), list)
         or not isinstance(agreement_type, dict)

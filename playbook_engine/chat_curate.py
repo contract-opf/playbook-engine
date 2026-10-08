@@ -16,8 +16,8 @@ Two instruction kinds:
 - ``pin <clause> to <stance>[: <comment>]`` — embeds a
   ``playbook_engine.curation.CurationPin`` for the clause, recording the
   attorney's asserted ``position`` (the ``<stance>`` token) AND the clause's
-  *current* ``historical_stance``/``rollup.position`` as ``baseline_stance``
-  — what the attorney is overriding FROM. The leading filler words
+  current stance as ``baseline_stance`` — ``curation.NO_STANCE``, since the
+  document carries no stance (issue #223). The leading filler words
   ``clause``/``stance`` are optional sugar; ``pin <clause> to <stance>`` and
   ``pin clause <clause> to stance <stance>`` parse identically.
 - ``note <clause>: <text>`` — a free-text note, appended to
@@ -51,8 +51,8 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
-from playbook_engine.curation import CurationPin, merge_curation
-from playbook_engine.opf_accessors import clause_stance, playbook_clauses
+from playbook_engine.curation import NO_STANCE, CurationPin, merge_curation
+from playbook_engine.opf_accessors import playbook_clauses
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.viewer import _build_index
 
@@ -215,7 +215,7 @@ def apply_curate_commands(
 
     doc: dict[str, Any] = json.loads(opf_path.read_text(encoding="utf-8"))
     clauses = playbook_clauses(doc)
-    clause_stances = {c["id"]: clause_stance(c) for c in clauses if c.get("id")}
+    clause_stances = {c["id"]: NO_STANCE for c in clauses if c.get("id")}
     clause_lookup = _clause_lookup(doc)
 
     timestamp = now or datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
@@ -260,7 +260,7 @@ def apply_curate_commands(
                 clause_id=clause_id,
                 item_id=str(clause.get("_clause_num", "")),
                 position=parsed.value,
-                baseline_stance=clause_stances.get(clause_id, "unknown"),
+                baseline_stance=clause_stances.get(clause_id, NO_STANCE),
                 pinned_at=timestamp,
                 pinned_by=pinned_by,
                 comment=parsed.comment,

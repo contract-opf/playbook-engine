@@ -114,8 +114,9 @@ def render_coherence_flags(coherence_flags: list[CoherenceFlag]) -> str:
     """Render a Markdown section for CoherenceFlag entries.
 
     Args:
-        coherence_flags: Flags emitted by ``CoherenceJudge`` for unreliable
-                         clause positions.  May be empty.
+        coherence_flags: The fragment-quarantine warn flags
+                         ``compile_clause_positions`` emits (issue #210).
+                         May be empty.
 
     Returns:
         Markdown string (may be empty if there are no flags).
@@ -127,8 +128,8 @@ def render_coherence_flags(coherence_flags: list[CoherenceFlag]) -> str:
     lines.append("## Coherence Flags")
     lines.append("")
     lines.append(
-        "> The following clauses were flagged by the coherence reviewer as potentially "
-        "unreliable.  Review before publishing the playbook."
+        "> The following clause types had sub-sentence fragments quarantined out of "
+        "the playbook.  Review before publishing the playbook."
     )
     lines.append("")
     lines.append("| Clause ID | Severity | Reason |")
@@ -154,8 +155,10 @@ def build_inspection_report(
     Args:
         out_dir:          Path to the ``out/`` directory produced by
                           ``playbook mine``.
-        coherence_flags:  Optional list of ``CoherenceFlag`` entries emitted
-                          by ``CoherenceJudge``.  When provided and non-empty,
+        coherence_flags:  Optional list of ``CoherenceFlag`` entries (the
+                          fragment-quarantine warn flags
+                          ``compile_clause_positions`` emits, issue #210).
+                          When provided and non-empty,
                           a dedicated section is prepended to the report.
 
     Returns:

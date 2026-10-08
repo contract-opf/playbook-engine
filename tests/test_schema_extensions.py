@@ -1,11 +1,15 @@
 """Tests for the x_* vendor-extension namespace (issue #180).
 
-schema-0.2 closes every object with ``additionalProperties: false``; the
-``x_*`` namespace is the sanctioned escape hatch so adopters can attach
-vendor fields without forking the standard. Extensions are allowed at
-exactly the eight levels listed in #180 — and nowhere hash-integrity or
+The OPF 0.4 schema closes every object with ``additionalProperties: false``;
+the ``x_*`` namespace is the sanctioned escape hatch so adopters can attach
+vendor fields without forking the standard. Extensions are allowed at the
+document root, ``posture``, ``floor`` and its invariants, ``curation.pins[]``
+and ``corpus.documents[]`` (and ``digest``, whose content the validator
+additionally pins to its recomputation) — and nowhere hash integrity or
 mechanical resolvability depends on a closed shape (identity, citations,
-agreement_type, taxonomy entries, compiler).
+agreement_type, taxonomy entries, compiler), nor in the verdict-free
+precedent record (``evidence.clauses[]`` / ``evidence.precedent[]``, issue
+#223: judged extras go under the root ``x_judgments``).
 
 x_* fields ARE content: they participate in identity.content_hash and the
 section digests, so two documents differing only in an x_* value have
@@ -22,12 +26,15 @@ from typing import Any
 from playbook_engine.canonicalize import content_hash
 from playbook_engine.validator import validate_document
 
-FIXTURES = Path(__file__).parent.parent / "examples" / "fixtures"
+NDA_PLAYBOOK = Path(__file__).parent.parent / "examples" / "nda" / "playbook.opf.json"
 
 
 def _minimal() -> dict[str, Any]:
-    with (FIXTURES / "valid_v0_2_minimal.json").open() as f:
-        return json.load(f)
+    """The compiled NDA example, identity dropped so an added field trips only
+    the rule under test."""
+    doc: dict[str, Any] = json.loads(NDA_PLAYBOOK.read_text(encoding="utf-8"))
+    del doc["identity"]
+    return doc
 
 
 def _assert_valid(doc: dict[str, Any], where: str) -> None:
@@ -38,48 +45,36 @@ def _assert_valid(doc: dict[str, Any], where: str) -> None:
 
 
 def test_x_field_valid_at_each_level() -> None:
-    """`x_vendor_note` must validate at each of the 8 sanctioned levels."""
+    """`x_vendor_note` must validate at each sanctioned level."""
     doc = _minimal()
 
-    # 1. document root
     doc["x_vendor_note"] = "v"
-    # 2. ClausePosition (evidence.clauses[] item)
-    clause = doc["evidence"]["clauses"][0]
-    clause["x_vendor_note"] = "v"
-    # 3. Observation (observed_positions[] item)
-    clause["observed_positions"][0]["x_vendor_note"] = "v"
-    # 4. ClauseConcept (clause_library[] item)
-    doc["evidence"]["clause_library"] = [
-        {
-            "concept_id": "concept.indemnification",
-            "taxonomy_id": "indemnification",
-            "description": "Who bears third-party claim risk.",
-            "accepted_forms": [],
-            "x_vendor_note": "v",
-        }
-    ]
-    # 5. posture
     doc["posture"]["x_vendor_note"] = "v"
-    # 6. floor and floor.invariants[] item
     doc["floor"]["x_vendor_note"] = "v"
     doc["floor"]["invariants"][0]["x_vendor_note"] = "v"
-    # 7. curation pin (curation.pins[] item)
     doc["curation"] = {
         "pins": [
             {
-                "clause_id": "clause.indemnification",
+                "clause_id": "clause.governing_law",
                 "item_id": "C1",
                 "position": "hold firm",
-                "baseline_stance": "usually_held",
+                "baseline_stance": "unknown",
                 "pinned_at": "2026-01-01T00:00:00Z",
                 "x_vendor_note": "v",
             }
         ]
     }
-    # 8. corpus.documents[] item
     doc["corpus"]["documents"][0]["x_vendor_note"] = "v"
 
-    _assert_valid(doc, "the 8 sanctioned levels")
+    _assert_valid(doc, "the sanctioned levels")
+
+
+def test_x_field_rejected_in_the_precedent_record() -> None:
+    """Clause and precedent records are closed (issue #223)."""
+    for container in ("clauses", "precedent"):
+        doc = _minimal()
+        doc["evidence"][container][0]["x_vendor_note"] = "v"
+        assert not validate_document(doc).ok, container
 
 
 def test_x_field_rejected_in_identity() -> None:
@@ -101,8 +96,8 @@ def test_x_field_rejected_in_identity() -> None:
 def test_x_field_rejected_in_citation() -> None:
     """Citations must stay mechanically resolvable — extensions stay out."""
     doc = _minimal()
-    observation = doc["evidence"]["clauses"][0]["observed_positions"][0]
-    observation["example_ref"]["x_foo"] = "v"
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    record["signed_text"]["ref"]["x_foo"] = "v"
     result = validate_document(doc)
     assert not result.ok
 

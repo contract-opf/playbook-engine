@@ -1,16 +1,14 @@
 """Playbook assembler — final L5 stage.
 
-Assembles the full OPF playbook document — by default OPF 0.4 (issue #223):
-the verdict-free per-deal precedent record as ``evidence``
-(``playbook_engine/precedent.py``) plus a digest_version 3 digest;
-``opf_version="0.3"`` keeps the 0.3 shape (evidence-wrapped clauses with a
-descriptive ``summary.historical_stance``, digest v2) for one release. Both
-carry empty-but-present ``posture``/``floor``, an embedded ``curation``
-overlay of attorney-pinned positions that survives recompile (issue #147),
-and an ``identity`` block carrying ``content_hash`` + per-section digests
-(issue #143) — and ``write_playbook`` writes ``playbook.opf.json``.  The assembled document is
-self-validated via the built-in validator before any data is written to
-disk.
+Assembles the full OPF 0.4 playbook document (issue #223) — the only format
+the engine emits or validates (issue #238): the verdict-free per-deal
+precedent record as ``evidence`` (``playbook_engine/precedent.py``) plus a
+digest_version 3 digest, empty-but-present ``posture``/``floor``, an
+embedded ``curation`` overlay of attorney-pinned positions that survives
+recompile (issue #147), and an ``identity`` block carrying ``content_hash``
++ per-section digests (issue #143) — and ``write_playbook`` writes
+``playbook.opf.json``.  The assembled document is self-validated via the
+built-in validator before any data is written to disk.
 
 API
 ---
@@ -38,19 +36,16 @@ from playbook_engine.canonicalize import (
     content_hash,
     sha256_hex,
 )
-from playbook_engine.clause_library_compiler import ClauseConcept
 from playbook_engine.clause_position_compiler import (
-    MIN_EVIDENCE_N,
     ClausePosition,
     UnclassifiedCoverage,
 )
-from playbook_engine.curation import merge_curation
+from playbook_engine.curation import NO_STANCE, merge_curation
 from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, RoundMove
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
     SIDECARS_KEY,
-    clause_stance,
     perspective_party,
     precedent_jsonl,
     precedent_sidecar_manifest,
@@ -62,14 +57,11 @@ from playbook_engine.precedent import (
 )
 from playbook_engine.validator import validate_document
 
-# OPF 0.4 (issue #223) = the verdict-free per-deal precedent record as the
-# evidence shape, plus a digest_version 3 digest. The assembler emits 0.4 by
-# default; ``opf_version="0.3"`` keeps the 0.3 shape (0.2 evidence + digest
-# v2) for one release. Validation accepts 0.1 through 0.4.
-_OPF_VERSION = "0.4"
-
-#: OPF versions ``assemble_playbook`` can emit.
-EMITTABLE_OPF_VERSIONS = ("0.3", "0.4")
+#: The one OPF version the engine emits and validates (issue #238): the
+#: verdict-free per-deal precedent record (issue #223) plus a digest_version 3
+#: digest. Older formats were retired; git history and contract-opf/opf keep
+#: them.
+OPF_VERSION = "0.4"
 _COMPILER_NAME = "playbook-engine"
 
 # Zero-width and bidirectional-control characters (ZWSP/ZWNJ/ZWJ/BOM and the
@@ -93,9 +85,8 @@ def _strip_invisible(value: Any) -> Any:
 
 
 # Keys corpus.documents[].version_ingest[] may carry into the PUBLISHED
-# playbook — mirrors spec/playbook.schema-0.3.json's (and -0.2.json's,
-# identical here) corpus.documents.items.properties.version_ingest.items.
-# properties exactly, whose additionalProperties:false rejects anything
+# playbook — mirrors spec/playbook.schema-0.4.json's
+# corpus.documents.items.properties.version_ingest.items.properties exactly, whose additionalProperties:false rejects anything
 # else. corpus_documents (as read from corpus_manifest.json) can carry
 # richer, engine-internal-only keys not in this set — e.g. "reason"
 # (extraction.ExtractorLabel.reason, issue #81) or "signature_block_span"
@@ -194,12 +185,12 @@ def _sanitize_corpus_documents_for_schema(
 
     Two document-level ``x_`` extensions are added, computed from the
     UNSTRIPPED entries, so a consumer can see which trails mixed extractors
-    (issue #218) without the per-version ``reason`` that every published
-    schema's ``version_ingest.items`` (``additionalProperties: false``, no
-    ``x_`` pattern — 0.2, 0.3 and 0.4 alike) cannot carry. Both go under the
-    ``^x_`` pattern ``corpus.documents.items`` already sanctions in every
-    version, so no published schema changes; a future format version is
-    where they would become first-class fields:
+    (issue #218) without the per-version ``reason`` that the schema's
+    ``version_ingest.items`` (``additionalProperties: false``, no ``x_``
+    pattern) cannot carry. Both go under the ``^x_`` pattern
+    ``corpus.documents.items`` already sanctions, so the schema does not
+    change; a future format version is where they would become first-class
+    fields:
 
     - ``x_mixed_extractors`` (bool, always present when ``version_ingest`` is
       a list): see :func:`_has_mixed_extractors`.
@@ -238,8 +229,7 @@ def _sanitize_corpus_documents_for_schema(
     return sanitized
 
 
-# Observation bases meaning no real judge assessed the clause — mirrors
-# ``clause_position_compiler._UNJUDGED_BASES``. "stub" (no judge configured
+# Observation bases meaning no real judge assessed the clause. "stub" (no judge configured
 # at all) is the strict case; "needs_review"/"judge_error" additionally
 # cover the zero-LLM deviation stub (``_NullDeviationJudge``, pipeline.py)
 # that an opt-in ``--with-deviation-judge`` run wires until verdicts land,
@@ -287,7 +277,6 @@ def assemble_playbook(
     baseline: dict[str, Any],
     taxonomy: dict[str, Any],
     clause_positions: list[ClausePosition],
-    clause_library: list[ClauseConcept],
     corpus_documents: list[dict[str, Any]],
     generated_at: str,
     run_id: str | None = None,
@@ -299,14 +288,12 @@ def assemble_playbook(
     playbook_id: str | None = None,
     playbook_version: str | None = None,
     supersedes: str | None = None,
-    min_evidence_n: int = MIN_EVIDENCE_N,
     existing_curation: dict[str, Any] | None = None,
     existing_posture: dict[str, Any] | None = None,
     existing_floor: dict[str, Any] | None = None,
     round_moves: list[RoundMove] | None = None,
-    opf_version: str = _OPF_VERSION,
 ) -> dict[str, Any]:
-    """Assemble and validate a complete OPF playbook document (0.4 by default).
+    """Assemble and validate a complete OPF 0.4 playbook document.
 
     Args:
         agreement_type:    Top-level ``{id, name}`` (``description``/``aliases``
@@ -314,7 +301,6 @@ def assemble_playbook(
         baseline:          ``{has_canonical_template: bool, template_ref?, notes?}``.
         taxonomy:          ``{source: str, entries: [...]}``.
         clause_positions:  Output of ``compile_clause_positions()``.
-        clause_library:    Output of ``compile_clause_library()``.
         corpus_documents:  One dict per corpus document, each with at least
                           ``{document_id, provenance, in_scope}``.
                           Out-of-scope docs MUST have ``scope_rationale``.
@@ -340,7 +326,7 @@ def assemble_playbook(
                           contributes no watermark signal.
         unclassified_coverage: Coverage summary (issue #113) for
                           ``taxonomy_id=None`` observations that were
-                          excluded from ``clauses``/``clause_library`` —
+                          excluded from ``evidence.clauses`` —
                           typically ``compile_clause_positions()``'s third
                           return value. Recorded in
                           ``corpus.stats.unclassified`` so a consumer can see
@@ -370,21 +356,13 @@ def assemble_playbook(
         supersedes:       Optional identifier of the playbook this one
                           supersedes, recorded in ``identity.supersedes``
                           when supplied.
-        min_evidence_n:   Producer-configurable evidence-depth floor (issue
-                          #144, config.provenance.min_evidence_n) — must match
-                          whatever value was passed to
-                          ``compile_clause_positions()`` for this same run, so
-                          the self-validation below (``validate_document()``)
-                          enforces the identical threshold the compiler
-                          already used to derive ``historical_stance``.
-                          Defaults to ``MIN_EVIDENCE_N`` (2).
         existing_curation: The prior compile's ``playbook["curation"]`` dict
                           (issue #147), read by the caller from the previous
                           ``playbook.opf.json`` before it's overwritten. Every
-                          pin is preserved across this recompile; its
-                          ``conflict`` flag is set/cleared by comparing the
-                          freshly recomputed ``historical_stance`` against
-                          the pin's ``baseline_stance`` (see
+                          pin is preserved across this recompile; OPF 0.4
+                          carries no stance, so every clause is compared as
+                          ``curation.NO_STANCE`` against the pin's
+                          ``baseline_stance`` (see
                           ``playbook_engine/curation.py``). ``None`` (the
                           default) means no prior pins to carry forward — a
                           first compile, or a store with no curation history.
@@ -406,29 +384,19 @@ def assemble_playbook(
                           (the default, or an explicit ``{}``) means no prior
                           Floor to carry forward.
         round_moves:      Per-round clause moves (``round_moves.jsonl``,
-                          issue #177). OPF 0.4 derives each precedent's
-                          ``rounds``/``moved`` from them; OPF 0.3 carries
-                          them already grouped as each ClausePosition's
-                          ``negotiation_trail``. ``None`` = no moves recorded.
-        opf_version:      ``"0.4"`` (the default — the verdict-free per-deal
-                          precedent record, issue #223) or ``"0.3"`` (the
-                          0.2 evidence shape plus digest v2, kept for one
-                          release).
+                          issue #177), from which each precedent's
+                          ``rounds``/``moved`` derive. ``None`` = no moves
+                          recorded.
 
     Returns:
-        A validated playbook dict conforming to OPF v0.2 (evidence-wrapped
-        clauses, descriptive ``summary.historical_stance``, empty-but-present
-        ``posture``/``floor``, and an ``identity`` block carrying
+        A validated OPF 0.4 playbook dict (precedent-record ``evidence``,
+        empty-but-present ``posture``/``floor``, a digest_version 3
+        ``digest``, and an ``identity`` block carrying
         ``content_hash``/``section_digests`` — see issue #143).
 
     Raises:
         AssemblyError: if ``validate_document()`` reports any blocking errors.
     """
-    if opf_version not in EMITTABLE_OPF_VERSIONS:
-        raise ValueError(
-            f"opf_version {opf_version!r} cannot be emitted "
-            f"(supported: {', '.join(EMITTABLE_OPF_VERSIONS)})"
-        )
 
     # Strip each version_ingest entry down to the schema-allowed key set
     # (issue #81) BEFORE anything below reads/embeds corpus_documents — the
@@ -487,9 +455,9 @@ def assemble_playbook(
         compiler["run_id"] = run_id
 
     # --- assemble ---
-    # Field order mirrors spec/playbook.schema-0.2.json's property order.
+    # Field order mirrors spec/playbook.schema-0.4.json's property order.
     playbook: dict[str, Any] = {
-        "opf_version": opf_version,
+        "opf_version": OPF_VERSION,
         "agreement_type": agreement_type,
         "baseline": baseline,
         "taxonomy": taxonomy,
@@ -498,23 +466,16 @@ def assemble_playbook(
         playbook["perspective"] = perspective
     if de_minimis is not None:
         playbook["de_minimis"] = de_minimis
-    if opf_version == "0.4":
-        # Issue #223: the verdict-free per-deal precedent record. No
-        # clause_library, summary, observed_positions or negotiation_trail —
-        # every field is a fact read off the store, never a judged verdict.
-        playbook["evidence"] = build_precedent_evidence(
-            agreement_type_id=str(agreement_type.get("id")),
-            clause_positions=clause_positions,
-            observations=list(observations or []),
-            corpus_documents=corpus_documents,
-            round_moves=round_moves,
-            party=perspective_party(playbook),
-        )
-    else:
-        playbook["evidence"] = {
-            "clauses": [cp.to_dict() for cp in clause_positions],
-            "clause_library": [cc.to_dict() for cc in clause_library],
-        }
+    # Issue #223: the verdict-free per-deal precedent record — every field
+    # is a fact read off the store, never a judged verdict.
+    playbook["evidence"] = build_precedent_evidence(
+        agreement_type_id=str(agreement_type.get("id")),
+        clause_positions=clause_positions,
+        observations=list(observations or []),
+        corpus_documents=corpus_documents,
+        round_moves=round_moves,
+        party=perspective_party(playbook),
+    )
     # Posture/Floor (§3.6/§3.7): empty-but-present by default (#140 scope
     # excludes Floor invariant content — see #145) — the engine must never
     # fabricate negotiation intent or hard lines, so both sections are always
@@ -552,26 +513,23 @@ def assemble_playbook(
     playbook["compiler"] = compiler
 
     # --- curation (issue #147) ---
-    # Merge any prior compile's attorney-pinned positions over this compile's
-    # freshly recomputed historical_stance, flagging/clearing conflict per
-    # clause. Computed before `identity` below so section_digests.curation
-    # reflects the merged (not the stale) curation content. Omitted entirely
-    # when there's nothing to carry forward (no prior pins) — mirrors
-    # perspective/de_minimis's "never fabricate, omit when absent" rule.
-    # Read through the same accessor `playbook curate`/`view apply` use to
-    # stamp a pin's baseline_stance, so a pin made on this document never
-    # conflicts with it on recompile. An OPF 0.4 document carries no stance
-    # (issue #223), so every 0.4 clause reads "unknown": a pin carried over
-    # from a 0.3 compile is flagged once (its stance is no longer computed),
-    # and a pin made on a 0.4 document never is.
-    clause_stances = {c["id"]: clause_stance(c) for c in playbook["evidence"]["clauses"]}
+    # Carry any prior compile's attorney-pinned positions forward, flagging/
+    # clearing conflict per clause. Computed before `identity` below so
+    # section_digests.curation reflects the merged (not the stale) curation
+    # content. Omitted entirely when there's nothing to carry forward (no
+    # prior pins) — mirrors perspective/de_minimis's "never fabricate, omit
+    # when absent" rule. OPF 0.4 carries no stance (issue #223), so every
+    # clause compares as NO_STANCE — the same value `playbook curate`/`view
+    # apply` stamp as a pin's baseline_stance, so a pin never conflicts with
+    # its own document on recompile.
+    clause_stances = {c["id"]: NO_STANCE for c in playbook["evidence"]["clauses"]}
     curation = merge_curation(existing_curation, clause_stances, checked_at=generated_at)
     if curation:
         playbook["curation"] = curation
 
     # Strip zero-width/bidi-control characters carried in from extraction
-    # BEFORE the digest is built, so digest._dedupe_rank groups observations
-    # by their post-strip text (issue #35) — otherwise an intra-word ZWSP
+    # BEFORE the digest is built, so the digest groups texts by their
+    # post-strip form (issue #35) — otherwise an intra-word ZWSP
     # splits what should be one dedupe group into two, and the embedded
     # digest diverges from build_digest() recomputed over the shipped
     # (stripped) playbook, breaking the "digest is a pure function of the
@@ -582,22 +540,21 @@ def assemble_playbook(
     # under x_judgments, keyed by precedent id — never part of
     # evidence.precedent, never read by the digest (issue #223). Emitted only
     # when a real judge assessed at least one precedent's terminal row.
-    if opf_version == "0.4":
-        restamp_evidence(
-            playbook["evidence"],
-            str(agreement_type.get("id")),
-            party=perspective_party(playbook),
-        )
-        judgments = build_x_judgments(list(observations or []), playbook["evidence"]["precedent"])
-        if judgments:
-            playbook["x_judgments"] = _strip_invisible(judgments)
-        # The precedent.jsonl sidecar's content address (issue #224): a pure
-        # function of the final evidence.precedent, recorded before the
-        # digest and identity so content_hash covers it. Vendor namespace
-        # because `compiler` is closed to extensions (OPF-SPEC §10.1).
-        playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
+    restamp_evidence(
+        playbook["evidence"],
+        str(agreement_type.get("id")),
+        party=perspective_party(playbook),
+    )
+    judgments = build_x_judgments(list(observations or []), playbook["evidence"]["precedent"])
+    if judgments:
+        playbook["x_judgments"] = _strip_invisible(judgments)
+    # The precedent.jsonl sidecar's content address (issue #224): a pure
+    # function of the final evidence.precedent, recorded before the digest
+    # and identity so content_hash covers it. Vendor namespace because
+    # `compiler` is closed to extensions (OPF-SPEC §10.1).
+    playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
 
-    # --- digest (OPF 0.3: digest v2; OPF 0.4: digest v3) ---
+    # --- digest (digest_version 3) ---
     # The compact model-facing projection of the evidence section. Computed
     # after stripping (above) and before identity so it is covered by
     # content_hash like every other content section (it is a pure function of
@@ -626,7 +583,7 @@ def assemble_playbook(
     playbook["identity"] = identity
 
     # --- validate ---
-    result = validate_document(playbook, min_evidence_n=min_evidence_n)
+    result = validate_document(playbook)
     if not result.ok:
         raise AssemblyError(blocking_errors=[str(e) for e in result.errors if e.blocking])
 
@@ -659,8 +616,7 @@ def write_precedent_sidecar(playbook: dict[str, Any], playbook_path: Path) -> Pa
     The file is :func:`~playbook_engine.opf_accessors.precedent_jsonl` —
     one ``evidence.precedent`` record per line, sorted by id — and its bytes
     hash to the ``x_sidecars["precedent.jsonl"].sha256`` the playbook
-    records. A playbook recording no such sidecar (OPF 0.3 and earlier)
-    gets none, and a stale ``precedent.jsonl`` left by an earlier 0.4
+    records. A playbook recording no such sidecar gets none, and a stale ``precedent.jsonl`` left by an earlier 0.4
     compile into the same directory is removed, so the directory never
     pairs a playbook with a sidecar that does not belong to it.
 

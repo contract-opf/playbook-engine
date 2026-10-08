@@ -1,8 +1,8 @@
-"""Shape-agnostic OPF accessors (issue #154; OPF 0.4 precedent, issue #223).
+"""OPF accessors (issue #154; OPF 0.4 precedent, issue #223).
 
-The 0.4 cases read the real compiled NDA example
-(``examples/nda/playbook.opf.json``, produced by ``playbook project``); the
-0.1/0.2 cases read the committed validator fixtures. Where a test mutates
+The cases read the real compiled NDA example
+(``examples/nda/playbook.opf.json``, produced by ``playbook project``). The
+0.1-0.3 accessors were retired with those formats (issue #238). Where a test mutates
 one of those documents (unsigned drafts, flipped paper side), the mutated
 document is re-stamped with ``precedent.refresh_derived`` and asserted to pass
 ``validator.validate_document`` -- never a shape the engine itself rejects.
@@ -30,13 +30,9 @@ from playbook_engine.digest import build_digest
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
     SIDECARS_KEY,
-    clause_confidence,
     clause_precedent,
-    clause_stance,
-    clause_trail,
     find_precedent,
     is_precedent_shape,
-    playbook_clause_library,
     playbook_clauses,
     playbook_precedent,
     precedent_by_id,
@@ -49,7 +45,6 @@ from playbook_engine.validator import validate_document
 
 _ROOT = Path(__file__).parent.parent
 _NDA = _ROOT / "examples" / "nda" / "playbook.opf.json"
-_FIXTURES = _ROOT / "examples" / "fixtures"
 _NDA_SIDECAR = _ROOT / "examples" / "nda" / "precedent.jsonl"
 _VECTOR_002 = (
     _ROOT / "spec" / "conformance" / "0.4" / "vectors" / "002-variants-refused-and-exclusions.json"
@@ -74,25 +69,27 @@ def test_precedent_accessors_read_a_compiled_0_4_document() -> None:
     assert sum(len(clause_precedent(doc, c)) for c in playbook_clauses(doc)) == len(records)
 
 
-def test_0_3_accessors_degrade_to_absent_on_a_0_4_clause() -> None:
-    """A 0.4 clause carries no stance, confidence, trail or clause library —
-    the 0.2/0.3 accessors return their documented absent values rather than
-    inventing one."""
-    doc = _load(_NDA)
-    clause = playbook_clauses(doc)[0]
-    assert clause_stance(clause) == "unknown"
-    assert clause_confidence(clause) == {}
-    assert clause_trail(clause) == []
-    assert playbook_clause_library(doc) == []
+def test_retired_0_3_accessors_are_gone() -> None:
+    """The 0.1-0.3 accessors were retired with those formats (issue #238)."""
+    import playbook_engine.opf_accessors as acc
+
+    for name in (
+        "clause_stance",
+        "clause_confidence",
+        "clause_is_thin",
+        "clause_trail",
+        "observation_dynamics",
+        "playbook_clause_library",
+    ):
+        assert not hasattr(acc, name), name
 
 
-def test_precedent_accessors_are_empty_on_older_documents() -> None:
-    for name in ("valid_v0_2_minimal.json", "minimal_valid.json"):
-        doc = _load(_FIXTURES / name)
-        assert not is_precedent_shape(doc)
-        assert playbook_precedent(doc) == []
-        for clause in playbook_clauses(doc):
-            assert clause_precedent(doc, clause) == []
+def test_accessors_are_empty_on_a_document_without_evidence() -> None:
+    """A top-level ``clauses`` list (the retired 0.1 shape) is not read."""
+    doc = {"opf_version": "0.4", "clauses": [{"id": "clause.x", "taxonomy_id": "x"}]}
+    assert not is_precedent_shape(doc)
+    assert playbook_clauses(doc) == []
+    assert playbook_precedent(doc) == []
 
 
 def test_precedent_accessor_drops_non_dict_entries() -> None:
@@ -259,10 +256,10 @@ def test_find_precedent_limit_clause_id_and_errors() -> None:
         find_precedent(doc, "governing_law", order=("paper",))
     with pytest.raises(ValueError, match="limit"):
         find_precedent(doc, "governing_law", limit=-1)
-    for name in ("valid_v0_2_minimal.json", "minimal_valid.json"):
-        older = _load(_FIXTURES / name)
-        for clause in playbook_clauses(older):
-            assert find_precedent(older, str(clause.get("taxonomy_id"))) == []
+    no_precedent = copy.deepcopy(doc)
+    no_precedent["evidence"]["precedent"] = []
+    for clause in playbook_clauses(no_precedent):
+        assert find_precedent(no_precedent, str(clause.get("taxonomy_id"))) == []
 
 
 def test_find_precedent_ignores_paper_side() -> None:
@@ -289,7 +286,7 @@ def test_precedent_by_id_round_trips_every_record() -> None:
     for record in playbook_precedent(doc):
         assert precedent_by_id(doc, record["id"]) is record
     assert precedent_by_id(doc, "prec.0000000000000000") is None
-    assert precedent_by_id(_load(_FIXTURES / "valid_v0_2_minimal.json"), "prec.x") is None
+    assert precedent_by_id({"opf_version": "0.4", "evidence": {"clauses": []}}, "prec.x") is None
 
 
 def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
@@ -302,7 +299,7 @@ def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
     for line, record in zip(lines, parsed, strict=True):
         assert record == precedent_by_id(doc, record["id"])
         assert line == canonicalize(precedent_by_id(doc, record["id"]))
-    assert precedent_jsonl(_load(_FIXTURES / "valid_v0_2_minimal.json")) == ""
+    assert precedent_jsonl({"opf_version": "0.4", "evidence": {"clauses": []}}) == ""
 
 
 def test_committed_nda_sidecar_belongs_to_its_playbook() -> None:

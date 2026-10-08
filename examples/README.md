@@ -4,18 +4,15 @@
 |---|---|
 | [`judge-fixture/`](judge-fixture/) | Synthetic corpus + pre-computed ("canned") judge verdicts used by the Quickstart below and by `tests/test_cli_judge.py` |
 | [`staging-fixtures/`](staging-fixtures/) | Corpus-layout variants (flat, CLM-nested, manifest) used by `playbook stage` tests |
-| [`fixtures/`](fixtures/) | OPF documents used by the schema validator's test suite (valid + deliberately invalid) |
+| [`fixtures/`](fixtures/) | Deliberately invalid OPF documents (a missing and an unknown `opf_version`) used by the validator's test suite |
 | [`affiliation-config/`](affiliation-config/) | A worked `playbook.config.yaml` for the Educational Affiliation Agreement taxonomy |
 | [`canary/`](canary/) | A tiny synthetic 4-document DOCX corpus (two negotiations, two tracked-changes redlines) that exists to fail loudly when the extraction layer moves: extractor identity, warm-cache replay with zero re-extraction and zero quarantine, and committed derivation counts (`tests/test_canary_corpus.py` / `make smoke-canary`) — see [`canary/README.md`](canary/README.md) |
 | [`nda/`](nda/) | A synthetic second agreement type (Mutual NDA): the OPF 0.4 reference playbook at `nda/playbook.opf.json` (`opf_version` "0.4": per-deal precedent record, `digest_version` "3"; populated Posture/Floor, reproducible from committed inputs — `tests/test_nda_derive_reproducible.py`), plus a bare structural smoke path (`tests/test_nda_smoke.py` / `make smoke-nda`) — see [`nda/README.md`](nda/README.md) |
-| `our-paper-baseline.v0.2.playbook.json` | A worked example playbook, current OPF v0.2 format |
-| `our-paper-baseline.playbook.json`, `emergent-no-template.playbook.json` | Worked examples in the superseded OPF v0.1 format |
 
-`our-paper-baseline.v0.2.playbook.json`'s embedded `compiler.version` and
-`posture.generation.generated_by` strings (`"0.2.0"`) are historical
-provenance — the actual engine version that generated this fixture and its
-recorded `identity.content_hash` — and are intentionally not rolled
-forward on later engine version bumps; doing so would change the hash.
+The engine emits and validates exactly one format, OPF 0.4. The worked
+examples in the retired OPF 0.1 and 0.2 formats were removed with those
+formats (issue #238); git history has them. `nda/playbook.opf.json` is the
+reference playbook.
 
 ## Quickstart: judge-fixture → playbook
 
@@ -108,7 +105,7 @@ L1-L4 complete: 7 observations, 2 docs
 ### 4. Project the playbook
 
 Compiles the observation store into `playbook.opf.json` — purely
-deterministic rollup, zero LLM calls.
+deterministic, zero LLM calls.
 
 ```sh
 playbook project out/quickstart-demo --config examples/judge-fixture/config.yaml

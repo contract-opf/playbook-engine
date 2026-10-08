@@ -8,9 +8,9 @@ implementations — no LLM, no network. Covers the three required scenarios:
   (b) a verify-pass leak finding is surfaced on the report (and logged),
       never silently dropped, and never raised as an error (best-effort,
       no human gate);
-  (c) export preserves clause/stance structure — only the targeted free-text
-      fields change, everything else (id, taxonomy_id, rollup, deviation,
-      risk_delta, provenance, outcome, citations) is untouched.
+  (c) export preserves clause structure — only the targeted free-text
+      fields change, everything else (clause records, taxonomy_id, deal,
+      paper, signed, standard, citations) is untouched.
 
 SECURITY NOTE: All fixtures use synthetic text and fictional party/institution
 names only. No real agreement text or real document paths are used.
@@ -31,61 +31,52 @@ from playbook_engine.export_profile import (
 )
 
 # ---------------------------------------------------------------------------
-# Fixture: a minimal OPF-shaped doc with one clause, two observed positions
+# Fixture: a minimal OPF 0.4-shaped doc — one clause, two precedent records
+# (no agreement_type, so precedent.refresh_derived leaves the ids as given)
 # ---------------------------------------------------------------------------
+
+_LARGE_SE = "The large southeastern teaching-hospital university"
+
+
+def _record(pid: str, document_id: str, text: str, refused: list[str] | None = None) -> dict:
+    ref = {"document_id": document_id, "version": 3, "clause_path": "8"}
+    return {
+        "id": pid,
+        "taxonomy_id": "indemnification",
+        "document_id": document_id,
+        "paper": "theirs",
+        "signed": True,
+        "signed_text": {"text": text, "ref": ref},
+        "opening_text": None,
+        "standard": False,
+        "refused_asks": [{"text": t, "round": 1, "ref": ref} for t in refused or []],
+    }
 
 
 def _make_doc() -> dict:
     return {
-        "opf_version": "0.2",
-        "clauses": [
-            {
-                "id": "clause.indemnification",
-                "taxonomy_id": "indemnification",
-                "title": "Indemnification",
-                "our_standard": {"text": "Each party shall indemnify the other."},
-                "observed_positions": [
-                    {
-                        "text_summary": "Counterparty-1 demanded a mutual carve-out.",
-                        "full_text": "Counterparty-1 demanded a mutual carve-out.",
-                        "example_ref": {
-                            "document_id": "Counterparty-1-2023",
-                            "version": 3,
-                            "clause_path": "8",
-                        },
-                        "deviation": "substantive",
-                        "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                        "provenance": "counterparty_paper",
-                        "outcome": "signed",
-                        "precedent_count": 3,
-                    },
-                    {
-                        "text_summary": (
-                            "The large southeastern teaching-hospital university insisted "
-                            "on capping liability."
-                        ),
-                        "full_text": (
-                            "The large southeastern teaching-hospital university insisted "
-                            "on capping liability."
-                        ),
-                        "example_ref": {
-                            "document_id": "Counterparty-2-2022",
-                            "version": 1,
-                            "clause_path": "9.1",
-                        },
-                        "deviation": "none",
-                        "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                        "provenance": "our_paper",
-                        "outcome": "signed",
-                        "precedent_count": 7,
-                    },
-                ],
-                "rollup": {
-                    "position": "negotiable",
-                    "confidence": {"score": 0.7, "n_our_paper": 7, "n_counterparty_paper": 3},
-                },
-            }
-        ],
+        "opf_version": "0.4",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.indemnification",
+                    "taxonomy_id": "indemnification",
+                    "title": "Indemnification",
+                    "our_standard": {"text": "Each party shall indemnify the other."},
+                }
+            ],
+            "precedent": [
+                _record(
+                    "prec.a", "Counterparty-1-2023", "Counterparty-1 demanded a mutual carve-out."
+                ),
+                _record(
+                    "prec.b",
+                    "Counterparty-2-2022",
+                    f"{_LARGE_SE} insisted on capping liability.",
+                    refused=[f"{_LARGE_SE} asked for uncapped indemnity."],
+                ),
+            ],
+        },
     }
 
 
@@ -182,11 +173,10 @@ def test_verify_pass_always_runs_even_when_redaction_finds_nothing() -> None:
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
 
     assert all(not f.has_residue for f in report.redaction_findings)
-    # Verify pass must still have been called, once per free-text sample.
+    # Verify pass must still have been called, once per free-text sample:
+    # our_standard.text + 2 signed texts + 1 refused ask.
     assert len(verify.calls) == 1
-    # 2 observed_positions x 2 fields (text_summary/full_text) + 1
-    # our_standard.text (issue #188 extended sampling to this surface too).
-    assert len(verify.calls[0]) == len(report.verify_findings) == 5
+    assert len(verify.calls[0]) == len(report.verify_findings) == 4
     assert report.leaked == ()
 
 
@@ -198,10 +188,10 @@ def test_verify_pass_always_runs_even_when_redaction_finds_nothing() -> None:
 def test_flagged_residual_leak_is_surfaced_not_silently_emitted() -> None:
     doc = _make_doc()
     redaction = _FakeRedactionJudge(flag_marker="large southeastern")
-    # Independently flag the REWRITTEN text_summary as still leaking, even
+    # Independently flag the REWRITTEN signed text as still leaking, even
     # though the redaction pass "fixed" it — proving the two passes are
     # decoupled.
-    rewritten_path = "clauses[0:clause.indemnification].observed_positions[1].text_summary"
+    rewritten_path = "precedent[1:prec.b].signed_text.text"
     verify = _FlaggingVerifyJudge(leak_path=rewritten_path)
 
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
@@ -219,7 +209,7 @@ def test_export_profile_does_not_raise_on_a_leaked_verdict() -> None:
     """A "leak found" verdict is a SUCCESSFUL evaluation, not a judge failure."""
     doc = _make_doc()
     redaction = _FakeRedactionJudge(flag_marker=None)
-    leak_path = "clauses[0:clause.indemnification].observed_positions[0].text_summary"
+    leak_path = "precedent[0:prec.a].signed_text.text"
     verify = _FlaggingVerifyJudge(leak_path=leak_path)
 
     # Must not raise.
@@ -228,7 +218,7 @@ def test_export_profile_does_not_raise_on_a_leaked_verdict() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (c) export preserves stance + clause structure
+# (c) export preserves clause structure
 # ---------------------------------------------------------------------------
 
 
@@ -239,36 +229,21 @@ def test_export_preserves_clause_structure_and_only_rewrites_flagged_text() -> N
     verify = _CleanVerifyJudge()
 
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
-    exported_clause = report.doc["clauses"][0]
-    original_clause = original["clauses"][0]
+    exported = report.doc["evidence"]
+    before = original["evidence"]
 
     # Structure is byte-identical.
-    assert exported_clause["id"] == original_clause["id"]
-    assert exported_clause["taxonomy_id"] == original_clause["taxonomy_id"]
-    assert exported_clause["rollup"] == original_clause["rollup"]
-    for exp_obs, orig_obs in zip(
-        exported_clause["observed_positions"], original_clause["observed_positions"], strict=True
-    ):
-        assert exp_obs["deviation"] == orig_obs["deviation"]
-        assert exp_obs["risk_delta"] == orig_obs["risk_delta"]
-        assert exp_obs["provenance"] == orig_obs["provenance"]
-        assert exp_obs["outcome"] == orig_obs["outcome"]
-        assert exp_obs["example_ref"] == orig_obs["example_ref"]
+    assert exported["clauses"] == before["clauses"]
+    for exp, orig in zip(exported["precedent"], before["precedent"], strict=True):
+        for key in ("taxonomy_id", "document_id", "paper", "signed", "standard"):
+            assert exp[key] == orig[key]
+        assert exp["signed_text"]["ref"] == orig["signed_text"]["ref"]
 
-    # Observation 0 (no marker) is untouched.
-    assert (
-        exported_clause["observed_positions"][0]["text_summary"]
-        == original_clause["observed_positions"][0]["text_summary"]
-    )
-    # Observation 1 (has the marker) is rewritten in BOTH free-text fields.
-    assert (
-        exported_clause["observed_positions"][1]["text_summary"]
-        != (original_clause["observed_positions"][1]["text_summary"])
-    )
-    assert (
-        exported_clause["observed_positions"][1]["full_text"]
-        != (original_clause["observed_positions"][1]["full_text"])
-    )
+    # Record 0 (no marker) is untouched.
+    assert exported["precedent"][0]["signed_text"] == before["precedent"][0]["signed_text"]
+    # Record 1 (has the marker) is rewritten in its signed text AND its ask.
+    assert "large southeastern" not in exported["precedent"][1]["signed_text"]["text"]
+    assert "large southeastern" not in exported["precedent"][1]["refused_asks"][0]["text"]
     # The input doc itself is never mutated.
     assert doc == original
 
@@ -283,49 +258,24 @@ def test_export_preserves_clause_structure_and_only_rewrites_flagged_text() -> N
 def _make_duplicate_clause_id_doc() -> dict:
     """Two clauses sharing id 'clause.x', each with distinct residue-bearing text."""
     return {
-        "opf_version": "0.2",
-        "clauses": [
-            {
-                "id": "clause.x",
-                "taxonomy_id": "indemnification",
-                "title": "Indemnification",
-                "observed_positions": [
-                    {
-                        "text_summary": "Northwind State University demanded a carve-out.",
-                        "full_text": "Northwind State University demanded a carve-out.",
-                        "deviation": "substantive",
-                        "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                        "provenance": "counterparty_paper",
-                        "outcome": "signed",
-                        "precedent_count": 3,
-                    }
-                ],
-                "rollup": {
-                    "position": "negotiable",
-                    "confidence": {"score": 0.5, "n_our_paper": 0, "n_counterparty_paper": 3},
+        "opf_version": "0.4",
+        "evidence": {
+            "clauses": [
+                {
+                    "id": "clause.x",
+                    "taxonomy_id": "indemnification",
+                    "our_standard": {"text": "Northwind State University demanded a carve-out."},
                 },
-            },
-            {
-                "id": "clause.x",
-                "taxonomy_id": "confidentiality",
-                "title": "Confidentiality",
-                "observed_positions": [
-                    {
-                        "text_summary": "Southridge Regional Medical Center capped liability.",
-                        "full_text": "Southridge Regional Medical Center capped liability.",
-                        "deviation": "none",
-                        "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                        "provenance": "our_paper",
-                        "outcome": "signed",
-                        "precedent_count": 5,
-                    }
-                ],
-                "rollup": {
-                    "position": "standard",
-                    "confidence": {"score": 0.9, "n_our_paper": 5, "n_counterparty_paper": 0},
+                {
+                    "id": "clause.x",
+                    "taxonomy_id": "confidentiality",
+                    "our_standard": {
+                        "text": "Southridge Regional Medical Center capped liability."
+                    },
                 },
-            },
-        ],
+            ],
+            "precedent": [],
+        },
     }
 
 
@@ -353,42 +303,36 @@ def test_duplicate_clause_ids_both_get_rewritten_not_just_the_last() -> None:
 
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
 
-    exported_texts = [
-        obs["text_summary"]
-        for clause in report.doc["clauses"]
-        for obs in clause["observed_positions"]
-    ]
+    exported_texts = [c["our_standard"]["text"] for c in report.doc["evidence"]["clauses"]]
     # Pre-#70 bug: the two clauses' identical clause-id-keyed paths collided,
     # so only the LAST clause's location survived in `locations` — the first
-    # clause's flagged text_summary shipped unmodified despite being flagged.
+    # clause's flagged text shipped unmodified despite being flagged.
     assert "Northwind State University" not in " ".join(exported_texts)
     assert "Southridge Regional Medical Center" not in " ".join(exported_texts)
     # Both clauses were independently sampled (positionally-unique paths).
     sample_paths = {f.path for f in report.redaction_findings}
-    assert "clauses[0:clause.x].observed_positions[0].text_summary" in sample_paths
-    assert "clauses[1:clause.x].observed_positions[0].text_summary" in sample_paths
+    assert "clauses[0:clause.x].our_standard.text" in sample_paths
+    assert "clauses[1:clause.x].our_standard.text" in sample_paths
 
 
 def _make_duplicate_other_sections_doc() -> dict:
-    """Two entries sharing an id in each of clause_library/floor/corpus,
-    each with distinct residue-bearing text (issue #70 round 2 — the same
+    """Two entries sharing an id in each of precedent/floor/corpus, each
+    with distinct residue-bearing text (issue #70 round 2 — the same
     collision class as clauses, but for the other three path families
     export_profile.py touches)."""
     return {
-        "opf_version": "0.2",
-        "clauses": [],
-        "clause_library": [
-            {
-                "concept_id": "concept.dup",
-                "title": "Indemnification",
-                "description": "Ridgeline Regional Utility pushed for a mutual carve-out.",
-            },
-            {
-                "concept_id": "concept.dup",
-                "title": "Confidentiality",
-                "description": "Ashgrove Municipal Water District required a longer term.",
-            },
-        ],
+        "opf_version": "0.4",
+        "evidence": {
+            "clauses": [],
+            "precedent": [
+                _record(
+                    "prec.dup", "d1", "Ridgeline Regional Utility pushed for a mutual carve-out."
+                ),
+                _record(
+                    "prec.dup", "d2", "Ashgrove Municipal Water District required a longer term."
+                ),
+            ],
+        },
         "floor": {
             "invariants": [
                 {
@@ -413,7 +357,7 @@ def _make_duplicate_other_sections_doc() -> dict:
 def test_duplicate_ids_in_other_sections_both_get_rewritten_not_just_the_last() -> None:
     # Sibling of test_duplicate_clause_ids_both_get_rewritten_not_just_the_last
     # covering the other three path families this issue changed:
-    # clause_library[{li}:{concept_id}], floor.invariants[{fi}:{invariant_id}],
+    # precedent[{pi}:{id}], floor.invariants[{fi}:{invariant_id}],
     # corpus.documents[{di}:{document_id}]. Without the index tag, the two
     # duplicates in each section collapse onto one `locations` key and only
     # the last one's flagged text gets rewritten.
@@ -423,7 +367,7 @@ def test_duplicate_ids_in_other_sections_both_get_rewritten_not_just_the_last() 
 
     report = export_profile(doc, redaction_judge=redaction, verify_judge=verify)
 
-    exported_descriptions = [c["description"] for c in report.doc["clause_library"]]
+    exported_descriptions = [p["signed_text"]["text"] for p in report.doc["evidence"]["precedent"]]
     exported_statements = [inv["statement"] for inv in report.doc["floor"]["invariants"]]
     exported_titles = [d["title"] for d in report.doc["corpus"]["documents"]]
 
@@ -435,8 +379,8 @@ def test_duplicate_ids_in_other_sections_both_get_rewritten_not_just_the_last() 
     assert "Pinehollow Water Co-op" not in " ".join(exported_titles)
 
     sample_paths = {f.path for f in report.redaction_findings}
-    assert "clause_library[0:concept.dup].description" in sample_paths
-    assert "clause_library[1:concept.dup].description" in sample_paths
+    assert "precedent[0:prec.dup].signed_text.text" in sample_paths
+    assert "precedent[1:prec.dup].signed_text.text" in sample_paths
     assert "floor.invariants[0:invariant.dup].statement" in sample_paths
     assert "floor.invariants[1:invariant.dup].statement" in sample_paths
     assert "corpus.documents[0:doc.dup].title" in sample_paths
@@ -471,7 +415,7 @@ def test_redaction_judge_silently_dropping_a_sample_fails_loud() -> None:
 
 
 def test_no_free_text_samples_never_calls_either_judge() -> None:
-    doc = {"opf_version": "0.2", "clauses": []}
+    doc = {"opf_version": "0.4", "evidence": {"clauses": [], "precedent": []}}
 
     class _NeverCallJudge:
         def evaluate_batch(self, samples):  # noqa: ANN001

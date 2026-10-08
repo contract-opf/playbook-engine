@@ -558,8 +558,7 @@ def test_build_observations_none_taxonomy_id_no_cross_contamination() -> None:
 # terminal never produces a net-diff row (clause_differ.diff_aligned skips any
 # (before=None, after=None) pair) — so it never reaches deviation_results and
 # was previously dropped from observations.jsonl entirely, along with the
-# outcome=proposed_then_reversed / rollup.rejected / hold_firm signal it
-# should have produced.
+# outcome=proposed_then_reversed refused-ask signal it should have produced.
 # ---------------------------------------------------------------------------
 
 
@@ -576,8 +575,8 @@ def test_reversal_record_yields_reversed_observation() -> None:
     assert reversed_obs.taxonomy_id == "ind"
     assert reversed_obs.full_text == "proposed text here"
     assert reversed_obs.provenance == "our_paper"
-    # Must not carry a basis that caps clause_position_compiler's rollup
-    # position to "negotiable" (see _UNJUDGED_BASES / _STUB_BASES).
+    # Must not carry an unjudged placeholder basis (it would trip the
+    # playbook's stub_basis_present watermark).
     assert reversed_obs.basis == "deterministic"
 
 
@@ -1133,7 +1132,7 @@ def test_fallback_backing_observation_carries_verbatim_pseudonymized_precedent_t
     diffs = [(_cd("ind", text_after=long_text), dr)]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [])[0]
 
-    # Fallback-backing shape (clause_position_compiler._derive_rollup).
+    # A judged, worse-risk signed our-paper row.
     assert obs.provenance == "our_paper"
     assert obs.outcome == "signed"
     assert obs.risk_delta["direction"] == "worse"
@@ -1172,7 +1171,7 @@ def test_acceptable_if_backing_observation_carries_verbatim_pseudonymized_preced
     diffs = [(_cd("coop", text_after=long_text), dr)]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [])[0]
 
-    # Acceptable_if-backing shape (clause_position_compiler._derive_rollup).
+    # A judged, neutral-risk signed row.
     assert obs.outcome == "signed"
     assert obs.risk_delta["direction"] == "neutral"
     assert obs.deviation != "none"

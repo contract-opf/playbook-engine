@@ -24,7 +24,7 @@ Config schema (YAML):
   perspective:                       # optional; whose "us" this playbook is
                                       # reviewed as (issue #165) — an
                                       # open-standard OPF instance must say
-                                      # who "us" is (spec/playbook.schema-0.2.json
+                                      # who "us" is (spec/playbook.schema-0.4.json
                                       # perspective). Omit entirely and
                                       # ``party`` defaults from
                                       # provenance.our_party_aliases[0] below;
@@ -57,13 +57,6 @@ Config schema (YAML):
       # with a stable alias (playbook_engine.entity_registry) before the
       # observation store is written, so playbook.opf.json never carries a
       # raw name. Defaults to an empty list (no pseudonymization) when omitted.
-    min_evidence_n: 2         # optional; minimum distinct our-paper observations
-      # required before a clause may carry a position/historical_stance
-      # stronger than "negotiable"/"mixed" (issue #144, OPF §2.2). Defaults to
-      # clause_position_compiler.MIN_EVIDENCE_N (2) when omitted. Must be a
-      # positive integer. The compiler and validator both enforce this same
-      # threshold — see playbook_engine.clause_position_compiler._derive_rollup
-      # and playbook_engine.validator._check_evidence_depth_rule_v2.
   segmentation:                      # optional; omit entirely to keep today's
                                       # deterministic-only behavior unchanged
     llm: true                        # opt in to LLM-first segmentation; default false
@@ -148,7 +141,6 @@ from typing import Any
 import yaml
 
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD, AUTO_CLASSIFY_THRESHOLD
-from playbook_engine.clause_position_compiler import MIN_EVIDENCE_N
 from playbook_engine.llm_segmenter import DEFAULT_MODEL
 
 # Bundled taxonomies shipped with the engine itself (as opposed to a
@@ -190,7 +182,7 @@ class PerspectiveConfig:
     A ``PerspectiveConfig`` with only ``party`` set is a valid, useful
     config-level value (e.g. for future callers), but is NOT enough on its
     own to populate the assembled playbook's top-level ``perspective`` key:
-    ``spec/playbook.schema-0.2.json`` requires ``party`` AND
+    ``spec/playbook.schema-0.4.json`` requires ``party`` AND
     ``counterparty_type`` together or neither — see
     ``pipeline.project_playbook``.
     """
@@ -208,10 +200,6 @@ class ProvenanceConfig:
     # observation_builder.party_side_for_author).
     our_authors: list[str] = field(default_factory=list)
     known_entities: list[str] = field(default_factory=list)
-    # Issue #144: producer-configurable evidence-depth floor. Defaults to
-    # clause_position_compiler.MIN_EVIDENCE_N so an existing config with no
-    # ``min_evidence_n`` key keeps enforcing the same threshold it always has.
-    min_evidence_n: int = MIN_EVIDENCE_N
 
 
 @dataclass
@@ -244,8 +232,7 @@ class SegmentationConfig:
 class ClassificationConfig:
     """Producer-configurable clause-classifier confidence bands (issue #168).
 
-    Mirrors the ``provenance.min_evidence_n`` pattern: both fields default to
-    ``clause_classifier.py``'s module constants, so a config with no
+    Both fields default to ``clause_classifier.py``'s module constants, so a config with no
     ``classification:`` block (every existing fixture) preserves today's
     classification banding exactly.
     """
@@ -352,9 +339,7 @@ TOP_LEVEL_KEYS = frozenset(
 )
 AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
 BASELINE_KEYS = frozenset({"template"})
-PROVENANCE_KEYS = frozenset(
-    {"our_party_aliases", "our_authors", "known_entities", "min_evidence_n"}
-)
+PROVENANCE_KEYS = frozenset({"our_party_aliases", "our_authors", "known_entities"})
 PERSPECTIVE_KEYS = frozenset({"party", "counterparty_type"})
 SEGMENTATION_KEYS = frozenset({"llm", "batch", "cache", "normalize_trail", "model", "agent"})
 CLASSIFICATION_KEYS = frozenset({"ambiguity_threshold", "auto_classify_threshold"})
@@ -543,12 +528,6 @@ def load_config(path: Path) -> EngineConfig:
         raise ConfigError("provenance.known_entities must be a list")
     known_entities = [str(e) for e in known_entities_raw]
 
-    min_evidence_n_raw = prov_raw.get("min_evidence_n", MIN_EVIDENCE_N)
-    if isinstance(min_evidence_n_raw, bool) or not isinstance(min_evidence_n_raw, int):
-        raise ConfigError("provenance.min_evidence_n must be a positive integer")
-    if min_evidence_n_raw < 1:
-        raise ConfigError("provenance.min_evidence_n must be a positive integer")
-
     # --- perspective (issue #165) ---
     persp_raw = raw.get("perspective", {})
     if not isinstance(persp_raw, dict):
@@ -676,7 +655,6 @@ def load_config(path: Path) -> EngineConfig:
             our_party_aliases=aliases,
             our_authors=our_authors,
             known_entities=known_entities,
-            min_evidence_n=min_evidence_n_raw,
         ),
         perspective=perspective,
         segmentation=segmentation,

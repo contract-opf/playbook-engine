@@ -27,5 +27,5 @@ picks representatives when the field is present.
 Every input is self-consistent (it passes `playbook validate`): precedent ids
 and clause counts are stamped with the reference functions. All content is
 synthetic. Regenerate only with
-`scripts/generate_conformance_vectors.py --opf-version 0.4`, and only for a
+`scripts/generate_conformance_vectors.py`, and only for a
 new format-version stamp — never in place.

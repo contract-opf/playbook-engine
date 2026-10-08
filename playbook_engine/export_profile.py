@@ -14,14 +14,12 @@ Per the Q6 (revised 2026-07-09) direction, this is a **judgment**, not a
 lexical, pass:
 
   - :class:`RedactionJudge` reviews every free-text sample and may flag +
-    rewrite it. Issue #188 extended sampling from just ``text_summary``/
-    ``full_text`` on each observed position to EVERY free-text surface in
-    the document — ``posture.system_prompt``, interview answers, Floor
-    invariant statements/rationale, curation pin comments,
-    ``our_standard.text``, clause-concept description/notes, corpus
-    document titles, and the baseline template's title/source — since a
-    counterparty can be identified from prose anywhere in the doc, not only
-    an observation's text. See :func:`_extract_text_samples` for the full
+    rewrite it. Issue #188 extended sampling to EVERY free-text surface in
+    the document — the precedent record's texts, ``posture.system_prompt``,
+    interview answers, Floor invariant statements/rationale, curation pin
+    comments, ``our_standard.text``, corpus document titles, and the
+    baseline template's title/source — since a counterparty can be
+    identified from prose anywhere in the doc. See :func:`_extract_text_samples` for the full
     list.
   - An INDEPENDENT :class:`VerifyJudge` reviews the (possibly rewritten)
     output afterwards. It always runs — regardless of what the redaction
@@ -59,28 +57,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from playbook_engine.opf_accessors import playbook_clause_library, playbook_clauses
+from playbook_engine.opf_accessors import playbook_clauses
 from playbook_engine.precedent import refresh_derived
 
 _log = logging.getLogger(__name__)
 
 _BASIS_VALUES = frozenset({"judge", "stub", "judge_error"})
-
-# Free-text fields on each ``observed_positions[]`` entry that may carry
-# semantic residue. ``full_text`` (issue #105) is the untruncated clause
-# text; ``text_summary`` is the ≤300-char display truncation; ``x_search_snippet``
-# (issue #95) is a short verbatim excerpt near the citation's location —
-# deterministically pseudonymized/truncated at mine time same as the other
-# two, but sampled here independently since a rewrite of one must not
-# silently leave the others unexamined by this SEPARATE semantic-residue
-# judgment pass (deterministic alias substitution and LLM-judged residue are
-# independent lines of defense, not substitutes for each other).
-_FREE_TEXT_FIELDS: tuple[str, ...] = ("text_summary", "full_text", "x_search_snippet")
-
-# ClauseConcept (``evidence.clause_library[]``) free-text fields (issue #188
-# gap analysis item 1) — human-authored prose describing an accepted clause
-# form, exactly as residue-prone as an observation's text_summary/full_text.
-_CLAUSE_CONCEPT_TEXT_FIELDS: tuple[str, ...] = ("description", "notes")
 
 # One ``floor.invariants[]`` entry's free-text fields (issue #188) — a red
 # line's ``statement``/``rationale`` are human-authored natural language and
@@ -105,9 +87,9 @@ class TextSample:
 
     Attributes:
         path: Stable locator back into the doc, e.g.
-              ``"clauses[0:clause.indemnification].observed_positions[0].text_summary"``.
+              ``"clauses[0:clause.indemnification].our_standard.text"``.
               The leading ``{index}:{id}`` tag on clause/document/
-              clause_library/floor.invariants-scoped paths keeps the path
+              precedent/floor.invariants-scoped paths keeps the path
               positionally unique even when the id is not (issue #70) —
               nothing enforces id uniqueness on any of these across a
               foreign or hand-edited OPF doc. Opaque to callers otherwise —
@@ -120,50 +102,39 @@ class TextSample:
     text: str
 
 
-# A clause-scoped location: (clause_index, container key, item index, field
-# name) into ``playbook_clauses(doc)`` — the ORIGINAL, narrower location
-# shape (issue #146/#177). A setter is a callable taking the doc being
-# rewritten and the replacement text and mutating the target field in place
-# — used for every free-text surface OUTSIDE a clause's observed_positions/
-# negotiation_trail (issue #188's full-surface extension: posture, floor,
-# curation, corpus, baseline, clause_library, our_standard all live at
-# different nesting depths that don't fit the 4-tuple shape). Both forms
-# close over integer indices/field names only (never over a specific dict
+# A setter is a callable taking the doc being rewritten and the replacement
+# text and mutating the target field in place — one per free-text surface
+# (issue #188's full-surface extension: precedent, posture, floor, curation,
+# corpus, baseline, our_standard all live at different nesting depths). Each
+# closes over integer indices/field names only (never over a specific dict
 # object), so the SAME location map is safe to apply to any deep copy of the
 # doc it was extracted from — see :func:`_apply_rewrites`.
-_ClauseLocation = tuple[int, str, int, str]
 _Setter = Callable[[dict[str, Any], str], None]
 
 
 def _extract_text_samples(
     doc: dict[str, Any],
-) -> tuple[list[TextSample], dict[str, _ClauseLocation | _Setter]]:
+) -> tuple[list[TextSample], dict[str, _Setter]]:
     """Return every free-text sample in *doc*, plus a path -> location map.
 
-    Full free-text surface (issue #188 gap analysis item 1 — everything
-    residue sampling missed before this issue is now covered):
+    Full free-text surface (issue #188 gap analysis item 1):
 
-      - ``observed_positions[].text_summary`` / ``.full_text`` /
-        ``.x_search_snippet`` (issues #146, #95)
-      - ``negotiation_trail[].change_summary`` (issue #177 — quotes raw
-        clause text verbatim, exactly as residue-prone as an observation)
       - ``clauses[].our_standard.text``
-      - ``clause_library[].description`` / ``.notes``
       - ``posture.system_prompt`` and ``posture.generation.interview[].answer``
         (operators type real names/context into interview answers)
       - ``floor.invariants[].statement`` / ``.rationale``
       - ``curation.pins[].comment``
       - ``corpus.documents[].title``
       - ``baseline.template_ref.title`` / ``.source``
-      - OPF 0.4 ``evidence.precedent[].signed_text.text`` /
+      - ``evidence.precedent[].signed_text.text`` /
         ``.opening_text.text`` / ``.refused_asks[].text`` (issue #223)
 
-    Every surface no-ops cleanly when absent (optional sections, or a v0.1
-    fixture / pre-#177 store with none of the newer fields) — there is no
-    ordering dependency on which OPF sections a given doc happens to carry.
+    Every surface no-ops cleanly when absent (optional sections) — there is
+    no ordering dependency on which OPF sections a given doc happens to
+    carry.
     """
     samples: list[TextSample] = []
-    locations: dict[str, _ClauseLocation | _Setter] = {}
+    locations: dict[str, _Setter] = {}
 
     for ci, clause in enumerate(playbook_clauses(doc)):
         # Include the clause INDEX in the path, not just clause.get("id") —
@@ -175,22 +146,6 @@ def _extract_text_samples(
         # judge-flagged rewrite lands on the wrong clause (issue #70).
         clause_id = clause.get("id", str(ci))
         clause_tag = f"{ci}:{clause_id}"
-        for oi, obs in enumerate(clause.get("observed_positions", [])):
-            for field_name in _FREE_TEXT_FIELDS:
-                text = obs.get(field_name, "")
-                if not text:
-                    continue
-                path = f"clauses[{clause_tag}].observed_positions[{oi}].{field_name}"
-                samples.append(TextSample(path=path, text=text))
-                locations[path] = (ci, "observed_positions", oi, field_name)
-        for ti, entry in enumerate(clause.get("negotiation_trail", [])):
-            text = entry.get("change_summary", "")
-            if not text:
-                continue
-            path = f"clauses[{clause_tag}].negotiation_trail[{ti}].change_summary"
-            samples.append(TextSample(path=path, text=text))
-            locations[path] = (ci, "negotiation_trail", ti, "change_summary")
-
         our_standard = clause.get("our_standard")
         if isinstance(our_standard, dict):
             text = our_standard.get("text", "")
@@ -198,19 +153,6 @@ def _extract_text_samples(
                 path = f"clauses[{clause_tag}].our_standard.text"
                 samples.append(TextSample(path=path, text=text))
                 locations[path] = _clause_our_standard_setter(ci)
-
-    for li, concept in enumerate(playbook_clause_library(doc)):
-        concept_id = concept.get("concept_id", str(li))
-        # Same collision class as clauses/corpus documents above: include
-        # the index so two clause_library entries sharing a concept_id don't
-        # collapse onto one path (issue #70).
-        for field_name in _CLAUSE_CONCEPT_TEXT_FIELDS:
-            text = concept.get(field_name, "")
-            if not text:
-                continue
-            path = f"clause_library[{li}:{concept_id}].{field_name}"
-            samples.append(TextSample(path=path, text=text))
-            locations[path] = _clause_library_setter(li, field_name)
 
     posture = doc.get("posture")
     if isinstance(posture, dict):
@@ -268,9 +210,9 @@ def _extract_text_samples(
             samples.append(TextSample(path=path, text=text))
             locations[path] = _corpus_document_title_setter(di)
 
-    # OPF 0.4 precedent texts (issue #223): every signed/opening text and
-    # every refused ask is clause language exactly as residue-prone as an
-    # observation's full_text. The digest is NOT sampled — it is re-derived
+    # Precedent texts (issue #223): every signed/opening text and every
+    # refused ask is clause language, the most residue-prone text there is.
+    # The digest is NOT sampled — it is re-derived
     # from these (rewritten) texts by _apply_rewrites, never edited itself.
     evidence = doc.get("evidence")
     precedent = evidence.get("precedent") if isinstance(evidence, dict) else None
@@ -310,8 +252,7 @@ def _extract_text_samples(
 
 
 # ---------------------------------------------------------------------------
-# Setter factories for every free-text surface outside a clause's
-# observed_positions/negotiation_trail (issue #188). Each closes over
+# Setter factories for every free-text surface (issue #188). Each closes over
 # integer indices/field names only, never over a specific dict object, so it
 # is safe to apply against ANY structurally-equivalent deep copy of the doc
 # it was built from (see the comment above ``_ClauseLocation``/``_Setter``).
@@ -321,13 +262,6 @@ def _extract_text_samples(
 def _clause_our_standard_setter(ci: int) -> _Setter:
     def setter(target: dict[str, Any], text: str) -> None:
         playbook_clauses(target)[ci]["our_standard"]["text"] = text
-
-    return setter
-
-
-def _clause_library_setter(li: int, field_name: str) -> _Setter:
-    def setter(target: dict[str, Any], text: str) -> None:
-        playbook_clause_library(target)[li][field_name] = text
 
     return setter
 
@@ -391,17 +325,16 @@ def _template_ref_setter(field_name: str) -> _Setter:
 def _apply_rewrites(
     doc: dict[str, Any],
     findings: Sequence[RedactionFinding],
-    locations: dict[str, _ClauseLocation | _Setter],
+    locations: dict[str, _Setter],
 ) -> dict[str, Any]:
     """Return a deep copy of *doc* with every flagged sample's text replaced.
 
     Only the targeted free-text field is mutated — clause id, taxonomy_id,
-    rollup (position/confidence), deviation, risk_delta, provenance, outcome,
-    and every other structural field are copied through unchanged. This is
-    what "export preserves stance + clause structure" means in practice.
+    paper, standard, and every other structural field are copied through
+    unchanged. This is what "export preserves clause structure" means in
+    practice.
     """
     exported = copy.deepcopy(doc)
-    exported_clauses = playbook_clauses(exported)
     for finding in findings:
         if not finding.has_residue:
             continue
@@ -415,14 +348,10 @@ def _apply_rewrites(
         # has_residue is True (checked above).
         rewritten_text = finding.rewritten_text
         assert rewritten_text is not None
-        if isinstance(loc, tuple):
-            ci, container, idx, field_name = loc
-            exported_clauses[ci][container][idx][field_name] = rewritten_text
-        else:
-            loc(exported, rewritten_text)
-    # OPF 0.4: precedent ids, clause counts and the digest are functions of
-    # the (now rewritten) text — re-derive them so the digest never ships a
-    # stale copy of pre-rewrite text (issue #223). No-op before 0.4.
+        loc(exported, rewritten_text)
+    # Precedent ids, clause counts and the digest are functions of the (now
+    # rewritten) text — re-derive them so the digest never ships a stale
+    # copy of pre-rewrite text (issue #223).
     refresh_derived(exported)
     return exported
 
@@ -593,8 +522,8 @@ class ExportProfileReport:
         doc:                The exported doc — a deep copy of the input with
                             every flagged free-text field replaced by its
                             judge-provided rewrite. All other fields (clause
-                            id, taxonomy_id, rollup, deviation, risk_delta,
-                            provenance, outcome, citations, ...) are
+                            id, taxonomy_id, deal, paper, signed,
+                            standard, citations, ...) are
                             byte-identical to the input.
         redaction_findings: Every :class:`RedactionFinding`, one per free-text
                             sample in the input doc.
@@ -660,7 +589,7 @@ def export_profile(
         doc:             A compiled OPF doc (already born-safe per #153 — known
                          entity names are aliases, never raw names).
         redaction_judge: Flags + rewrites semantic residue in every free-text
-                         sample (``text_summary`` / ``full_text``).
+                         sample (see ``_extract_text_samples``).
         verify_judge:    Independently re-checks the (possibly rewritten)
                          samples. ALWAYS runs when there is free text to check
                          — regardless of what ``redaction_judge`` found —
