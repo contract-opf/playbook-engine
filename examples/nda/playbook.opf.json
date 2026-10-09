@@ -870,7 +870,8 @@
               6082,
               6312
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -897,7 +898,8 @@
               2149,
               2433
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -924,7 +926,8 @@
               4773,
               5020
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -951,7 +954,8 @@
               6892,
               7072
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -978,7 +982,8 @@
               641,
               1026
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1005,6 +1010,12 @@
               5862,
               6081
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Moves the exclusive forum from Wilmington, Delaware to New York County; a different venue choice rather than a stronger or weaker protection.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -1018,7 +1029,8 @@
               5681,
               5895
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -1043,7 +1055,8 @@
               6470,
               6686
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1070,7 +1083,8 @@
               1027,
               1559
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1088,6 +1102,12 @@
                 968,
                 1316
               ]
+            },
+            "vs_standard": {
+              "label": "less_protective",
+              "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+              "basis": "agent",
+              "check": null
             }
           }
         ]
@@ -1111,7 +1131,8 @@
               5276,
               5435
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1138,6 +1159,12 @@
               5728,
               5861
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Substitutes New York law for Delaware law; a different governing-law choice that is not clearly better or worse for AlphaCorp.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -1151,7 +1178,8 @@
               5547,
               5680
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -1176,7 +1204,8 @@
               5436,
               5727
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1203,7 +1232,8 @@
               4015,
               4300
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1230,7 +1260,8 @@
               4497,
               4772
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1257,7 +1288,8 @@
               4301,
               4496
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1284,7 +1316,8 @@
               2434,
               2671
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1311,7 +1344,8 @@
               6313,
               6469
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1338,6 +1372,12 @@
               59,
               425
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -1365,7 +1405,8 @@
               1560,
               1934
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1392,7 +1433,8 @@
               426,
               640
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1419,7 +1461,8 @@
               3344,
               3738
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1446,7 +1489,8 @@
               6687,
               6891
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1473,6 +1517,12 @@
               1935,
               2148
             ]
+          },
+          "vs_standard": {
+            "label": "more_protective",
+            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -1486,7 +1536,8 @@
               1876,
               1967
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -1511,7 +1562,8 @@
               2898,
               3133
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1538,7 +1590,8 @@
               2672,
               2897
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1565,7 +1618,8 @@
               5958,
               6188
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1592,7 +1646,8 @@
               2025,
               2309
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1619,7 +1674,8 @@
               4649,
               4896
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1646,7 +1702,8 @@
               6768,
               6948
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1673,7 +1730,8 @@
               639,
               1024
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1700,6 +1758,12 @@
               5738,
               5957
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Moves the exclusive forum from Wilmington, Delaware to New York County; a different venue choice rather than a stronger or weaker protection.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -1713,7 +1777,8 @@
               5679,
               5893
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -1738,7 +1803,8 @@
               6346,
               6562
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1765,7 +1831,8 @@
               1025,
               1557
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1792,7 +1859,8 @@
               5152,
               5311
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1819,6 +1887,12 @@
               5604,
               5737
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Substitutes New York law for Delaware law; a different governing-law choice that is not clearly better or worse for AlphaCorp.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -1832,7 +1906,8 @@
               5545,
               5678
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -1857,7 +1932,8 @@
               5312,
               5603
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1884,7 +1960,8 @@
               3891,
               4176
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1911,7 +1988,8 @@
               4373,
               4648
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1938,7 +2016,8 @@
               4177,
               4372
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1965,7 +2044,8 @@
               2310,
               2547
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -1992,7 +2072,8 @@
               6189,
               6345
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2019,6 +2100,12 @@
               59,
               423
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -2046,7 +2133,8 @@
               1558,
               1932
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2073,7 +2161,8 @@
               424,
               638
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2100,7 +2189,8 @@
               3220,
               3614
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2127,7 +2217,8 @@
               6563,
               6767
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2154,7 +2245,8 @@
               1933,
               2024
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2181,7 +2273,8 @@
               2774,
               3009
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2208,7 +2301,8 @@
               2548,
               2773
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2235,7 +2329,8 @@
               6213,
               6443
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2262,7 +2357,8 @@
               2031,
               2315
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "non_standard",
         "opening_text": {
@@ -2275,6 +2371,12 @@
               1972,
               2136
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the prompt-written-notice step before a compelled disclosure, so the Discloser cannot seek a protective order.",
+            "basis": "agent",
+            "check": null
           }
         },
         "standard": true,
@@ -2300,7 +2402,8 @@
               4909,
               5156
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2327,7 +2430,8 @@
               7023,
               7203
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2354,7 +2458,8 @@
               645,
               1030
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2381,7 +2486,8 @@
               5998,
               6212
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2408,7 +2514,8 @@
               6601,
               6817
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2435,7 +2542,8 @@
               1031,
               1563
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2462,7 +2570,8 @@
               5412,
               5571
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2489,7 +2598,8 @@
               5864,
               5997
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2516,7 +2626,8 @@
               5572,
               5863
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2543,7 +2654,8 @@
               4379,
               4632
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "non_standard",
         "opening_text": {
@@ -2556,7 +2668,8 @@
               4200,
               4356
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -2581,7 +2694,8 @@
               3897,
               4182
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2608,7 +2722,8 @@
               4633,
               4908
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2635,7 +2750,8 @@
               4183,
               4378
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2662,7 +2778,8 @@
               2316,
               2553
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2689,7 +2806,8 @@
               6444,
               6600
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2716,6 +2834,12 @@
               59,
               429
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -2743,7 +2867,8 @@
               1564,
               1938
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2770,7 +2895,8 @@
               430,
               644
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2797,7 +2923,8 @@
               3226,
               3620
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2824,7 +2951,8 @@
               6818,
               7022
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2851,7 +2979,8 @@
               1939,
               2030
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2878,7 +3007,8 @@
               2780,
               3015
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2905,7 +3035,8 @@
               2554,
               2779
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2932,7 +3063,8 @@
               6008,
               6238
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2959,7 +3091,8 @@
               2028,
               2312
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -2986,6 +3119,12 @@
               4682,
               4951
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Narrows the restriction from disclosing the existence of the discussions to issuing a press release or public announcement.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -2999,7 +3138,8 @@
               4593,
               4840
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -3024,7 +3164,8 @@
               6818,
               6998
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3051,7 +3192,8 @@
               642,
               1027
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3078,7 +3220,8 @@
               5793,
               6007
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3105,7 +3248,8 @@
               6396,
               6612
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3132,7 +3276,8 @@
               1028,
               1560
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3159,7 +3304,8 @@
               5207,
               5366
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3186,7 +3332,8 @@
               5659,
               5792
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3213,7 +3360,8 @@
               5367,
               5658
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3240,7 +3388,8 @@
               3924,
               4209
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3267,7 +3416,8 @@
               4406,
               4681
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3294,7 +3444,8 @@
               4210,
               4405
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3321,6 +3472,12 @@
               2313,
               2580
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Replaces the 'promptly' notice duty with a fixed five-business-day written deadline, which is more certain but can be slower than prompt notice.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "standard",
@@ -3334,7 +3491,8 @@
               2254,
               2491
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -3359,7 +3517,8 @@
               6239,
               6395
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3386,6 +3545,12 @@
               59,
               426
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3413,7 +3578,8 @@
               1561,
               1935
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3440,7 +3606,8 @@
               427,
               641
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3467,7 +3634,8 @@
               3253,
               3647
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3494,7 +3662,8 @@
               6613,
               6817
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3521,7 +3690,8 @@
               1936,
               2027
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3548,7 +3718,8 @@
               2807,
               3042
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3575,7 +3746,8 @@
               2581,
               2806
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "standard",
         "opening_text": null,
@@ -3602,6 +3774,12 @@
               2941,
               3049
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3629,6 +3807,12 @@
               1564,
               1842
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted; the dropped purpose phrase changes nothing.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "absent",
@@ -3656,6 +3840,12 @@
               3428,
               3527
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3683,6 +3873,12 @@
               2812,
               2940
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Moves the exclusive forum from Wilmington, Delaware to San Francisco; a different venue choice rather than a stronger or weaker protection.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3710,6 +3906,12 @@
               3160,
               3333
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the statement that the Agreement supersedes all prior discussions, so earlier understandings are not displaced.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3737,6 +3939,12 @@
               581,
               1011
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Omits the recipient's burden of establishing that an exclusion applies; the four exclusions are otherwise substantively the same.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3750,6 +3958,12 @@
               522,
               817
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+            "basis": "agent",
+            "check": null
           }
         },
         "standard": false,
@@ -3775,6 +3989,12 @@
               2727,
               2811
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Substitutes California law for Delaware law and drops the conflict-of-laws carve-out; a different governing-law choice.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3802,6 +4022,12 @@
               2452,
               2610
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the acknowledgement that damages are inadequate and the 'in addition to any other remedy' preservation, weakening the injunctive-relief basis.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3831,7 +4057,8 @@
               2118,
               2274
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -3856,6 +4083,12 @@
               2338,
               2451
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same disclaimer of any warranty of accuracy or completeness without the 'AS IS' label.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3883,6 +4116,12 @@
               3050,
               3159
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the rule that notices are effective on receipt, leaving when a notice takes effect undefined.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3910,6 +4149,12 @@
               3334,
               3427
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the reformation step (modify to the minimum extent necessary), so an unenforceable provision is lost rather than narrowed.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3937,6 +4182,12 @@
               1161,
               1359
             ]
+          },
+          "vs_standard": {
+            "label": "more_protective",
+            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3964,6 +4215,12 @@
               1944,
               2063
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Omits the express 'notwithstanding expiration or termination' language, so survival after termination is implied rather than stated.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -3977,6 +4234,12 @@
               1611,
               1729
             ]
+          },
+          "vs_standard": {
+            "label": "more_protective",
+            "reason": "Extends the confidentiality survival period from three to five years.",
+            "basis": "agent",
+            "check": null
           }
         },
         "standard": false,
@@ -4002,6 +4265,12 @@
               1843,
               1943
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4029,6 +4298,12 @@
               3196,
               3304
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4056,6 +4331,12 @@
               1566,
               1844
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted; the dropped purpose phrase changes nothing.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "absent",
@@ -4083,6 +4364,12 @@
               3683,
               3782
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4110,6 +4397,12 @@
               3067,
               3195
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Moves the exclusive forum from Wilmington, Delaware to San Francisco; a different venue choice rather than a stronger or weaker protection.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4137,6 +4430,12 @@
               3415,
               3588
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the statement that the Agreement supersedes all prior discussions, so earlier understandings are not displaced.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4164,6 +4463,12 @@
               583,
               1013
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Omits the recipient's burden of establishing that an exclusion applies; the four exclusions are otherwise substantively the same.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4177,6 +4482,12 @@
               524,
               819
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+            "basis": "agent",
+            "check": null
           }
         },
         "standard": false,
@@ -4202,6 +4513,12 @@
               2982,
               3066
             ]
+          },
+          "vs_standard": {
+            "label": "different_concept",
+            "reason": "Substitutes California law for Delaware law and drops the conflict-of-laws carve-out; a different governing-law choice.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4229,6 +4546,12 @@
               2707,
               2865
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the acknowledgement that damages are inadequate and the 'in addition to any other remedy' preservation, weakening the injunctive-relief basis.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4256,7 +4579,8 @@
               2453,
               2706
             ]
-          }
+          },
+          "vs_standard": null
         },
         "opened_with": "non_standard",
         "opening_text": {
@@ -4269,7 +4593,8 @@
               2120,
               2276
             ]
-          }
+          },
+          "vs_standard": null
         },
         "standard": false,
         "moved": true,
@@ -4294,6 +4619,12 @@
               2339,
               2452
             ]
+          },
+          "vs_standard": {
+            "label": "equivalent",
+            "reason": "Same disclaimer of any warranty of accuracy or completeness without the 'AS IS' label.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4321,6 +4652,12 @@
               3305,
               3414
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the rule that notices are effective on receipt, leaving when a notice takes effect undefined.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4355,7 +4692,8 @@
                 1507,
                 1757
               ]
-            }
+            },
+            "vs_standard": null
           }
         ]
       },
@@ -4378,6 +4716,12 @@
               3589,
               3682
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the reformation step (modify to the minimum extent necessary), so an unenforceable provision is lost rather than narrowed.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4405,6 +4749,12 @@
               1163,
               1361
             ]
+          },
+          "vs_standard": {
+            "label": "more_protective",
+            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4432,6 +4782,12 @@
               1946,
               2064
             ]
+          },
+          "vs_standard": {
+            "label": "more_protective",
+            "reason": "Extends the confidentiality survival period from three to five years.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4459,6 +4815,12 @@
               1845,
               1945
             ]
+          },
+          "vs_standard": {
+            "label": "less_protective",
+            "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term.",
+            "basis": "agent",
+            "check": null
           }
         },
         "opened_with": "non_standard",
@@ -4474,7 +4836,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-09T03:39:36+00:00",
+      "generated_at": "2026-10-09T06:21:54+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -4507,7 +4869,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:4e748abbc320775fbe43a9ec9e799c90cb6253b1e0c2648c10f49b5c85ed594d"
+      "grounded_in": "evidence@sha256:bea582cb0f639ec21efd855ad3b8ae615ae227cdb80766850e7d47554eb47554"
     }
   },
   "floor": {
@@ -4527,7 +4889,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-09T03:39:36+00:00",
+        "x_signed_at": "2026-10-09T06:21:55+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -4906,12 +5268,12 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-09T03:39:35+00:00",
+    "generated_at": "2026-10-09T06:21:53+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:2e631ac447f68e2879d283ceb883379c230195b549297b0a13bb77299ba6b063",
+      "sha256": "sha256:19fcf8774f38e3e9d42d7b7c7b9e919515494d4de89523bc770b1692710c983d",
       "records": 128
     }
   },
@@ -6004,11 +6366,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:dfb51f6bcc1e3627076c2d6ed3029de2d0f7c1ed79789028c54cc18344774b40",
+    "content_hash": "sha256:fb24932104d13d5a5c82b2438f8da0a9f5635024e64cbaf22e9370ff51210b29",
     "section_digests": {
-      "evidence": "sha256:4e748abbc320775fbe43a9ec9e799c90cb6253b1e0c2648c10f49b5c85ed594d",
-      "posture": "sha256:8373e81d98bcfe4616ce0ea2478f726a84156926d46bc4fbb04037281b62d62e",
-      "floor": "sha256:f2fcf02ab3ab583a44de791a8e5ddb95af56a1f3711c0db5056c037b7a33b10e"
+      "evidence": "sha256:bea582cb0f639ec21efd855ad3b8ae615ae227cdb80766850e7d47554eb47554",
+      "posture": "sha256:4d3137f97d7c96a25c5832dcf7a447360bd1acd6e3f037cd04213f2fd640bc1d",
+      "floor": "sha256:28af1e8dfbb0e85da8c459d21f4d7388672f9cab494293b52a3d53dfd2702274"
     }
   }
 }

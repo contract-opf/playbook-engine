@@ -886,6 +886,38 @@ make docker-run CORPUS=./corpus OUT=./out \
 - **Provenance:** read the document's recital/header text to determine
   `our_paper` vs `counterparty_paper`. Unknown entity aliases: record for
   human review; do not silently guess.
+- **Equivalence** (`kind: equivalence`, template mode only): for each
+  distinct non-standard text (a signed text, a non-standard opening, a
+  refused ask) decide whether it is `equivalent`, `more_protective`,
+  `less_protective` or `different_concept` relative to our standard, for
+  `perspective_party`, with a one-sentence `reason` and `"basis": "agent"`.
+  These are queued by `judge` in the same round as any classify, scope and
+  provenance items, and new ones can appear after classification verdicts
+  land, so keep looping until `pending.jsonl` is empty. See
+  REFERENCE.md § "Equivalence". Each text is judged ONCE, however many deals
+  and roles carry it, and never by deal or paper side. Use
+  `different_concept` when the two cannot be ranked rather than guessing a
+  ranking.
+
+**The blind check (Step 6b).** Every drafted equivalence verdict is then
+checked by a separate agent pinned to `claude-opus-5-5` at `xhigh` effort
+(never the drafter):
+
+```bash
+playbook judge --check equivalence $OUT --config <config>
+# Agent (a DIFFERENT agent, claude-opus-5-5 / xhigh): answer each line of
+# $OUT/judge/check-pending.jsonl with {"key","label","reason","model","effort"}
+# (the model id you actually ran on) into $OUT/my-checks-<date>.jsonl, then:
+playbook judge-apply $OUT --check $OUT/my-checks-<date>.jsonl
+# A disagreement lands in $OUT/judge/adjudication-pending.jsonl; a FRESH
+# claude-opus-5-5 / xhigh agent answers it the same way.
+```
+
+`--allow-checker-model` overrides the pinned model/effort explicitly;
+`playbook judge --check equivalence --api` answers both queues through the
+API when credentials resolve. Checks never block: an unchecked draft is still
+projected (`check: null`) and `playbook scorecard` reports it as unchecked.
+An owner correction is re-applied with `"basis": "owner"` and wins.
 
 **Low-confidence verdicts:** mark `needs_review: true` in the verdict as your
 audit trail. **It is not read by any gate today** (see REFERENCE.md

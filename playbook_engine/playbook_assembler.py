@@ -27,7 +27,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from playbook_engine.canonicalize import (
     canonicalize,
@@ -40,6 +40,7 @@ from playbook_engine.clause_position_compiler import (
     UnclassifiedCoverage,
 )
 from playbook_engine.digest import build_digest
+from playbook_engine.equivalence import collect_subjects, label_evidence
 from playbook_engine.observation_builder import Observation, RoundMove
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
@@ -53,6 +54,9 @@ from playbook_engine.precedent import (
     restamp_evidence,
 )
 from playbook_engine.validator import validate_document
+
+if TYPE_CHECKING:
+    from playbook_engine.agent_judge import StoreBackedEquivalenceJudge
 
 #: The one OPF version the engine emits and validates (issue #238): the
 #: verdict-free per-deal precedent record (issue #223) plus a digest_version 3
@@ -275,6 +279,7 @@ def assemble_playbook(
     existing_posture: dict[str, Any] | None = None,
     existing_floor: dict[str, Any] | None = None,
     round_moves: list[RoundMove] | None = None,
+    equivalence_judge: StoreBackedEquivalenceJudge | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate a complete OPF 0.5 playbook document.
 
@@ -355,6 +360,11 @@ def assemble_playbook(
                           issue #177), from which each precedent's
                           ``rounds``/``moved`` derive. ``None`` = no moves
                           recorded.
+        equivalence_judge: The store-backed equivalence judge (issue #240)
+                          whose stored verdicts become each eligible text's
+                          ``vs_standard``. Read-only here (build it without a
+                          queue). ``None`` = no verdict store: every
+                          ``vs_standard`` is ``null`` (not yet judged).
 
     Returns:
         A validated OPF 0.5 playbook dict (precedent-record ``evidence``,
@@ -489,6 +499,24 @@ def assemble_playbook(
         str(agreement_type.get("id")),
         party=perspective_party(playbook),
     )
+    # Issue #240: the equivalence label of every eligible text, from the
+    # verdict store. After the strip + restamp above so the cache key is
+    # computed over the shipped text; an unjudged (or ineligible) text is
+    # null, never guessed.
+    equivalence_party = perspective_party(playbook)
+    verdicts_by_key = (
+        {
+            subject.key: equivalence_judge.judge(subject)
+            for subject in collect_subjects(
+                playbook["evidence"], str(agreement_type.get("id")), equivalence_party
+            )
+        }
+        if equivalence_judge is not None
+        else {}
+    )
+    label_evidence(
+        playbook["evidence"], str(agreement_type.get("id")), equivalence_party, verdicts_by_key
+    )
     # The precedent.jsonl sidecar's content address (issue #224): a pure
     # function of the final evidence.precedent, recorded before the digest
     # and identity so content_hash covers it. Vendor namespace because
@@ -524,7 +552,10 @@ def assemble_playbook(
     playbook["identity"] = identity
 
     # --- validate ---
-    result = validate_document(playbook)
+    result = validate_document(
+        playbook,
+        verdict_store=equivalence_judge.store if equivalence_judge is not None else None,
+    )
     if not result.ok:
         raise AssemblyError(blocking_errors=[str(e) for e in result.errors if e.blocking])
 

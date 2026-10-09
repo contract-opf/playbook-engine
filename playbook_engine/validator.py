@@ -859,6 +859,93 @@ def _check_paper(doc: dict[str, Any], result: ValidationResult) -> None:
             )
 
 
+def _check_equivalence(
+    doc: dict[str, Any], result: ValidationResult, verdict_store: Any | None
+) -> None:
+    """OPF 0.5 ``vs_standard`` cross-checks (issue #240, OPF-SPEC §3.5.6).
+
+    - a non-null label MUST NOT sit on a signed text whose ``standard`` fact
+      is true (an exact match is equivalent by definition and stays null) nor
+      on a text of a clause with no ``our_standard`` (nothing to be compared
+      with);
+    - ``check.adjudicated`` true implies ``check.agreed`` false (an
+      adjudication only follows a disagreement);
+    - when the run's verdict store is present (*verdict_store*, a
+      ``VerdictStore``), every non-null label MUST have a stored verdict under
+      its cache key (``equivalence.equivalence_key``) carrying the same label
+      — a label the store never produced is invented.
+    """
+    from playbook_engine.equivalence import (  # noqa: PLC0415
+        ROLE_SIGNED,
+        iter_slots,
+        slot_key,
+    )
+    from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
+
+    evidence = doc.get("evidence")
+    if not isinstance(evidence, dict):
+        return
+    party = perspective_party(doc)
+    agreement_type = doc.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    paths: dict[int, str] = {}
+    for i, record in enumerate(_evidence_list(doc, "precedent")):
+        if not isinstance(record, dict):
+            continue
+        for key in ("signed_text", "opening_text"):
+            if isinstance(record.get(key), dict):
+                paths[id(record[key])] = f"evidence.precedent[{i}].{key}"
+        for j, ask in enumerate(record.get("refused_asks") or []):
+            paths[id(ask)] = f"evidence.precedent[{i}].refused_asks[{j}]"
+    for slot in iter_slots(evidence):
+        vs = slot.entry.get("vs_standard")
+        if not isinstance(vs, dict):
+            continue
+        path = paths.get(id(slot.entry), "evidence.precedent") + ".vs_standard"
+        standard = slot.clause.get("our_standard") if isinstance(slot.clause, dict) else None
+        if slot.role == ROLE_SIGNED and slot.record.get("standard") is True:
+            result.add(
+                "vs_standard is set on a signed text whose standard fact is true — an exact "
+                "match with our standard is equivalent by definition and MUST stay null",
+                path=path,
+            )
+            continue
+        if not isinstance(standard, dict):
+            result.add(
+                "vs_standard is set on a text whose clause has no our_standard — there is "
+                "nothing to compare it with, so it MUST be null",
+                path=path,
+            )
+            continue
+        check = vs.get("check")
+        if (
+            isinstance(check, dict)
+            and check.get("adjudicated") is True
+            and check.get("agreed") is not False
+        ):
+            result.add(
+                "vs_standard.check is adjudicated but agreed is not false — an "
+                "adjudication only follows a disagreement",
+                path=f"{path}.check",
+            )
+        if verdict_store is None or not isinstance(agreement_type_id, str):
+            continue
+        verdict_key = slot_key(slot, agreement_type_id, party)
+        stored = verdict_store.get_record_by_key(verdict_key) if verdict_key is not None else None
+        if stored is None:
+            result.add(
+                "vs_standard is set but the run's verdict store has no equivalence verdict "
+                f"under its cache key ({verdict_key!r}) — the label was not produced by this run",
+                path=path,
+            )
+        elif stored.verdict.get("label") != vs.get("label"):
+            result.add(
+                f"vs_standard.label {vs.get('label')!r} differs from the stored verdict's "
+                f"label {stored.verdict.get('label')!r} — re-run `playbook project`",
+                path=f"{path}.label",
+            )
+
+
 def _check_digest(doc: dict[str, Any], result: ValidationResult) -> None:
     """A present ``digest`` MUST equal ``build_digest(document)``.
 
@@ -951,7 +1038,7 @@ def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
                 )
 
 
-def validate_document(doc: dict[str, Any]) -> ValidationResult:
+def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) -> ValidationResult:
     """Validate *doc* against the OPF 0.5 schema and normative rules.
 
     A document whose ``opf_version`` is not "0.5" gets one blocking
@@ -959,6 +1046,10 @@ def validate_document(doc: dict[str, Any]) -> ValidationResult:
 
     Args:
         doc: The OPF playbook document (dict, already parsed).
+        verdict_store: The run's ``agent_judge.VerdictStore`` when it is
+            present (``<out>/judge/verdicts.jsonl``); with it, every
+            non-null ``vs_standard`` must trace to a stored verdict
+            (issue #240). ``None`` skips that cross-check.
     """
     result = ValidationResult()
     if not _check_opf_version(doc, result):
@@ -981,6 +1072,7 @@ def validate_document(doc: dict[str, Any]) -> ValidationResult:
     _check_out_of_scope_rationale(doc, result)
     _check_citations(doc, result)
     _check_precedent(doc, result)
+    _check_equivalence(doc, result, verdict_store)
     _check_posture_floor_conflict(doc, result)
     _check_posture_interview_provenance(doc, result)
     _check_perspective_present(doc, result)

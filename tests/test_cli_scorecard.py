@@ -122,6 +122,20 @@ _FIELD_NAMES = frozenset(
         "dossiers",
         "max_tokens",
         "median_tokens",
+        "equivalence",
+        "by_role",
+        "totals",
+        "by_label",
+        "agreement_rate",
+        "checker_models",
+        "eligible",
+        "unjudged",
+        "drafted",
+        "checked",
+        "agreed",
+        "adjudicated",
+        "disputed",
+        "unchecked",
     }
 )
 
@@ -136,6 +150,7 @@ _TOP_LEVEL = {
     "opening_drift",
     "dropped_observations",
     "digest",
+    "equivalence",
     "queues",
     "dossiers",
 }
@@ -193,6 +208,33 @@ _NDA_FLAT_KEYS = frozenset(
         "digest.token_estimate",
         "dossiers",
         "dropped_observations.by_reason.removed_origin_undetermined",
+        # Issue #240: no verdict store in this run, so every eligible text is
+        # unjudged; the section is present (all zero) either way.
+        "equivalence.agreement_rate",
+        "equivalence.checker_models",
+        *(
+            f"equivalence.by_label.{label}"
+            for label in (
+                "equivalent",
+                "more_protective",
+                "less_protective",
+                "different_concept",
+            )
+        ),
+        *(
+            f"equivalence.{scope}.{field}"
+            for scope in ("totals", "by_role.signed", "by_role.opening", "by_role.refused")
+            for field in (
+                "eligible",
+                "unjudged",
+                "drafted",
+                "checked",
+                "agreed",
+                "adjudicated",
+                "disputed",
+                "unchecked",
+            )
+        ),
         "dropped_observations.by_reason.survives_in_terminal",
         "dropped_observations.count",
         "opf_version",
@@ -305,7 +347,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 3
+    assert card["scorecard_version"] == 4
     assert card["opf_version"] == "0.5"
     assert card["corpus"] == {
         "documents": 6,
@@ -581,6 +623,7 @@ def test_empty_out_dir_scores_null_never_errors(tmp_path: Path) -> None:
         "template_drift",
         "opening_drift",
         "digest",
+        "equivalence",
         "dossiers",
     ):
         assert card[section] is None, section

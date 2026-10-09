@@ -10,6 +10,61 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Judge each distinct text once against our standard: the `vs_standard`
+  equivalence label (issue #240, epic #236).** The exact-match `standard`
+  fact says "they signed our words unchanged", which on counterparty paper
+  is almost never true even where the concept is the same (0 of 16 signed
+  counterparty-paper NDA records match exactly, 85 of 97 on our paper), and
+  grouping by exact text turned one concept phrased five ways into five
+  one-deal variants. Every distinct non-standard text of the OPF 0.5
+  precedent record (a signed text, a non-standard opening, a refused ask)
+  now carries `vs_standard: {label, reason, basis, check} | null`: `label` is
+  `equivalent` | `more_protective` | `less_protective` | `different_concept`
+  relative to `perspective.party`, judged once and shared by every deal,
+  paper side and role carrying the text (cache key: sha256 over the agreement
+  type, clause type, perspective party, the text's grouping key and our
+  standard's; never paper side, document id or opening draft). This narrows
+  owner decision #227 (c) for this one label only; nothing else on the
+  consumer path is judged, and `null` is "not yet judged", never a guess.
+  New judge kind `equivalence` on the store-backed machinery: `playbook
+  judge` queues one item per distinct eligible text after mining (template
+  mode only; a `standard: true` text and emergent mode queue nothing),
+  `playbook judge --plan-only` reports `equivalence: N`, and `playbook
+  project` reads the verdict store (read-only) and writes the labels,
+  reporting how many texts are left unjudged. **Correctness is checked, never
+  gated on the owner:** `playbook judge --check equivalence OUT` writes
+  `judge/check-pending.jsonl` (the drafter's payload without the label or
+  reason) for a separate `claude-opus-5-5` / `xhigh` agent, and `playbook
+  judge-apply --check FILE` records each answer with the checker's model id
+  and effort, rejecting any other model or effort unless
+  `--allow-checker-model`; an agreement keeps the verdict, a disagreement is
+  adjudicated by a fresh pinned agent (`judge/adjudication-pending.jsonl`),
+  an unchecked draft still reaches the playbook with `check: null`, and an
+  `owner` correction wins over every agent or check answer. `--api` answers
+  both queues through the Message Batches API (`claude-opus-5-5`, `effort:
+  xhigh`, structured outputs, no `thinking`, no forced `tool_choice`, no
+  refusal fallback; CI uses a fake client). Schema (still-unfrozen 0.5):
+  optional `vs_standard` on `textRef` and `refusedAsk`; three new validator
+  rules, including that every label must trace to a stored verdict when the
+  run's verdict store is present (`validate_document(verdict_store=...)`,
+  automatic for `playbook validate` beside a `judge/verdicts.jsonl`).
+  `playbook scorecard` (shape v4) gains an `equivalence` section: drafted /
+  checked / agreed / adjudicated / unchecked per role, the agreement rate and
+  the checker model ids seen in the store. `digest_version` stays "3": the
+  digest hook that collapses equivalent variants is #234. The NDA example
+  ships 27 canned equivalence verdicts and is regenerated. OPF-SPEC gains
+  section 3.5.6; the skill's judge step, REFERENCE.md and ADOPTING.md
+  document drafting, the blind check and owner overrides.
+
+### Normative rule changes
+
+- OPF 0.5 (`spec/playbook.schema-0.5.json`, still unfrozen): a non-null
+  `vs_standard` MUST NOT sit on a signed text whose `standard` is true or on
+  a text of a clause with a null `our_standard`; `vs_standard.check.adjudicated`
+  true implies `check.agreed` false; and, when the run's verdict store is
+  present, every non-null `vs_standard` MUST trace to a stored verdict under
+  its cache key with the same label.
+
 - **Record what every clause opened with: OPF 0.5 (issue #233, epic #236).**
   A signed variant means much more when the record says where the deal
   started. Until now `opening_text` was recorded only for our standard

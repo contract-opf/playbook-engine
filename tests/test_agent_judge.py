@@ -1015,7 +1015,8 @@ class TestJudgeKindSeam:
     def test_builtin_kinds_are_exactly_the_non_deviation_ones(self) -> None:
         from playbook_engine import rubric
 
-        assert set(rubric.JUDGE_KINDS) == {"classify", "provenance", "scope"}
+        # Issue #240: the equivalence label is the one verdict kind added back.
+        assert set(rubric.JUDGE_KINDS) == {"classify", "provenance", "scope", "equivalence"}
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:
         from playbook_engine.agent_judge import infer_verdict_kind

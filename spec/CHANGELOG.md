@@ -24,13 +24,51 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.5.json` | `fc1706043da89ee70e60c7ba906d263f1d9e7804e64dea3457c66676508f4f77` |
+| `playbook.schema-0.5.json` | `341841651bc850179b59f5c633483f35c9adc6cfffe9530806dc8c55f9538670` |
 | `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `2e34e85d37f08187f3b54e1c97225708806f318feab20a1b51d281f354308781` |
 
 Current `DIGEST_VERSION`: **3** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-09 — OPF 0.5: the `vs_standard` equivalence label (issue #240)
+
+In-place addition to the unfrozen `playbook.schema-0.5.json` (epic #236; 0.5
+has no consumer until contract-opf/contract-toaster#128 vendors it, so
+nothing published binds the previous shape). `digest_version` stays "3"; the
+digest hook (collapsing equivalent variants, label counts) is #234's.
+
+- **New optional field `vs_standard`** on `evidence.precedent[].signed_text`,
+  `.opening_text` and each `.refused_asks[]` entry: `{label, reason, basis,
+  check} | null`. `label` is `equivalent` | `more_protective` |
+  `less_protective` | `different_concept`, relative to `perspective.party`;
+  `reason` is one sentence naming the operative difference; `basis` is
+  `judge` | `agent` | `owner`; `check` is `{agreed, by, adjudicated} | null`
+  (the independent blind check of the verdict, `by` the checking model's id).
+  `null` means "not yet judged", never a guess. A reference producer always
+  writes the key (null when nothing was judged); a document that omits it is
+  read as null.
+- **Owner decision #227 (c) narrowed for this one label only.** Judged
+  verdicts stay off the consumer path everywhere else. The label is an index
+  the consuming model checks against the cited text, never an instruction.
+- **New normative validator rules**, each blocking: a non-null `vs_standard`
+  MUST NOT sit on a signed text whose `standard` is true, nor on a text of a
+  clause whose `our_standard` is null; `check.adjudicated` true implies
+  `check.agreed` false; and, when the run's verdict store is present, every
+  non-null `vs_standard` MUST trace to a stored verdict under its cache key
+  (sha256 over `agreement_type.id`, `taxonomy_id`, `perspective.party`, the
+  text's §3.5.4 grouping key and our standard's) carrying the same label.
+- **Reference compiler.** New judge kind `equivalence`
+  (`playbook judge` queues one item per distinct eligible text once a
+  template is configured; `playbook judge --check equivalence` and
+  `playbook judge-apply --check` run the blind check and adjudication with a
+  pinned `claude-opus-5-5` / `xhigh` agent); `playbook project` reads the
+  verdict store and writes the labels; `playbook scorecard` (shape v4) gains
+  an `equivalence` section. Paper side, document id and role play no part in
+  the cache key. The NDA example ships canned equivalence verdicts.
+- **Unchanged:** the grouping key, precedent ids, the `standard` fact,
+  canonicalization, `identity`, and all conformance vectors.
 
 ### 2026-10-08 — OPF 0.5: what every clause opened with; 0.5 replaces 0.4 (issue #233)
 

@@ -146,6 +146,19 @@ playbook inspect ./out          # inspection report: coverage, confidence, flags
 playbook view bundle ./out      # human-readable playbook, one self-contained file
 ```
 
+With a template, each distinct non-standard text a deal signed, opened with
+or had refused also carries a `vs_standard` label: *equivalent* to our
+standard, *more protective*, *less protective* or a *different concept*,
+judged once per text against your standard (never per deal or per side of
+the table), with a one-sentence reason. It lets "the same concept phrased
+five ways" read as one thing instead of five. An independent model
+(`claude-opus-5-5` at `xhigh` effort) checks every drafted label blind and
+settles disagreements; nothing waits for you. Start from the labels that
+matter: `less_protective` and `different_concept`. If you disagree with a
+label, re-apply it with `"basis": "owner"` through `playbook judge-apply` and
+re-project: your correction wins over any agent or check answer. A text with
+no label yet is `null`, and `playbook project` says how many are left.
+
 Judge the output the way you'd judge an associate's memo: every position
 cites `document / version / clause`. Follow a few citations —
 `playbook resolve-citation` verifies you're holding the exact cited bytes
@@ -215,7 +228,8 @@ deal, or your risk tolerance, calls for.
   re-run the affected stages. A document-level fact (provenance, which
   version is the signed one, version order) goes in that deal's
   `hints.yaml`; a clause's classification or a provenance call you now
-  disagree with gets a corrected verdict (`playbook judge-apply`); then
+  disagree with gets a corrected verdict (`playbook judge-apply`; an
+  equivalence label you disagree with is re-applied with `"basis": "owner"`); then
   re-mine and re-project. The Posture and Floor you authored survive the
   recompile verbatim. There's no finish line — audit one clause or every
   clause, once or after every recompile.
