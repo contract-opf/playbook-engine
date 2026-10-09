@@ -39,6 +39,7 @@ from playbook_engine.clause_classifier import (
     ClassificationJudge,
     ClassifiedClause,
     ClauseClassification,
+    assign_by_content,
     classify_tree,
 )
 from playbook_engine.clause_differ import ClauseDiff, diff_aligned
@@ -289,7 +290,14 @@ _MEDIA_TYPES: dict[str, str] = {
 # unchanged on the deterministic path, but the judge identity folded into the
 # stage-cache key lost its "deviation" component, and observations from a
 # judged run (the removed opt-in layer) must never be replayed as current.
-_DEVIATION_VS_TEMPLATE_VERSION = 17
+#
+# v18 (issue #235): a node every other path left unclassified is now assigned
+# by content similarity to our standard's clause text (basis
+# "content_similarity", clause_classifier.assign_by_content), so counterparty-
+# form clauses with their own headings gain a taxonomy_id. L3 (and so L4's
+# alignments, observations and precedent) changes for identical inputs; a warm
+# cache would otherwise replay those clauses as unclassified forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 18
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -998,6 +1006,20 @@ def _build_template_observations(
         auto_classify_threshold=auto_classify_threshold,
     )
     return _template_observations_from_classified(classified)
+
+
+def _content_exemplars(
+    template_std_by_tid: dict[str, str],
+    template_std_nodes_by_tid: dict[str, list[str]] | None,
+) -> dict[str, str]:
+    """``{taxonomy_id: our standard's clause text}`` for the content-similarity
+    fallback (issue #235): every template node carrying the taxonomy_id,
+    joined in document order (the same reference the origin test uses), or the
+    first-node standard when the per-node map is not supplied. Empty in
+    emergent mode (no template standards)."""
+    if template_std_nodes_by_tid is not None:
+        return {tid: "\n".join(nodes) for tid, nodes in template_std_nodes_by_tid.items() if nodes}
+    return dict(template_std_by_tid)
 
 
 def _template_observations_from_classified(
@@ -2883,12 +2905,22 @@ def _compute_doc_from_l1(
     # L3: Classify each version. LLM-segmented versions already carry their
     # taxonomy_id from the L1 LLM pass — bypass classify_tree entirely for
     # those (no separate classify judge for LLM-segmented docs).
+    #
+    # Issue #235: a node still unclassified after that (heading paths, judge,
+    # parent inheritance, or the LLM's explicit null) is compared with our
+    # standard's own clause text and assigned only on a conservative
+    # threshold + margin (basis "content_similarity"). Emergent mode has no
+    # template, so no exemplars: a no-op there. The template itself never
+    # takes this path (see _build_template_observations).
+    content_exemplars = _content_exemplars(template_std_by_tid, template_std_nodes_by_tid)
     ordered_ids = list(version_order.ordered_ids) or list(version_trees.keys())
     classified_by_version: dict[str, list[ClassifiedClause]] = {}
     for vid in ordered_ids:
         if vid in llm_taxonomy_by_path:
-            classified_by_version[vid] = _classified_from_taxonomy_by_path(
-                version_trees[vid], llm_taxonomy_by_path[vid]
+            classified_by_version[vid] = assign_by_content(
+                _classified_from_taxonomy_by_path(version_trees[vid], llm_taxonomy_by_path[vid]),
+                content_exemplars,
+                eligible_ids=set(taxonomy_ids),
             )
         else:
             classified_by_version[vid] = classify_tree(
@@ -2897,6 +2929,7 @@ def _compute_doc_from_l1(
                 _cls_judge,
                 ambiguity_threshold=config.classification.ambiguity_threshold,
                 auto_classify_threshold=config.classification.auto_classify_threshold,
+                content_exemplars=content_exemplars,
             )
 
     # L4: Diff + reversals + deviations → observations

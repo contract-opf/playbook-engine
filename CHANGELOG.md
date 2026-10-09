@@ -10,6 +10,36 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Keyless content-similarity classification, so counterparty-paper clauses
+  reach precedent (issue #235).** The heading-only classifier left clauses
+  under a counterparty form's own headings ("Exceptions", "Protection",
+  "Required Disclosure") unclassified, so third-party deals barely reached
+  precedent. `clause_classifier.classify_tree` gains an optional
+  `content_exemplars` mapping (taxonomy_id -> our standard's clause text, every
+  template node joined; the pipeline passes the template's own standards).
+  After the heading paths, the judge and parent inheritance, a node still
+  `unclassified` that has body text is compared with each eligible exemplar by
+  stopword-filtered token Jaccard (numerals kept) and assigned only when its
+  best score is at least `CONTENT_ASSIGN_THRESHOLD` (0.25) and at least
+  `CONTENT_MARGIN_RATIO` (2.0) times the runner-up's, under the new basis
+  `content_similarity` at a confidence of `min(score, CONTENT_CONFIDENCE_CAP)`
+  (0.5, below `AMBIGUITY_THRESHOLD`, so it never reads as a verified judge
+  verdict). It runs on every segmentation path (default, LLM, agent) through
+  `assign_by_content`, is a no-op in emergent mode and never runs on the
+  template. Paper side is not an input: the same rule applies to every deal.
+  `playbook mine` prints one line of classification coverage by basis
+  (`exact_match`, `heading_similarity`, `judge`, `inherited`,
+  `content_similarity`, `unclassified`, plus any other non-zero basis) and the
+  same counts go into `run_manifest.json` under `classification_coverage`;
+  nothing is added to the OPF document. `playbook scorecard` counts the new
+  basis. `_DEVIATION_VS_TEMPLATE_VERSION` moves to 18 (L3 output changes for
+  identical inputs). `examples/nda/` is regenerated: `theta-logistics` and
+  `zeta-diagnostics` each gain precedent for seven more clause types
+  (exclusions, standard of care, compelled disclosure, survival, injunctive
+  relief, venue, entire agreement; `n_deals` 4 -> 6), 113 -> 127 precedent
+  records, every previously-classified record unchanged. OPF-SPEC §3.3 names
+  the basis in prose; no schema change.
+
 - **Retire everything off the corpus -> playbook -> toaster path (issue
   #239).** The deal is the unit of precedent and the consumer's model does the
   judging, so the engine keeps only what turns a corpus into a playbook the

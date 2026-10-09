@@ -143,9 +143,13 @@ _TOP_LEVEL = {
 #: because the NDA run is deterministic; a field dropped or renamed fails here.
 _NDA_FLAT_KEYS = frozenset(
     {
+        "classification.by_basis.content_similarity",
         "classification.by_basis.exact_match",
         "classification.by_basis.heading_similarity",
         "classification.by_basis.unclassified",
+        # Issue #235: the two counterparty-paper deals (paper "unknown" in this
+        # stub run) are the only ones whose clauses are assigned by content.
+        "classification.by_paper.unknown.by_basis.content_similarity",
         *(
             f"classification.by_paper.{paper}.{field}"
             for paper in ("our_paper", "unknown")
@@ -663,10 +667,13 @@ def test_digest_capped_clauses_count_lists_shorter_than_their_totals(
         if len(c.get("signed_variants") or []) < c["n_variants_total"]
         or len(c.get("refused_asks") or []) < c["n_refused_total"]
     ]
-    assert len(capped) == 2
+    # Issue #235: the counterparty-paper deals' content-similarity assignments
+    # add signed variants to five clauses, so five (was two) exceed the floor
+    # of one entry per list.
+    assert len(capped) == 5
 
     digest = build_scorecard(out)["digest"]
-    assert digest["capped_clauses"] == 2
+    assert digest["capped_clauses"] == len(capped)
     assert digest["signed_variant_groups"] == sum(c["n_variants_total"] for c in clauses)
     assert digest["refused_ask_groups"] == sum(c["n_refused_total"] for c in clauses)
 

@@ -31,6 +31,23 @@ without this it was absent from the playbook in default mode, where no judge
 classifies heading-less nodes. A judge's specific taxonomy fit for the child,
 a ``judge_error`` and a ``needs_review`` are kept as they are.
 
+Content similarity (issue #235): a node every other path left
+``basis="unclassified"`` and that has body text is compared with our standard's
+own clause text, per taxonomy_id (``content_exemplars``: the template's
+classified nodes joined). Counterparty forms use their own headings
+("Exceptions", "Protection", "Required Disclosure"), so heading matching alone
+leaves their clauses out of precedent; the content test recovers them without
+a judge and without a key. It is deterministic and deliberately conservative:
+a node is assigned only when its best score reaches
+``CONTENT_ASSIGN_THRESHOLD`` AND is at least ``CONTENT_MARGIN_RATIO`` times the
+runner-up's, at a confidence capped at ``CONTENT_CONFIDENCE_CAP`` (below
+``AMBIGUITY_THRESHOLD``, so it never reads as a verified judge verdict). It
+runs last, after the heading paths, the judge and parent inheritance, so it
+only fills what those left empty; it never runs on the template itself (the
+exemplars come from the template's classification) and is a no-op in emergent
+mode (no exemplars). The measurements behind the constants are on the
+constants' docstrings.
+
 ``ClauseClassification.basis`` values:
   ``"exact_match"``        — heading matched a taxonomy label exactly.
   ``"heading_similarity"`` — Jaccard ≥ ``AUTO_CLASSIFY_THRESHOLD``.
@@ -50,11 +67,17 @@ a ``judge_error`` and a ``needs_review`` are kept as they are.
                              a below-``AMBIGUITY_THRESHOLD`` confidence so
                              these assignments are never mistaken for a
                              verified judge verdict downstream (issue #86).
+  ``"content_similarity"`` — a node left unclassified by every other path,
+                             assigned by comparing its text with our
+                             standard's own clause text per taxonomy_id
+                             (issue #235), at a confidence capped at
+                             ``CONTENT_CONFIDENCE_CAP``.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -96,6 +119,31 @@ INHERITED_CONFIDENCE_CAP: float = 0.6
 #222): a heading-less child takes ``min(parent_confidence, 0.6)`` — below
 ``AMBIGUITY_THRESHOLD``, so an inherited assignment always reads as uncertain."""
 
+CONTENT_ASSIGN_THRESHOLD: float = 0.25
+"""Minimum content similarity (issue #235) between an unclassified node's text
+and our standard's clause text for one taxonomy_id before the node is assigned
+that type. Measured on the NDA example's six deals (stopword-filtered token
+Jaccard, ``_CONTENT_STOP_WORDS``): the seven correct third-party matches score
+0.28-0.53 in their terminal versions; the clauses that must stay unclassified
+score at most 0.12 (our-paper personal-data clause), 0.11 (``Confidential
+Information`` definition) and 0.06 (the no-obligation clause). 0.25 sits in the
+gap, and ``CONTENT_MARGIN_RATIO`` covers the near-ties above it."""
+
+CONTENT_MARGIN_RATIO: float = 2.0
+"""The best content score must also be at least this many times the
+runner-up's: an assignment between two nearly-equal types would be a guess.
+Measured: the seven correct matches lead their runner-up by 3.0x-13.1x; the
+near-ties that clear the threshold (a trade-secret survival sentence, 0.25 vs
+0.15; a permitted-disclosure sentence, 0.30 vs 0.17) lead by 1.6x-1.8x and are
+rejected. Never lower the ratio below 1.5 to recover a clause: a wrong
+assignment plants a false precedent."""
+
+CONTENT_CONFIDENCE_CAP: float = 0.5
+"""Ceiling on the confidence of a ``basis="content_similarity"`` classification
+(issue #235): ``min(best_score, 0.5)`` — below ``AMBIGUITY_THRESHOLD``, so a
+content assignment never reads as a verified judge verdict (same rule as
+``"llm_segmenter"``, issue #86, and ``INHERITED_CONFIDENCE_CAP``)."""
+
 _BASIS_VALUES = frozenset(
     {
         "exact_match",
@@ -106,6 +154,7 @@ _BASIS_VALUES = frozenset(
         "unclassified",
         "llm_segmenter",
         "inherited",
+        "content_similarity",
     }
 )
 
@@ -132,6 +181,44 @@ _STOP_WORDS: frozenset[str] = frozenset(
         "this",
         "to",
         "with",
+    }
+)
+
+#: Stop words for the content-similarity test (issue #235): ``_STOP_WORDS``
+#: plus contract boilerplate present in nearly every clause of every agreement
+#: type (modals, "party", "agreement", pronouns, relatives). Deliberately
+#: contains no agreement-type vocabulary ("confidential", "student", ...):
+#: those words are what separates one clause type from another, and the
+#: engine is agreement-type-general. Numerals are kept (``_normalize`` keeps
+#: digits), so "five (5) years" and "thirty (30) days" count as content.
+_CONTENT_STOP_WORDS: frozenset[str] = _STOP_WORDS | frozenset(
+    {
+        "any",
+        "agreement",
+        "been",
+        "each",
+        "either",
+        "has",
+        "have",
+        "if",
+        "it",
+        "may",
+        "not",
+        "other",
+        "parties",
+        "party",
+        "shall",
+        "such",
+        "than",
+        "their",
+        "then",
+        "these",
+        "those",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "will",
     }
 )
 
@@ -259,6 +346,7 @@ def classify_tree(
     *,
     ambiguity_threshold: float = AMBIGUITY_THRESHOLD,
     auto_classify_threshold: float = AUTO_CLASSIFY_THRESHOLD,
+    content_exemplars: Mapping[str, str] | None = None,
 ) -> list[ClassifiedClause]:
     """Classify every node in *tree* against *taxonomy*.
 
@@ -289,6 +377,16 @@ def classify_tree(
                                  — at or above this Jaccard similarity a
                                  clause is auto-classified without the judge.
                                  Defaults to ``AUTO_CLASSIFY_THRESHOLD``.
+        content_exemplars:       Optional ``{taxonomy_id: our standard's clause
+                                 text}`` (issue #235; every template node of
+                                 the type, joined). When given, a node still
+                                 ``basis="unclassified"`` after the heading
+                                 paths, the judge and parent inheritance is
+                                 compared with each eligible exemplar and
+                                 assigned under ``basis="content_similarity"``
+                                 (see :func:`assign_by_content`). ``None`` or
+                                 empty (emergent mode, and the template
+                                 itself) makes this a no-op.
 
     Returns:
         One ``ClassifiedClause`` per node in ``tree.all_nodes()`` order. A
@@ -372,7 +470,8 @@ def classify_tree(
             results[idx] = ClassifiedClause(node=nodes[idx], classification=classification)
 
     final = [r for r in results if r is not None]
-    return _inherit_from_parents(tree, final)
+    inherited = _inherit_from_parents(tree, final)
+    return assign_by_content(inherited, content_exemplars, eligible_ids=eligible_by_id)
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +526,86 @@ def _inherit_from_parents(
                 confidence=min(parent_cls.confidence, INHERITED_CONFIDENCE_CAP),
                 basis="inherited",
             ),
+        )
+    return out
+
+
+def _content_tokens(text: str) -> frozenset[str]:
+    """Content words of *text* for the content-similarity test (issue #235):
+    lowercase, punctuation stripped, ``_CONTENT_STOP_WORDS`` dropped, numerals
+    kept."""
+    return frozenset(w for w in _normalize(text).split() if w not in _CONTENT_STOP_WORDS)
+
+
+def assign_by_content(
+    classified: list[ClassifiedClause],
+    content_exemplars: Mapping[str, str] | None,
+    *,
+    eligible_ids: Collection[str] | None = None,
+) -> list[ClassifiedClause]:
+    """Assign still-unclassified nodes by content similarity to our standard
+    (issue #235; see the module docstring).
+
+    Every node whose basis is ``"unclassified"`` and that has body text is
+    scored (token Jaccard over ``_content_tokens``) against each exemplar in
+    *content_exemplars* — ``{taxonomy_id: our standard's clause text}``, every
+    template node of the type joined, restricted to *eligible_ids* when given
+    (active/custom taxonomy entries only, OPF §5). It becomes
+    ``basis="content_similarity"`` only when the best score is at least
+    ``CONTENT_ASSIGN_THRESHOLD`` AND at least ``CONTENT_MARGIN_RATIO`` times
+    the runner-up's, with confidence ``min(best, CONTENT_CONFIDENCE_CAP)``.
+    Everything else — including a node a judge, a heading or parent
+    inheritance classified, a ``judge_error`` and a ``needs_review`` — is
+    returned unchanged, in the same order.
+
+    Deterministic and keyless: a pure function of the node text and the
+    exemplars. A no-op when *content_exemplars* is ``None`` or empty (emergent
+    mode). Callers MUST NOT pass exemplars when classifying the template
+    itself — they come from the template's own classification.
+
+    Used by :func:`classify_tree` and, for the LLM/agent segmentation path
+    (which bypasses ``classify_tree``), by the pipeline directly, so the
+    fallback applies wherever a node's final basis is ``"unclassified"``.
+    """
+    if not content_exemplars:
+        return classified
+    exemplar_tokens = [
+        (tid, _content_tokens(text))
+        for tid, text in sorted(content_exemplars.items())
+        if (eligible_ids is None or tid in eligible_ids) and (text or "").strip()
+    ]
+    exemplar_tokens = [(tid, toks) for tid, toks in exemplar_tokens if toks]
+    if not exemplar_tokens:
+        return classified
+    out: list[ClassifiedClause] = []
+    for cc in classified:
+        cls = cc.classification
+        text = (cc.node.text or "").strip()
+        if cls.basis != "unclassified" or cls.taxonomy_id is not None or not text:
+            out.append(cc)
+            continue
+        node_tokens = _content_tokens(text)
+        if not node_tokens:
+            out.append(cc)
+            continue
+        scored = sorted(
+            ((_jaccard(node_tokens, toks), tid) for tid, toks in exemplar_tokens),
+            key=lambda pair: (-pair[0], pair[1]),
+        )
+        best, best_tid = scored[0]
+        runner_up = scored[1][0] if len(scored) > 1 else 0.0
+        if best < CONTENT_ASSIGN_THRESHOLD or best < CONTENT_MARGIN_RATIO * runner_up:
+            out.append(cc)
+            continue
+        out.append(
+            ClassifiedClause(
+                node=cc.node,
+                classification=ClauseClassification(
+                    taxonomy_id=best_tid,
+                    confidence=min(best, CONTENT_CONFIDENCE_CAP),
+                    basis="content_similarity",
+                ),
+            )
         )
     return out
 

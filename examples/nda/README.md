@@ -40,8 +40,8 @@ precedent.jsonl          -- the sidecar `playbook project` writes beside
 
 `playbook.opf.json` is committed as an **OPF 0.4** document (`opf_version`
 "0.4", issue #223): the verdict-free per-deal precedent record with a
-`digest_version` "3" digest. 26 clauses across all six deals, one
-`evidence.precedent` record per (deal, clause): what each deal signed, whether
+`digest_version` "3" digest. 26 clauses across all six deals, 127
+`evidence.precedent` records, one per (deal, clause): what each deal signed, whether
 that is our standard language (`standard` — an exact match after
 normalization, never a judged verdict), whether the clause moved, and the
 asks refused before signing. It demonstrates a real refused ask from a
@@ -94,6 +94,25 @@ the one-letter fragment "c". In `theta-logistics` and `zeta-diagnostics` the
 compelled-disclosure clause gained an appended notice proviso (Jaccard 0.48).
 It splits into removed + added, and the removed text is counted as
 `survives_in_terminal`.
+
+**What the counterparty-paper deals contribute (issue #235).** `theta-logistics`
+and `zeta-diagnostics` use their own headings ("Exceptions", "Protection",
+"Required Disclosure", ...), so the heading paths leave fifteen clauses in
+each unclassified. L3's keyless content-similarity fallback
+(`content_similarity`, see `clause_classifier`) compares each such clause with
+our standard form's own text per clause type and assigns it only when the best
+match scores at least 0.25 AND at least twice the runner-up. Seven clauses in
+each deal clear that bar: exclusions, standard of care, compelled disclosure,
+survival, injunctive relief, venue and entire agreement. Each of those seven
+types now has `n_deals` 6 (it was 4) and 14 more precedent records between
+the two deals. The weak cases stay unclassified: the DocuSign envelope line
+and "Confidential Information means ..." (0.11) are not guessed, and the
+near-ties (permitted disclosure to representatives, 0.30 vs 0.17) are
+rejected by the margin. On our own paper nothing changes: the personal-data
+clause, beta's two non-solicits and the DocuSign line stay unclassified, and
+every record that existed before is byte-identical. The basis is a compiler
+heuristic at a confidence below 0.70, never a verified verdict; `playbook mine`
+prints the coverage by basis, and paper side plays no part in it.
 
 **It is reproducible from the committed inputs above, with no
 `ANTHROPIC_API_KEY`:**

@@ -161,6 +161,8 @@ If `has_canonical_template` is `false`, the playbook is *emergent*. The provenan
 
 ### 3.3 `taxonomy`
 A curated clause taxonomy (unchanged from v0.1). Entries may be inactive so curation survives upstream taxonomy upgrades. A compiler MUST only classify clauses into `active` or `custom` entries.
+
+How a compiler reached a clause's `taxonomy_id` is the compiler's own record, not part of the format. The reference engine's classification bases are: an exact match of the clause heading to an entry label; heading similarity; a judge's verdict; inheritance from the clause's classified parent; the LLM segmenter's combined pass; and `content_similarity`, a deterministic fallback that assigns a clause every other path left unclassified when its text is close enough to the compiler's own standard text for exactly one entry (a token-overlap score of at least 0.25 and at least twice the runner-up's, at a confidence below 0.70). A content-similarity assignment is a compiler heuristic, never a verified verdict, and the engine assigns nothing on a guess: a clause that scores below the threshold, or whose best and runner-up entries are close, stays unclassified. The engine keeps the basis as the vendor key `x_classification_basis` on its observation store; it is not written into `evidence`, and no section is partitioned by it (prose only; no schema change).
 ```jsonc
 {
   "source": "CUAD-v1",
