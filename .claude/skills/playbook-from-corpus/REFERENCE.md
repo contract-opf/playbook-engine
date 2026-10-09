@@ -118,6 +118,102 @@ counterparty's paper.
   safe choice — it attributes less favorable positions to the counterparty,
   not to us).
 
+### Equivalence (`kind: equivalence`)
+
+Queued by `playbook judge` AFTER mining, once a canonical template is
+configured: one item per DISTINCT non-standard text of the precedent record (a
+deal's signed text, a non-standard opening, a refused ask) that has no verdict
+against our standard yet. The same words in ten deals, on either paper, in any
+role, are one item and one shared verdict (the key is over the agreement type,
+clause type, `perspective.party`, the text and our standard, never a deal or a
+paper side). A text that exactly matches our standard (`standard: true`) is
+never queued, and neither is any text in emergent mode (no template, no
+`our_standard`).
+
+**Input fields:** `taxonomy_id`, `taxonomy_title`, `perspective_party`,
+`our_standard` (our standard text for the clause type), `candidate` (the text
+to judge), `roles` (which of `signed` / `opening` / `refused` it plays).
+`agreement_type_id` and `stage` are context. There is no deal name,
+counterparty, paper side or outcome in the payload; none of those may enter
+your answer.
+
+**Task:** Compare the candidate's legal effect for `perspective_party` with
+our standard's, and answer with one label and one sentence.
+
+**Prompt (adapt as needed):**
+
+> You are comparing a clause with our standard clause for the same clause
+> type. Perspective: {perspective_party}.
+>
+> Our standard:
+> ---
+> {our_standard}
+> ---
+>
+> Candidate:
+> ---
+> {candidate}
+> ---
+>
+> Which describes the candidate relative to our standard, for
+> {perspective_party}?
+> - `equivalent` -- the same legal effect (wording, order and defined-term
+>   names may differ)
+> - `more_protective` -- better for {perspective_party} than our standard
+> - `less_protective` -- worse for {perspective_party} than our standard
+> - `different_concept` -- it does something our standard does not (or omits
+>   what it does), so the two cannot be ranked
+>
+> Respond with JSON: `{"label": "<one of the four>", "reason": "<one
+> sentence naming the operative difference>", "basis": "agent"}`
+
+**Rules:**
+- `reason` is ONE sentence naming the operative difference, never a restatement
+  of the label. No deal, party or counterparty names.
+- Judge the language, not the negotiation. Do not use how the deal ended, who
+  proposed the text, or whose paper it was on.
+- `basis` is required: `"agent"` when you (the coder or agent) judge,
+  `"judge"` for the store-backed judge, `"owner"` only for an after-the-fact
+  correction by the owner (it wins over any agent or check answer and is never
+  checked).
+- Do not write `check`: checks are recorded only by `judge-apply --check`.
+- When the candidate does something our standard does not (or the two cannot
+  be ranked), `different_concept` is the honest label: it makes no
+  protectiveness claim. Do not invent a ranking. A text you leave out of the
+  verdict file stays queued (and `null` in the playbook), so the drain loop
+  cannot finish until it is answered.
+
+**The blind check.** Every drafted verdict is then checked by a SEPARATE
+agent pinned to `claude-opus-5-5` at reasoning effort `xhigh`, which never
+sees the draft:
+
+```bash
+playbook judge --check equivalence $OUT --config <config>
+# -> $OUT/judge/check-pending.jsonl: the drafter's payload WITHOUT label/reason
+# -> $OUT/judge/adjudication-pending.jsonl: disputed items (both answers)
+```
+
+Answer each queue line with `{"key", "label", "reason", "model", "effort"}`,
+writing the model id you actually ran on and the effort, then:
+
+```bash
+playbook judge-apply $OUT --check $OUT/my-checks-<date>.jsonl
+```
+
+`judge-apply --check` rejects a record whose `model` is not `claude-opus-5-5`
+or whose `effort` is not `xhigh` unless `--allow-checker-model` is passed. A
+match keeps the verdict (`check: {agreed: true, ...}`); a mismatch keeps the
+draft flagged `agreed: false` and queues it for adjudication, which a FRESH
+pinned agent answers (its answer replaces the verdict, `adjudicated: true`).
+Every line of a `--check` file is judged against the store as it stood before
+that file, and a key repeated in one file is rejected: record the adjudication
+answers in a later file, after re-running `judge --check equivalence`.
+The drafter never answers its own check. `playbook judge --check equivalence
+--api` answers both queues through the Message Batches API when
+`ANTHROPIC_API_KEY` is set (a refusal leaves the item unchecked; there is no
+fallback model). An unchecked draft still reaches the playbook (`check:
+null`): nothing blocks.
+
 ---
 
 ## Verdict format
@@ -162,6 +258,9 @@ shown for each kind below:
   bases like `template_similarity` / `alias_first_party` / `hint` are set by
   the engine itself, not by you).
 - Scope — no `basis` field; it is forced to `"judge"` on replay.
+- Equivalence — `basis` is REQUIRED and is one of `"agent"` (you),
+  `"judge"` (the store-backed judge) or `"owner"` (an owner correction);
+  anything else is rejected.
 
 **Classification verdict:**
 ```json
@@ -199,6 +298,18 @@ document's `clause_heads`.
 ```
 An out-of-scope document (`in_scope: false`) is retained but excluded from the
 playbook.
+
+**Equivalence verdict** (`kind: equivalence`) — one per distinct text; exactly
+`label`, `reason`, `basis` and nothing else:
+```json
+{
+  "label": "less_protective",
+  "reason": "Drops the recipient's burden of establishing that an exclusion applies.",
+  "basis": "agent"
+}
+```
+`label` is `equivalent`, `more_protective`, `less_protective` or
+`different_concept`, relative to `perspective_party`.
 
 ### SegNode (agent segmentation — `segment` / `segment-apply`, issue #191)
 
@@ -268,7 +379,8 @@ restate existing rules — that would discard thousands of sound verdicts.
 **The derived half** needs no discipline; it moves on its own when the
 machine-readable rubric moves: the classifier-eligible taxonomy entries
 (id + label + description) for `classify`, the agreement-type definition for
-`scope`, the answer vocabulary for `provenance`. Editing
+`scope`, the answer vocabulary for `provenance`, the label vocabulary for
+`equivalence`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is

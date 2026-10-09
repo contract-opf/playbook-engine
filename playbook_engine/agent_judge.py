@@ -26,6 +26,9 @@ Components:
 - ``StoreBackedClassificationJudge`` — implements ``ClassificationJudge``.
 - ``StoreBackedProvenanceJudge``     — implements ``ProvenanceJudge``.
 - ``StoreBackedScopeJudge``          — implements ``ScopeJudge``.
+- ``StoreBackedEquivalenceJudge``    — the ``equivalence`` kind (issue #240):
+  one verdict per distinct text against our standard, queued after mining
+  (it needs the precedent record, not a seam inside ``mine_corpus``).
 
 These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, provenance_judge=…)``.
@@ -76,6 +79,12 @@ from typing import Any
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
+from playbook_engine.equivalence import (
+    EQUIVALENCE_KIND,
+    EquivalenceSubject,
+    validate_draft_verdict,
+    vs_standard_of,
+)
 from playbook_engine.provenance_detector import (
     _PROVENANCE_VALUES,
     PROVENANCE_UNKNOWN,
@@ -520,6 +529,10 @@ def _validate_provenance(verdict: dict[str, Any]) -> None:
     )
 
 
+def _validate_equivalence(verdict: dict[str, Any]) -> None:
+    validate_draft_verdict(verdict)
+
+
 def _validate_scope(verdict: dict[str, Any]) -> None:
     if not isinstance(verdict.get("in_scope"), bool):
         raise ValueError("'in_scope' must be a JSON boolean")
@@ -543,6 +556,7 @@ _VERDICT_KINDS: dict[
     "provenance": (_validate_provenance, lambda v: "provenance" in v),
     "scope": (_validate_scope, lambda v: "in_scope" in v),
     "classify": (_validate_classify, lambda v: "taxonomy_id" in v),
+    EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "label" in v),
 }
 
 
@@ -575,8 +589,9 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     ``ValueError`` with an actionable message on the first problem.
 
     Args:
-        kind:    Pending-item kind: ``classify`` / ``provenance`` / ``scope``
-                 (or a kind added with :func:`register_verdict_kind`).
+        kind:    Pending-item kind: ``classify`` / ``provenance`` / ``scope`` /
+                 ``equivalence`` (or a kind added with
+                 :func:`register_verdict_kind`).
         verdict: The verdict dict from the producer's JSONL line.
     """
     basis = verdict.get("basis")
@@ -933,3 +948,52 @@ class StoreBackedScopeJudge:
             f"No stored scope verdict for document {tree.document_id!r} — "
             "queued for external review."
         )
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedEquivalenceJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedEquivalenceJudge:
+    """Replays stored ``vs_standard`` verdicts or queues new equivalence payloads.
+
+    The ``equivalence`` kind (issue #240). Unlike the three judges above it
+    has no seam inside ``mine_corpus``: the questions come from the precedent
+    record (a deal's signed text, a non-standard opening, a refused ask,
+    each against our standard), which exists only once the observation store
+    is projected. ``playbook judge`` therefore calls :meth:`judge` for every
+    subject after mining, and ``playbook project`` calls it with
+    ``pending=None`` to read labels without queueing anything.
+
+    A hit whose rubric moved (stale, or legacy under ``--strict-rubric``) or
+    whose stored record is malformed is not replayed: it is re-queued (when a
+    queue is attached) and the text stays ``null``. A miss is queued, never
+    guessed.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: EquivalenceSubject) -> dict[str, Any] | None:
+        """The ``vs_standard`` object for *subject*, or ``None`` when unjudged."""
+        current_rubric = rubric_version(EQUIVALENCE_KIND)
+        record = self.store.get_record_by_key(subject.key)
+        if (
+            record is not None
+            and self.rubric.evaluate(EQUIVALENCE_KIND, record.rubric_version, current_rubric).replay
+        ):
+            try:
+                return vs_standard_of(record.verdict)
+            except ValueError as exc:
+                _log.warning(
+                    "StoreBackedEquivalenceJudge: malformed stored verdict for key %s (%s); "
+                    "treating as unjudged",
+                    subject.key,
+                    exc,
+                )
+        if self.pending is not None:
+            self.pending.add(subject.key, EQUIVALENCE_KIND, subject.payload, current_rubric)
+        return None

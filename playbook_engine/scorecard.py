@@ -49,6 +49,10 @@ from typing import Any
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
+from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
+from playbook_engine.equivalence import ROLES as EQUIVALENCE_ROLES
+from playbook_engine.equivalence import summarize as summarize_equivalence
+from playbook_engine.equivalence_check import CHECKER_MODEL
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.observation_builder import (
     DROPPED_ORIGIN_UNDETERMINED,
@@ -57,7 +61,7 @@ from playbook_engine.observation_builder import (
     DROPPED_SURVIVES_IN_TERMINAL,
     OUTCOME_OPENING,
 )
-from playbook_engine.opf_accessors import playbook_clauses
+from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 
 __all__ = [
     "SCORECARD_FILENAME",
@@ -83,7 +87,11 @@ __all__ = [
 #: share of our-paper signed deals opening with our standard) and
 #: ``template_drift.over_one_third_below_half``; ``opening`` rows are no
 #: longer counted as classification observations.
-SCORECARD_VERSION = 3
+#:
+#: v4 (issue #240): the ``equivalence`` section (``vs_standard`` verdicts
+#: drafted / checked / agreed / adjudicated / unchecked by role, the agreement
+#: rate and the checker model ids seen in the store).
+SCORECARD_VERSION = 4
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -123,7 +131,15 @@ DROPPED_REASONS = frozenset(
 #: ``PendingQueue`` record kinds (agent_judge / agent_segmenter). A kind added
 #: through ``agent_judge.register_verdict_kind`` must be added here too, or its
 #: pending items are counted under ``other``.
-PENDING_KINDS = frozenset({"classify", "provenance", "scope", "segment"})
+PENDING_KINDS = frozenset({"classify", "provenance", "scope", "segment", "equivalence"})
+
+#: Checker model ids the scorecard names (the pinned one); any other recorded
+#: id is written as ``other`` — a model id from the store is still data from
+#: the out-dir.
+CHECKER_MODELS = frozenset({CHECKER_MODEL})
+
+#: ``vs_standard`` labels and the three roles a judged text can play.
+EQUIVALENCE_VOCABULARY = frozenset(EQUIVALENCE_LABELS) | frozenset(EQUIVALENCE_ROLES)
 
 #: Observation ``provenance`` values — the paper-side diagnostic split.
 PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
@@ -146,6 +162,8 @@ ENUM_LABELS = frozenset(
     | OPENED_WITH
     | OPF_VERSIONS
     | DIGEST_VERSIONS
+    | CHECKER_MODELS
+    | EQUIVALENCE_VOCABULARY
 )
 
 
@@ -570,6 +588,31 @@ def _dropped_section(playbook: dict[str, Any] | None, manifest: Any) -> dict[str
     return {"count": sum(by_reason.values()), "by_reason": _sorted_counts(by_reason)}
 
 
+def _equivalence_section(playbook: dict[str, Any] | None, out_dir: Path) -> dict[str, Any] | None:
+    """The ``vs_standard`` verdicts of the playbook, by role (issue #240).
+
+    Distinct texts, counts only: how many are eligible, drafted, checked,
+    agreed, adjudicated, still disputed and unchecked, per role and in total;
+    the label histogram; the agreement rate (agreed over checked); and the
+    checker model id(s) recorded in the verdict store.
+    """
+    if playbook is None:
+        return None
+    evidence = playbook.get("evidence")
+    agreement_type = playbook.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    if not isinstance(evidence, dict) or not isinstance(agreement_type_id, str):
+        return None
+    summary = summarize_equivalence(evidence, agreement_type_id, perspective_party(playbook))
+    models: Counter[str] = Counter()
+    for _key, record in VerdictStore(out_dir / "judge" / "verdicts.jsonl").records():
+        check = record.verdict.get("check")
+        if isinstance(check, dict) and isinstance(check.get("by"), str):
+            models[_label(check["by"], CHECKER_MODELS)] += 1
+    summary["checker_models"] = _sorted_counts(models)
+    return summary
+
+
 def _dossiers_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
     """Critic dossier sizes (OPF 0.5, issue #228) — ``null`` until carried."""
     dossiers = playbook.get("dossiers") if playbook is not None else None
@@ -615,6 +658,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "opening_drift": _template_drift_section(playbook, field="opened_with", value="standard"),
         "dropped_observations": _dropped_section(playbook, manifest),
         "digest": _digest_section(playbook),
+        "equivalence": _equivalence_section(playbook, out_dir),
         "queues": _queues_section(out_dir),
         "dossiers": _dossiers_section(playbook),
     }

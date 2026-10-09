@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playbook_engine.agent_judge import PendingQueue, VerdictStore
+from playbook_engine.agent_judge import PendingQueue, StoreBackedEquivalenceJudge, VerdictStore
 from playbook_engine.artifact_store import (
     ArtifactStore,
     _sha256_file,
@@ -57,6 +57,7 @@ from playbook_engine.entity_registry import (
     pseudonymize_text,
     write_holdout_map,
 )
+from playbook_engine.equivalence import EquivalenceSubject, collect_subjects
 from playbook_engine.extraction import (
     FAILURE_TIMEOUT,
     ExtractionCache,
@@ -110,10 +111,12 @@ from playbook_engine.observation_builder import (
 )
 from playbook_engine.pdf_ingester import ingest_pdf
 from playbook_engine.playbook_assembler import (
+    _strip_invisible,
     assemble_playbook,
     write_playbook,
     write_precedent_sidecar,
 )
+from playbook_engine.precedent import build_precedent_evidence
 from playbook_engine.provenance_detector import (
     PROVENANCE_UNKNOWN,
     ProvenanceJudge,
@@ -4557,48 +4560,25 @@ def mine_corpus(
         )
 
 
-def project_playbook(
-    out_dir: Path,
-    config: EngineConfig,
-    taxonomy: Taxonomy,
-    *,
-    progress: Callable[[str], None] = lambda _: None,
-) -> dict[str, Any]:
-    """Run L5 only — read the observation store and write ``playbook.opf.json``.
+@dataclass(frozen=True)
+class _ProjectionStore:
+    """What L5 reads from a ``mine`` out-dir (see :func:`_read_projection_store`)."""
 
-    Reads from ``{out_dir}/``:
+    corpus_documents: list[dict[str, Any]]
+    observations: list[Observation]
+    template_observations: list[Observation]
+    round_moves: list[RoundMove]
+    scope_bases: list[str]
 
-    - ``observations.jsonl``          — written by :func:`mine_corpus`.
-    - ``corpus_manifest.json``        — written by :func:`mine_corpus`.
-    - ``template_observations.jsonl`` — written by :func:`mine_corpus` (may be absent or empty).
-    - ``scope.json``                  — written by :func:`mine_corpus` (may be absent; only
-                                        feeds the assembler's stub-basis watermark, issue #101).
-    - ``playbook.opf.json``           — a PRIOR compile's output, if present, read only for
-                                        its ``posture`` and ``floor`` sections, which a
-                                        recompile carries forward verbatim (issue #123).
-                                        Absent on a first compile.
 
-    All L5 logic is deterministic given the store — zero LLM calls.
-
-    Args:
-        out_dir:         Output directory that already contains the observation store.
-        config:          Engine configuration (agreement type, baseline, taxonomy).
-        taxonomy:        Loaded taxonomy object.
-        progress:        Callable receiving progress message strings.
-
-    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.5, the one format the
-    engine emits — issue #238), ``{out_dir}/coherence_flags.json`` (the
-    fragment-quarantine warnings) and ``{out_dir}/precedent.jsonl`` — one
-    ``evidence.precedent`` record per line, sorted by id, whose sha256 the
-    playbook records under ``x_sidecars`` (issue #224; see
-    ``write_precedent_sidecar``).
-
-    Returns:
-        Validated playbook dict (also written to ``{out_dir}/playbook.opf.json``).
+def _read_projection_store(
+    out_dir: Path, *, progress: Callable[[str], None] = lambda _: None
+) -> _ProjectionStore:
+    """Read the observation store L5 compiles from — shared by ``project`` and
+    the equivalence queue (issue #240), so both see exactly the same texts.
 
     Raises:
-        PipelineError:  If the observation store is missing or empty.
-        AssemblyError:  If the assembled playbook fails schema validation.
+        PipelineError: the store is missing or empty.
     """
     obs_path = out_dir / "observations.jsonl"
     manifest_path = out_dir / "corpus_manifest.json"
@@ -4653,17 +4633,148 @@ def project_playbook(
     if t_observations:
         progress(f"  loaded {len(t_observations)} template observation(s) from store")
 
-    # -----------------------------------------------------------------------
-    # L5: Compile playbook (deterministic given the store)
-    # -----------------------------------------------------------------------
-    progress("L5: compiling clause types + precedent…")
-
     # Round moves (issue #177) — absent for pre-#177 stores or
     # single-version corpora; read_round_moves_jsonl returns [] then and
     # every precedent records rounds = 0.
     round_moves = read_round_moves_jsonl(out_dir / "round_moves.jsonl")
     if round_moves:
         progress(f"  loaded {len(round_moves)} round move(s) from store")
+
+    return _ProjectionStore(
+        corpus_documents=corpus_documents,
+        observations=all_observations,
+        template_observations=t_observations,
+        round_moves=round_moves,
+        scope_bases=scope_bases,
+    )
+
+
+def _perspective_dict(config: EngineConfig) -> dict[str, str] | None:
+    """The playbook's ``perspective`` object (issue #165), or ``None``.
+
+    Emitted only when BOTH party and counterparty_type are known — the OPF
+    schema requires the whole object or nothing, and neither field may be
+    fabricated (see ``assemble_playbook``'s ``perspective``). A party-only
+    default (from ``provenance.our_party_aliases``) lives on
+    ``config.perspective`` for other consumers, but is not sufficient on its
+    own to answer "what kind of counterparty is across the table".
+    """
+    if config.perspective.party is not None and config.perspective.counterparty_type is not None:
+        return {
+            "party": config.perspective.party,
+            "counterparty_type": config.perspective.counterparty_type,
+        }
+    return None
+
+
+def equivalence_subjects(
+    out_dir: Path, config: EngineConfig, taxonomy: Taxonomy
+) -> list[EquivalenceSubject]:
+    """The distinct texts of *out_dir*'s precedent record to judge against our standard.
+
+    Issue #240. Rebuilds the very evidence ``project_playbook`` would write —
+    same store, same clause positions, same invisible-character strip, same
+    ``perspective.party`` — and returns :func:`~playbook_engine.equivalence.collect_subjects`
+    over it, so the keys a judge round queues are the keys ``project`` later
+    looks up. Empty when no canonical template is configured (emergent mode:
+    no clause has an ``our_standard``) or when *out_dir* holds no
+    observation store yet.
+    """
+    if not config.baseline.has_canonical_template:
+        return []
+    try:
+        store = _read_projection_store(out_dir)
+    except PipelineError:
+        return []
+    clause_positions, _flags, _coverage = compile_clause_positions(
+        store.observations,
+        store.template_observations,
+        taxonomy_titles={e.id: e.label for e in taxonomy.entries},
+    )
+    perspective = _perspective_dict(config)
+    party = perspective["party"] if perspective else None
+    evidence = _strip_invisible(
+        build_precedent_evidence(
+            agreement_type_id=config.agreement_type.id,
+            clause_positions=clause_positions,
+            observations=store.observations,
+            corpus_documents=store.corpus_documents,
+            round_moves=store.round_moves,
+            party=party,
+        )
+    )
+    return collect_subjects(evidence, config.agreement_type.id, party)
+
+
+def queue_equivalence(
+    out_dir: Path,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    judge: StoreBackedEquivalenceJudge,
+) -> tuple[int, int]:
+    """Ask *judge* about every equivalence subject of *out_dir*; return ``(subjects, unjudged)``.
+
+    A subject with no replayable stored verdict is queued on the judge's
+    pending queue (deduplicated by key).
+    """
+    subjects = equivalence_subjects(out_dir, config, taxonomy)
+    unjudged = sum(1 for subject in subjects if judge.judge(subject) is None)
+    return len(subjects), unjudged
+
+
+def project_playbook(
+    out_dir: Path,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    *,
+    progress: Callable[[str], None] = lambda _: None,
+) -> dict[str, Any]:
+    """Run L5 only — read the observation store and write ``playbook.opf.json``.
+
+    Reads from ``{out_dir}/``:
+
+    - ``observations.jsonl``          — written by :func:`mine_corpus`.
+    - ``corpus_manifest.json``        — written by :func:`mine_corpus`.
+    - ``template_observations.jsonl`` — written by :func:`mine_corpus` (may be absent or empty).
+    - ``scope.json``                  — written by :func:`mine_corpus` (may be absent; only
+                                        feeds the assembler's stub-basis watermark, issue #101).
+    - ``playbook.opf.json``           — a PRIOR compile's output, if present, read only for
+                                        its ``posture`` and ``floor`` sections, which a
+                                        recompile carries forward verbatim (issue #123).
+                                        Absent on a first compile.
+
+    All L5 logic is deterministic given the store — zero LLM calls.
+
+    Args:
+        out_dir:         Output directory that already contains the observation store.
+        config:          Engine configuration (agreement type, baseline, taxonomy).
+        taxonomy:        Loaded taxonomy object.
+        progress:        Callable receiving progress message strings.
+
+    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.5, the one format the
+    engine emits — issue #238), ``{out_dir}/coherence_flags.json`` (the
+    fragment-quarantine warnings) and ``{out_dir}/precedent.jsonl`` — one
+    ``evidence.precedent`` record per line, sorted by id, whose sha256 the
+    playbook records under ``x_sidecars`` (issue #224; see
+    ``write_precedent_sidecar``).
+
+    Returns:
+        Validated playbook dict (also written to ``{out_dir}/playbook.opf.json``).
+
+    Raises:
+        PipelineError:  If the observation store is missing or empty.
+        AssemblyError:  If the assembled playbook fails schema validation.
+    """
+    store = _read_projection_store(out_dir, progress=progress)
+    # -----------------------------------------------------------------------
+    # L5: Compile playbook (deterministic given the store)
+    # -----------------------------------------------------------------------
+    progress("L5: compiling clause types + precedent…")
+    corpus_documents = store.corpus_documents
+    all_observations = store.observations
+    t_observations = store.template_observations
+    round_moves = store.round_moves
+    scope_bases = store.scope_bases
 
     taxonomy_titles = {e.id: e.label for e in taxonomy.entries}
     clause_positions, coherence_flags, unclassified_coverage = compile_clause_positions(
@@ -4725,14 +4836,22 @@ def project_playbook(
     # docstring). A party-only default (from provenance.our_party_aliases)
     # lives on config.perspective for other consumers, but is not sufficient
     # on its own to answer "what kind of counterparty is across the table".
-    perspective_dict: dict[str, str] | None = None
-    if config.perspective.party is not None and config.perspective.counterparty_type is not None:
-        perspective_dict = {
-            "party": config.perspective.party,
-            "counterparty_type": config.perspective.counterparty_type,
-        }
+    perspective_dict = _perspective_dict(config)
 
     generated_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+
+    # Issue #240: each eligible text's ``vs_standard`` is read from the run's
+    # verdict store (``<out>/judge/verdicts.jsonl``) when there is one — a
+    # read-only judge (no queue), so ``project`` never writes a pending item;
+    # a text with no replayable verdict stays null and is reported, not
+    # guessed. Only a template-mode run has any ``our_standard`` to judge
+    # against; the store file is read only when it exists, so a run that never
+    # judged anything validates without a store.
+    equivalence_judge: StoreBackedEquivalenceJudge | None = None
+    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
+    if config.baseline.has_canonical_template and verdicts_path.is_file():
+        equivalence_judge = StoreBackedEquivalenceJudge(store=VerdictStore(verdicts_path))
+        progress(f"  equivalence verdicts: {verdicts_path}")
 
     # Issue #123: read the PRIOR compile's `posture` and `floor`, if a
     # playbook already exists in out_dir, and carry them forward VERBATIM.
@@ -4769,6 +4888,7 @@ def project_playbook(
         existing_posture=existing_posture,
         existing_floor=existing_floor,
         round_moves=round_moves,
+        equivalence_judge=equivalence_judge,
     )
 
     write_playbook(playbook, out_file)

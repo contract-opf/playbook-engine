@@ -403,7 +403,9 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
     ``observations.jsonl`` with stub-mode sentinels.
 
     Every deviation is the deterministic standard check, so no judge is
-    wired for it: only scope, classification and provenance are judged.
+    wired for it: only scope, classification and provenance are judged while
+    mining (the equivalence label is read at ``project`` and queued by
+    ``playbook judge`` after mining, issue #240).
 
     The L1-L4 stage cache stays ON (issue #219 — this used to force
     ``no_cache=True``, re-mining every document on every round). The
@@ -628,7 +630,14 @@ def validate(file: Path) -> None:
         click.secho(f"ERROR: could not parse {file}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
-    result = validate_document(doc)
+    # Issue #240: next to a derivation's playbook sits its verdict store; with
+    # it, every vs_standard label must trace to a stored verdict.
+    from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
+
+    verdicts_path = file.resolve().parent / "judge" / "verdicts.jsonl"
+    result = validate_document(
+        doc, verdict_store=VerdictStore(verdicts_path) if verdicts_path.is_file() else None
+    )
 
     for err in result.errors:
         color = "red" if err.blocking else "yellow"
@@ -1291,6 +1300,33 @@ def mine_cmd(
     click.secho(f"OK  {out_dir / 'observations.jsonl'}", fg="green")
 
 
+def _echo_equivalence_report(playbook: dict[str, Any], echo: Callable[[str], None]) -> None:
+    """Report the ``vs_standard`` coverage of a projected playbook (issue #240).
+
+    Counts only. An unjudged text stays ``null`` in the playbook, so the number
+    left to judge is reported rather than hidden. Silent when nothing is
+    eligible (emergent mode, or every non-standard text already exact).
+    """
+    from playbook_engine.equivalence import summarize  # noqa: PLC0415
+    from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
+
+    agreement_type = playbook.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    evidence = playbook.get("evidence")
+    if not isinstance(agreement_type_id, str) or not isinstance(evidence, dict):
+        return
+    totals = summarize(evidence, agreement_type_id, perspective_party(playbook))["totals"]
+    if not totals["eligible"]:
+        return
+    echo(
+        f"equivalence: {totals['eligible']} distinct text(s), {totals['drafted']} labelled "
+        f"({totals['unchecked']} unchecked, {totals['disputed']} disputed), "
+        f"{totals['unjudged']} unjudged"
+    )
+    if totals["unjudged"]:
+        echo("  run `playbook judge` to queue the unjudged texts, then `judge-apply` and project")
+
+
 @cli.command(name="project")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
 @click.option(
@@ -1329,7 +1365,7 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
     click.echo(f"config : {config_path}")
 
     try:
-        project_playbook(
+        playbook = project_playbook(
             out_dir=out_dir_resolved,
             config=cfg,
             taxonomy=taxonomy,
@@ -1339,6 +1375,7 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
+    _echo_equivalence_report(playbook, click.echo)
     click.secho(f"OK  {out_dir_resolved / 'playbook.opf.json'}", fg="green")
 
 
@@ -1699,6 +1736,103 @@ def stage_cmd(
     click.secho(f"OK  {dest}", fg="green")
 
 
+def _queue_equivalence_round(mined_dir: Path, cfg: Any, taxonomy: Any, judge: Any) -> None:
+    """Queue the equivalence questions of the store just mined into *mined_dir* (issue #240).
+
+    A no-op without a canonical template (no clause has an ``our_standard``
+    to be compared with). Runs after mining because the questions come from the
+    precedent record, not from a seam inside ``mine_corpus``.
+    """
+    from playbook_engine.pipeline import queue_equivalence  # noqa: PLC0415
+
+    if not cfg.baseline.has_canonical_template:
+        return
+    subjects, unjudged = queue_equivalence(mined_dir, cfg, taxonomy, judge)
+    click.echo(
+        f"  equivalence: {subjects} distinct text(s) against our standard, {unjudged} unjudged"
+    )
+
+
+def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api: bool) -> None:
+    """``playbook judge --check equivalence OUT``: emit (and with --api, answer) the check queues."""
+    from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
+    from playbook_engine.equivalence_check import (  # noqa: PLC0415
+        apply_check_records,
+        build_check_queues,
+        check_via_api,
+        write_check_queues,
+    )
+    from playbook_engine.pipeline import equivalence_subjects  # noqa: PLC0415
+
+    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
+    if not out_dir.is_dir() or not (out_dir / "observations.jsonl").is_file():
+        click.secho(
+            f"ERROR: {out_dir} holds no observation store — run `playbook mine` first",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    if not cfg.baseline.has_canonical_template:
+        click.secho(
+            "OK  no canonical template configured: nothing is judged against a standard, "
+            "so there is nothing to check",
+            fg="green",
+        )
+        return
+    subjects = equivalence_subjects(out_dir, cfg, taxonomy)
+    store = VerdictStore(verdicts_path)
+    queues = build_check_queues(store, subjects)
+
+    if use_api:
+        import anthropic  # noqa: PLC0415
+
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            click.secho(
+                "ERROR: --api needs ANTHROPIC_API_KEY (Anthropic credentials were not found); "
+                "answer the queues with a claude-opus-5-5 / xhigh agent instead and record "
+                "them with `playbook judge-apply --check`",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1)
+        client = anthropic.Anthropic()
+        unchecked = 0
+        for stage, items in (("check", queues.check), ("adjudication", None)):
+            if items is None:
+                # The adjudication queue is rebuilt after the checks are applied.
+                queues = build_check_queues(store, subjects)
+                items = queues.adjudication
+            records, missed = check_via_api(items, client=client, progress=click.echo)
+            unchecked += missed
+            try:
+                result = apply_check_records(
+                    store, [(i, r) for i, r in enumerate(records, start=1)]
+                )
+            except ValueError as exc:
+                click.secho(f"ERROR: {stage} answers rejected: {exc}", fg="red", err=True)
+                raise SystemExit(1) from exc
+            for key, verdict in result.updates:
+                prior = store.get_record_by_key(key)
+                store.put_by_key(key, verdict, rubric=prior.rubric if prior else None)
+            click.echo(
+                f"  {stage}: {len(records)} answered, {missed} left unchecked "
+                f"(agreed {result.agreed}, disagreed {result.disagreed}, "
+                f"adjudicated {result.adjudicated})"
+            )
+        queues = build_check_queues(store, subjects)
+        if unchecked:
+            click.secho(f"WARN: {unchecked} item(s) left unchecked", fg="yellow", err=True)
+
+    check_path, adjudication_path = write_check_queues(out_dir / "judge", queues)
+    click.secho(f"OK  {check_path}", fg="green")
+    click.echo(
+        f"equivalence check: {len(queues.check)} to check, {len(queues.adjudication)} to "
+        f"adjudicate, {queues.settled} settled, {queues.undrafted} not drafted yet"
+    )
+    if queues.adjudication:
+        click.echo(f"  adjudication queue: {adjudication_path}")
+
+
 @cli.command(name="judge")
 @click.argument("corpus_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1769,6 +1903,31 @@ def stage_cmd(
     ),
 )
 @click.option(
+    "--check",
+    "check_kind",
+    type=click.Choice(["equivalence"]),
+    default=None,
+    help=(
+        "Instead of mining, write the blind-check queue for drafted verdicts of this kind "
+        "(judge/check-pending.jsonl: the drafter's payload, no label or reason) and the "
+        "adjudication queue for disputed ones (judge/adjudication-pending.jsonl). With "
+        "--check the first argument is the derivation OUT dir. Answer the queues with a "
+        "separate claude-opus-5-5 / xhigh agent and record the answers with "
+        "`playbook judge-apply --check`, or pass --api."
+    ),
+)
+@click.option(
+    "--api",
+    "use_api",
+    is_flag=True,
+    default=False,
+    help=(
+        "With --check: answer the check and adjudication queues through the Anthropic "
+        "Message Batches API (claude-opus-5-5, effort xhigh; needs ANTHROPIC_API_KEY) and "
+        "record the answers. A refusal leaves the item unchecked; there is no fallback model."
+    ),
+)
+@click.option(
     "--skip-preflight",
     "skip_preflight",
     is_flag=True,
@@ -1785,13 +1944,23 @@ def judge_cmd(
     accept_stale: bool,
     strict_rubric: bool,
     entity_registry_path: Path | None,
+    check_kind: str | None,
+    use_api: bool,
     skip_preflight: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
 
-    Only scope, classification and provenance items are queued: every
-    deviation is the deterministic standard check, so nothing is judged for it.
+    Scope, classification and provenance items are queued while mining, and
+    once a canonical template is configured an ``equivalence``
+    item for every distinct non-standard text of the precedent record — a
+    deal's signed text, a non-standard opening, a refused ask — that has no
+    verdict against our standard yet. Every deviation is the deterministic
+    standard check, so nothing is judged for it.
+
+    ``--check equivalence OUT`` skips mining and queues the independent blind
+    check (and adjudication) of the verdicts already drafted into OUT; see the
+    option's help.
 
     Reads the verdict store at <out>/judge/verdicts.jsonl and replays any
     previously supplied verdicts.  For every new clause payload not in the store,
@@ -1816,6 +1985,7 @@ def judge_cmd(
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
         StoreBackedClassificationJudge,
+        StoreBackedEquivalenceJudge,
         StoreBackedProvenanceJudge,
         StoreBackedScopeJudge,
         VerdictStore,
@@ -1833,6 +2003,13 @@ def judge_cmd(
     except TaxonomyError as exc:
         click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
+
+    if use_api and check_kind is None:
+        click.secho("ERROR: --api only applies with --check", fg="red", err=True)
+        raise SystemExit(1)
+    if check_kind is not None:
+        _judge_check_equivalence((out_path or corpus_dir).resolve(), cfg, taxonomy, use_api=use_api)
+        return
 
     out_dir = (out_path or corpus_dir.parent / "out").resolve()
     judge_dir = out_dir / "judge"
@@ -1952,6 +2129,14 @@ def judge_cmd(
                     progress=click.echo,
                     **seg_kwargs,
                 )
+                _queue_equivalence_round(
+                    Path(_tmp) / "mine_out",
+                    cfg,
+                    taxonomy,
+                    StoreBackedEquivalenceJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
+                )
             except PipelineError as exc:
                 click.secho(f"ERROR: {exc}", fg="red", err=True)
                 raise SystemExit(1) from exc
@@ -2041,6 +2226,12 @@ def judge_cmd(
             entity_registry_path=(entity_registry_path.resolve() if entity_registry_path else None),
             progress=click.echo,
             **seg_kwargs,
+        )
+        _queue_equivalence_round(
+            out_dir,
+            cfg,
+            taxonomy,
+            StoreBackedEquivalenceJudge(store=store, pending=pending_queue, rubric=rubric_policy),
         )
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
@@ -2133,16 +2324,77 @@ def judge_cmd(
         os.replace(tmp_pending, pending_path)
 
 
+def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: bool) -> None:
+    """``judge-apply --check``: record equivalence check / adjudication answers."""
+    from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
+    from playbook_engine.equivalence_check import (  # noqa: PLC0415
+        apply_check_records,
+        load_check_records,
+    )
+
+    out_dir_resolved = out_dir.resolve()
+    if not out_dir_resolved.is_dir():
+        click.secho(f"ERROR: {out_dir_resolved} does not exist", fg="red", err=True)
+        raise SystemExit(1)
+    store = VerdictStore(out_dir_resolved / "judge" / "verdicts.jsonl")
+    try:
+        result = apply_check_records(
+            store, load_check_records(check_path), allow_checker_model=allow_checker_model
+        )
+    except ValueError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    for key, verdict in result.updates:
+        prior = store.get_record_by_key(key)
+        # Same rubric stamp as the draft: the check answers the question as asked.
+        store.put_by_key(key, verdict, rubric=prior.rubric if prior else None)
+    click.secho(
+        f"OK  recorded {len(result.updates)} check answer(s) into "
+        f"{out_dir_resolved / 'judge' / 'verdicts.jsonl'}",
+        fg="green",
+    )
+    click.echo(
+        f"  agreed {result.agreed}, disagreed {result.disagreed} (awaiting adjudication), "
+        f"adjudicated {result.adjudicated}, owner-decided (skipped) {result.skipped_owner}"
+    )
+    if result.disagreed:
+        click.echo("  re-run `playbook judge --check equivalence` to queue the disagreements")
+
+
 @cli.command(name="judge-apply")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
 @click.option(
     "--verdicts",
     "verdicts_path",
     type=click.Path(exists=True, path_type=Path),
-    required=True,
+    default=None,
     help="JSONL file of verdicts to load (each line: {'key': '<sha256>', 'verdict': {...}}).",
 )
-def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
+@click.option(
+    "--check",
+    "check_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help=(
+        "JSONL file of equivalence check or adjudication answers instead of verdicts (each "
+        "line: {'key', 'label', 'reason', 'model', 'effort'}). A record whose model is not "
+        "claude-opus-5-5 or whose effort is not xhigh is rejected unless "
+        "--allow-checker-model is passed."
+    ),
+)
+@click.option(
+    "--allow-checker-model",
+    "allow_checker_model",
+    is_flag=True,
+    default=False,
+    help="With --check: accept a checker model or effort other than claude-opus-5-5 / xhigh.",
+)
+def judge_apply_cmd(
+    out_dir: Path,
+    verdicts_path: Path | None,
+    check_path: Path | None,
+    allow_checker_model: bool,
+) -> None:
     """Load verdicts from a JSONL file into the verdict store.
 
     Reads OUT_DIR/judge/verdicts.jsonl (created by ``playbook judge``) and
@@ -2156,8 +2408,23 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
     After applying verdicts, re-run ``playbook judge`` to confirm the pending
     queue is empty, then run ``playbook mine`` + ``playbook project`` to compile
     the final playbook with the judged taxonomy_ids populated.
+
+    ``--check FILE`` loads the answers to the equivalence blind-check and
+    adjudication queues (``playbook judge --check equivalence``) instead; see
+    the option.
     """
     import json  # noqa: PLC0415
+
+    if (verdicts_path is None) == (check_path is None):
+        click.secho("ERROR: pass exactly one of --verdicts or --check", fg="red", err=True)
+        raise SystemExit(1)
+    if allow_checker_model and check_path is None:
+        click.secho("ERROR: --allow-checker-model only applies with --check", fg="red", err=True)
+        raise SystemExit(1)
+    if check_path is not None:
+        _judge_apply_check(out_dir, check_path, allow_checker_model)
+        return
+    assert verdicts_path is not None
 
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         VerdictStore,

@@ -88,6 +88,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from playbook_engine.equivalence import EQUIVALENCE_KIND, LABELS
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
 #: The pending-item kinds a store-backed judge can produce. Grows through
 #: :func:`register_judge_kind`.
-JUDGE_KINDS: tuple[str, ...] = ("classify", "provenance", "scope")
+JUDGE_KINDS: tuple[str, ...] = ("classify", "provenance", "scope", EQUIVALENCE_KIND)
 
 # ---------------------------------------------------------------------------
 # Manual half — bump by hand when the PROSE rubric changes semantically
@@ -124,6 +125,11 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     "classify": "v2",
     "provenance": "v1",
     "scope": "v1",
+    # Issue #240: the vs_standard equivalence label. The prose rubric is the
+    # skill's equivalence step (compare the candidate's legal effect for
+    # perspective.party with our standard's); the label vocabulary is the
+    # derived half, so adding or renaming a label re-queues every verdict.
+    EQUIVALENCE_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -250,6 +256,7 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     "scope": lambda *, taxonomy, agreement_type: {
         "agreement_type": _agreement_type_surface(agreement_type)
     },
+    EQUIVALENCE_KIND: lambda *, taxonomy, agreement_type: {"labels": list(LABELS)},
 }
 
 

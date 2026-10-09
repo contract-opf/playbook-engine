@@ -19,7 +19,8 @@ standard-form.rtf        -- AlphaCorp's canonical NDA template
 corpus/                  -- six fictional negotiations (four on our paper, two
                              on counterparty paper)
 canned-verdicts.jsonl    -- pre-computed judge verdicts (classification,
-                             provenance, scope) for every item the
+                             provenance, scope, and the 27 `vs_standard`
+                             equivalence labels) for every item the
                              deterministic pipeline can't resolve on its own
                              (deviation is never judged by default -- it is
                              the deterministic standard check)
@@ -94,6 +95,19 @@ the one-letter fragment "c". In `theta-logistics` and `zeta-diagnostics` the
 compelled-disclosure clause gained an appended notice proviso (Jaccard 0.48).
 It splits into removed + added, and the removed text is counted as
 `survives_in_terminal`.
+
+**How each distinct text compares with our standard (issue #240).** Every
+non-standard text the record carries (24 distinct signed texts, 3 distinct
+non-standard openings, 1 distinct refused ask: 27 in all) has a `vs_standard`
+label judged once against the standard form, shared by every deal that
+carries the same words: 7 equivalent (for example the four parties clauses
+that only fill the counterparty name into the template's placeholder), 3 more
+protective, 12 less protective, 5 a different concept (a different governing
+law or venue). The canned verdicts are `basis: "agent"` with `check: null`:
+this fully offline example runs no independent check, which is what a
+real run adds with `playbook judge --check equivalence`. An exact match with
+the standard (`standard: true`) is never labelled, and `vs_standard` is
+`null` on it.
 
 **What every clause opened with (issue #233).** Every precedent says what
 its clause opened with, as a fact, whatever the origin of the first draft's
