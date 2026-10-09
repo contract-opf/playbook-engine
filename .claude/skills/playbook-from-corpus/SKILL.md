@@ -1303,10 +1303,13 @@ the host — the container has no browser):
   treat anything leaving the org as needing its own review.
 
 The digest — the model-facing projection — is the `digest` section inside
-`playbook.opf.json` (for a 0.5 playbook, `digest_version` 3: per clause our
-standard, the signed variants and refused asks grouped by exact normalization
-with distinct-deal counts and citations, no stance or verdict; target ~40K
-tokens). There is no standalone digest file.
+`playbook.opf.json` (for a 0.5 playbook, `digest_version` 4: per clause our
+standard, how many deals opened with it and kept it, the signed variants (each
+with how many were conceded from our standard and how many signed as proposed;
+the variants judged equivalent to our standard collapse into one entry), the
+refused asks and the openings not signed as proposed, grouped by exact
+normalization with distinct-deal counts and citations, plus the clause types
+with no evidence at all; verdict-free except the one judged `vs_standard` label on each text; target ~40K tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
 disk** — the bundle contains it, never replaces it. A consumer extracts the

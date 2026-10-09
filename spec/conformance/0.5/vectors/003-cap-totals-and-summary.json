@@ -3,7 +3,7 @@
   "description": "One clause with seven distinct signed variants: the digest lists the top 5 (n_deals desc, last_signed desc with unknown last, then normalized text) and n_variants_total reports all 7. The two-deal variant's text exceeds 300 characters, pinning the sentence-boundary summary (a verbatim prefix ending on a sentence end, <= 300 chars). our_standard is null.",
   "opf_version": "0.5",
   "engine_version": "1.0.0",
-  "digest_version": "3",
+  "digest_version": "4",
   "input": {
     "opf_version": "0.5",
     "agreement_type": {
@@ -27,7 +27,10 @@
           "n_deals": 8,
           "n_signed_standard": 0,
           "n_variants": 7,
-          "n_refused": 0
+          "n_refused": 0,
+          "n_opened_standard": 0,
+          "n_kept_standard": 0,
+          "n_changed_openings": 0
         }
       ],
       "precedent": [
@@ -321,15 +324,15 @@
     }
   },
   "expected": {
-    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-1\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-2\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-3\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-4\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-5\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-6\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-7\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-8\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.limitation_of_liability\",\"n_deals\":8,\"n_refused\":0,\"n_signed_standard\":0,\"n_variants\":7,\"our_standard\":null,\"taxonomy_id\":\"limitation_of_liability\",\"title\":\"Limitation of Liability\"}],\"precedent\":[{\"document_id\":\"deal-1\",\"id\":\"prec.22c50d618e1622cd\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-1\",\"version\":3},\"text\":\"Liability is capped at 1 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-2\",\"id\":\"prec.6023df17826f29d1\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-2\",\"version\":3},\"text\":\"Liability is capped at 2 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-3\",\"id\":\"prec.b9b632fd533701ce\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-3\",\"version\":3},\"text\":\"Liability is capped at 3 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-4\",\"id\":\"prec.1cf74df5835f3df4\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-4\",\"version\":3},\"text\":\"Liability is capped at 4 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-5\",\"id\":\"prec.3285ec99facbf0da\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-5\",\"version\":3},\"text\":\"Liability is capped at 5 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-6\",\"id\":\"prec.a193d3aa7de2fbca\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-6\",\"version\":3},\"text\":\"Liability is capped at 6 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-7\",\"id\":\"prec.8ef82662373be97f\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-7\",\"version\":3},\"text\":\"Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-8\",\"id\":\"prec.764fe7983c7e3ea4\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2025-05-05\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-8\",\"version\":3},\"text\":\"Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"}]},\"floor\":{},\"opf_version\":\"0.5\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
-    "content_hash": "sha256:2adc420ccecbdf7b6cabbbebeffd7fc008927542a706bf055f5fc360960a3149",
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-1\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-2\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-3\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-4\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-5\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-6\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-7\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-8\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.limitation_of_liability\",\"n_changed_openings\":0,\"n_deals\":8,\"n_kept_standard\":0,\"n_opened_standard\":0,\"n_refused\":0,\"n_signed_standard\":0,\"n_variants\":7,\"our_standard\":null,\"taxonomy_id\":\"limitation_of_liability\",\"title\":\"Limitation of Liability\"}],\"precedent\":[{\"document_id\":\"deal-1\",\"id\":\"prec.22c50d618e1622cd\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-1\",\"version\":3},\"text\":\"Liability is capped at 1 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-2\",\"id\":\"prec.6023df17826f29d1\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-2\",\"version\":3},\"text\":\"Liability is capped at 2 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-3\",\"id\":\"prec.b9b632fd533701ce\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-3\",\"version\":3},\"text\":\"Liability is capped at 3 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-4\",\"id\":\"prec.1cf74df5835f3df4\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-4\",\"version\":3},\"text\":\"Liability is capped at 4 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-5\",\"id\":\"prec.3285ec99facbf0da\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-5\",\"version\":3},\"text\":\"Liability is capped at 5 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-6\",\"id\":\"prec.a193d3aa7de2fbca\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-6\",\"version\":3},\"text\":\"Liability is capped at 6 times the fees paid.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-7\",\"id\":\"prec.8ef82662373be97f\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-7\",\"version\":3},\"text\":\"Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"},{\"document_id\":\"deal-8\",\"id\":\"prec.764fe7983c7e3ea4\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_at\":\"2025-05-05\",\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-8\",\"version\":3},\"text\":\"Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.\"},\"standard\":false,\"taxonomy_id\":\"limitation_of_liability\"}]},\"floor\":{},\"opf_version\":\"0.5\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:54ecb70a6735142524219115b51c3c4c425e4f5f4f16dd43e1ed81a472be2709",
     "section_digests": {
-      "evidence": "sha256:ec6a9e716984335d907ab0dc5279f66ce2b062e9698bf28eae5dcf41717282a6",
+      "evidence": "sha256:a02979e91a74a62b861d3ac92912b4a897cacd72662e95c84d03d1a85cfb843d",
       "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
       "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     },
     "digest": {
-      "digest_version": "3",
+      "digest_version": "4",
       "perspective": null,
       "agreement_type": {
         "id": "conformance-fixture",
@@ -349,11 +352,24 @@
           "our_standard": null,
           "n_deals": 8,
           "n_signed_standard": 0,
+          "n_opened_standard": 0,
+          "n_kept_standard": 0,
+          "positions": {
+            "standard": 0,
+            "equivalent": 0,
+            "more_protective": 0,
+            "less_protective": 0,
+            "different_concept": 0,
+            "unjudged": 8
+          },
           "signed_variants": [
             {
               "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars.",
               "n_deals": 2,
               "last_signed": "2025-05-05",
+              "n_from_standard": 0,
+              "n_unchanged": 2,
+              "label": null,
               "ref": {
                 "document_id": "deal-8",
                 "version": 3,
@@ -372,6 +388,9 @@
               "text": "Liability is capped at 1 times the fees paid.",
               "n_deals": 1,
               "last_signed": null,
+              "n_from_standard": 0,
+              "n_unchanged": 1,
+              "label": null,
               "ref": {
                 "document_id": "deal-1",
                 "version": 3,
@@ -389,6 +408,9 @@
               "text": "Liability is capped at 2 times the fees paid.",
               "n_deals": 1,
               "last_signed": null,
+              "n_from_standard": 0,
+              "n_unchanged": 1,
+              "label": null,
               "ref": {
                 "document_id": "deal-2",
                 "version": 3,
@@ -406,6 +428,9 @@
               "text": "Liability is capped at 3 times the fees paid.",
               "n_deals": 1,
               "last_signed": null,
+              "n_from_standard": 0,
+              "n_unchanged": 1,
+              "label": null,
               "ref": {
                 "document_id": "deal-3",
                 "version": 3,
@@ -423,6 +448,9 @@
               "text": "Liability is capped at 4 times the fees paid.",
               "n_deals": 1,
               "last_signed": null,
+              "n_from_standard": 0,
+              "n_unchanged": 1,
+              "label": null,
               "ref": {
                 "document_id": "deal-4",
                 "version": 3,
@@ -438,10 +466,13 @@
             }
           ],
           "refused_asks": [],
+          "changed_openings": [],
           "n_variants_total": 7,
-          "n_refused_total": 0
+          "n_refused_total": 0,
+          "n_changed_openings_total": 0
         }
-      ]
+      ],
+      "uncovered_clause_types": []
     }
   }
 }

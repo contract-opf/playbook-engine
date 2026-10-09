@@ -344,7 +344,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.compelled_disclosure",
@@ -365,7 +368,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 3,
+        "n_kept_standard": 3,
+        "n_changed_openings": 1
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -386,7 +392,10 @@
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.counterparts",
@@ -407,7 +416,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.definition_confidential_info",
@@ -428,7 +440,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.dispute_resolution_venue",
@@ -449,7 +464,10 @@
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 2,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.entire_agreement_amendment",
@@ -470,7 +488,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.exclusions_from_confidential",
@@ -491,7 +512,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 1
+        "n_refused": 1,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 1
       },
       {
         "id": "clause.export_control",
@@ -512,7 +536,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.governing_law",
@@ -533,7 +560,10 @@
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 2,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.injunctive_relief",
@@ -554,7 +584,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.limitation_of_liability",
@@ -564,7 +597,10 @@
         "n_deals": 3,
         "n_signed_standard": 0,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "n_changed_openings": 1
       },
       {
         "id": "clause.no_license_ip_ownership",
@@ -585,7 +621,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.no_obligation_to_proceed",
@@ -606,7 +645,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.no_warranty_as_is",
@@ -627,7 +669,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.notice_of_unauthorized_disclosure",
@@ -648,7 +693,10 @@
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.notices",
@@ -669,7 +717,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.parties_and_recitals",
@@ -690,7 +741,10 @@
         "n_deals": 4,
         "n_signed_standard": 0,
         "n_variants": 4,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.permitted_disclosure_reps",
@@ -711,7 +765,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.purpose_permitted_use",
@@ -732,7 +789,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.residuals",
@@ -742,7 +802,10 @@
         "n_deals": 1,
         "n_signed_standard": 0,
         "n_variants": 0,
-        "n_refused": 1
+        "n_refused": 1,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.return_or_destruction",
@@ -763,7 +826,10 @@
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.severability",
@@ -784,7 +850,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.standard_of_care",
@@ -805,7 +874,10 @@
         "n_deals": 6,
         "n_signed_standard": 3,
         "n_variants": 2,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "n_changed_openings": 0
       },
       {
         "id": "clause.survival_period",
@@ -826,7 +898,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 2,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 1
       },
       {
         "id": "clause.term",
@@ -847,7 +922,10 @@
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
-        "n_refused": 0
+        "n_refused": 0,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "n_changed_openings": 0
       }
     ],
     "precedent": [
@@ -4836,7 +4914,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-09T06:21:54+00:00",
+      "generated_at": "2026-10-09T08:29:49+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -4869,7 +4947,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:bea582cb0f639ec21efd855ad3b8ae615ae227cdb80766850e7d47554eb47554"
+      "grounded_in": "evidence@sha256:025848111a68be211f85957c47f8bf1f776ecbb5456edeb3be85709a3554493f"
     }
   },
   "floor": {
@@ -4889,7 +4967,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-09T06:21:55+00:00",
+        "x_signed_at": "2026-10-09T08:29:50+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -5268,7 +5346,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-09T06:21:53+00:00",
+    "generated_at": "2026-10-09T08:29:48+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -5278,7 +5356,7 @@
     }
   },
   "digest": {
-    "digest_version": "3",
+    "digest_version": "4",
     "perspective": {
       "party": "AlphaCorp Holdings, Inc.",
       "counterparty_type": "Prospective Commercial Counterparty"
@@ -5312,11 +5390,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5333,8 +5424,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.compelled_disclosure",
@@ -5354,20 +5447,38 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 3,
+        "n_kept_standard": 3,
+        "positions": {
+          "standard": 4,
+          "equivalent": 2,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
-            "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+            "label": "equivalent",
             "n_deals": 2,
+            "n_texts": 1,
+            "n_from_standard": 0,
+            "n_unchanged": 0,
             "last_signed": null,
-            "ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "7",
-              "char_span": [
-                1564,
-                1842
-              ]
-            },
+            "exemplars": [
+              {
+                "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+                "ref": {
+                  "document_id": "theta-logistics",
+                  "version": 2,
+                  "clause_path": "7",
+                  "char_span": [
+                    1564,
+                    1842
+                  ]
+                }
+              }
+            ],
             "precedent_ids": [
               "prec.2cbae90493c10f2c",
               "prec.5f2a8af137fc29ac"
@@ -5375,8 +5486,30 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [
+          {
+            "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
+            "n_deals": 1,
+            "n_to_standard": 1,
+            "n_struck": 0,
+            "label": "less_protective",
+            "ref": {
+              "document_id": "epsilon-systems",
+              "version": 1,
+              "clause_path": "7",
+              "char_span": [
+                1972,
+                2136
+              ]
+            },
+            "precedent_ids": [
+              "prec.ffa283342815c2f1"
+            ]
+          }
+        ],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 1
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -5396,11 +5529,24 @@
         },
         "n_deals": 4,
         "n_signed_standard": 3,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "positions": {
+          "standard": 3,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 1,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
             "n_deals": 1,
             "last_signed": null,
+            "n_from_standard": 1,
+            "n_unchanged": 0,
+            "label": "less_protective",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -5416,8 +5562,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.counterparts",
@@ -5437,20 +5585,38 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 2,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
-            "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
+            "label": "equivalent",
             "n_deals": 2,
+            "n_texts": 1,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
             "last_signed": null,
-            "ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "21",
-              "char_span": [
-                3428,
-                3527
-              ]
-            },
+            "exemplars": [
+              {
+                "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
+                "ref": {
+                  "document_id": "theta-logistics",
+                  "version": 2,
+                  "clause_path": "21",
+                  "char_span": [
+                    3428,
+                    3527
+                  ]
+                }
+              }
+            ],
             "precedent_ids": [
               "prec.2b8c18c025c782ba",
               "prec.f21c55f1331b5dce"
@@ -5458,8 +5624,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.definition_confidential_info",
@@ -5479,10 +5647,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.dispute_resolution_venue",
@@ -5502,11 +5682,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 2,
+        "n_opened_standard": 4,
+        "n_kept_standard": 2,
+        "positions": {
+          "standard": 2,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 4,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "different_concept",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5525,6 +5718,9 @@
             "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "different_concept",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -5541,8 +5737,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 2,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.entire_agreement_amendment",
@@ -5562,11 +5760,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5583,8 +5794,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.exclusions_from_confidential",
@@ -5604,11 +5817,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 0,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5628,6 +5854,7 @@
           {
             "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
             "n_deals": 1,
+            "label": "less_protective",
             "ref": {
               "document_id": "beta-industries",
               "version": 2,
@@ -5642,8 +5869,31 @@
             ]
           }
         ],
+        "changed_openings": [
+          {
+            "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; or (c) is lawfully obtained from a third party without restriction.",
+            "n_deals": 2,
+            "n_to_standard": 0,
+            "n_struck": 0,
+            "label": "less_protective",
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 1,
+              "clause_path": "3",
+              "char_span": [
+                522,
+                817
+              ]
+            },
+            "precedent_ids": [
+              "prec.500fb6712293bc21",
+              "prec.9c4fe86ad49e975a"
+            ]
+          }
+        ],
         "n_variants_total": 1,
-        "n_refused_total": 1
+        "n_refused_total": 1,
+        "n_changed_openings_total": 1
       },
       {
         "id": "clause.export_control",
@@ -5663,10 +5913,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.governing_law",
@@ -5686,11 +5948,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 2,
+        "n_opened_standard": 4,
+        "n_kept_standard": 2,
+        "positions": {
+          "standard": 2,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 4,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "This Agreement is governed by the laws of the State of California.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "different_concept",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5709,6 +5984,9 @@
             "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "different_concept",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -5725,8 +6003,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 2,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.injunctive_relief",
@@ -5746,11 +6026,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5767,8 +6060,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.limitation_of_liability",
@@ -5777,11 +6072,24 @@
         "our_standard": null,
         "n_deals": 3,
         "n_signed_standard": 0,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "positions": {
+          "standard": 0,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 2
+        },
         "signed_variants": [
           {
             "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 0,
+            "label": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 3,
@@ -5798,8 +6106,32 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [
+          {
+            "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
+            "n_deals": 3,
+            "n_to_standard": 0,
+            "n_struck": 1,
+            "label": null,
+            "ref": {
+              "document_id": "epsilon-systems",
+              "version": 1,
+              "clause_path": "16",
+              "char_span": [
+                4200,
+                4356
+              ]
+            },
+            "precedent_ids": [
+              "prec.20c4e3248b6371c9",
+              "prec.6e17fb71a752c28a",
+              "prec.a765891d72a5733f"
+            ]
+          }
+        ],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 1
       },
       {
         "id": "clause.no_license_ip_ownership",
@@ -5819,10 +6151,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.no_obligation_to_proceed",
@@ -5842,10 +6186,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.no_warranty_as_is",
@@ -5865,20 +6221,38 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 2,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
-            "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
+            "label": "equivalent",
             "n_deals": 2,
+            "n_texts": 1,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
             "last_signed": null,
-            "ref": {
-              "document_id": "theta-logistics",
-              "version": 2,
-              "clause_path": "12",
-              "char_span": [
-                2338,
-                2451
-              ]
-            },
+            "exemplars": [
+              {
+                "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
+                "ref": {
+                  "document_id": "theta-logistics",
+                  "version": 2,
+                  "clause_path": "12",
+                  "char_span": [
+                    2338,
+                    2451
+                  ]
+                }
+              }
+            ],
             "precedent_ids": [
               "prec.06c38c92f6004e39",
               "prec.4f5cf4f840e79e05"
@@ -5886,8 +6260,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.notice_of_unauthorized_disclosure",
@@ -5907,11 +6283,24 @@
         },
         "n_deals": 4,
         "n_signed_standard": 3,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "positions": {
+          "standard": 3,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 1,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
             "n_deals": 1,
             "last_signed": null,
+            "n_from_standard": 1,
+            "n_unchanged": 0,
+            "label": "different_concept",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -5927,8 +6316,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.notices",
@@ -5948,11 +6339,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5969,8 +6373,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.parties_and_recitals",
@@ -5990,79 +6396,63 @@
         },
         "n_deals": 4,
         "n_signed_standard": 0,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "positions": {
+          "standard": 0,
+          "equivalent": 4,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
-            "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\").",
-            "n_deals": 1,
+            "label": "equivalent",
+            "n_deals": 4,
+            "n_texts": 4,
+            "n_from_standard": 0,
+            "n_unchanged": 4,
             "last_signed": null,
-            "ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "1",
-              "char_span": [
-                59,
-                425
-              ]
-            },
+            "exemplars": [
+              {
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\").",
+                "ref": {
+                  "document_id": "beta-industries",
+                  "version": 4,
+                  "clause_path": "1",
+                  "char_span": [
+                    59,
+                    425
+                  ]
+                }
+              },
+              {
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\").",
+                "ref": {
+                  "document_id": "delta-ventures",
+                  "version": 2,
+                  "clause_path": "1",
+                  "char_span": [
+                    59,
+                    423
+                  ]
+                }
+              }
+            ],
             "precedent_ids": [
-              "prec.1073f6d32012245b"
-            ]
-          },
-          {
-            "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\").",
-            "n_deals": 1,
-            "last_signed": null,
-            "ref": {
-              "document_id": "delta-ventures",
-              "version": 2,
-              "clause_path": "1",
-              "char_span": [
-                59,
-                423
-              ]
-            },
-            "precedent_ids": [
-              "prec.7631f2a27978434a"
-            ]
-          },
-          {
-            "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\").",
-            "n_deals": 1,
-            "last_signed": null,
-            "ref": {
-              "document_id": "epsilon-systems",
-              "version": 3,
-              "clause_path": "1",
-              "char_span": [
-                59,
-                429
-              ]
-            },
-            "precedent_ids": [
+              "prec.1073f6d32012245b",
+              "prec.22bd3a0c133a8b5b",
+              "prec.7631f2a27978434a",
               "prec.c41aecf4ae2be952"
-            ]
-          },
-          {
-            "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\").",
-            "n_deals": 1,
-            "last_signed": null,
-            "ref": {
-              "document_id": "gamma-holdings",
-              "version": 3,
-              "clause_path": "1",
-              "char_span": [
-                59,
-                426
-              ]
-            },
-            "precedent_ids": [
-              "prec.22bd3a0c133a8b5b"
             ]
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 4,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.permitted_disclosure_reps",
@@ -6082,10 +6472,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.purpose_permitted_use",
@@ -6105,10 +6507,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.residuals",
@@ -6117,11 +6531,22 @@
         "our_standard": null,
         "n_deals": 1,
         "n_signed_standard": 0,
+        "n_opened_standard": 0,
+        "n_kept_standard": 0,
+        "positions": {
+          "standard": 0,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [
           {
             "text": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
             "n_deals": 1,
+            "label": null,
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 2,
@@ -6136,8 +6561,10 @@
             ]
           }
         ],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 1
+        "n_refused_total": 1,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.return_or_destruction",
@@ -6157,10 +6584,22 @@
         },
         "n_deals": 4,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 0,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.severability",
@@ -6180,11 +6619,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "If any provision is held invalid, the remaining provisions remain in effect.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6201,8 +6653,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.standard_of_care",
@@ -6222,11 +6676,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 3,
+        "n_opened_standard": 4,
+        "n_kept_standard": 3,
+        "positions": {
+          "standard": 3,
+          "equivalent": 0,
+          "more_protective": 3,
+          "less_protective": 0,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "more_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6245,6 +6712,9 @@
             "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "n_deals": 1,
             "last_signed": null,
+            "n_from_standard": 1,
+            "n_unchanged": 0,
+            "label": "more_protective",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -6260,8 +6730,10 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 2,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
       },
       {
         "id": "clause.survival_period",
@@ -6281,28 +6753,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 1,
+          "less_protective": 1,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
-          {
-            "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
-            "n_deals": 1,
-            "last_signed": null,
-            "ref": {
-              "document_id": "zeta-diagnostics",
-              "version": 3,
-              "clause_path": "9",
-              "char_span": [
-                1946,
-                2064
-              ]
-            },
-            "precedent_ids": [
-              "prec.1c2c87601dffd71b"
-            ]
-          },
           {
             "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
             "n_deals": 1,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 0,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6315,11 +6783,53 @@
             "precedent_ids": [
               "prec.574e5b7400141bcf"
             ]
+          },
+          {
+            "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+            "n_deals": 1,
+            "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 1,
+            "label": "more_protective",
+            "ref": {
+              "document_id": "zeta-diagnostics",
+              "version": 3,
+              "clause_path": "9",
+              "char_span": [
+                1946,
+                2064
+              ]
+            },
+            "precedent_ids": [
+              "prec.1c2c87601dffd71b"
+            ]
           }
         ],
         "refused_asks": [],
+        "changed_openings": [
+          {
+            "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+            "n_deals": 1,
+            "n_to_standard": 0,
+            "n_struck": 0,
+            "label": "more_protective",
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 1,
+              "clause_path": "9",
+              "char_span": [
+                1611,
+                1729
+              ]
+            },
+            "precedent_ids": [
+              "prec.574e5b7400141bcf"
+            ]
+          }
+        ],
         "n_variants_total": 2,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 1
       },
       {
         "id": "clause.term",
@@ -6339,11 +6849,24 @@
         },
         "n_deals": 6,
         "n_signed_standard": 4,
+        "n_opened_standard": 4,
+        "n_kept_standard": 4,
+        "positions": {
+          "standard": 4,
+          "equivalent": 0,
+          "more_protective": 0,
+          "less_protective": 2,
+          "different_concept": 0,
+          "unjudged": 0
+        },
         "signed_variants": [
           {
             "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
             "n_deals": 2,
             "last_signed": null,
+            "n_from_standard": 0,
+            "n_unchanged": 2,
+            "label": "less_protective",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6360,17 +6883,33 @@
           }
         ],
         "refused_asks": [],
+        "changed_openings": [],
         "n_variants_total": 1,
-        "n_refused_total": 0
+        "n_refused_total": 0,
+        "n_changed_openings_total": 0
+      }
+    ],
+    "uncovered_clause_types": [
+      {
+        "taxonomy_id": "data_protection_personal_data",
+        "label": "Data Protection / Personal Data"
+      },
+      {
+        "taxonomy_id": "non_solicitation_employees",
+        "label": "Non-Solicitation of Employees"
+      },
+      {
+        "taxonomy_id": "trade_secret_carve_out",
+        "label": "Trade Secret Carve-Out"
       }
     ]
   },
   "identity": {
-    "content_hash": "sha256:fb24932104d13d5a5c82b2438f8da0a9f5635024e64cbaf22e9370ff51210b29",
+    "content_hash": "sha256:46f76f34b560a9c8a620f07f75ce94077751b3f14a1f4cb99cb5ff18ab527179",
     "section_digests": {
-      "evidence": "sha256:bea582cb0f639ec21efd855ad3b8ae615ae227cdb80766850e7d47554eb47554",
-      "posture": "sha256:4d3137f97d7c96a25c5832dcf7a447360bd1acd6e3f037cd04213f2fd640bc1d",
-      "floor": "sha256:28af1e8dfbb0e85da8c459d21f4d7388672f9cab494293b52a3d53dfd2702274"
+      "evidence": "sha256:025848111a68be211f85957c47f8bf1f776ecbb5456edeb3be85709a3554493f",
+      "posture": "sha256:ac1a4e441ff5cad870bf7c565d3602c06aa28cd6a44533428e6b992e80473b77",
+      "floor": "sha256:5bef34891929c6fd77b973967b63533ea5936f7ddb702236265fd5a13729bb93"
     }
   }
 }

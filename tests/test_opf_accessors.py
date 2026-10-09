@@ -26,7 +26,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.canonicalize import canonicalize, file_sha256
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
     SIDECARS_KEY,
@@ -62,7 +62,7 @@ def _restamp(doc: dict[str, Any]) -> None:
     restamp_evidence(
         doc["evidence"], str(doc["agreement_type"]["id"]), party=perspective_party(doc)
     )
-    doc["digest"] = build_digest(doc)
+    doc["digest"] = build_digest_v4(doc)
     if isinstance(doc.get(SIDECARS_KEY), dict) and PRECEDENT_SIDECAR in doc[SIDECARS_KEY]:
         doc[SIDECARS_KEY].update(precedent_sidecar_manifest(doc))
 
@@ -164,11 +164,22 @@ def test_find_precedent_ranks_by_deal_count_then_recency() -> None:
 
 def test_find_precedent_group_order_matches_the_digest() -> None:
     """The non-standard signed groups appear in find_precedent in exactly the
-    order the digest ranks its signed_variants (both rank n_deals, then
-    last_signed) — on the dated vector and on the real compiled NDA."""
+    order the digest ranks its signed groups (both rank n_deals, then
+    last_signed) — on the dated vector and on the real compiled NDA. The
+    digest's label tiers and the collapsed equivalent entry (issue #234) are
+    a presentation of these groups, so the ranking is read off the uncapped,
+    uncollapsed groups the digest is built from."""
+    from playbook_engine.digest import clause_precedent_groups
+
     for doc in (_vector_002(), _load(_NDA)):
-        digest = build_digest(doc)
+        digest = build_digest_v4(doc)
         for clause in digest["clauses"]:
+            groups = clause_precedent_groups(
+                clause["taxonomy_id"],
+                doc["evidence"]["precedent"],
+                party=(doc.get("perspective") or {}).get("party"),
+            )["signed_variants"]
+            clause = {**clause, "signed_variants": groups}
             variant_of = {
                 pid: i
                 for i, v in enumerate(clause["signed_variants"])
@@ -225,7 +236,7 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
     assert signed == sorted(signed, reverse=True)
     assert set(ranked[-5:]) == {"deal-f", *drafts}
 
-    digest = build_digest(doc)
+    digest = build_digest_v4(doc)
     clause = next(c for c in digest["clauses"] if c["taxonomy_id"] == "assignment")
     variant_of = {
         pid: i for i, v in enumerate(clause["signed_variants"]) for pid in v["precedent_ids"]

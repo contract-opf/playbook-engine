@@ -1,13 +1,13 @@
 # OPF conformance vectors — canonicalization + digest
 
 The vectors under [`0.5/`](0.5/README.md) are the **normative definition**
-of two things for OPF 0.5 / `digest_version` 3 — the one format the
+of two things for OPF 0.5 / `digest_version` 4 — the one format the
 reference engine reads and writes:
 
 1. **Canonicalization and content addressing** (`playbook_engine/canonicalize.py`)
    — the whole-document canonical form, `identity.content_hash`, and the
    three `identity.section_digests` values (`evidence` / `posture` / `floor`).
-2. **The `digest` section** (`playbook_engine/digest.py`, OPF §3.12.1) — the
+2. **The `digest` section** (`playbook_engine/digest.py`, OPF §3.12.2) — the
    compact model-facing projection of the precedent record.
 
 An independent implementation (a different language, or a hand-maintained

@@ -10,6 +10,42 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Digest 4: held and conceded counts, variant provenance, openings not
+  signed as proposed, uncovered clause types and the equivalence label
+  (issue #234, epic #236).** `digest_version` "4" replaces digest 3 in place
+  (the digest-3 builder is deleted; nothing consumed it). The digest is still
+  a deterministic projection of the precedent record, and the model still does
+  the judging. Per clause it now adds `n_opened_standard` (signed deals whose
+  clause opened with our standard) and `n_kept_standard` (of those, the ones
+  that signed it); `positions` (signed deals by standard, each `vs_standard`
+  label, or unjudged); on each signed variant `n_from_standard` (deals that
+  conceded it from our standard) and `n_unchanged` (deals that signed the
+  counterparty's opening exactly as proposed); and `changed_openings`
+  (non-standard opening language that was not signed as proposed, grouped by
+  the section 3.5.4 key, each with `n_to_standard` and `n_struck`, excluding
+  an opening that is also the same deal's refused ask) with its uncapped
+  `n_changed_openings_total`. At the top level `uncovered_clause_types` names
+  every classifier-eligible taxonomy entry with no evidence clause, so the
+  consuming reviewer can switch to its own direction instead of reading
+  silence as acceptance. **The #240 label is used here:** variants, refused
+  asks and changed openings carry their `label`; signed variants labelled
+  `equivalent` collapse into one "equivalent to our standard" entry (`n_deals`,
+  `n_texts`, at most two exemplar texts and refs); `less_protective` and
+  `different_concept` variants are listed first, then unjudged ones, then
+  `more_protective`, with the collapsed entry last; the cap applies after
+  collapsing. `evidence.clauses[]` gains `n_opened_standard`,
+  `n_kept_standard` and `n_changed_openings`, recomputed by the validator.
+  Conformance: `spec/conformance/0.5/` is regenerated for digest 4 (vectors
+  001-005 re-expected, 006 pins the opening rules, 007 the label collapse and
+  `uncovered_clause_types`). `playbook scorecard` (shape v5) reports the
+  digest counts for the acceptance run. `document_renderer` (the `view bundle`
+  page) states the new facts in plain words ("opened with our standard in N
+  signed deals; kept it in K", "from our standard in n", "signed as proposed
+  in n", a "Not signed as proposed" list and one line naming the uncovered
+  clause types). The NDA example is regenerated; its digest grows from about
+  6,000 to about 8,100 tokens, under the 40,000-token budget. OPF-SPEC gains
+  section 3.12.2.
+
 - **Judge each distinct text once against our standard: the `vs_standard`
   equivalence label (issue #240, epic #236).** The exact-match `standard`
   fact says "they signed our words unchanged", which on counterparty paper
@@ -57,6 +93,11 @@ changes` heading in the release it ships under.
   document drafting, the blind check and owner overrides.
 
 ### Normative rule changes
+
+- Digest 4 (issue #234): a present `digest` MUST equal `build_digest_v4`
+  over the document (the digest-3 construction no longer validates), and each
+  `evidence.clauses[]` entry's `n_opened_standard`, `n_kept_standard` and
+  `n_changed_openings` MUST equal what `evidence.precedent` implies.
 
 - OPF 0.5 (`spec/playbook.schema-0.5.json`, still unfrozen): a non-null
   `vs_standard` MUST NOT sit on a signed text whose `standard` is true or on

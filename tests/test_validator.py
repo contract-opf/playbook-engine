@@ -18,7 +18,7 @@ import pytest
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_position_compiler import compile_clause_positions
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import assemble_playbook
 from playbook_engine.validator import ValidationResult, load_opf_file, validate_document
@@ -82,7 +82,7 @@ def _minimal() -> dict[str, Any]:
 
 def _refresh(doc: dict[str, Any]) -> dict[str, Any]:
     """Re-derive the digest (and identity, when present) after a mutation."""
-    doc["digest"] = build_digest(doc)
+    doc["digest"] = build_digest_v4(doc)
     if "identity" in doc:
         doc["identity"]["content_hash"] = content_hash(doc)
         doc["identity"]["section_digests"] = compute_section_digests(doc)
@@ -685,7 +685,7 @@ def test_v05_rejects_edited_digest() -> None:
     clause = next(c for c in doc["digest"]["clauses"] if c["signed_variants"])
     clause["signed_variants"][0]["n_deals"] += 1
     errors = _blocking(_restamp_identity(doc))
-    assert any("digest does not equal build_digest" in e for e in errors), errors
+    assert any("digest does not equal build_digest_v4" in e for e in errors), errors
 
 
 def test_v05_rejects_digest_without_perspective_key() -> None:
@@ -713,10 +713,10 @@ def test_v05_rejects_full_text_in_digest() -> None:
 
 def test_v05_rejects_impossible_signed_at() -> None:
     doc = _nda_04()
-    from playbook_engine.digest import build_digest
+    from playbook_engine.digest import build_digest_v4
 
     doc["evidence"]["precedent"][0]["signed_at"] = "2025-13-45"
-    doc["digest"] = build_digest(doc)
+    doc["digest"] = build_digest_v4(doc)
     errors = _blocking(_restamp_identity(doc))
     assert any("signed_at" in e for e in errors), errors
 
@@ -815,7 +815,7 @@ def test_v05_paper_rejects_our_standard_from_an_unknown_paper_deal() -> None:
         "text": record["signed_text"]["text"],
         "source_ref": copy.deepcopy(record["signed_text"]["ref"]),
     }
-    doc["digest"] = build_digest(doc)
+    doc["digest"] = build_digest_v4(doc)
     errors = _blocking(_restamp_identity(doc))
     assert any("an unknown-paper deal contributes no our_standard" in e for e in errors), errors
 

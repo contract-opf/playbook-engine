@@ -530,7 +530,7 @@ def test_project_playbook_opf_version(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
     assert pb["opf_version"] == "0.5"
-    assert pb["digest"]["digest_version"] == "3"
+    assert pb["digest"]["digest_version"] == "4"
     assert "precedent" in pb["evidence"]
 
     for version in ("0.3", "0.5"):

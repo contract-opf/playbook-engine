@@ -1,9 +1,11 @@
-# OPF 0.5 conformance vectors — canonicalization + digest_version 3
+# OPF 0.5 conformance vectors — canonicalization + digest_version 4
 
 The separately stamped vector set for `opf_version` "0.5" / `digest_version`
-"3" (issues #223, #233). It replaces the 0.4 set, which the 0.5 conversion
-retired: the same four documents with the opening evidence of OPF-SPEC
-§3.5.5 added, plus vector 005. The contract (see `../README.md`): every
+"4" (issues #223, #233, #234, #240). It replaces the 0.4 set, which the 0.5
+conversion retired (the same four documents with the opening evidence of
+OPF-SPEC §3.5.5 added, plus vector 005), and the digest 3 expectations, which
+digest 4 (OPF-SPEC §3.12.2) replaced in place: vectors 001-005 now expect the
+digest 4 shape, and vectors 006 and 007 are new. The contract (see `../README.md`): every
 `vectors/*.json` is a plain-JSON `{input, expected}` pair, and an independent implementation that reproduces each vector's
 `expected.canonical` / `content_hash` / `section_digests` / `digest` from its
 `input` is conformant for this format version. `manifest.json` stamps the
@@ -11,11 +13,13 @@ format version and indexes the vectors.
 
 | Vector | Isolates |
 |---|---|
-| `001-minimal-no-perspective` | The digest 3 skeleton: `perspective` present and `null`, `agreement_type` `{id, name}`, zero corpus counts, null signing dates. |
+| `001-minimal-no-perspective` | The digest 4 skeleton: `perspective` present and `null`, `agreement_type` `{id, name}`, zero corpus counts, null signing dates, an empty `uncovered_clause_types`. |
 | `002-variants-refused-and-exclusions` | Grouping by exact normalization (case/punctuation merge, a negator does not), the `last_signed` ordering with a `YYYY-Qn` quarter, representatives, refused asks grouped across deals, and every exclusion (standard text, unsigned deals, struck clauses). |
 | `003-cap-totals-and-summary` | The top-5 cap with uncapped `n_variants_total`, the full ordering key, and the ≤ 300-char sentence-boundary summary. |
 | `004-party-alias-grouping` | The grouping key's party neutralization (OPF-SPEC §3.5.4): two deals whose texts differ only by the counterparty's `Counterparty-<n>` alias group to `n_deals` 2 (signed variants and refused asks alike); the parties' places swapped stays a separate variant (`counterparty` and `party` are distinct tokens); and the order of two one-deal variants pins the `perspective.party` rewrite. |
-| `005-opening-evidence` | The 0.5 precedent record's opening evidence (OPF-SPEC §3.5.5): `opened_with` and `opening_text` for an edited standard, a non-standard opening changed to our standard, a non-standard opening signed unchanged, a clause added in round 2 (`absent`), an unsigned deal (both null), a case-only edit (no distinct opening under the grouping key) and a struck non-standard opening (`signed_text` null, no refused ask). Opening evidence is not projected into digest 3, so `expected.digest` is unchanged by it; the vector pins that the document canonicalizes, hashes and validates. |
+| `005-opening-evidence` | The 0.5 precedent record's opening evidence (OPF-SPEC §3.5.5): `opened_with` and `opening_text` for an edited standard, a non-standard opening changed to our standard, a non-standard opening signed unchanged, a clause added in round 2 (`absent`), an unsigned deal (both null), a case-only edit (no distinct opening under the grouping key) and a struck non-standard opening (`signed_text` null, no refused ask). Digest 4 projects it: two deals opened with our standard and one kept it, one signed variant (three deals) with `n_from_standard` 1 and `n_unchanged` 1, and two changed openings (one ended at our standard, one struck). |
+| `006-opening-rules` | The digest 4 opening rules on one clause of ten deals: `n_opened_standard` / `n_kept_standard`, `n_from_standard` and `n_unchanged` on each signed variant, and `changed_openings` — a non-standard opening that ended at our standard grouped with its respelling in another deal (`n_deals` 2, `n_to_standard` 1), a struck one with no refused ask (`n_struck` 1), one excluded because the same words are its own deal's refused ask, plus `absent` and an unsigned deal that count nowhere. |
+| `007-equivalence-label-and-coverage` | The `vs_standard` label in the digest (OPF-SPEC §3.5.6, §3.12.2): equivalent variants collapse into one entry (`n_deals`, `n_texts`, two exemplars), the others keep the tier order (less protective and different concept, unjudged, more protective), `positions` counts signed deals by label, the refused ask and the changed opening carry their labels, and `uncovered_clause_types` lists the active and custom taxonomy entries with no evidence (an inactive one never appears). |
 
 **`signed_at` is producer-supplied, not reference-compiler output.** The
 reference compiler never emits `signed_at` (it extracts no signing date and

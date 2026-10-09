@@ -270,7 +270,7 @@ def test_spec_changelog_pins_v05_conformance_vectors() -> None:
 def test_spec_changelog_states_current_digest_version() -> None:
     """The changelog's stated DIGEST_VERSION must match the code, so a digest
     shape/semantics change cannot ship without the changelog noticing."""
-    from playbook_engine.digest import DIGEST_VERSION
+    from playbook_engine.digest import DIGEST_VERSION_V4 as DIGEST_VERSION
 
     changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"Current `DIGEST_VERSION`: **{DIGEST_VERSION}**" in changelog

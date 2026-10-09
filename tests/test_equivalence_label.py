@@ -757,11 +757,11 @@ def test_validator_schema_rejects_a_malformed_label() -> None:
 def _rehash(playbook: dict[str, Any]) -> dict[str, Any]:
     """Re-stamp the sidecar, digest and identity after a test edited the evidence."""
     from playbook_engine.canonicalize import compute_section_digests, content_hash
-    from playbook_engine.digest import build_digest
+    from playbook_engine.digest import build_digest_v4
     from playbook_engine.opf_accessors import SIDECARS_KEY, precedent_sidecar_manifest
 
     playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
-    playbook["digest"] = build_digest(playbook)
+    playbook["digest"] = build_digest_v4(playbook)
     playbook["identity"]["content_hash"] = content_hash(playbook)
     playbook["identity"]["section_digests"] = compute_section_digests(playbook)
     return playbook

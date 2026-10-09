@@ -41,7 +41,7 @@ precedent.jsonl          -- the sidecar `playbook project` writes beside
 
 `playbook.opf.json` is committed as an **OPF 0.5** document (`opf_version`
 "0.5", issues #223 and #233): the verdict-free per-deal precedent record with a
-`digest_version` "3" digest. 26 clauses across all six deals, 128
+`digest_version` "4" digest. 26 clauses across all six deals, 128
 `evidence.precedent` records, one per (deal, clause): what each deal signed, whether
 that is our standard language (`standard` — an exact match after
 normalization, never a judged verdict), what the clause opened with
@@ -108,6 +108,26 @@ this fully offline example runs no independent check, which is what a
 real run adds with `playbook judge --check equivalence`. An exact match with
 the standard (`standard: true`) is never labelled, and `vs_standard` is
 `null` on it.
+
+**What the digest says about it (issue #234).** The `digest` is digest 4:
+besides each clause's standard and deal counts it says how often we held our
+standard when we opened with it, whether a signed variant was a concession or
+the counterparty's own words signed unchanged, which non-standard openings
+did not survive as proposed, and which clause types the corpus has no
+evidence for. Governing law shows it: it opened with our standard in 4 deals
+and kept it in 2; the New York variant (2 deals) was reached from our
+Delaware standard in both (`n_from_standard` 2), while the California variant
+(`theta-logistics`, `zeta-diagnostics`) was the counterparty's own opening,
+signed unchanged (`n_unchanged` 2, `n_from_standard` 0). Limitation of
+liability lists the $50,000-cap opening as one entry across its three deals
+(`n_struck` 1, for `theta-logistics`), compelled disclosure lists
+`epsilon-systems`' first draft (`n_to_standard` 1), and the three taxonomy
+entries with no precedent (`data_protection_personal_data`,
+`non_solicitation_employees`, `trade_secret_carve_out`) are named in
+`uncovered_clause_types`. The seven texts judged equivalent to our standard
+collapse into one entry per clause (four entries; the four parties clauses
+become one). The digest grew from about 6,000 to
+about 8,100 tokens (chars/4), well under the 40,000-token budget.
 
 **What every clause opened with (issue #233).** Every precedent says what
 its clause opened with, as a fact, whatever the origin of the first draft's

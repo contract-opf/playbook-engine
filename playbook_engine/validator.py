@@ -576,7 +576,8 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
       ``opening_text`` differs from ``signed_text`` under the §3.5.4 grouping
       key (or ``signed_text`` is null) and ``moved`` is true;
     - each clause's ``n_deals``/``n_signed_standard``/``n_variants``/
-      ``n_refused`` equal what ``precedent`` implies
+      ``n_refused``/``n_opened_standard``/``n_kept_standard``/
+      ``n_changed_openings`` equal what ``precedent`` implies
       (``precedent.clause_counts``, grouping with the document's own
       ``perspective.party``);
     - paper side (issue #225) — metadata only, so these are honesty checks,
@@ -947,7 +948,7 @@ def _check_equivalence(
 
 
 def _check_digest(doc: dict[str, Any], result: ValidationResult) -> None:
-    """A present ``digest`` MUST equal ``build_digest(document)``.
+    """A present ``digest`` MUST equal ``build_digest_v4(document)`` (digest_version 4).
 
     The digest is a pure function of the document (issue #223) — an
     embedded digest that differs from a recomputation describes evidence the
@@ -961,10 +962,10 @@ def _check_digest(doc: dict[str, Any], result: ValidationResult) -> None:
     _check_digest_shape(doc, result)
     if not isinstance(digest, dict):
         return
-    from playbook_engine.digest import build_digest  # noqa: PLC0415
+    from playbook_engine.digest import build_digest_v4  # noqa: PLC0415
 
     try:
-        expected = build_digest(doc)
+        expected = build_digest_v4(doc)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         result.add(f"digest cannot be recomputed from this document: {exc}", path="digest")
         return
@@ -973,7 +974,7 @@ def _check_digest(doc: dict[str, Any], result: ValidationResult) -> None:
             k for k in set(digest) | set(expected) if digest.get(k) != expected.get(k)
         )
         result.add(
-            "digest does not equal build_digest(document) — it was edited, or "
+            "digest does not equal build_digest_v4(document) — it was edited, or "
             f"built from different evidence (differs in: {', '.join(differing)})",
             path="digest",
         )

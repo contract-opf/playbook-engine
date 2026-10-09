@@ -1,9 +1,9 @@
 {
   "name": "minimal-no-perspective",
-  "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null.",
+  "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 4 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null, uncovered_clause_types is an empty list.",
   "opf_version": "0.5",
   "engine_version": "1.0.0",
-  "digest_version": "3",
+  "digest_version": "4",
   "input": {
     "opf_version": "0.5",
     "agreement_type": {
@@ -43,7 +43,7 @@
       "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     },
     "digest": {
-      "digest_version": "3",
+      "digest_version": "4",
       "perspective": null,
       "agreement_type": {
         "id": "conformance-fixture",
@@ -55,7 +55,8 @@
         "first_signed": null,
         "last_signed": null
       },
-      "clauses": []
+      "clauses": [],
+      "uncovered_clause_types": []
     }
   }
 }

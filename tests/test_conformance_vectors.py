@@ -2,11 +2,11 @@
 
 ``spec/conformance/0.5/`` is the frozen, standalone-consumable (plain JSON,
 no Python import required) normative definition of canonicalization,
-content hashing, and digest construction for OPF 0.5 / digest_version 3 —
+content hashing, and digest construction for OPF 0.5 / digest_version 4 —
 the one format the engine reads and writes (issue #238; the OPF 0.3 /
 digest 2 set was retired with that format). This suite is the reference
 check: for every vector, recompute ``canonicalize_playbook``/
-``content_hash``/``compute_section_digests``/``build_digest`` from the
+``content_hash``/``compute_section_digests``/``build_digest_v4`` from the
 vector's ``input`` using THIS engine and assert the result equals the
 vector's FROZEN ``expected.*`` values byte-for-byte.
 
@@ -38,11 +38,11 @@ from playbook_engine.canonicalize import (
     compute_section_digests,
     content_hash,
 )
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 
 ROOT = Path(__file__).parent.parent
 CONFORMANCE_DIR = ROOT / "spec" / "conformance"
-#: The OPF 0.5 / digest_version 3 set (issue #223).
+#: The OPF 0.5 / digest_version 4 set (issues #223, #234).
 CONFORMANCE_DIR_V05 = CONFORMANCE_DIR / "0.5"
 
 
@@ -53,7 +53,7 @@ def test_retired_0_3_vector_set_is_gone() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 / digest_version 3 set (issue #223) — spec/conformance/0.5/
+# OPF 0.5 / digest_version 4 set (issues #223, #234) — spec/conformance/0.5/
 # ---------------------------------------------------------------------------
 
 
@@ -77,10 +77,10 @@ def test_v05_manifest_lists_every_vector_file_on_disk() -> None:
     assert manifest_files == on_disk
 
 
-def test_v05_manifest_is_stamped_0_5_digest_3() -> None:
+def test_v05_manifest_is_stamped_0_5_digest_4() -> None:
     fv = _load_manifest_v05()["format_version"]
     assert fv["opf_version"] == "0.5"
-    assert fv["digest_version"] == "3"
+    assert fv["digest_version"] == "4"
     assert fv["engine_version"]
 
 
@@ -93,8 +93,9 @@ def test_v05_vector_reproduces_exactly(filename: str) -> None:
     assert canonicalize_playbook(doc) == expected["canonical"], filename
     assert content_hash(doc) == expected["content_hash"], filename
     assert compute_section_digests(doc) == expected["section_digests"], filename
-    assert build_digest(doc) == expected["digest"], filename
-    assert expected["digest"]["digest_version"] == "3"
+    assert build_digest_v4(doc) == expected["digest"], filename
+    assert expected["digest"]["digest_version"] == "4"
+    assert vector["digest_version"] == "4"
     assert "full_text" not in json.dumps(expected["digest"])
 
 
@@ -116,7 +117,7 @@ def test_v05_mutated_digest_is_detected() -> None:
     vector = _load_vector_v05("vectors/002-variants-refused-and-exclusions.json")
     tampered = copy.deepcopy(vector["expected"]["digest"])
     tampered["clauses"][0]["signed_variants"][0]["n_deals"] += 1
-    recomputed = build_digest(vector["input"])
+    recomputed = build_digest_v4(vector["input"])
     assert recomputed != tampered
     assert recomputed == vector["expected"]["digest"]
 
@@ -149,6 +150,55 @@ def test_v05_counterparty_alias_never_splits_a_variant() -> None:
     assert [a["n_deals"] for a in entry["refused_asks"]] == [2]
     clause = vector["input"]["evidence"]["clauses"][0]
     assert (clause["n_variants"], clause["n_refused"]) == (3, 1)
+
+
+def test_v05_opening_rules_vector_pins_every_branch() -> None:
+    """006 (issue #234): edited standard, struck standard, non-standard changed
+    to standard, non-standard unchanged, struck + own refused ask (excluded
+    from changed_openings), struck with no refused ask (included, n_struck 1),
+    "absent" and an unsigned deal (ignored)."""
+    digest = _load_vector_v05("vectors/006-opening-rules.json")["expected"]["digest"]
+    clause = digest["clauses"][0]
+    assert (clause["n_opened_standard"], clause["n_kept_standard"]) == (3, 1)
+    by_text = {v["text"]: v for v in clause["signed_variants"]}
+    new_york = next(v for t, v in by_text.items() if "New York" in t)
+    texas = next(v for t, v in by_text.items() if "Texas" in t)
+    assert (new_york["n_deals"], new_york["n_from_standard"], new_york["n_unchanged"]) == (2, 1, 0)
+    assert (texas["n_deals"], texas["n_from_standard"], texas["n_unchanged"]) == (1, 0, 1)
+    assert [
+        (e["n_deals"], e["n_to_standard"], e["n_struck"]) for e in clause["changed_openings"]
+    ] == [
+        (2, 1, 0),
+        (1, 0, 1),
+    ]
+    assert clause["n_changed_openings_total"] == 2
+    assert len(clause["refused_asks"]) == 1
+    # The excluded opening is the refused ask's text; it is not also a changed opening.
+    assert clause["refused_asks"][0]["text"].lower().rstrip(".") not in {
+        e["text"].lower().rstrip(".") for e in clause["changed_openings"]
+    }
+
+
+def test_v05_label_vector_collapses_equivalent_variants_and_lists_uncovered() -> None:
+    """007 (issues #240, #234): equivalent variants are ONE entry, the rest
+    keep the tier order, and the uncovered list is the eligible taxonomy
+    entries with no evidence clause."""
+    digest = _load_vector_v05("vectors/007-equivalence-label-and-coverage.json")["expected"][
+        "digest"
+    ]
+    listed = digest["clauses"][0]["signed_variants"]
+    assert [v["label"] for v in listed] == [
+        "less_protective",
+        "different_concept",
+        None,
+        "more_protective",
+        "equivalent",
+    ]
+    collapsed = listed[-1]
+    assert (collapsed["n_deals"], collapsed["n_texts"], len(collapsed["exemplars"])) == (3, 2, 2)
+    assert "text" not in collapsed
+    assert [u["taxonomy_id"] for u in digest["uncovered_clause_types"]] == ["audit_rights", "term"]
+    assert digest["clauses"][0]["n_variants_total"] == 6
 
 
 # ---------------------------------------------------------------------------

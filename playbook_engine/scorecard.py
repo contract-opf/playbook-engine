@@ -91,7 +91,13 @@ __all__ = [
 #: v4 (issue #240): the ``equivalence`` section (``vs_standard`` verdicts
 #: drafted / checked / agreed / adjudicated / unchecked by role, the agreement
 #: rate and the checker model ids seen in the store).
-SCORECARD_VERSION = 4
+#:
+#: v5 (issue #234): the ``digest`` section gains ``n_opened_standard``,
+#: ``n_kept_standard``, ``signed_variants_n_from_standard``,
+#: ``signed_variants_n_unchanged``, ``changed_openings`` and
+#: ``uncovered_clause_types`` (digest 4); a list counts as capped against the
+#: changed openings too.
+SCORECARD_VERSION = 5
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -150,7 +156,7 @@ OPENED_WITH = frozenset({"standard", "non_standard", "absent", "undetermined"})
 #: The engine's one format; any other version a playbook claims is labelled
 #: ``other``.
 OPF_VERSIONS = frozenset({"0.5"})
-DIGEST_VERSIONS = frozenset({"3", "4"})
+DIGEST_VERSIONS = frozenset({"4"})
 
 #: Every string the scorecard may carry as a value or a data-derived key.
 ENUM_LABELS = frozenset(
@@ -460,25 +466,59 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
     digest = playbook.get("digest")
     if not isinstance(digest, dict):
         return None
-    from playbook_engine.digest import digest_token_estimate  # noqa: PLC0415
+    from playbook_engine.digest import (  # noqa: PLC0415
+        build_digest_uncapped,
+        digest_token_estimate,
+    )
 
     clauses = [c for c in digest.get("clauses") or [] if isinstance(c, dict)]
     variant_groups = 0
     refused_groups = 0
     capped = 0
+    opened_standard = 0
+    kept_standard = 0
+    changed_openings = 0
     for c in clauses:
         n_variants = _count(c.get("n_variants_total"))
         n_refused = _count(c.get("n_refused_total"))
+        n_changed = _count(c.get("n_changed_openings_total"))
         if n_variants is not None:
             variant_groups += n_variants
         if n_refused is not None:
             refused_groups += n_refused
-        shown_variants = len(c.get("signed_variants") or [])
+        if n_changed is not None:
+            changed_openings += n_changed
+        opened_standard += _count(c.get("n_opened_standard")) or 0
+        kept_standard += _count(c.get("n_kept_standard")) or 0
+        # A list is capped when it shows fewer entries than the uncapped
+        # digest holds; the collapsed equivalent variants are one entry that
+        # stands for ``n_texts`` distinct texts, so count texts, not entries.
+        shown_variants = sum(
+            (_count(v.get("n_texts")) or 1) if isinstance(v, dict) else 0
+            for v in c.get("signed_variants") or []
+        )
         shown_refused = len(c.get("refused_asks") or [])
-        if (n_variants is not None and shown_variants < n_variants) or (
-            n_refused is not None and shown_refused < n_refused
+        shown_changed = len(c.get("changed_openings") or [])
+        if (
+            (n_variants is not None and shown_variants < n_variants)
+            or (n_refused is not None and shown_refused < n_refused)
+            or (n_changed is not None and shown_changed < n_changed)
         ):
             capped += 1
+    # Signed-variant opening facts, totalled over the UNCAPPED digest so the
+    # cap cannot hide a deal. Every deal sits in exactly one variant group.
+    from_standard: int | None = 0
+    unchanged: int | None = 0
+    try:
+        for c in build_digest_uncapped(playbook)["clauses"]:
+            for v in c["signed_variants"]:
+                from_standard = (from_standard or 0) + (_count(v.get("n_from_standard")) or 0)
+                unchanged = (unchanged or 0) + (_count(v.get("n_unchanged")) or 0)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        # A playbook too malformed to rebuild its digest: report nothing
+        # rather than a half-total (the validator names the real problem).
+        from_standard = unchanged = None
+    uncovered = digest.get("uncovered_clause_types")
     return {
         "digest_version": _label(digest.get("digest_version"), DIGEST_VERSIONS),
         "token_estimate": digest_token_estimate(digest),
@@ -486,6 +526,12 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         "capped_clauses": capped,
         "signed_variant_groups": variant_groups,
         "refused_ask_groups": refused_groups,
+        "n_opened_standard": opened_standard,
+        "n_kept_standard": kept_standard,
+        "signed_variants_n_from_standard": from_standard,
+        "signed_variants_n_unchanged": unchanged,
+        "changed_openings": changed_openings,
+        "uncovered_clause_types": len(uncovered) if isinstance(uncovered, list) else None,
     }
 
 

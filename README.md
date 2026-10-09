@@ -139,7 +139,7 @@ L2  order versions        edit-distance chain anchored on the detected signed co
 L3  classify              clause → taxonomy entry (deterministic fast path, judge on the ambiguous band)
 L4  diff + attribute      per-round diffs, reversals, who-proposed-what → cited observations
 L5  compile + assemble    clause types + template our_standard, per-deal precedent,
-                          distinct-deal counts → OPF 0.5 playbook.opf.json + digest 3
+                          distinct-deal counts → OPF 0.5 playbook.opf.json + digest 4
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers each layer;
@@ -247,7 +247,9 @@ Two guards run without being asked:
 **Engine 1.0.1; OPF 1.0 (stable).** The engine reads and writes exactly one
 format, `opf_version` 0.5 — the verdict-free per-deal precedent record,
 with what each clause opened with (`opened_with`, `opening_text`; issue #233),
-and a `digest_version` 3 digest. The 0.1–0.4 formats, their
+and a `digest_version` 4 digest (held and conceded counts, variant
+provenance, openings not signed as proposed, uncovered clause types; issue
+#234). The 0.1–0.4 formats, their
 schemas and the digest 2 builder were retired (issues #238, #233): there is no
 installed consumer to stay compatible with, so a 0.1–0.4 document is
 rejected as an unsupported version; git history and

@@ -19,7 +19,7 @@ import pytest
 from playbook_engine.clause_position_compiler import (
     compile_clause_positions,
 )
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import (
     _VERSION_INGEST_SCHEMA_KEYS,
@@ -260,7 +260,7 @@ def test_assemble_opf_version() -> None:
 
     pb = _minimal_playbook()
     assert pb["opf_version"] == "0.5"
-    assert pb["digest"]["digest_version"] == "3"
+    assert pb["digest"]["digest_version"] == "4"
     assert "opf_version" not in inspect.signature(assemble_playbook).parameters
 
 
@@ -306,6 +306,9 @@ def test_assemble_clauses_carry_counts_and_no_stance() -> None:
             "n_signed_standard",
             "n_variants",
             "n_refused",
+            "n_opened_standard",
+            "n_kept_standard",
+            "n_changed_openings",
         }
 
 
@@ -704,7 +707,7 @@ def test_assemble_digest_matches_recompute_over_stripped_playbook() -> None:
     ZWSP inside a word, the other is its clean twin) must land in the SAME
     dedupe group. If the digest were built before stripping, they would form
     two separate n=1 groups instead of one n=2 group, and recomputing
-    build_digest() over the final (stripped) playbook would then disagree
+    build_digest_v4() over the final (stripped) playbook would then disagree
     with the embedded digest.
     """
     dirty = _obs(
@@ -723,7 +726,7 @@ def test_assemble_digest_matches_recompute_over_stripped_playbook() -> None:
         obs_list=[dirty, clean, _obs("governing_law", clause_path="12")],
         corpus_docs=[_corpus_doc("deal_001"), _corpus_doc("deal_002"), _corpus_doc("deal_003")],
     )
-    assert playbook["digest"] == build_digest(playbook)
+    assert playbook["digest"] == build_digest_v4(playbook)
 
 
 # ---------------------------------------------------------------------------
