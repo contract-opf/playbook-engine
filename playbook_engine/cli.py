@@ -45,7 +45,7 @@ from playbook_engine.segmentation_qa import SegmentationQAError
 from playbook_engine.taxonomy import Taxonomy, TaxonomyError, load_taxonomy, merge_taxonomy
 from playbook_engine.validator import SUPPORTED_OPF_VERSIONS, load_opf_file, validate_document
 
-# e.g. "0.4" — engine version and OPF version drift independently, so
+# e.g. "0.5" — engine version and OPF version drift independently, so
 # `--version` reports both
 # to keep bug reports unambiguous about which OPF schema a given engine
 # build validates against (issue #176).
@@ -56,7 +56,7 @@ def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
     """Exit 1 when *doc* does not claim a supported opf_version (issue #238).
 
     The engine reads exactly one format. A command that reads a playbook
-    (view bundle) must refuse a retired 0.1-0.3
+    (view bundle) must refuse a retired 0.1-0.4
     document loudly rather than render it as an empty or stale artifact —
     the same silent empty render opf_accessors exists to prevent (#154).
     The message mirrors the validator's "unsupported opf_version" error.
@@ -67,8 +67,8 @@ def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
         return
     click.secho(
         f"ERROR: {source}: unsupported opf_version {version!r} (supported: "
-        f"{_OPF_VERSIONS_STR}) — the engine reads and writes only OPF 0.4; the "
-        "0.1-0.3 formats were retired (spec/CHANGELOG.md)",
+        f"{_OPF_VERSIONS_STR}) — the engine reads and writes only OPF 0.5; the "
+        "0.1-0.4 formats were retired (spec/CHANGELOG.md)",
         fg="red",
         err=True,
     )
@@ -678,7 +678,7 @@ def resolve_citation_cmd(
 ) -> None:
     """Resolve one observation's citation to a hash-verified source file (OPF §4).
 
-    Address the citation either by --clause and --obs, or (OPF 0.4) by
+    Address the citation either by --clause and --obs, or (OPF 0.5) by
     --precedent-id. Looks up the cited (document_id, version) in
     corpus.documents[].version_files, finds the file under CORPUS-DIR whose
     sha256 matches, and prints the path plus clause_path/char_span. Exits 1 on
@@ -820,7 +820,7 @@ def precedent_cmd(
     limit: int | None,
     fmt: str,
 ) -> None:
-    """Query an OPF 0.4 playbook's precedent records.
+    """Query an OPF 0.5 playbook's precedent records.
 
     --clause returns one clause's records, ranked by how many distinct deals
     signed the same text, then by most recent signing, with unsigned deals'
@@ -848,10 +848,14 @@ def precedent_cmd(
         click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
+    # One format (issues #238, #233): a retired OPF 0.4 playbook has the same
+    # evidence.precedent shape but not the opening evidence, so it is refused
+    # by version rather than read as a 0.5 document with `opened_with` missing.
+    _refuse_unsupported_opf_version(doc, playbook_file)
     if not is_precedent_shape(doc):
         click.secho(
             f"ERROR: {playbook_file.name} carries no evidence.precedent (OPF "
-            f"{doc.get('opf_version')!s}); precedent queries need an OPF 0.4 playbook",
+            f"{doc.get('opf_version')!s}); precedent queries need an OPF 0.5 playbook",
             fg="red",
             err=True,
         )
@@ -1297,7 +1301,7 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
 
     Reads ``observations.jsonl`` and ``corpus_manifest.json`` from OUT_DIR
     (written by ``playbook mine``) and compiles them into a schema-valid
-    OPF 0.4 ``playbook.opf.json`` (the one format the engine emits) plus its
+    OPF 0.5 ``playbook.opf.json`` (the one format the engine emits) plus its
     ``precedent.jsonl`` sidecar, using purely deterministic logic — zero
     ingest work, zero LLM calls.
 

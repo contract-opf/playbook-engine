@@ -92,7 +92,7 @@ def _signed_observation(observation_id: str = "doc-a/2/1.1") -> dict[str, Any]:
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.4",
+        "opf_version": "0.5",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
@@ -112,7 +112,6 @@ def _minimal_doc(**overrides: Any) -> dict[str, Any]:
                 "evidence": "sha256:" + "1" * 64,
                 "posture": "sha256:" + "2" * 64,
                 "floor": "sha256:" + "3" * 64,
-                "curation": "sha256:" + "4" * 64,
             },
         },
     }
@@ -1330,7 +1329,7 @@ def test_sign_floor_invariant_custom_rationale() -> None:
 
 
 def test_sign_floor_invariant_taxonomy_id_stored_as_x_prefixed() -> None:
-    """Not a bare `taxonomy_id` — spec/playbook.schema-0.4.json's frozen
+    """Not a bare `taxonomy_id` — spec/playbook.schema-0.5.json's frozen
     floor.invariants[] item is `additionalProperties: false`; only the
     `^x_` escape hatch is schema-safe without a spec version bump."""
     result = sign_floor_invariant(

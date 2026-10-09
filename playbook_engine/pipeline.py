@@ -240,7 +240,7 @@ _MEDIA_TYPES: dict[str, str] = {
 # v11 (issue #225): an ambiguous provenance detection is recorded "unknown"
 # instead of being coerced to counterparty_paper — the trail's and every
 # observation's provenance become "unknown" for such a deal, observations
-# gained "paper_basis"/"paper_confidence" (the detection signal the OPF 0.4
+# gained "paper_basis"/"paper_confidence" (the detection signal the OPF 0.5
 # precedent record's paper side rests on), the alias_first_party confidence
 # dropped to 0.70, template similarity now compares node fingerprints, and
 # corpus_doc provenance is written through two_valued_side. A warm cache
@@ -297,7 +297,14 @@ _MEDIA_TYPES: dict[str, str] = {
 # form clauses with their own headings gain a taxonomy_id. L3 (and so L4's
 # alignments, observations and precedent) changes for identical inputs; a warm
 # cache would otherwise replay those clauses as unclassified forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 18
+#
+# v19 (issue #233): L4 records what every clause opened with — each terminal
+# observation gains "opened_with" and a signed deal gains one "opening"
+# observation per clause type whose first-draft text differs from what was
+# signed (observation_builder.OUTCOME_OPENING). L4 output changes for
+# identical inputs; a warm cache would otherwise replay observations with no
+# opening evidence forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 19
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1237,6 +1244,7 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 paper_confidence=raw.get("paper_confidence"),
                 alignment_confidence=raw.get("x_alignment_confidence"),
                 classification_basis=raw.get("x_classification_basis"),
+                opened_with=raw.get("opened_with"),
             )
         )
     return result
@@ -2005,7 +2013,7 @@ def _build_quarantine_corpus_doc(
       ``version_ingest``) — keeping it a fixed string is one less place that
       would need auditing for leaked content.
     - ``x_quarantined=True`` — the sanctioned ``x_`` extension point
-      (spec/playbook.schema-0.4.json's ``corpus.documents.items``; NOT
+      (spec/playbook.schema-0.5.json's ``corpus.documents.items``; NOT
       stripped by ``playbook_assembler._sanitize_corpus_documents_for_schema``,
       which only rewrites ``version_ingest`` entries) gives a downstream
       consumer an explicit, unambiguous way to recognize "quarantined
@@ -2327,7 +2335,7 @@ def _collect_l1(
                 # as ClauseNode.char_span), or None when no block was found
                 # (or its offsets could not be related to the tree). Engine-
                 # internal: corpus_manifest.json carries it; the frozen
-                # OPF 0.4 schema's version_ingest (additionalProperties:
+                # OPF 0.5 schema's version_ingest (additionalProperties:
                 # false) does not, so playbook_assembler's
                 # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
                 # playbook.
@@ -2865,7 +2873,7 @@ def _compute_doc_from_l1(
     # Issue #225: an ambiguous detection is "unknown" — never coerced to a
     # side. (The coercion this replaces flipped e.g. an alias_present
     # our_paper lean to counterparty_paper.) Paper side is deal metadata
-    # only; it gates nothing in OPF 0.4.
+    # only; it gates nothing in OPF 0.5.
     provenance = PROVENANCE_UNKNOWN if prov_result.is_ambiguous else prov_result.provenance
 
     # has_signed_copy: whether order_versions actually anchored a signed
@@ -4578,7 +4586,7 @@ def project_playbook(
         taxonomy:        Loaded taxonomy object.
         progress:        Callable receiving progress message strings.
 
-    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.4, the one format the
+    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.5, the one format the
     engine emits — issue #238), ``{out_dir}/coherence_flags.json`` (the
     fragment-quarantine warnings) and ``{out_dir}/precedent.jsonl`` — one
     ``evidence.precedent`` record per line, sorted by id, whose sha256 the

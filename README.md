@@ -77,7 +77,7 @@ not the full control ladder above.
 
 ## What a playbook knows
 
-OPF 1.0 (document shape `opf_version` "0.4", the one format the engine reads and writes) is **one document with three
+OPF 1.0 (document shape `opf_version` "0.5", the one format the engine reads and writes) is **one document with three
 sections**, each with a different runtime binding — this is the design
 that makes it safe to point a stochastic model at high-stakes legal work:
 
@@ -139,7 +139,7 @@ L2  order versions        edit-distance chain anchored on the detected signed co
 L3  classify              clause → taxonomy entry (deterministic fast path, judge on the ambiguous band)
 L4  diff + attribute      per-round diffs, reversals, who-proposed-what → cited observations
 L5  compile + assemble    clause types + template our_standard, per-deal precedent,
-                          distinct-deal counts → OPF 0.4 playbook.opf.json + digest 3
+                          distinct-deal counts → OPF 0.5 playbook.opf.json + digest 3
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers each layer;
@@ -239,16 +239,17 @@ Two guards run without being asked:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The compiler pipeline, layer by layer |
 | [`docs/OPF-BUNDLE-BOUNDARY.md`](docs/OPF-BUNDLE-BOUNDARY.md) | What OPF owns vs what a downstream review engine owns |
 | [`docs/OPF-SPEC-v0.1.md`](docs/OPF-SPEC-v0.1.md) | The superseded v0.1 spec, retained for history |
-| [`spec/`](spec/) | The JSON Schema — `playbook.schema-0.4.json`, the one format the engine reads and writes — and shipped taxonomies |
+| [`spec/`](spec/) | The JSON Schema — `playbook.schema-0.5.json`, the one format the engine reads and writes — and shipped taxonomies |
 | [`examples/`](examples/) | The reference playbook (a Mutual NDA) at [`examples/nda/`](examples/nda/), validator fixtures, and the quickstart corpus |
 
 ## Status
 
 **Engine 1.0.1; OPF 1.0 (stable).** The engine reads and writes exactly one
-format, `opf_version` 0.4 — the verdict-free per-deal precedent record with
-a `digest_version` 3 digest (issue #223). The 0.1–0.3 formats, their
-schemas and the digest 2 builder were retired (issue #238): there is no
-installed consumer to stay compatible with, so a 0.1–0.3 document is
+format, `opf_version` 0.5 — the verdict-free per-deal precedent record,
+with what each clause opened with (`opened_with`, `opening_text`; issue #233),
+and a `digest_version` 3 digest. The 0.1–0.4 formats, their
+schemas and the digest 2 builder were retired (issues #238, #233): there is no
+installed consumer to stay compatible with, so a 0.1–0.4 document is
 rejected as an unsupported version; git history and
 [contract-opf/opf](https://github.com/contract-opf/opf) keep them. A shape
 or semantic change ships under a new `opf_version` rather than an in-place

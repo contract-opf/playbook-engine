@@ -787,6 +787,45 @@ def test_llm_segmentation_two_versions_diff_and_playbook_validate(tmp_path: Path
     assert result.ok, f"playbook validate must pass: {[str(e) for e in result.errors]}"
 
 
+def test_llm_segmented_signed_deal_records_what_each_clause_opened_with(tmp_path: Path) -> None:
+    """Issue #233: opening evidence flows through the LLM/agent branch of L3
+    (``llm_taxonomy_by_path``) exactly as through the deterministic one. v1 ->
+    v2 edits Indemnification and leaves Governing Law alone; with no template
+    nothing is "our standard", so both clauses opened ``non_standard``, and
+    only the edited one has a distinct opening (the v1 text, cited to v1)."""
+    corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=True)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    cfg = load_config(config_path)
+
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=cfg,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        use_llm_segmentation=True,
+        llm_segment_fn=_fake_segment_fn,
+    )
+    raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    assert manifest[0]["signed_version"] == 2, "premise: v2 is the detected executed copy"
+    terminals = {o["taxonomy_id"]: o for o in raw_obs if o["outcome"] == "signed"}
+    assert {t["opened_with"] for t in terminals.values() if t["taxonomy_id"]} == {"non_standard"}
+    (opening,) = [o for o in raw_obs if o["outcome"] == "opening"]
+    assert opening["taxonomy_id"] == "indemnification"
+    assert opening["full_text"].endswith("arising from the placement programme.")
+    assert "hold harmless" not in opening["full_text"]
+    assert opening["citation"]["version"] == 1 and opening["citation"]["version_id"] == "v1"
+
+    playbook = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    by_tid = {p["taxonomy_id"]: p for p in playbook["evidence"]["precedent"]}
+    assert by_tid["indemnification"]["opened_with"] == "non_standard"
+    assert by_tid["indemnification"]["opening_text"]["text"] == opening["full_text"]
+    assert by_tid["indemnification"]["moved"] is True
+    assert by_tid["governing_law"]["opened_with"] == "non_standard"
+    assert by_tid["governing_law"]["opening_text"] is None
+    assert validate_document(playbook).ok
+
+
 # ---------------------------------------------------------------------------
 # AC-3: QA-gate failure fails loud but ISOLATED — the failing document is
 # quarantined (recorded in quarantine.json), not silently degraded to the
@@ -3626,7 +3665,7 @@ def test_mixed_extractor_trail_and_timeout_reason_reach_the_playbook(
     assert doc["x_mixed_extractors"] is True
     assert doc["x_ingest_reason"] == [None, "timeout", "backend-error"]
     # The per-version reason still never enters version_ingest itself — the
-    # 0.4 schema's additionalProperties:false there has no x_ escape hatch.
+    # 0.5 schema's additionalProperties:false there has no x_ escape hatch.
     assert all("reason" not in vi for vi in doc["version_ingest"])
 
 

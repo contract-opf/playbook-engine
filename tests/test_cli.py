@@ -515,7 +515,7 @@ def test_project_corpus_stats_correct(tmp_path: Path) -> None:
 
 
 def test_project_playbook_opf_version(tmp_path: Path) -> None:
-    """Projected playbook has opf_version='0.4' (issue #223), the one format
+    """Projected playbook has opf_version='0.5' (issue #223), the one format
     the engine emits: ``project`` has no ``--opf-version`` (issue #238)."""
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path)
     runner = CliRunner()
@@ -529,11 +529,11 @@ def test_project_playbook_opf_version(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert pb["opf_version"] == "0.4"
+    assert pb["opf_version"] == "0.5"
     assert pb["digest"]["digest_version"] == "3"
     assert "precedent" in pb["evidence"]
 
-    for version in ("0.3", "0.4"):
+    for version in ("0.3", "0.5"):
         result = runner.invoke(
             cli,
             ["project", str(out_dir), "--config", str(config_path), "--opf-version", version],

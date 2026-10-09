@@ -1,4 +1,4 @@
-"""OPF accessors (issue #154; OPF 0.4 precedent, issue #223).
+"""OPF accessors (issue #154; OPF 0.5 precedent, issue #223).
 
 The cases read the real compiled NDA example
 (``examples/nda/playbook.opf.json``, produced by ``playbook project``). The
@@ -7,12 +7,12 @@ one of those documents (unsigned drafts, flipped paper side), the mutated
 document is re-stamped with the test-local ``_restamp`` helper and asserted to pass
 ``validator.validate_document`` -- never a shape the engine itself rejects.
 
-The query surface (issue #224) is also exercised on the frozen OPF 0.4
-conformance vector 002 (``spec/conformance/0.4/vectors/``), read-only: the
+The query surface (issue #224) is also exercised on the frozen OPF 0.5
+conformance vector 002 (``spec/conformance/0.5/vectors/``), read-only: the
 reference compiler never sets ``signed_at`` (OPF-SPEC §3.5.4), so that
 vector — which models a third-party producer recording signing dates, with
 multi-deal variant groups, a struck clause and a refused ask shared by
-three deals — is the only committed 0.4 document on which recency and
+three deals — is the only committed 0.5 document on which recency and
 group ranking can be observed.
 """
 
@@ -48,7 +48,7 @@ _ROOT = Path(__file__).parent.parent
 _NDA = _ROOT / "examples" / "nda" / "playbook.opf.json"
 _NDA_SIDECAR = _ROOT / "examples" / "nda" / "precedent.jsonl"
 _VECTOR_002 = (
-    _ROOT / "spec" / "conformance" / "0.4" / "vectors" / "002-variants-refused-and-exclusions.json"
+    _ROOT / "spec" / "conformance" / "0.5" / "vectors" / "002-variants-refused-and-exclusions.json"
 )
 
 
@@ -67,9 +67,9 @@ def _restamp(doc: dict[str, Any]) -> None:
         doc[SIDECARS_KEY].update(precedent_sidecar_manifest(doc))
 
 
-def test_precedent_accessors_read_a_compiled_0_4_document() -> None:
+def test_precedent_accessors_read_a_compiled_0_5_document() -> None:
     doc = _load(_NDA)
-    assert doc["opf_version"] == "0.4"
+    assert doc["opf_version"] == "0.5"
     assert is_precedent_shape(doc)
     records = playbook_precedent(doc)
     assert records == doc["evidence"]["precedent"]
@@ -97,7 +97,7 @@ def test_retired_0_3_accessors_are_gone() -> None:
 
 def test_accessors_are_empty_on_a_document_without_evidence() -> None:
     """A top-level ``clauses`` list (the retired 0.1 shape) is not read."""
-    doc = {"opf_version": "0.4", "clauses": [{"id": "clause.x", "taxonomy_id": "x"}]}
+    doc = {"opf_version": "0.5", "clauses": [{"id": "clause.x", "taxonomy_id": "x"}]}
     assert not is_precedent_shape(doc)
     assert playbook_clauses(doc) == []
     assert playbook_precedent(doc) == []
@@ -209,6 +209,7 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
         draft["document_id"] = deal_id
         draft["signed_text"]["ref"]["document_id"] = deal_id
         draft["signed"] = False
+        draft["opened_with"] = None  # an unsigned deal has no anchored opening (#233)
         draft.pop("signed_at", None)
         for key in ("paper", "paper_basis", "paper_confidence"):
             draft[key] = deal_f[key]
@@ -297,7 +298,7 @@ def test_precedent_by_id_round_trips_every_record() -> None:
     for record in playbook_precedent(doc):
         assert precedent_by_id(doc, record["id"]) is record
     assert precedent_by_id(doc, "prec.0000000000000000") is None
-    assert precedent_by_id({"opf_version": "0.4", "evidence": {"clauses": []}}, "prec.x") is None
+    assert precedent_by_id({"opf_version": "0.5", "evidence": {"clauses": []}}, "prec.x") is None
 
 
 def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
@@ -310,7 +311,7 @@ def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
     for line, record in zip(lines, parsed, strict=True):
         assert record == precedent_by_id(doc, record["id"])
         assert line == canonicalize(precedent_by_id(doc, record["id"]))
-    assert precedent_jsonl({"opf_version": "0.4", "evidence": {"clauses": []}}) == ""
+    assert precedent_jsonl({"opf_version": "0.5", "evidence": {"clauses": []}}) == ""
 
 
 def test_committed_nda_sidecar_belongs_to_its_playbook() -> None:

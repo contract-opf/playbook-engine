@@ -98,7 +98,7 @@ def _compile(corpus_dir: Path, config_path: Path, out_dir: Path) -> dict[str, An
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, Any], Path]:
-    """An OPF 0.4 compile of the synthetic corpus."""
+    """An OPF 0.5 compile of the synthetic corpus."""
     tmp_path = tmp_path_factory.mktemp("citation-resolution")
     corpus_dir, config_path = _make_corpus(tmp_path)
     playbook = _compile(corpus_dir, config_path, tmp_path / "out")
@@ -158,7 +158,7 @@ def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path])
     assert resolved.clause_path == ref["clause_path"]
     if ref.get("char_span"):
         assert list(resolved.char_span) == ref["char_span"]
-    # #86: the compiled citation object (spec/playbook.schema-0.4.json's
+    # #86: the compiled citation object (spec/playbook.schema-0.5.json's
     # closed $defs.citation) never carries a "page" key (see
     # citation_resolver's module docstring) — resolve_citation() must
     # default to None rather than crash or fabricate a value.
@@ -166,11 +166,11 @@ def test_resolve_citation_roundtrip(compiled: tuple[Path, dict[str, Any], Path])
 
 
 def test_resolve_citation_roundtrip_opf_04(tmp_path: Path) -> None:
-    """OPF 0.4 (issue #223): --obs indexes the clause's precedent records, and
+    """OPF 0.5 (issue #223): --obs indexes the clause's precedent records, and
     precedent 0 resolves to the hash-verified file its signed_text cites."""
     corpus_dir, config_path = _make_corpus(tmp_path)
     playbook = _compile(corpus_dir, config_path, tmp_path / "out")
-    assert playbook["opf_version"] == "0.4"
+    assert playbook["opf_version"] == "0.5"
     clause = playbook["evidence"]["clauses"][0]
     records = [
         p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == clause["taxonomy_id"]

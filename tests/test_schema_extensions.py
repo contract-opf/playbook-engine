@@ -1,9 +1,9 @@
 """Tests for the x_* vendor-extension namespace (issue #180).
 
-The OPF 0.4 schema closes every object with ``additionalProperties: false``;
+The OPF 0.5 schema closes every object with ``additionalProperties: false``;
 the ``x_*`` namespace is the sanctioned escape hatch so adopters can attach
 vendor fields without forking the standard. Extensions are allowed at the
-document root, ``posture``, ``floor`` and its invariants, ``curation.pins[]``
+document root, ``posture``, ``floor`` and its invariants
 and ``corpus.documents[]`` (and ``digest``, whose content the validator
 additionally pins to its recomputation) — and nowhere hash integrity or
 mechanical resolvability depends on a closed shape (identity, citations,
@@ -52,18 +52,6 @@ def test_x_field_valid_at_each_level() -> None:
     doc["posture"]["x_vendor_note"] = "v"
     doc["floor"]["x_vendor_note"] = "v"
     doc["floor"]["invariants"][0]["x_vendor_note"] = "v"
-    doc["curation"] = {
-        "pins": [
-            {
-                "clause_id": "clause.governing_law",
-                "item_id": "C1",
-                "position": "hold firm",
-                "baseline_stance": "unknown",
-                "pinned_at": "2026-01-01T00:00:00Z",
-                "x_vendor_note": "v",
-            }
-        ]
-    }
     doc["corpus"]["documents"][0]["x_vendor_note"] = "v"
 
     _assert_valid(doc, "the sanctioned levels")

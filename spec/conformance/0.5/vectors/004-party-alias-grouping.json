@@ -1,11 +1,11 @@
 {
   "name": "party-alias-grouping",
   "description": "The grouping key's party neutralization (OPF-SPEC §3.5.4): every entity-registry alias (Counterparty-<n>, case-insensitive, on word boundaries) becomes the token 'counterparty' and the document's perspective.party becomes the token 'party' before case and punctuation are dropped. Two deals whose signed texts differ only by the counterparty alias (Counterparty-2 vs Counterparty-5) are one variant with n_deals 2, and two refused asks that differ only by alias are one group with n_deals 2. The same words with the parties' places swapped stay a separate variant (our party and the counterparty are distinct tokens). The order of the two one-deal variants pins the perspective.party rewrite: 'notice of termination given to party ...' sorts before 'party may terminate ...'.",
-  "opf_version": "0.4",
+  "opf_version": "0.5",
   "engine_version": "1.0.0",
   "digest_version": "3",
   "input": {
-    "opf_version": "0.4",
+    "opf_version": "0.5",
     "agreement_type": {
       "id": "conformance-fixture",
       "name": "Conformance Fixture Agreement"
@@ -66,6 +66,7 @@
               ]
             }
           },
+          "opened_with": "non_standard",
           "opening_text": null,
           "standard": false,
           "moved": true,
@@ -109,6 +110,7 @@
               ]
             }
           },
+          "opened_with": "non_standard",
           "opening_text": null,
           "standard": false,
           "moved": false,
@@ -138,6 +140,7 @@
               ]
             }
           },
+          "opened_with": "non_standard",
           "opening_text": null,
           "standard": false,
           "moved": true,
@@ -178,6 +181,7 @@
               ]
             }
           },
+          "opened_with": "non_standard",
           "opening_text": null,
           "standard": false,
           "moved": false,
@@ -228,13 +232,12 @@
     }
   },
   "expected": {
-    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.termination\",\"n_deals\":4,\"n_refused\":1,\"n_signed_standard\":0,\"n_variants\":3,\"our_standard\":{\"source_ref\":{\"clause_path\":\"11\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"Either party may terminate this Agreement on thirty days' notice.\"},\"taxonomy_id\":\"termination\",\"title\":\"Termination\"}],\"precedent\":[{\"counterparty_ref\":{\"alias\":\"Counterparty-2\"},\"document_id\":\"deal-a\",\"id\":\"prec.7d6e1d5aebde15a4\",\"moved\":true,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":2},\"round\":1,\"text\":\"Counterparty-2 may terminate this Agreement at any time.\"}],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"Counterparty-2 may terminate this Agreement on notice to Fixture Co.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"counterparty_ref\":{\"alias\":\"Counterparty-5\"},\"document_id\":\"deal-b\",\"id\":\"prec.d4886c201b871491\",\"moved\":false,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"Counterparty-5 may terminate this Agreement on notice to Fixture Co.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"counterparty_ref\":{\"alias\":\"Counterparty-3\"},\"document_id\":\"deal-c\",\"id\":\"prec.a9f77771188c44d1\",\"moved\":true,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":2},\"round\":1,\"text\":\"Counterparty-3 may terminate this Agreement at any time.\"}],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"Fixture Co may terminate this Agreement on notice to Counterparty-3.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"document_id\":\"deal-d\",\"id\":\"prec.348c6acf6851dd53\",\"moved\":false,\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"Notice of termination given to Fixture Co is effective on receipt.\"},\"standard\":false,\"taxonomy_id\":\"termination\"}]},\"floor\":{},\"opf_version\":\"0.4\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
-    "content_hash": "sha256:8595a81618a5a7725f8dd67420da871845e8c7b1c99e377ea5bbb869f6e71873",
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.termination\",\"n_deals\":4,\"n_refused\":1,\"n_signed_standard\":0,\"n_variants\":3,\"our_standard\":{\"source_ref\":{\"clause_path\":\"11\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"Either party may terminate this Agreement on thirty days' notice.\"},\"taxonomy_id\":\"termination\",\"title\":\"Termination\"}],\"precedent\":[{\"counterparty_ref\":{\"alias\":\"Counterparty-2\"},\"document_id\":\"deal-a\",\"id\":\"prec.7d6e1d5aebde15a4\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":2},\"round\":1,\"text\":\"Counterparty-2 may terminate this Agreement at any time.\"}],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"Counterparty-2 may terminate this Agreement on notice to Fixture Co.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"counterparty_ref\":{\"alias\":\"Counterparty-5\"},\"document_id\":\"deal-b\",\"id\":\"prec.d4886c201b871491\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"Counterparty-5 may terminate this Agreement on notice to Fixture Co.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"counterparty_ref\":{\"alias\":\"Counterparty-3\"},\"document_id\":\"deal-c\",\"id\":\"prec.a9f77771188c44d1\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":2},\"round\":1,\"text\":\"Counterparty-3 may terminate this Agreement at any time.\"}],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"Fixture Co may terminate this Agreement on notice to Counterparty-3.\"},\"standard\":false,\"taxonomy_id\":\"termination\"},{\"document_id\":\"deal-d\",\"id\":\"prec.348c6acf6851dd53\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"Notice of termination given to Fixture Co is effective on receipt.\"},\"standard\":false,\"taxonomy_id\":\"termination\"}]},\"floor\":{},\"opf_version\":\"0.5\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:c4c0353154e1a8d3fcc3c3e4df9938702d6f3f464ffb65f41abed7a248e7dbc0",
     "section_digests": {
-      "evidence": "sha256:1d98a486adc11021d5a6b3e6627c824e5d01432ec6d14d1b443ad14bfbf67914",
+      "evidence": "sha256:9736a3db48dbab05bef572b6a1d955119b1f4c830a64b3444a99552bad117efe",
       "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     },
     "digest": {
       "digest_version": "3",

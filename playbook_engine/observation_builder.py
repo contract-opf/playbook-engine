@@ -12,8 +12,12 @@ ORIGIN of its text: our standard language struck is one
 executed copy (issue #221: an unsigned deal records no refused asks) — and
 removed text that survives in the terminal, whose origin is undetermined,
 or that would be a concession or refused ask in a deal with no detected
-executed copy produces no row at all — it is counted in
-``corpus.stats.dropped_observations``. See ``build_observations``.
+executed copy produces no concession or refused-ask row — it is counted in
+``corpus.stats.dropped_observations``. Separately, a deal with a detected
+executed copy records what each clause type OPENED with (issue #233): the
+terminal observation carries ``opened_with``, and one ``"opening"`` row per
+clause type whose first-draft text differs from what was signed carries that
+text, whatever its origin. See ``build_observations``.
 
 Each observation captures:
   - What was observed: taxonomy_id, text_summary (a ≤ 300-char prefix of the
@@ -33,7 +37,9 @@ Each observation captures:
     a detected executed copy only, issue #221), or
     "conceded_before_signing" (our standard language removed before signing
     in a deal with a detected executed copy; engine-internal, never an OPF
-    outcome). A terminal row is "unsigned" when no version was detected as
+    outcome), or "opening" (what a clause opened with when that differs from
+    what was signed, whatever its origin — OPF 0.5, engine-internal, never an
+    OPF outcome). A terminal row is "unsigned" when no version was detected as
     the executed copy — see build_observations' has_signed_copy
   - Source: document_id + version for traceability
 
@@ -267,13 +273,17 @@ class Observation:
         provenance:      The deal's paper side: ``"our_paper"``,
                          ``"counterparty_paper"``, or ``"unknown"`` when the
                          detection was ambiguous — never coerced to a side
-                         (issue #225). Metadata only in OPF 0.4.
+                         (issue #225). Metadata only in OPF 0.5.
         outcome:         ``"signed"``, ``"unsigned"``, ``"proposed_then_reversed"``,
                          or ``"conceded_before_signing"`` (issue #216: OUR
                          standard language removed before signing — our
                          concession, never a refused ask; engine-internal
-                         like ``"unsigned"``; the precedent record carries
-                         its text as the clause's ``opening_text``).
+                         like ``"unsigned"``), or ``"opening"`` (issue
+                         #233: what the clause type opened with, when that
+                         differs from what was signed — whatever its origin;
+                         engine-internal like ``"unsigned"``; the precedent
+                         record carries its text as the clause's
+                         ``opening_text``).
                          ``"unsigned"`` marks a clause from a document with no
                          detected executed copy (issue #83) — the precedent
                          record carries it as ``signed: false``; only
@@ -347,6 +357,18 @@ class Observation:
                          one version only). Serialized under the vendor key
                          ``x_alignment_confidence`` (omitted when ``None``)
                          until the format gives it a home.
+        opened_with:     What the clause type opened with (issue #233, OPF
+                         0.5) — ``"standard"`` (the first draft's text is
+                         our standard language), ``"non_standard"``,
+                         ``"absent"`` (the first draft has no node of the
+                         clause type: it was added during negotiation), or
+                         ``None`` (not determined: an unsigned deal, a
+                         store that predates this field, or a row that is
+                         not a terminal/opening row). Set on every terminal
+                         observation of a classified taxonomy_id in a deal
+                         with a detected executed copy, on its opening
+                         row, and on its reversal rows. Serialized only
+                         when not ``None``.
         classification_basis: How the cited node's taxonomy_id was reached
                          (issue #237) — the ``ClauseClassification.basis`` of
                          the node the citation points at (``exact_match``,
@@ -388,6 +410,7 @@ class Observation:
     paper_confidence: float | None = None
     alignment_confidence: float | None = None
     classification_basis: str | None = None
+    opened_with: str | None = None
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -442,6 +465,10 @@ class Observation:
         # pipeline did not record one.
         if self.classification_basis is not None:
             d["x_classification_basis"] = self.classification_basis
+        # opened_with (issue #233): omitted when not determined, so a store
+        # written before the field existed reads back None, never "absent".
+        if self.opened_with is not None:
+            d["opened_with"] = self.opened_with
         return d
 
 
@@ -765,8 +792,12 @@ DROPPED_SURVIVES_IN_TERMINAL = "survives_in_terminal"
 #: text for its clause (unclassified, or no template clause for its
 #: taxonomy_id) to tell our standard language from a counterparty ask. It is
 #: neither a refused ask (``proposed_then_reversed``) nor our concession
-#: (``conceded_before_signing``), so it produces no observation and is
-#: counted here (surfaced in ``corpus.stats.dropped_observations``).
+#: (``conceded_before_signing``), so it produces no concession or refused-ask
+#: observation and is counted here (surfaced in
+#: ``corpus.stats.dropped_observations``). Its text is not lost, though
+#: (issue #233): in a deal with a detected executed copy it reaches precedent
+#: as the clause's opening (``OUTCOME_OPENING``), a fact that needs no origin
+#: claim.
 DROPPED_ORIGIN_UNDETERMINED = "removed_origin_undetermined"
 
 #: ``dropped`` counter key (issue #216, issue #83): a removed row whose text
@@ -797,11 +828,31 @@ DROPPED_REFUSED_UNSIGNED = "refused_ask_no_signed_copy"
 #: signing is a concession we made, not an ask we refused, so it is never
 #: ``proposed_then_reversed``. Engine-internal like ``"unsigned"``: the OPF
 #: ``observation.outcome`` enum does not carry it, so it never becomes a
-#: refused ask (nor a Floor candidate); the precedent record carries its
-#: text as the clause's ``opening_text``. Emitted
-#: only for a deal with a detected executed copy; otherwise the row is
-#: dropped under ``DROPPED_STANDARD_REMOVED_UNSIGNED`` (issue #83).
+#: refused ask (nor a Floor candidate). Emitted only for a deal with a
+#: detected executed copy; otherwise the row is dropped under
+#: ``DROPPED_STANDARD_REMOVED_UNSIGNED`` (issue #83). The clause's opening is
+#: recorded separately, as an ``OUTCOME_OPENING`` row (issue #233).
 OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
+
+#: Outcome of the row that records what a clause type OPENED with (issue #233,
+#: OPF 0.5): the text of every first-draft node bound into an aligned row of
+#: the clause type, whatever its origin (our standard or not) and whatever
+#: paper the deal is on. Written once per (deal, clause type), only for a
+#: deal with a detected executed copy, and only when that first-draft text
+#: differs from what the deal signed (whitespace-collapsed) or nothing was
+#: signed for the clause. It records a fact, never a meaning: whether the
+#: opening was held, conceded or moved to standard is derived in the digest.
+#: Engine-internal like ``"unsigned"``: the OPF ``observation.outcome`` enum
+#: does not carry it, so it never defines a clause type, becomes a refused
+#: ask or a Floor candidate, or counts toward a position
+#: (``clause_position_compiler`` ignores it); the precedent record carries its
+#: text as the clause's ``opening_text``.
+OUTCOME_OPENING = "opening"
+
+#: ``Observation.opened_with`` values (OPF 0.5).
+OPENED_STANDARD = "standard"
+OPENED_NON_STANDARD = "non_standard"
+OPENED_ABSENT = "absent"
 
 # Severity ranks used to pick the representative net-diff row when several
 # terminal nodes share one taxonomy_id (issue #216): the row whose attribution
@@ -951,6 +1002,41 @@ def _is_standard_language(
     return bool(normalized) and f" {normalized} " in f" {whole} "
 
 
+def _collapse_ws(text: str) -> str:
+    """*text* with every whitespace run collapsed to one space (issue #233)."""
+    return " ".join(text.split())
+
+
+def _path_sort_key(path: str) -> tuple[tuple[int, int, str], ...]:
+    """Natural order of a dotted clause path: ``2`` < ``10``, ``1.2`` < ``1.10``."""
+    return tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in path.split("."))
+
+
+def _first_draft_order_key(
+    diff: ClauseDiff,
+) -> tuple[int, int, int, tuple[tuple[int, int, str], ...]]:
+    """Order of one first-draft node: its ``char_span_before`` start, else its
+    path (issue #233). A node with a span sorts before one without."""
+    span = diff.char_span_before
+    return (
+        0 if span else 1,
+        span[0] if span else 0,
+        span[1] if span else 0,
+        _path_sort_key(diff.clause_path_before or "?"),
+    )
+
+
+@dataclass(frozen=True)
+class _FirstDraft:
+    """The first draft's text of one clause type (issue #233): every
+    first-draft node bound into an aligned row of the taxonomy_id, joined in
+    first-draft order, with the net-diff rows it came from."""
+
+    taxonomy_id: str
+    text: str
+    rows: tuple[tuple[int, ClauseDiff], ...]
+
+
 def _row_severity(dr: DeviationResult) -> int:
     return _DEVIATION_RANK.get(dr.deviation, 0)
 
@@ -1037,6 +1123,32 @@ def build_observations(
     PROPOSED text and the draft citation — including a reversal inside a
     clause that survived to the terminal, whose signed text stays the
     (single) signed observation.
+
+    **What each clause type opened with (issue #233, OPF 0.5)** — only when
+    *has_signed_copy*. The first draft is the net diff's before side (the
+    signed copy itself for a single-version deal). The first-draft text of a
+    clause type is every first-draft node bound into an aligned row of its
+    taxonomy_id (rows with ``clause_path_before`` set, removed rows and rows
+    counted under ``DROPPED_SURVIVES_IN_TERMINAL`` included), joined with
+    ``"\\n"`` in ``char_span_before`` order and citing the first node:
+
+    - every terminal observation of a classified taxonomy_id, and every
+      reversal of one, carries ``opened_with``: ``"standard"`` when that text
+      is our standard language (the same exact check ``standard`` uses,
+      against the whole template clause), ``"non_standard"`` when present but
+      not standard (including a clause type with no template clause),
+      ``"absent"`` when the first draft has no node of the clause type (it
+      was added during negotiation);
+    - one ``OUTCOME_OPENING`` observation per clause type whose first-draft
+      text differs from the terminal group's joined text
+      (whitespace-collapsed), or that has no terminal row, carries that text
+      as ``full_text``, whatever its origin. For a clause type with NO
+      terminal row only first-draft nodes that do not survive in the terminal
+      count: text that survives was relocated, not struck, and if every node
+      survives there is no opening row.
+
+    Unclassified nodes get neither; a deal with no detected executed copy
+    gets neither (``opened_with`` stays ``None``).
 
     Args:
         document_id:               Source document identifier.
@@ -1180,7 +1292,10 @@ def build_observations(
         unclassified terminal node), one per removed row whose text is
         absent from the terminal and whose origin is determined (except our
         standard language in a deal with no detected executed copy, which
-        is dropped), and one per distinct ``ReversalRecord``.
+        is dropped), one per distinct ``ReversalRecord``, and — in a deal
+        with a detected executed copy — one ``OUTCOME_OPENING`` row per
+        clause type whose first-draft text differs from what was signed
+        (issue #233; see below).
     """
     default_outcome = "signed" if has_signed_copy else "unsigned"
 
@@ -1315,6 +1430,9 @@ def build_observations(
     # the whole signed document, and never by word-set membership, where a
     # narrowed or replaced clause's words can all recur in the signed copy.
     survival_nodes = [_survival_node(n.text, n.row[1].kind == "unchanged") for n in nodes]
+    # Net-diff rows whose own text survives in the terminal (issue #233): the
+    # relocation guard for a clause type's opening, below.
+    surviving_idx: set[int] = set()
     for idx, clause_diff, _dr in removed_rows:
         # No terminal slot: the cited text is read from the FIRST version, so
         # it is never the default (signed/unsigned) outcome. What its removal
@@ -1325,6 +1443,7 @@ def build_observations(
         if _survives_in_terminal(raw_text, survival_nodes):
             # The text survives in the terminal (e.g. basis="alignment") —
             # not reversed, and not draft-only.
+            surviving_idx.add(idx)
             if dropped is not None:
                 dropped[DROPPED_SURVIVES_IN_TERMINAL] = (
                     dropped.get(DROPPED_SURVIVES_IN_TERMINAL, 0) + 1
@@ -1400,6 +1519,70 @@ def build_observations(
             )
         )
 
+    # --- 2c. What each clause type opened with (issue #233, OPF 0.5) ---
+    # A fact about the first draft, whatever its origin and whatever paper
+    # the deal is on; only a deal with a detected executed copy has an
+    # anchored version order to speak of an "opening" (issue #221).
+    terminal_text_by_tid: dict[str, str] = {}
+    for node in nodes:
+        if node.taxonomy_id is not None and node.text:
+            terminal_text_by_tid[node.taxonomy_id] = (
+                f"{terminal_text_by_tid[node.taxonomy_id]}\n{node.text}"
+                if node.taxonomy_id in terminal_text_by_tid
+                else node.text
+            )
+    terminal_tids = {n.taxonomy_id for n in nodes if n.taxonomy_id is not None}
+    first_drafts: dict[str, _FirstDraft] = {}
+    # What the first draft held of each clause type, before the relocation
+    # guard: ``opened_with`` is a fact about the first draft, so it must not
+    # depend on whether a node's text later survived under another clause.
+    first_draft_text_by_tid: dict[str, str] = {}
+    opened_with_by_tid: dict[str, str] = {}
+    if has_signed_copy:
+        first_rows: dict[str, list[tuple[int, ClauseDiff]]] = {}
+        for idx, (clause_diff, _dr) in enumerate(deviation_results):
+            tid = clause_diff.taxonomy_id
+            if tid is None or clause_diff.clause_path_before is None:
+                continue
+            if not clause_diff.text_before.strip():
+                continue
+            first_rows.setdefault(tid, []).append((idx, clause_diff))
+        for tid, tid_rows in first_rows.items():
+            first_draft_text_by_tid[tid] = "\n".join(
+                d.text_before
+                for _, d in sorted(tid_rows, key=lambda r: _first_draft_order_key(r[1]))
+            )
+            if tid not in terminal_tids:
+                # Relocation guard: with no terminal row for the clause type,
+                # a first-draft node whose text survives in the terminal was
+                # relocated, not struck; if every node survives there is no
+                # opening row to record (it is counted as before). Only the
+                # opening row's text is filtered: ``opened_with`` is read
+                # from the unfiltered first-draft text above.
+                tid_rows = [r for r in tid_rows if r[0] not in surviving_idx]
+            if not tid_rows:
+                continue
+            ordered = sorted(tid_rows, key=lambda r: _first_draft_order_key(r[1]))
+            first_drafts[tid] = _FirstDraft(
+                taxonomy_id=tid,
+                text="\n".join(d.text_before for _, d in ordered),
+                rows=tuple(ordered),
+            )
+        # Every clause type the deal has a precedent for: a terminal row, or a
+        # reversal (a proposal inserted mid-negotiation and struck again,
+        # which has no first-draft node, so it "opened" absent).
+        reversal_tids = {r.taxonomy_id for r in reversals if r.taxonomy_id is not None}
+        for tid in sorted(terminal_tids | reversal_tids | set(first_draft_text_by_tid), key=str):
+            if tid is None:
+                continue
+            first_text = first_draft_text_by_tid.get(tid)
+            if first_text is None:
+                opened_with_by_tid[tid] = OPENED_ABSENT
+            else:
+                opened_with_by_tid[tid] = (
+                    OPENED_STANDARD if _standard_fact(first_text, tid) else OPENED_NON_STANDARD
+                )
+
     # --- 3. One observation per terminal taxonomy_id (per node if None) ---
     groups: list[list[_TerminalNode]] = []
     group_by_tid: dict[str, list[_TerminalNode]] = {}
@@ -1462,6 +1645,11 @@ def build_observations(
                 observed_at=observed_at,
                 standard=group_standard,
                 alignment_confidence=alignment_conf,
+                opened_with=(
+                    opened_with_by_tid.get(first.taxonomy_id)
+                    if first.taxonomy_id is not None
+                    else None
+                ),
             )
         )
 
@@ -1534,6 +1722,53 @@ def build_observations(
                 basis="deterministic",
                 standard=reversal_standard,
                 alignment_confidence=r.alignment_confidence,
+                opened_with=(
+                    opened_with_by_tid.get(r.taxonomy_id) if r.taxonomy_id is not None else None
+                ),
+            )
+        )
+
+    # --- 5. Openings (issue #233) ---
+    # One row per clause type whose first-draft text differs from what the
+    # deal signed (whitespace-collapsed) or that has no terminal row. Emitted
+    # last so every earlier observation keeps its id. Whether the opening is
+    # distinct under the §3.5.4 grouping key (the party-aware test that
+    # decides ``opening_text``) is decided at L5, where perspective.party is
+    # known.
+    for tid, draft in first_drafts.items():
+        signed_text = terminal_text_by_tid.get(tid)
+        if signed_text is not None and _collapse_ws(draft.text) == _collapse_ws(signed_text):
+            continue
+        first_idx, first_diff = draft.rows[0]
+        opening_standard = _standard_fact(draft.text, tid)
+        clause_path = first_diff.clause_path_before or "?"
+        bound = [
+            d.alignment_confidence for _, d in draft.rows if d.alignment_confidence is not None
+        ]
+        observations.append(
+            Observation(
+                observation_id=_next_id(clause_path),
+                taxonomy_id=tid,
+                text_summary=summarize_clause_text(draft.text),
+                full_text=draft.text,
+                citation=ObservationCitation(
+                    document_id=document_id,
+                    version=_cite_version(first_diff.clause_version_before),
+                    clause_path=clause_path,
+                    char_span=first_diff.char_span_before,
+                    version_id=first_diff.clause_version_before,
+                ),
+                deviation=_deviation_of(opening_standard),
+                risk_delta=dict(_NEUTRAL_RISK),
+                provenance=provenance,
+                outcome=OUTCOME_OPENING,
+                confidence=_confidence(first_idx),
+                basis="deterministic",
+                standard=opening_standard,
+                alignment_confidence=min(bound) if bound else None,
+                opened_with=opened_with_by_tid.get(
+                    tid, OPENED_STANDARD if opening_standard else OPENED_NON_STANDARD
+                ),
             )
         )
 

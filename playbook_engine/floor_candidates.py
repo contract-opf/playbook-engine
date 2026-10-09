@@ -1025,7 +1025,7 @@ def promote_interview_q4_invariants(
 # ---------------------------------------------------------------------------
 
 # Storing a bare "taxonomy_id" key on a floor.invariants entry would violate
-# spec/playbook.schema-0.4.json's `additionalProperties: false` (only
+# spec/playbook.schema-0.5.json's `additionalProperties: false` (only
 # id/statement/rationale/`^x_.*` are allowed there) — and OPF-SPEC.md's
 # versioning policy (spec/CHANGELOG.md: a published opf_version is frozen;
 # any further spec-affecting change goes to a new version) forbids widening

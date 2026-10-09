@@ -47,7 +47,7 @@ _SMOKE_CONFIG = _NDA_DIR / "config.smoke.yaml"
 
 
 def _mine_and_project(out_dir: Path, **judges: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Mine + project (OPF 0.4, the one format the engine emits)."""
+    """Mine + project (OPF 0.5, the one format the engine emits)."""
     cfg = load_config(_SMOKE_CONFIG)
     taxonomy = load_taxonomy(cfg.taxonomy_path)
     mine_corpus(_CORPUS_DIR, cfg, taxonomy, out_dir, no_cache=True, **judges)
@@ -94,12 +94,12 @@ def test_identical_signed_text_always_gets_the_same_standard_fact(consumer_run: 
 
 
 def test_default_project_is_the_verdict_free_precedent(consumer_run: tuple) -> None:
-    """Issue #223: the OPF 0.4 projection of the consumer-path store carries
+    """Issue #223: the OPF 0.5 projection of the consumer-path store carries
     each terminal row's deterministic standard fact as the precedent's
     ``standard``, counts distinct deals, keeps refused asks, and has no
     stance, risk, deviation or x_judgments anywhere."""
     observations, playbook = consumer_run
-    assert playbook["opf_version"] == "0.4"
+    assert playbook["opf_version"] == "0.5"
     assert validate_document(playbook).ok
     precedent = playbook["evidence"]["precedent"]
     by_key = {(p["document_id"], p["taxonomy_id"]): p for p in precedent}
@@ -163,7 +163,7 @@ def _all_template_corpus(root: Path) -> Path:
 def test_cli_mine_stamps_the_manifest_and_project_succeeds(tmp_path: Path) -> None:
     """Through the CLI: ``mine`` stamps the run manifest with its environment
     (and no deviation mode — there is none to record), and ``project`` (which
-    has no ``--opf-version``: one format, issue #238) emits OPF 0.4."""
+    has no ``--opf-version``: one format, issue #238) emits OPF 0.5."""
     corpus = _all_template_corpus(tmp_path)
     out_dir = tmp_path / "out"
     runner = CliRunner()
@@ -186,7 +186,7 @@ def test_cli_mine_stamps_the_manifest_and_project_succeeds(tmp_path: Path) -> No
     result = runner.invoke(cli, ["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
     assert result.exit_code == 0, result.output
     playbook = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    assert playbook["opf_version"] == "0.4"
+    assert playbook["opf_version"] == "0.5"
     assert validate_document(playbook).ok
 
 

@@ -6,8 +6,10 @@ text.  No real agreements are referenced.  Fictional party/document names.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
+from typing import Any
 
 import pytest
 
@@ -22,20 +24,32 @@ from playbook_engine.observation_builder import (
     DROPPED_STANDARD_REMOVED_UNSIGNED,
     DROPPED_SURVIVES_IN_TERMINAL,
     OUTCOME_CONCEDED_BEFORE_SIGNING,
+    OUTCOME_OPENING,
     Observation,
     ObservationCitation,
-    build_observations,
     read_observations_jsonl,
     summarize_clause_text,
     truncate_search_snippets,
     write_observations_jsonl,
 )
+from playbook_engine.observation_builder import build_observations as build_all_observations
 from playbook_engine.reversal_detector import ReversalRecord
 from playbook_engine.tracked_changes_overlay import HunkEnrichment
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def build_observations(*args: Any, **kwargs: Any) -> list[Observation]:
+    """``build_observations`` without its ``opening`` rows (issue #233).
+
+    Every test below this helper pins the terminal, concession, refused-ask,
+    survival and dedupe logic that opening evidence leaves unchanged, so it
+    reads the rows that logic produces. The opening rows have their own
+    section at the end of this file, which calls ``build_all_observations``.
+    """
+    return [o for o in build_all_observations(*args, **kwargs) if o.outcome != OUTCOME_OPENING]
 
 
 def _cd(
@@ -2265,3 +2279,347 @@ def test_appended_carve_out_stays_modified_and_keeps_tracked_attribution() -> No
     assert conf is not None
     assert conf == pytest.approx(_jaccard(_tokens(v1_text), _tokens(v2_text)))
     assert conf < ALIGNMENT_AMBIGUITY_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# Opening evidence (issue #233, OPF 0.5): what every clause opened with
+#
+# Every fixture below is a shape the pipeline's net diff produces: a modified
+# or unchanged row carries both sides (`_terminal_cd`), a clause inserted
+# after the first draft is an "added" row with no `clause_path_before`, and a
+# clause with no signed slot is a "removed" row (`_removed_row`).
+# ---------------------------------------------------------------------------
+
+_NY_LAW = "This Agreement is governed by the laws of the State of New York."
+
+
+def _absent_from_first_draft_row(
+    taxonomy_id: str, path: str, text: str, span: tuple[int, int]
+) -> ClauseDiff:
+    """A clause with no first-draft node: inserted after the first draft."""
+    return ClauseDiff(
+        taxonomy_id=taxonomy_id,
+        clause_path_before=None,
+        clause_path_after=path,
+        kind="added",
+        hunks=(),
+        text_before="",
+        text_after=text,
+        clause_version_before=None,
+        clause_version_after="signed_final",
+        char_span_after=span,
+    )
+
+
+def _opening_run(
+    rows: list[ClauseDiff],
+    tree: list[ClassifiedClause],
+    *,
+    has_signed_copy: bool = True,
+    standards: Any = None,
+    reversals: list[ReversalRecord] | None = None,
+    dropped: dict[str, int] | None = None,
+    provenance: str = "our_paper",
+) -> list[Observation]:
+    """``build_observations`` over a net diff and its terminal tree, with every
+    row (opening rows included), as the pipeline calls it."""
+    return build_all_observations(
+        "doc1",
+        3,
+        provenance,
+        [(r, _dr()) for r in rows],
+        reversals or [],
+        has_signed_copy=has_signed_copy,
+        ordinal_by_vid=_ORDINALS,
+        terminal_clauses=tree,
+        terminal_version_id="signed_final",
+        dropped=dropped,
+        standard_text_by_tid=_STD if standards is None else standards,
+    )
+
+
+def _openings(obs: list[Observation]) -> list[Observation]:
+    return [o for o in obs if o.outcome == OUTCOME_OPENING]
+
+
+def _terminals(obs: list[Observation]) -> list[Observation]:
+    return [o for o in obs if o.outcome in ("signed", "unsigned")]
+
+
+def test_opening_standard_edited_before_signing() -> None:
+    """Opened with our standard, signed an edit: the terminal says it opened
+    `standard`, and one opening row carries the first-draft text (cited to the
+    first draft, not the signed copy), whatever paper the deal is on."""
+    row = _terminal_cd(
+        "governing_law", "10", _NY_LAW, (60, 125), kind="modified", before=_STD["governing_law"]
+    )
+    tree = [_node_cc("10", "governing_law", _NY_LAW, (60, 125))]
+    for provenance in ("our_paper", "counterparty_paper", "unknown"):
+        obs = _opening_run([row], tree, provenance=provenance)
+        (terminal,) = _terminals(obs)
+        (opening,) = _openings(obs)
+        assert terminal.opened_with == "standard"
+        assert terminal.full_text == _NY_LAW and terminal.standard is False
+        assert opening.opened_with == "standard" and opening.standard is True
+        assert opening.full_text == _STD["governing_law"]
+        assert opening.taxonomy_id == "governing_law"
+        assert (opening.citation.version, opening.citation.version_id) == (1, "draft_v1")
+        assert (opening.citation.clause_path, opening.citation.char_span) == ("10", (60, 125))
+        assert opening.provenance == provenance
+        assert opening.deviation == "none" and opening.basis == "deterministic"
+
+
+def test_opening_standard_struck_before_signing() -> None:
+    """Our standard struck outright: the concession row is unchanged AND the
+    clause type has an opening row (there is no terminal row to carry it)."""
+    removed = _removed_row("non_solicit", _STD["non_solicit"])
+    other = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    tree = [_node_cc("10", "governing_law", _STD["governing_law"], (60, 125))]
+    dropped: dict[str, int] = {}
+    obs = _opening_run([removed, other], tree, dropped=dropped)
+    assert [(o.taxonomy_id, o.outcome) for o in obs] == [
+        ("non_solicit", OUTCOME_CONCEDED_BEFORE_SIGNING),
+        ("governing_law", "signed"),
+        ("non_solicit", OUTCOME_OPENING),
+    ]
+    opening = _openings(obs)[0]
+    assert (opening.opened_with, opening.standard) == ("standard", True)
+    assert opening.full_text == _STD["non_solicit"]
+    assert opening.citation.version == 1
+    assert dropped == {}
+
+
+def test_opening_multi_node_standard_with_one_node_struck_is_all_first_draft_nodes() -> None:
+    """A two-node standard whose second node was struck: the opening is ALL
+    first-draft nodes of the clause type, joined in first-draft order, and the
+    kept node's terminal row says the clause opened with our standard."""
+    node_a, node_b = "The Supplier shall maintain insurance.", "Cover is for five million."
+    std = {"ins": [node_a, node_b]}
+    kept = _terminal_cd("ins", "5", node_a, (100, 138))
+    struck = _removed_row("ins", node_b, path="6")
+    struck = ClauseDiff(**{**struck.__dict__, "char_span_before": (139, 165)})
+    tree = [_node_cc("5", "ins", node_a, (100, 138))]
+    # Rows are deliberately given out of first-draft order.
+    obs = _opening_run([struck, kept], tree, standards=std)
+    (terminal,) = _terminals(obs)
+    (opening,) = _openings(obs)
+    assert terminal.opened_with == "standard"
+    assert opening.full_text == f"{node_a}\n{node_b}"
+    assert opening.opened_with == "standard"
+    # Cited to the first node in first-draft order, not the struck one.
+    assert (opening.citation.clause_path, opening.citation.char_span) == ("5", (100, 138))
+
+
+def test_opening_non_standard_changed_to_standard() -> None:
+    """Opened non-standard, signed our standard: the opening is recorded
+    whatever its origin."""
+    row = _terminal_cd(
+        "governing_law",
+        "10",
+        _STD["governing_law"],
+        (60, 125),
+        kind="modified",
+        before=_NY_LAW,
+    )
+    tree = [_node_cc("10", "governing_law", _STD["governing_law"], (60, 125))]
+    obs = _opening_run([row], tree, provenance="counterparty_paper")
+    (terminal,) = _terminals(obs)
+    (opening,) = _openings(obs)
+    assert terminal.opened_with == "non_standard" and terminal.standard is True
+    assert opening.opened_with == "non_standard" and opening.standard is False
+    assert opening.full_text == _NY_LAW
+
+
+def test_opening_non_standard_unchanged_has_no_opening_row() -> None:
+    row = _terminal_cd("governing_law", "10", _NY_LAW, (60, 125))
+    tree = [_node_cc("10", "governing_law", _NY_LAW, (60, 125))]
+    obs = _opening_run([row], tree)
+    assert _openings(obs) == []
+    assert [t.opened_with for t in _terminals(obs)] == ["non_standard"]
+
+
+def test_opening_clause_added_in_a_later_round_is_absent() -> None:
+    """The first draft had no node of the clause type: `absent`, no opening
+    row (there is no first-draft text to record)."""
+    row = _absent_from_first_draft_row("governing_law", "10", _NY_LAW, (60, 125))
+    tree = [_node_cc("10", "governing_law", _NY_LAW, (60, 125))]
+    obs = _opening_run([row], tree)
+    assert _openings(obs) == []
+    assert [t.opened_with for t in _terminals(obs)] == ["absent"]
+
+
+def test_opening_single_version_signed_deal_opened_with_what_it_signed() -> None:
+    """A single-version signed deal: the first draft IS the signed copy, so
+    each terminal row says what it opened with and nothing is distinct."""
+    rows = [
+        _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125)),
+        _terminal_cd("non_solicit", "11", "Employees may be hired freely.", (126, 160)),
+    ]
+    tree = [
+        _node_cc("10", "governing_law", _STD["governing_law"], (60, 125)),
+        _node_cc("11", "non_solicit", "Employees may be hired freely.", (126, 160)),
+    ]
+    obs = _opening_run(rows, tree)
+    assert _openings(obs) == []
+    assert {t.taxonomy_id: t.opened_with for t in _terminals(obs)} == {
+        "governing_law": "standard",
+        "non_solicit": "non_standard",
+    }
+
+
+def test_opening_unsigned_deal_has_no_opened_with_and_no_opening_rows() -> None:
+    """Without a detected executed copy the version order is not anchored: no
+    opening rows, `opened_with` is None everywhere and nothing new is counted
+    as dropped."""
+    edited = _terminal_cd(
+        "governing_law", "10", _NY_LAW, (60, 125), kind="modified", before=_STD["governing_law"]
+    )
+    added = _absent_from_first_draft_row(
+        "non_solicit", "11", "Employees may be hired freely.", (126, 160)
+    )
+    struck = _removed_row("ind", _STD["ind"], path="7")
+    tree = [
+        _node_cc("10", "governing_law", _NY_LAW, (60, 125)),
+        _node_cc("11", "non_solicit", "Employees may be hired freely.", (126, 160)),
+    ]
+    dropped: dict[str, int] = {}
+    obs = _opening_run([edited, added, struck], tree, has_signed_copy=False, dropped=dropped)
+    assert _openings(obs) == []
+    assert [(o.outcome, o.opened_with) for o in obs] == [("unsigned", None), ("unsigned", None)]
+    assert dropped == {DROPPED_STANDARD_REMOVED_UNSIGNED: 1}
+
+
+def test_opening_whitespace_only_difference_is_not_distinct() -> None:
+    """The builder compares whitespace-collapsed text: a re-wrapped clause has
+    no opening row (a case/punctuation-only edit is decided at L5)."""
+    wrapped = _NY_LAW.replace(" governed ", "\n governed  ")
+    row = _terminal_cd("governing_law", "10", _NY_LAW, (60, 125), kind="modified", before=wrapped)
+    tree = [_node_cc("10", "governing_law", _NY_LAW, (60, 125))]
+    obs = _opening_run([row], tree)
+    assert _openings(obs) == []
+    assert [t.opened_with for t in _terminals(obs)] == ["non_standard"]
+    # A case-only edit is not whitespace-only: the row exists, and L5 (which
+    # knows the party) decides whether it is distinct under the grouping key.
+    cased = _terminal_cd(
+        "governing_law", "10", _NY_LAW, (60, 125), kind="modified", before=_NY_LAW.upper()
+    )
+    assert len(_openings(_opening_run([cased], tree))) == 1
+
+
+def test_opening_of_a_struck_clause_with_no_template_clause_needs_no_origin() -> None:
+    """A struck clause type with no template clause: its origin is undetermined
+    (no concession, no refused ask, still counted), but as a FACT it opened
+    with this text, `non_standard`."""
+    cap = "Each party's liability is capped at fifty thousand dollars."
+    removed = _removed_row("limitation_of_liability", cap, path="13")
+    other = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    tree = [_node_cc("10", "governing_law", _STD["governing_law"], (60, 125))]
+    dropped: dict[str, int] = {}
+    obs = _opening_run([removed, other], tree, dropped=dropped)
+    assert [o.outcome for o in obs] == ["signed", OUTCOME_OPENING]
+    opening = _openings(obs)[0]
+    assert (opening.taxonomy_id, opening.opened_with, opening.full_text) == (
+        "limitation_of_liability",
+        "non_standard",
+        cap,
+    )
+    assert opening.standard is False
+    assert not [o for o in obs if o.outcome == "proposed_then_reversed"]
+    assert dropped == {DROPPED_ORIGIN_UNDETERMINED: 1}
+
+
+def test_opening_relocated_text_is_not_a_struck_opening() -> None:
+    """Relocation guard: a first-draft node with no terminal slot whose text
+    survives in the signed copy under ANOTHER clause was relocated, not
+    struck. With no terminal row for its clause type it produces no opening
+    row (and still no precedent), and is counted as surviving."""
+    relocated = "The Recipient shall return Confidential Information on request."
+    removed = _removed_row("return_of_materials", relocated, path="4")
+    kept = _terminal_cd("survival_period", "9", f"{relocated} Duties survive.", (80, 140))
+    tree = [_node_cc("9", "survival_period", f"{relocated} Duties survive.", (80, 140))]
+    dropped: dict[str, int] = {}
+    obs = _opening_run([removed, kept], tree, dropped=dropped, standards={"ind": "x"})
+    assert [(o.taxonomy_id, o.outcome) for o in obs] == [("survival_period", "signed")]
+    assert dropped == {DROPPED_SURVIVES_IN_TERMINAL: 1}
+
+
+def test_opened_with_ignores_the_relocation_guard() -> None:
+    """`opened_with` is a fact about the first draft: a clause type whose
+    first-draft nodes were all relocated (so it has no opening row) and which
+    also has a reversal still opened WITH that clause, never `absent`."""
+    relocated = "The Recipient shall return Confidential Information on request."
+    removed = _removed_row("return_of_materials", relocated, path="4")
+    kept = _terminal_cd("survival_period", "9", f"{relocated} Duties survive.", (80, 140))
+    tree = [_node_cc("9", "survival_period", f"{relocated} Duties survive.", (80, 140))]
+    reversal = ReversalRecord(
+        taxonomy_id="return_of_materials",
+        clause_path="12",
+        version_inserted="draft_v2",
+        version_removed="signed_final",
+        proposed_text="The Recipient shall return all copies within five days.",
+    )
+    obs = _opening_run([removed, kept], tree, reversals=[reversal], standards={"ind": "x"})
+    refused = [o for o in obs if o.outcome == "proposed_then_reversed"]
+    assert [(o.taxonomy_id, o.opened_with) for o in refused] == [
+        ("return_of_materials", "non_standard")
+    ]
+    assert _openings(obs) == []
+
+
+def test_opening_keeps_only_the_struck_nodes_when_another_node_was_relocated() -> None:
+    """Two first-draft nodes of one clause type, no terminal row for it: the
+    relocated node is left out of the opening, the struck one is the opening."""
+    relocated = "The Recipient shall return Confidential Information on request."
+    struck_text = "The Recipient shall certify destruction within ten days."
+    node_relocated = _removed_row("return_of_materials", relocated, path="4")
+    node_struck = ClauseDiff(
+        **{
+            **_removed_row("return_of_materials", struck_text, path="5").__dict__,
+            "char_span_before": (200, 255),
+        }
+    )
+    kept = _terminal_cd("survival_period", "9", f"{relocated} Duties survive.", (80, 140))
+    tree = [_node_cc("9", "survival_period", f"{relocated} Duties survive.", (80, 140))]
+    obs = _opening_run([node_relocated, node_struck, kept], tree, standards={"ind": "x"})
+    (opening,) = _openings(obs)
+    assert opening.full_text == struck_text
+    assert opening.citation.clause_path == "5"
+
+
+def test_opening_unclassified_nodes_get_no_opening() -> None:
+    removed = _removed_row("governing_law", _STD["governing_law"])
+    removed = ClauseDiff(**{**removed.__dict__, "taxonomy_id": None})
+    other = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    tree = [_node_cc("10", "governing_law", _STD["governing_law"], (60, 125))]
+    obs = _opening_run([removed, other], tree)
+    assert _openings(obs) == []
+
+
+def test_opening_reversal_of_a_clause_the_first_draft_lacked_is_absent() -> None:
+    """A proposal inserted after the first draft and struck again has no
+    first-draft node: its reversal row says it opened `absent`, which is what
+    makes a signed deal's record complete for a clause it never signed."""
+    reversal = ReversalRecord(
+        taxonomy_id="residuals",
+        clause_path="12",
+        version_inserted="draft_v2",
+        version_removed="signed_final",
+        proposed_text="Residual knowledge may be used freely.",
+    )
+    other = _terminal_cd("governing_law", "10", _STD["governing_law"], (60, 125))
+    tree = [_node_cc("10", "governing_law", _STD["governing_law"], (60, 125))]
+    obs = _opening_run([other], tree, reversals=[reversal])
+    refused = [o for o in obs if o.outcome == "proposed_then_reversed"]
+    assert [(o.taxonomy_id, o.opened_with) for o in refused] == [("residuals", "absent")]
+    assert _openings(obs) == []
+
+
+def test_opened_with_is_serialized_only_when_set() -> None:
+    """An observation store written before the field reads back None, never a
+    fabricated value: the key is absent when None."""
+    row = _terminal_cd("governing_law", "10", _NY_LAW, (60, 125))
+    tree = [_node_cc("10", "governing_law", _NY_LAW, (60, 125))]
+    (terminal,) = _terminals(_opening_run([row], tree))
+    assert terminal.to_dict()["opened_with"] == "non_standard"
+    legacy = dataclasses.replace(terminal, opened_with=None)
+    assert "opened_with" not in legacy.to_dict()

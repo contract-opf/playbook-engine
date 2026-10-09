@@ -154,7 +154,7 @@ def test_nda_smoke_full_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert ok_rows and all(isinstance(vi.get("signature_block_span"), list) for vi in ok_rows), (
         "every NDA version's signature block should be located and recorded"
     )
-    # Engine-internal only: the frozen OPF 0.4 version_ingest schema has no
+    # Engine-internal only: the frozen OPF 0.5 version_ingest schema has no
     # such key, so the published playbook must not carry it.
     for doc in playbook["corpus"]["documents"]:
         for vi in doc.get("version_ingest") or []:

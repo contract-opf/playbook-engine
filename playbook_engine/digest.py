@@ -1,6 +1,6 @@
 """Model-facing digest of an OPF playbook — the top-level `digest` section.
 
-**digest_version 3** (OPF 0.4, issue #223; the only digest the engine
+**digest_version 3** (OPF 0.5, issue #223; the only digest the engine
 builds — digest 2 was retired with OPF 0.3, issue #238): the verdict-free
 projection of the per-deal precedent record. Per clause: our standard, how
 many deals signed it, and the non-standard signed variants and refused asks,
@@ -55,7 +55,7 @@ DIGEST_TOKEN_BUDGET = 40_000
 
 
 # ---------------------------------------------------------------------------
-# digest_version 3 — projection of the OPF 0.4 precedent record (issue #223)
+# digest_version 3 — projection of the OPF 0.5 precedent record (issue #223)
 # ---------------------------------------------------------------------------
 
 _QUARTER_RE = re.compile(r"^(\d{4})-Q([1-4])$")
@@ -271,7 +271,7 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
 def build_digest(
     playbook: dict[str, Any], *, token_budget: int | None = DIGEST_TOKEN_BUDGET
 ) -> dict[str, Any]:
-    """Build the digest_version 3 digest of an OPF 0.4 document (issue #223).
+    """Build the digest_version 3 digest of an OPF 0.5 document (issue #223).
 
     Verdict-free: per clause, our standard, how many deals signed it, the
     non-standard signed variants and the refused asks, each grouped by

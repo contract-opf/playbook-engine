@@ -39,7 +39,7 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.4",
+        "opf_version": "0.5",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
@@ -258,9 +258,8 @@ def test_section_digest_stable_across_key_order() -> None:
 
 def test_compute_section_digests_returns_all_three() -> None:
     digests = compute_section_digests(_minimal_doc())
-    # Issue #147: "curation" is a fourth digest, always computed (digests
-    # `{}` when the document carries no curation key at all).
-    assert set(digests.keys()) == {"evidence", "posture", "floor", "curation"}
+    # OPF 0.5 has no curation section (issue #233), so no fourth digest.
+    assert set(digests.keys()) == {"evidence", "posture", "floor"}
     for h in digests.values():
         assert _HASH_RE.match(h)
 

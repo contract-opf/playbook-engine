@@ -54,8 +54,8 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
           otherwise it was removed (narrowed or replaced text included, even
           when its words recur), and its ORIGIN (never the deal's paper side,
           tested against every template node for the taxonomy_id) decides:
-            · our standard language struck → our CONCESSION (the precedent's
-              opening_text; never a rejected/refused ask) —
+            · our standard language struck → our CONCESSION (never a
+              rejected/refused ask) —
               only in a deal with a detected executed copy; in an unsigned
               deal it is dropped and counted, never a concession
             · non-standard (their) language struck → proposed_then_reversed —
@@ -63,19 +63,27 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
               deal it is dropped and counted (refused_ask_no_signed_copy), so
               an unsigned deal's precedent records carry no refused_asks
             · no standard to compare against → dropped and counted
+        - what each clause OPENED with (issue #233; only in a deal with a
+          detected executed copy): the first draft's text of a clause type
+          (every first-draft node bound into its aligned rows) is a fact,
+          whatever its origin. Each terminal row carries opened_with
+          (standard | non_standard | absent), and one `opening` row per clause
+          type whose first-draft text differs from what was signed carries
+          that text. Text relocated, not struck, yields no opening.
                                      │
-  L5  COMPILE PLAYBOOK      aggregate observations → OPF 0.4 (deterministic assembly)
+  L5  COMPILE PLAYBOOK      aggregate observations → OPF 0.5 (deterministic assembly)
         - decide the clause types and each one's our_standard (template only)
         - evidence = {clauses, precedent} (issue #223) — one verdict-free
           precedent per (deal, clause) (signed_text, standard, rounds/moved,
-          opening_text, refused_asks, paper as metadata only); clause n_* counts
+          opened_with, opening_text, refused_asks, paper as metadata only);
+          clause n_* counts
           and the digest_version 3 digest are derived from it (precedent.py)
         - every evidence count counts DISTINCT DEALS; nothing is read from a
           judged verdict or risk direction
-        - one format only: OPF 0.1–0.3 and digest 2 were retired (issue #238)
+        - one format only: OPF 0.1–0.4 and digest 2 were retired (issues #238, #233)
                                      │
             ┌──────────────────────────────────────────────────────────────┐
-  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.4.json)     │
+  OUTPUT    │  playbook.opf.json (validates: playbook.schema-0.5.json)     │
             └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,7 +102,7 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
 The engine writes inspectable intermediates so runs are debuggable and re-runnable:
 - `normalized/<doc>/<version>.clauses.json` — the clause tree per version.
 - `trail/<doc>.json` — inferred order, signed version, provenance, per-round diffs.
-- `observations.jsonl` — one row per clause observation feeding L5: one terminal row per (deal, taxonomy_id), one per unclassified terminal node, one `proposed_then_reversed` row per reversal, and, for a clause removed before signing, one row classified by the origin of its text: `conceded_before_signing` for our standard language (only in a deal with a detected executed copy) or `proposed_then_reversed` for non-standard language. Removed text that survives in the signed version, whose origin cannot be determined, or that is our standard in a deal with no detected executed copy produces no row and is counted in `corpus.stats.dropped_observations`.
+- `observations.jsonl` — one row per clause observation feeding L5: one terminal row per (deal, taxonomy_id), one per unclassified terminal node, one `proposed_then_reversed` row per reversal, one `opening` row per clause type whose first-draft text differs from what was signed (a signed deal only; OPF 0.5), and, for a clause removed before signing, one row classified by the origin of its text: `conceded_before_signing` for our standard language (only in a deal with a detected executed copy) or `proposed_then_reversed` for non-standard language. Removed text that survives in the signed version, or that is our standard in a deal with no detected executed copy, produces no row and is counted in `corpus.stats.dropped_observations`. Removed text whose origin cannot be determined (for example a clause type with no template clause) produces no `conceded_before_signing` or `proposed_then_reversed` row and is still counted there, but in a deal with a detected executed copy it does yield the clause type's `opening` row, so the first draft's text of that clause reaches precedent as `opening_text` with `signed_text` null.
 - `scope.json` — the scope-gate decisions and rationales.
 
 These let a human (or a workflow) verify L2/L4 before trusting the compiled playbook.

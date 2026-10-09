@@ -259,7 +259,7 @@ reach for them:
 
 ### Querying precedent
 
-An OPF 0.4 playbook keeps one `evidence.precedent` record per (deal,
+An OPF 0.5 playbook keeps one `evidence.precedent` record per (deal,
 clause type), each with a stable id (`prec.<sha>`). Three ways to get at
 them without scanning the whole document:
 

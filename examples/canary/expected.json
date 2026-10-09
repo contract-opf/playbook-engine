@@ -12,10 +12,10 @@
   "extractor_reason": [
     "declared"
   ],
-  "observations": 21,
+  "observations": 26,
   "observations_by_document": {
-    "halcyon-freight": 10,
-    "meridian-assay": 11
+    "halcyon-freight": 13,
+    "meridian-assay": 13
   },
   "playbook_clauses": 10,
   "quarantined": 0,

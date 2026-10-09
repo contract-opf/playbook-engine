@@ -1305,7 +1305,16 @@ def test_removed_clause_confidence_not_borrowed_from_signed_version(
     obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
     observations = [json.loads(line) for line in obs_lines if line.strip()]
 
-    insurance_obs = [o for o in observations if o["taxonomy_id"] == "insurance"]
+    insurance_obs = [
+        o for o in observations if o["taxonomy_id"] == "insurance" and o["outcome"] != "opening"
+    ]
+    # The clause's opening row (issue #233) cites the same v1 node with the
+    # same OWN v1 confidence: it is a second row of the removed clause, not a
+    # clause of the signed copy.
+    (opening_row,) = [
+        o for o in observations if o["taxonomy_id"] == "insurance" and o["outcome"] == "opening"
+    ]
+    assert opening_row["citation"]["version_id"] == "v1" and opening_row["confidence"] == 1.0
     assert len(insurance_obs) == 1, (
         f"expected exactly one 'insurance' observation (the removed v1 clause); "
         f"got {len(insurance_obs)}: {insurance_obs}"
@@ -1482,7 +1491,7 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
 
 
 def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) -> None:
-    """Issue #223: the same three corpora projected as OPF 0.4. An unsigned
+    """Issue #223: the same three corpora projected as OPF 0.5. An unsigned
     deal that struck our standard produces no precedent for the clause; the
     same strike in a signed deal is a precedent with no signed text, our
     standard as its opening text, ``standard: false``, ``moved: true`` — and
@@ -1594,14 +1603,21 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
     assert not [o for o in observations if o["outcome"] == "proposed_then_reversed"]
     assert derive_reversal_candidates(observations, min_deals=2) == []
 
-    # OPF 0.4 (issue #223): each deal's struck later node is its opening
-    # text, never a refused ask, and neither deal signed our standard.
+    # OPF 0.5 (issues #223, #233): each deal opened with our whole two-node
+    # standard (the opening is ALL first-draft nodes of the clause type, not
+    # only the struck one), signed only the first node, and neither deal
+    # signed our standard or refused anything.
     playbook_04 = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
     records = [p for p in playbook_04["evidence"]["precedent"] if p["taxonomy_id"] == "insurance"]
     assert sorted(p["document_id"] for p in records) == ["deal-001", "deal-002"]
     for record in records:
         assert record["refused_asks"] == []
-        assert record["opening_text"]["text"] == _MULTI_NODE_INSURANCE_B
+        assert record["opened_with"] == "standard"
+        assert (
+            record["opening_text"]["text"]
+            == f"{_MULTI_NODE_INSURANCE_A}\n{_MULTI_NODE_INSURANCE_B}"
+        )
+        assert record["signed_text"]["text"] == _MULTI_NODE_INSURANCE_A
         assert record["standard"] is False and record["moved"] is True
     clause_04 = next(
         c for c in playbook_04["evidence"]["clauses"] if c["taxonomy_id"] == "insurance"
@@ -1617,7 +1633,7 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
 
 # Issue #223 fix round 1: one conceded_before_signing row is written per
 # struck node, so a deal that strikes TWO nodes of a multi-node standard has
-# two rows for the (deal, clause) — the 0.4 precedent must carry both.
+# two rows for the (deal, clause) — the 0.5 precedent must carry both.
 _MULTI_NODE_INSURANCE_C = "Alpha Corp shall deliver certificates of insurance on request."
 _THREE_NODE_TEMPLATE_BODY = (
     r"1. Indemnification\par "
@@ -1639,9 +1655,9 @@ def test_two_struck_nodes_of_multi_node_standard_both_reach_opening_text(
 ) -> None:
     """Our template's Insurance standard spans three nodes (A, B, C); two
     deals start from it and sign keeping only A. Each deal's store has a
-    conceded_before_signing row for B and one for C, and its OPF 0.4
-    precedent's opening_text carries BOTH struck texts (joined in clause
-    order), never only the first row."""
+    conceded_before_signing row for B and one for C, and its OPF 0.5
+    precedent's opening_text is the first-draft text of the whole clause type:
+    A, B and C joined in clause order, never only the first struck row."""
     from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
 
     corpus_dir = tmp_path / "corpus"
@@ -1689,7 +1705,11 @@ def test_two_struck_nodes_of_multi_node_standard_both_reach_opening_text(
         opening = record["opening_text"]["text"]
         assert _MULTI_NODE_INSURANCE_B in opening, opening
         assert _MULTI_NODE_INSURANCE_C in opening, opening
-        assert opening == f"{_MULTI_NODE_INSURANCE_B}\n{_MULTI_NODE_INSURANCE_C}"
+        assert opening == (
+            f"{_MULTI_NODE_INSURANCE_A}\n{_MULTI_NODE_INSURANCE_B}\n{_MULTI_NODE_INSURANCE_C}"
+        )
+        # Our whole standard opened the negotiation.
+        assert record["opened_with"] == "standard"
         assert record["signed_text"]["text"] == _MULTI_NODE_INSURANCE_A
         assert record["refused_asks"] == []
         assert record["standard"] is False and record["moved"] is True
@@ -1781,7 +1801,7 @@ def test_unsigned_deal_striking_their_language_records_no_refused_ask(
     is struck in v2. In a deal with a detected executed copy that is their
     refused ask; with no signed copy, v2 is only the later draft, so no
     proposed_then_reversed observation is written (counted instead) and the
-    OPF 0.4 precedent carries no refused_asks for the unsigned deal."""
+    OPF 0.5 precedent carries no refused_asks for the unsigned deal."""
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
@@ -1991,3 +2011,246 @@ def test_project_drops_refused_asks_of_unsigned_deal_from_pre_221_store(tmp_path
     assert all(p["signed"] is False for p in deal), "premise: deal-001 is unsigned"
     assert [p for p in deal if p["refused_asks"]] == []
     assert [c["n_refused"] for c in playbook["evidence"]["clauses"] if c["n_refused"]] == []
+
+
+# ---------------------------------------------------------------------------
+# Issue #233 (OPF 0.5): what every clause opened with, mined and projected
+# through the real pipeline. Each deal is a two-version negotiation whose
+# first draft is v1 and whose executed copy is v2 (hints.yaml), except where
+# stated.
+# ---------------------------------------------------------------------------
+
+_OPENING_GL_STANDARD = "This agreement is governed by the laws of the State of New York."
+_OPENING_GL_CALIFORNIA = "This agreement is governed by the laws of the State of California."
+_OPENING_INDEMNITY = (
+    "Alpha Corp shall indemnify Beta University against third-party claims "
+    "arising from the placement programme."
+)
+_OPENING_TERM = "This agreement commences on the date of execution and continues for one year."
+
+
+def _opening_body(governing_law: str, *, term: bool = True) -> str:
+    body = (
+        rf"1. Indemnification\par {_OPENING_INDEMNITY}\par "
+        rf"2. Governing Law\par {governing_law}\par "
+    )
+    return body + (rf"3. Term\par {_OPENING_TERM}\par " if term else "")
+
+
+def _mine_openings(root: Path) -> tuple[Path, Any, Any]:
+    """Mine the opening-evidence corpus; returns (out_dir, config, taxonomy)."""
+    corpus_dir = root / "corpus"
+    deals: dict[str, tuple[str, str, bool]] = {
+        # first draft body, executed body, has a detected executed copy
+        "deal-edited": (
+            _opening_body(_OPENING_GL_STANDARD),
+            _opening_body(_OPENING_GL_CALIFORNIA),
+            True,
+        ),
+        "deal-to-standard": (
+            _opening_body(_OPENING_GL_CALIFORNIA),
+            _opening_body(_OPENING_GL_STANDARD),
+            True,
+        ),
+        "deal-unchanged": (
+            _opening_body(_OPENING_GL_CALIFORNIA),
+            _opening_body(_OPENING_GL_CALIFORNIA),
+            True,
+        ),
+        "deal-case-only": (
+            _opening_body(_OPENING_GL_STANDARD),
+            _opening_body(_OPENING_GL_STANDARD.upper()),
+            True,
+        ),
+        "deal-added": (
+            _opening_body(_OPENING_GL_STANDARD, term=False),
+            _opening_body(_OPENING_GL_STANDARD),
+            True,
+        ),
+        "deal-unsigned": (
+            _opening_body(_OPENING_GL_STANDARD),
+            _opening_body(_OPENING_GL_CALIFORNIA),
+            False,
+        ),
+    }
+    for name, (first, executed, signed) in deals.items():
+        deal_dir = corpus_dir / name
+        deal_dir.mkdir(parents=True)
+        _write_rtf(deal_dir / "v1.rtf", first)
+        _write_rtf(deal_dir / "v2.rtf", executed)
+        if signed:
+            (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = root / "template.rtf"
+    _write_rtf(template_path, _opening_body(_OPENING_GL_STANDARD))
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = root / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    out_dir = root / "out"
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+    return out_dir, config, taxonomy
+
+
+def _precedent_by_deal(playbook: dict[str, Any], taxonomy_id: str) -> dict[str, dict[str, Any]]:
+    return {
+        p["document_id"]: p
+        for p in playbook["evidence"]["precedent"]
+        if p["taxonomy_id"] == taxonomy_id
+    }
+
+
+def test_precedent_records_what_every_clause_opened_with(tmp_path: Path) -> None:
+    out_dir, config, taxonomy = _mine_openings(tmp_path)
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    assert playbook["opf_version"] == "0.5"
+    assert validate_document(playbook).ok
+    gl = _precedent_by_deal(playbook, "governing_law")
+    assert set(gl) == {
+        "deal-edited",
+        "deal-to-standard",
+        "deal-unchanged",
+        "deal-case-only",
+        "deal-added",
+        "deal-unsigned",
+    }
+
+    # Opened with our standard, edited before signing.
+    edited = gl["deal-edited"]
+    assert edited["opened_with"] == "standard"
+    assert edited["opening_text"]["text"] == _OPENING_GL_STANDARD
+    assert edited["opening_text"]["ref"]["version"] == 1
+    assert edited["signed_text"]["text"] == _OPENING_GL_CALIFORNIA
+    assert edited["standard"] is False and edited["moved"] is True
+
+    # Opened non-standard, changed to our standard: recorded whatever its origin.
+    to_standard = gl["deal-to-standard"]
+    assert to_standard["opened_with"] == "non_standard"
+    assert to_standard["opening_text"]["text"] == _OPENING_GL_CALIFORNIA
+    assert to_standard["standard"] is True and to_standard["moved"] is True
+
+    # Opened non-standard, signed unchanged: nothing distinct to record.
+    unchanged = gl["deal-unchanged"]
+    assert unchanged["opened_with"] == "non_standard"
+    assert unchanged["opening_text"] is None and unchanged["moved"] is False
+
+    # A case-only edit is not a distinct opening under the grouping key.
+    case_only = gl["deal-case-only"]
+    assert case_only["opened_with"] == "standard"
+    assert case_only["opening_text"] is None
+
+    # An unsigned deal's version order is not anchored: nothing is determined.
+    unsigned = gl["deal-unsigned"]
+    assert unsigned["signed"] is False
+    assert unsigned["opened_with"] is None and unsigned["opening_text"] is None
+
+    # The clause added in a later round opened absent; the others opened with Term.
+    term = _precedent_by_deal(playbook, "term")
+    assert term["deal-added"]["opened_with"] == "absent"
+    assert term["deal-added"]["opening_text"] is None
+    assert term["deal-edited"]["opened_with"] == "standard"
+
+    # Every signed record has its opening determined; none is distinct without
+    # having moved.
+    for record in playbook["evidence"]["precedent"]:
+        if record["signed"]:
+            assert record["opened_with"] is not None, record["document_id"]
+        if record["opening_text"] is not None:
+            assert record["moved"] is True and record["signed"] is True
+
+
+def test_store_without_opened_with_projects_null_never_absent(tmp_path: Path) -> None:
+    """A store mined before this change carries no `opened_with` and no
+    opening rows: every signed deal's record says `null` (not determined),
+    never `absent`, and records no opening."""
+    out_dir, config, taxonomy = _mine_openings(tmp_path)
+    obs_path = out_dir / "observations.jsonl"
+    legacy_rows = []
+    for line in obs_path.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if row["outcome"] == "opening":
+            continue
+        row.pop("opened_with", None)
+        legacy_rows.append(row)
+    obs_path.write_text("".join(json.dumps(r) + "\n" for r in legacy_rows), encoding="utf-8")
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    assert validate_document(playbook).ok
+    records = playbook["evidence"]["precedent"]
+    assert records
+    assert {r["opened_with"] for r in records} == {None}
+    assert {r["opening_text"] for r in records} == {None}
+
+
+def test_struck_clause_with_no_template_clause_is_precedent_without_a_refused_ask(
+    tmp_path: Path,
+) -> None:
+    """A first-draft clause of a type our template has no clause for, struck
+    before signing: its origin is undetermined, so it is not claimed as a
+    refused ask, but as a fact the deal opened with it. It is a precedent with
+    no signed text (and a deal the clause type's count now includes)."""
+    cap = (
+        "Each party's aggregate liability under this agreement shall not exceed "
+        "fifty thousand dollars."
+    )
+    corpus_dir = tmp_path / "corpus"
+    base = rf"1. Indemnification\par {_OPENING_INDEMNITY}\par 2. Term\par {_OPENING_TERM}\par "
+    capped = base + rf"3. Limitation of Liability\par {cap}\par "
+    # Two deals sign a (different) liability clause; the third strikes its cap.
+    deals = {
+        "deal-signs-1": (base, capped),
+        "deal-signs-2": (base, capped),
+        "deal-struck": (capped, base),
+    }
+    for name, (first, executed) in deals.items():
+        deal_dir = corpus_dir / name
+        deal_dir.mkdir(parents=True)
+        _write_rtf(deal_dir / "v1.rtf", first)
+        _write_rtf(deal_dir / "v2.rtf", executed)
+        (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    template_path = tmp_path / "template.rtf"
+    _write_rtf(template_path, base)
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {"template": str(template_path)},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    config = load_config(config_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    out_dir = tmp_path / "out"
+    mine_corpus(corpus_dir=corpus_dir, config=config, taxonomy=taxonomy, out_dir=out_dir)
+    manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
+    struck_manifest = next(d for d in manifest if d["document_id"] == "deal-struck")
+    assert struck_manifest["dropped_observations"] == {"removed_origin_undetermined": 1}, (
+        "premise: the struck cap has no template clause, so its origin is undetermined"
+    )
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    assert validate_document(playbook).ok
+    liability = _precedent_by_deal(playbook, "limitation_of_liability")
+    assert set(liability) == {"deal-signs-1", "deal-signs-2", "deal-struck"}
+    struck = liability["deal-struck"]
+    assert struck["signed_text"] is None
+    assert struck["opened_with"] == "non_standard"
+    assert struck["opening_text"]["text"] == cap
+    assert struck["opening_text"]["ref"]["version"] == 1
+    assert struck["refused_asks"] == []
+    assert struck["standard"] is False and struck["moved"] is True
+    clause = next(
+        c for c in playbook["evidence"]["clauses"] if c["taxonomy_id"] == "limitation_of_liability"
+    )
+    assert (clause["n_deals"], clause["n_refused"]) == (3, 0)

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.4.json",
-  "title": "Open Playbook Format (OPF) v0.4",
-  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 3 model-facing projection. OPF 0.4 = the 0.3 document with `evidence` replaced by {clauses, precedent} (no observed_positions, clause_library, summary or negotiation_trail; no stance, band, risk or deviation verdict anywhere in evidence or digest). Judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json",
+  "title": "Open Playbook Format (OPF) v0.5",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 3 model-facing projection. OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. No stance, band, risk or deviation verdict anywhere in evidence or digest. Judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
   "type": "object",
   "required": [
     "opf_version",
@@ -22,7 +22,7 @@
   "properties": {
     "opf_version": {
       "type": "string",
-      "const": "0.4"
+      "const": "0.5"
     },
     "agreement_type": {
       "type": "object",
@@ -179,7 +179,7 @@
     },
     "evidence": {
       "type": "object",
-      "description": "\u00a73.5 (OPF 0.4) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
+      "description": "\u00a73.5 (OPF 0.5) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
       "required": [
         "clauses",
         "precedent"
@@ -317,19 +317,6 @@
       "description": "Categories of change accepted even if technically novel. Negotiation knowledge, owned by OPF.",
       "items": {
         "type": "string"
-      }
-    },
-    "curation": {
-      "type": "object",
-      "description": "OPTIONAL \u2014 embedded attorney-pinned positions (issue #147). Pins are EMBEDDED here (not a sidecar) so they survive a recompile: the pipeline's merge layer preserves every pin and flags `conflict` when fresh evidence contradicts it. Excluded from `identity.content_hash`; digested separately as `identity.section_digests.curation` so pin edits/conflict flags don't perturb the playbook's own content identity.",
-      "additionalProperties": false,
-      "properties": {
-        "pins": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/curationPin"
-          }
-        }
       }
     },
     "corpus": {
@@ -562,7 +549,7 @@
         "content_hash": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "sha256 over the whole-document canonical form, excluding `identity`, `curation` (digested separately as section_digests.curation \u2014 see \u00a73.11), and `compiler.generated_at`/`compiler.run_id`."
+          "description": "sha256 over the whole-document canonical form, excluding `identity` and `compiler.generated_at`/`compiler.run_id`."
         },
         "section_digests": {
           "type": "object",
@@ -584,11 +571,6 @@
             "floor": {
               "type": "string",
               "pattern": "^sha256:[0-9a-f]{64}$"
-            },
-            "curation": {
-              "type": "string",
-              "pattern": "^sha256:[0-9a-f]{64}$",
-              "description": "Digest of the `curation` section alone (issue #147), computed even when `curation` is absent (digests `{}`)."
             }
           }
         }
@@ -596,7 +578,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "digest_version 3 \u2014 the compact model-facing projection of the 0.4 evidence (playbook_engine/digest.py build_digest_v3). Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields. Covered by identity.content_hash like every content section.",
+      "description": "digest_version 3 \u2014 the compact model-facing projection of the 0.5 evidence (playbook_engine/digest.py build_digest_v3). Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields. Covered by identity.content_hash like every content section.",
       "required": [
         "digest_version",
         "perspective",
@@ -728,68 +710,6 @@
         }
       }
     },
-    "curationPin": {
-      "type": "object",
-      "description": "One attorney-pinned clause position (issue #147). `position` is the attorney's asserted stance (free-form \u2014 the engine preserves and surfaces it but does not validate or interpret it); `baseline_stance` is the engine's own `summary.historical_stance` for this clause at the moment the pin was made, i.e. what the attorney was overriding FROM. On recompile, `conflict` is set when the freshly recomputed historical_stance differs from `baseline_stance` (evidence moved since the pin was made) and cleared when it matches \u2014 see playbook_engine/curation.py.",
-      "required": [
-        "clause_id",
-        "item_id",
-        "position",
-        "baseline_stance",
-        "pinned_at"
-      ],
-      "additionalProperties": false,
-      "patternProperties": {
-        "^x_": true
-      },
-      "properties": {
-        "clause_id": {
-          "type": "string",
-          "description": "clausePosition.id this pin applies to."
-        },
-        "item_id": {
-          "type": "string",
-          "description": "Viewer item number (e.g. 'C3') at pin time \u2014 informational, not authoritative (clause_id is)."
-        },
-        "position": {
-          "type": "string",
-          "description": "Attorney-asserted position. Not validated against any enum."
-        },
-        "baseline_stance": {
-          "type": "string",
-          "description": "summary.historical_stance for this clause at the moment this pin was made."
-        },
-        "pinned_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "pinned_by": {
-          "type": "string"
-        },
-        "comment": {
-          "type": "string"
-        },
-        "conflict": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "flagged_at": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "recomputed_historical_stance": {
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
     "signedAt": {
       "type": "string",
       "pattern": "^\\d{4}-(\\d{2}-\\d{2}|Q[1-4])$",
@@ -842,7 +762,7 @@
     },
     "precedentClause": {
       "type": "object",
-      "description": "One clause type (OPF 0.4). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
+      "description": "One clause type (OPF 0.5). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
       "required": [
         "id",
         "taxonomy_id",
@@ -914,7 +834,7 @@
     },
     "precedent": {
       "type": "object",
-      "description": "One deal's record for one clause type (OPF 0.4) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
+      "description": "One deal's record for one clause type (OPF 0.5) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
       "required": [
         "id",
         "taxonomy_id",
@@ -925,6 +845,7 @@
         "signed",
         "rounds",
         "signed_text",
+        "opened_with",
         "opening_text",
         "standard",
         "moved",
@@ -999,8 +920,17 @@
             }
           ]
         },
+        "opened_with": {
+          "enum": [
+            "standard",
+            "non_standard",
+            "absent",
+            null
+          ],
+          "description": "What the clause opened with, a fact about the deal's first draft (the first version in negotiation order; the signed copy itself for a single-version deal), whatever its origin and whatever paper the deal is on. `standard`: the first-draft text of the clause type is our standard language (the same exact check `standard` uses). `non_standard`: present but not standard, including a clause type with no template clause. `absent`: the first draft has no node of the clause type (it was added during negotiation). null: not determined, i.e. the deal has no detected executed copy (`signed` false) or the store predates this field. MUST be null when `signed` is false. Never a judged verdict."
+        },
         "opening_text": {
-          "description": "The text the deal opened with, when recorded as distinct evidence (our standard language struck before signing); null otherwise.",
+          "description": "The first-draft text of the clause type (every first-draft node bound into an aligned row of it, joined with a newline in first-draft order; `ref` cites the first node), whatever its origin. Recorded when `opened_with` is `standard` or `non_standard` AND either `signed_text` is null or the \u00a73.5.4 grouping key of the opening differs from that of `signed_text`; null otherwise. null means \"not recorded / not distinct\", never \"opened with the signed text\" when `opened_with` is null. When non-null, `moved` MUST be true.",
           "oneOf": [
             {
               "type": "null"
@@ -1016,7 +946,7 @@
         },
         "moved": {
           "type": "boolean",
-          "description": "The clause changed during the negotiation, was struck, or carried a refused ask."
+          "description": "The clause changed during the negotiation, was struck, or carried a refused ask. Always true when `opening_text` is non-null."
         },
         "refused_asks": {
           "type": "array",

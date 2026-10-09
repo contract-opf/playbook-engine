@@ -46,12 +46,12 @@ def _compiled_out_dir(tmp_path: Path) -> Path:
     return out_dir
 
 
-def test_compiled_playbook_is_v04_with_digest_v3(tmp_path: Path) -> None:
-    """Issue #223: the reference compiler emits OPF 0.4 with a digest_version 3
+def test_compiled_playbook_is_v05_with_digest_v3(tmp_path: Path) -> None:
+    """Issue #223: the reference compiler emits OPF 0.5 with a digest_version 3
     digest equal to build_digest over the shipped document."""
     out_dir = _compiled_out_dir(tmp_path)
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert pb["opf_version"] == "0.4"
+    assert pb["opf_version"] == "0.5"
     assert pb["digest"]["digest_version"] == DIGEST_VERSION == "3"
     assert len(pb["digest"]["clauses"]) == len(pb["evidence"]["clauses"])
     assert "clause_count" not in pb["digest"]
@@ -148,16 +148,17 @@ def test_view_bundle_escapes_script_closers(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# digest_version 3 (OPF 0.4, issue #223). Every document here is built by
+# digest_version 3 (OPF 0.5, issue #223). Every document here is built by
 # the real producer — Observation rows (the shapes observation_builder
 # writes: signed / unsigned / proposed_then_reversed /
-# conceded_before_signing, with the deterministic `standard` fact) through
+# conceded_before_signing / opening, with the deterministic `standard` fact
+# and `opened_with`) through
 # compile_clause_positions + assemble_playbook — never a hand-built
 # precedent record.
 # ---------------------------------------------------------------------------
 
 
-def _v04_obs(
+def _v05_obs(
     doc_id: str,
     text: str,
     *,
@@ -165,6 +166,7 @@ def _v04_obs(
     outcome: str = "signed",
     standard: bool = False,
     version: int = 3,
+    opened_with: str | None = None,
 ):
     from playbook_engine.observation_builder import Observation, ObservationCitation
 
@@ -182,13 +184,14 @@ def _v04_obs(
         outcome=outcome,
         basis="deterministic",
         standard=standard,
+        opened_with=opened_with,
     )
 
 
-_V04_STANDARD = "This Agreement is governed by the laws of the State of New York."
+_V05_STANDARD = "This Agreement is governed by the laws of the State of New York."
 
 
-def _v04_playbook(observations: list, *, signed: dict[str, bool], perspective=None) -> dict:
+def _v05_playbook(observations: list, *, signed: dict[str, bool], perspective=None) -> dict:
     from playbook_engine.clause_position_compiler import compile_clause_positions
     from playbook_engine.observation_builder import Observation, ObservationCitation
     from playbook_engine.playbook_assembler import assemble_playbook
@@ -196,7 +199,7 @@ def _v04_playbook(observations: list, *, signed: dict[str, bool], perspective=No
     template = Observation(
         observation_id="template/governing_law",
         taxonomy_id="governing_law",
-        text_summary=_V04_STANDARD,
+        text_summary=_V05_STANDARD,
         citation=ObservationCitation(
             document_id="template", version="template", clause_path="4", char_span=None
         ),
@@ -233,13 +236,13 @@ def test_v3_digest_groups_variants_by_exact_normalization() -> None:
     text and an unsigned deal's text are never signed variants."""
     variant = "This Agreement is governed by the laws of the State of Delaware."
     observations = [
-        _v04_obs("d1", _V04_STANDARD, standard=True),
-        _v04_obs("d2", variant),
-        _v04_obs("d3", "THIS AGREEMENT is governed by the laws of the State of Delaware"),
-        _v04_obs("d4", "This Agreement is not governed by the laws of the State of Delaware."),
-        _v04_obs("d5", "This Agreement is governed by the laws of Texas.", outcome="unsigned"),
+        _v05_obs("d1", _V05_STANDARD, standard=True),
+        _v05_obs("d2", variant),
+        _v05_obs("d3", "THIS AGREEMENT is governed by the laws of the State of Delaware"),
+        _v05_obs("d4", "This Agreement is not governed by the laws of the State of Delaware."),
+        _v05_obs("d5", "This Agreement is governed by the laws of Texas.", outcome="unsigned"),
     ]
-    pb = _v04_playbook(
+    pb = _v05_playbook(
         observations, signed={"d1": True, "d2": True, "d3": True, "d4": True, "d5": False}
     )
     (clause,) = pb["digest"]["clauses"]
@@ -270,22 +273,22 @@ def test_v3_grouping_neutralizes_counterparty_aliases_and_perspective_party() ->
     signed = "{} and AlphaCorp agree that the laws of Delaware govern this Agreement."
     ask = "The laws of the home state of {} govern this Agreement."
     observations = [
-        aliased(_v04_obs("d1", signed.format("Counterparty-2")), "Counterparty-2"),
+        aliased(_v05_obs("d1", signed.format("Counterparty-2")), "Counterparty-2"),
         aliased(
-            _v04_obs(
+            _v05_obs(
                 "d1", ask.format("Counterparty-2"), outcome="proposed_then_reversed", version=2
             ),
             "Counterparty-2",
         ),
-        aliased(_v04_obs("d2", signed.format("Counterparty-5")), "Counterparty-5"),
+        aliased(_v05_obs("d2", signed.format("Counterparty-5")), "Counterparty-5"),
         aliased(
-            _v04_obs(
+            _v05_obs(
                 "d2", ask.format("COUNTERPARTY-5"), outcome="proposed_then_reversed", version=2
             ),
             "Counterparty-5",
         ),
         aliased(
-            _v04_obs(
+            _v05_obs(
                 "d3",
                 "AlphaCorp and Counterparty-3 agree that the laws of Delaware govern "
                 "this Agreement.",
@@ -293,7 +296,7 @@ def test_v3_grouping_neutralizes_counterparty_aliases_and_perspective_party() ->
             "Counterparty-3",
         ),
     ]
-    pb = _v04_playbook(
+    pb = _v05_playbook(
         observations,
         signed={"d1": True, "d2": True, "d3": True},
         perspective={"party": "AlphaCorp", "counterparty_type": "Vendor"},
@@ -350,32 +353,42 @@ def test_normalize_variant_text_party_tokens() -> None:
 def test_v3_digest_refused_asks_group_across_deals_and_conceded_is_not_refused() -> None:
     ask = "Either party may terminate this Agreement at any time without notice."
     observations = [
-        _v04_obs("d1", _V04_STANDARD, standard=True),
-        _v04_obs("d1", ask, outcome="proposed_then_reversed", version=2),
-        _v04_obs("d2", _V04_STANDARD, standard=True),
-        _v04_obs("d2", ask.upper(), outcome="proposed_then_reversed", version=3),
-        # Our standard struck in d3: a concession — opening text, never refused.
-        _v04_obs("d3", _V04_STANDARD, outcome="conceded_before_signing", version=1),
+        _v05_obs("d1", _V05_STANDARD, standard=True),
+        _v05_obs("d1", ask, outcome="proposed_then_reversed", version=2),
+        _v05_obs("d2", _V05_STANDARD, standard=True),
+        _v05_obs("d2", ask.upper(), outcome="proposed_then_reversed", version=3),
+        # Our standard struck in d3: a concession and an opening (the two rows
+        # observation_builder writes for it) — opening text, never refused.
+        _v05_obs("d3", _V05_STANDARD, standard=True, outcome="conceded_before_signing", version=1),
+        _v05_obs(
+            "d3",
+            _V05_STANDARD,
+            standard=True,
+            outcome="opening",
+            version=1,
+            opened_with="standard",
+        ),
     ]
-    pb = _v04_playbook(observations, signed={"d1": True, "d2": True, "d3": True})
+    pb = _v05_playbook(observations, signed={"d1": True, "d2": True, "d3": True})
     (clause,) = pb["digest"]["clauses"]
     assert [(a["n_deals"], len(a["precedent_ids"])) for a in clause["refused_asks"]] == [(2, 2)]
     # The representative is the earliest-round ask (d1's v2 → round 1).
     assert clause["refused_asks"][0]["ref"]["document_id"] == "d1"
     d3 = next(p for p in pb["evidence"]["precedent"] if p["document_id"] == "d3")
-    assert d3["signed_text"] is None and d3["opening_text"]["text"] == _V04_STANDARD
+    assert d3["signed_text"] is None and d3["opening_text"]["text"] == _V05_STANDARD
+    assert d3["opened_with"] == "standard"
     assert d3["refused_asks"] == [] and d3["standard"] is False and d3["moved"] is True
     assert clause["n_signed_standard"] == 2
 
 
 def test_v3_digest_carries_perspective_or_null() -> None:
-    observations = [_v04_obs("d1", _V04_STANDARD, standard=True)]
-    with_p = _v04_playbook(
+    observations = [_v05_obs("d1", _V05_STANDARD, standard=True)]
+    with_p = _v05_playbook(
         observations,
         signed={"d1": True},
         perspective={"party": "Fixture Co", "counterparty_type": "Vendor"},
     )
-    without_p = _v04_playbook(observations, signed={"d1": True})
+    without_p = _v05_playbook(observations, signed={"d1": True})
     assert with_p["digest"]["perspective"] == with_p["perspective"]
     assert without_p["digest"]["perspective"] is None
     assert "perspective" in without_p["digest"]
@@ -383,10 +396,10 @@ def test_v3_digest_carries_perspective_or_null() -> None:
 
 def test_v3_digest_budget_tightens_cap_but_keeps_totals() -> None:
     observations = [
-        _v04_obs(f"d{i}", f"This Agreement is governed by the laws of jurisdiction {i}.")
+        _v05_obs(f"d{i}", f"This Agreement is governed by the laws of jurisdiction {i}.")
         for i in range(8)
     ]
-    pb = _v04_playbook(observations, signed={f"d{i}": True for i in range(8)})
+    pb = _v05_playbook(observations, signed={f"d{i}": True for i in range(8)})
     loose = build_digest(pb, token_budget=None)
     tight = build_digest(pb, token_budget=1)
     assert len(loose["clauses"][0]["signed_variants"]) == EXEMPLAR_TOP_N
@@ -399,7 +412,7 @@ def test_v3_digest_budget_tightens_cap_but_keeps_totals() -> None:
 
 def test_v3_digest_summaries_never_exceed_300_chars_and_no_judged_fields() -> None:
     long_text = ("This Agreement is governed by the laws of Delaware. " * 12).strip()
-    pb = _v04_playbook([_v04_obs("d1", long_text)], signed={"d1": True})
+    pb = _v05_playbook([_v05_obs("d1", long_text)], signed={"d1": True})
     (variant,) = pb["digest"]["clauses"][0]["signed_variants"]
     assert len(variant["text"]) <= 300 and long_text.startswith(variant["text"])
     serialized = json.dumps(pb["digest"])
@@ -408,26 +421,26 @@ def test_v3_digest_summaries_never_exceed_300_chars_and_no_judged_fields() -> No
 
 
 # ---------------------------------------------------------------------------
-# Validator: digest consistency on a 0.4 document
+# Validator: digest consistency on a 0.5 document
 # ---------------------------------------------------------------------------
 
 
-def _small_v04_playbook() -> dict:
+def _small_v05_playbook() -> dict:
     variant = "This Agreement is governed by the laws of the State of Delaware."
-    return _v04_playbook(
-        [_v04_obs("d1", _V04_STANDARD, standard=True), _v04_obs("d2", variant)],
+    return _v05_playbook(
+        [_v05_obs("d1", _V05_STANDARD, standard=True), _v05_obs("d2", variant)],
         signed={"d1": True, "d2": True},
     )
 
 
 def test_digest_never_contains_full_text_and_estimates_positive() -> None:
-    pb = _small_v04_playbook()
+    pb = _small_v05_playbook()
     assert "full_text" not in json.dumps(pb["digest"])
     assert digest_token_estimate(pb["digest"]) > 0
 
 
-def test_validator_accepts_v04_with_and_without_digest() -> None:
-    pb = _small_v04_playbook()
+def test_validator_accepts_v05_with_and_without_digest() -> None:
+    pb = _small_v05_playbook()
     assert validate_document(pb).ok
     del pb["digest"]
     del pb["identity"]
@@ -436,7 +449,7 @@ def test_validator_accepts_v04_with_and_without_digest() -> None:
 
 
 def test_validator_rejects_digest_id_mismatch() -> None:
-    pb = _small_v04_playbook()
+    pb = _small_v05_playbook()
     del pb["identity"]
     pb["digest"]["clauses"][0]["id"] = "clause.some_other_clause"
     result = validate_document(pb)
@@ -445,7 +458,7 @@ def test_validator_rejects_digest_id_mismatch() -> None:
 
 
 def test_validator_rejects_full_text_in_digest() -> None:
-    pb = _small_v04_playbook()
+    pb = _small_v05_playbook()
     del pb["identity"]
     pb["digest"]["clauses"][0]["x_extra"] = {"full_text": "leaked verbatim clause"}
     result = validate_document(pb)

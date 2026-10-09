@@ -38,19 +38,19 @@ precedent.jsonl          -- the sidecar `playbook project` writes beside
 
 ## The worked playbook
 
-`playbook.opf.json` is committed as an **OPF 0.4** document (`opf_version`
-"0.4", issue #223): the verdict-free per-deal precedent record with a
-`digest_version` "3" digest. 26 clauses across all six deals, 127
+`playbook.opf.json` is committed as an **OPF 0.5** document (`opf_version`
+"0.5", issues #223 and #233): the verdict-free per-deal precedent record with a
+`digest_version` "3" digest. 26 clauses across all six deals, 128
 `evidence.precedent` records, one per (deal, clause): what each deal signed, whether
 that is our standard language (`standard` — an exact match after
-normalization, never a judged verdict), whether the clause moved, and the
-asks refused before signing. It demonstrates a real refused ask from a
+normalization, never a judged verdict), what the clause opened with
+(`opened_with`, plus the first-draft `opening_text` whenever it differs from
+what was signed), whether the clause moved, and the asks refused before
+signing. It demonstrates a real refused ask from a
 proposed-then-reversed round-trip (a `residuals` clause inserted in v2 of the
 three-version `zeta-diagnostics` deal and struck again before signing -- the
-reversal detector needs >=3 versions on a deal to observe this); our own
-standard clauses struck before signing (standard of care and venue in
-`beta-industries`) as precedents whose `opening_text` is our standard and
-whose `standard` is false -- our concession, never a refused ask; and no
+reversal detector needs >=3 versions on a deal to observe this; its
+`opened_with` is `absent`); and no
 stance, risk or deviation verdict anywhere (the consumer model does the
 judging; each clause's `n_signed_standard` of `n_deals` is the fact it reads).
 It also carries a populated `posture.system_prompt` from a six-question GC
@@ -60,10 +60,11 @@ Information; survival of confidentiality obligations) and one hand-authored
 conditional hard line via `playbook floor sign` (limitation of liability, if
 present, must not reach a confidentiality breach -- responding to the
 $50,000 liability cap that appears in three of the six deals, introduced by
-the counterparty in two of them). OPF 0.4 is the only format the engine
-emits (issue #238).
-`corpus.stats.dropped_observations` counts removed text that yields no
-precedent.
+the counterparty in two of them). OPF 0.5 is the only format the engine
+emits (issues #238, #233).
+`corpus.stats.dropped_observations` counts removed rows that yield no
+concession or refused ask. Since #233 that is no longer "no precedent": a
+removed clause's text still reaches precedent as the clause's opening (below).
 A clause edited in an early round and then carried unchanged into the
 signed copy is one `modified` clause (issue #232). The global move phase
 chains the identical later copies into one row first, and that row is then
@@ -82,8 +83,7 @@ concession (`beta-industries` governing law, `gamma-holdings`), a
 fabricated refused ask (`epsilon-systems`), or a dropped observation
 (`removed_origin_undetermined` in `zeta-diagnostics`, `survives_in_terminal`
 in `beta-industries`). The four precedents that changed now have `rounds` 1
-and `opening_text` null, because the store records an opening text only
-for a clause struck before signing.
+and carry the first draft as `opening_text` (issue #233, below).
 Below the 0.70 Jaccard threshold the aligner binds two drafts only as a
 localized edit: Jaccard of at least 0.5 and exactly one contiguous edit span.
 `beta-industries`' second draft struck the independent-development exclusion
@@ -94,6 +94,30 @@ the one-letter fragment "c". In `theta-logistics` and `zeta-diagnostics` the
 compelled-disclosure clause gained an appended notice proviso (Jaccard 0.48).
 It splits into removed + added, and the removed text is counted as
 `survives_in_terminal`.
+
+**What every clause opened with (issue #233).** Every precedent says what
+its clause opened with, as a fact, whatever the origin of the first draft's
+text. Of the 128 records, `opened_with` is `standard` for 91, `non_standard`
+for 34 and `absent` for 3 (the `zeta-diagnostics` residuals clause above, and
+the compelled-disclosure clause in `theta-logistics` and `zeta-diagnostics`,
+whose first-draft copy is not bound to the clause type, so only the later
+copy is). 14 records carry an `opening_text`, because the first
+draft differs from what was signed: seven opened with our standard and were
+edited before signing (`beta-industries` governing law, venue and standard of
+care; `delta-ventures` governing law and venue; `gamma-holdings` discussions
+and breach notice); seven opened non-standard. Of those, `epsilon-systems`
+compelled disclosure ended at our standard (the opening lacked the notice
+proviso), the $50,000 liability caps of `epsilon-systems` and
+`zeta-diagnostics` were changed, and `theta-logistics`' cap was struck outright:
+it has `signed_text` null, an `opening_text`, and **no** `refused_asks`
+entry, because without a template clause for limitation of liability the
+engine cannot say whose language the cap was. It is the third deal behind the
+"3 of 6" in the Floor rationale, and `n_deals` for the clause goes from 2 to
+3. The other three are exclusions in `theta-logistics` and `zeta-diagnostics`
+(the signed copy added an independent-development exception) and the survival
+period in `theta-logistics` (five years, signed at three); all three clauses
+only became classified through #235. Every other record has an
+`opened_with` and a null `opening_text`.
 
 **What the counterparty-paper deals contribute (issue #235).** `theta-logistics`
 and `zeta-diagnostics` use their own headings ("Exceptions", "Protection",

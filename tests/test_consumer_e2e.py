@@ -1,9 +1,9 @@
-"""End-to-end regression guard: real compiled playbook (OPF 0.4) → consumers.
+"""End-to-end regression guard: real compiled playbook (OPF 0.5) → consumers.
 
 Issue #140 showed that consumers reading a hand-authored fixture shape can
 silently degrade to empty output against a real compiled playbook. This test
 drives the *real* ``mine_corpus`` → ``project_playbook`` path (which runs
-the actual assembler) to produce a genuine ``playbook.opf.json`` — OPF 0.4,
+the actual assembler) to produce a genuine ``playbook.opf.json`` — OPF 0.5,
 the one format the engine emits (issue #238) — then feeds that exact file
 into the bundle (the one human-readable artifact), and asserts it surfaces
 its clauses rather than emitting empty output.
@@ -64,7 +64,7 @@ def _write_rtf(path: Path, body: str) -> None:
 
 def _compile_real_playbook(tmp_path: Path, *, signed: bool = False) -> Path:
     """Run the real mine → project pipeline; return the ``out`` dir holding the
-    compiled ``playbook.opf.json`` (a genuine OPF 0.4 document)."""
+    compiled ``playbook.opf.json`` (a genuine OPF 0.5 document)."""
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
@@ -101,15 +101,15 @@ def _compile_real_playbook(tmp_path: Path, *, signed: bool = False) -> Path:
     return out_dir
 
 
-def test_real_compile_emits_v04_with_evidence_clauses(tmp_path: Path) -> None:
-    """Sanity anchor: the compiled document is OPF 0.4 with non-empty
+def test_real_compile_emits_v05_with_evidence_clauses(tmp_path: Path) -> None:
+    """Sanity anchor: the compiled document is OPF 0.5 with non-empty
     ``evidence.clauses`` and ``evidence.precedent``."""
     out_dir = _compile_real_playbook(tmp_path)
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
-    # Issue #223: the default compile is OPF 0.4 (evidence.clauses + precedent).
-    assert doc["opf_version"] == "0.4"
-    assert doc["evidence"]["precedent"], "compiled 0.4 playbook must carry precedent"
+    # Issue #223: the default compile is OPF 0.5 (evidence.clauses + precedent).
+    assert doc["opf_version"] == "0.5"
+    assert doc["evidence"]["precedent"], "compiled 0.5 playbook must carry precedent"
     assert doc["evidence"]["clauses"], "compiled playbook must have evidence.clauses"
     # The legacy top-level key must NOT exist — proves the regression is real:
     # a consumer reading doc["clauses"] would get nothing.
@@ -117,7 +117,7 @@ def test_real_compile_emits_v04_with_evidence_clauses(tmp_path: Path) -> None:
     assert playbook_clauses(doc), "playbook_clauses must read the evidence shape"
 
 
-def test_bundle_reads_real_v04_playbook(tmp_path: Path) -> None:
+def test_bundle_reads_real_v05_playbook(tmp_path: Path) -> None:
     """``playbook view bundle`` against a real compiled playbook emits every
     clause's title — not an empty document — and embeds the canonical OPF
     JSON and the digest the playbook carries."""
@@ -134,8 +134,8 @@ def test_bundle_reads_real_v04_playbook(tmp_path: Path) -> None:
     assert n_digest_clauses == len(doc["evidence"]["clauses"])
 
 
-def test_bundle_shows_real_v04_precedent(tmp_path: Path) -> None:
-    """Issue #223: the readable bundle shows a real 0.4 compile's signed
+def test_bundle_shows_real_v05_precedent(tmp_path: Path) -> None:
+    """Issue #223: the readable bundle shows a real 0.5 compile's signed
     variants (here the Delaware governing-law text the deal signed instead of
     our New York standard) — not an empty clause card."""
     out_dir = _compile_real_playbook(tmp_path, signed=True)
