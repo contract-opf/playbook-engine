@@ -704,6 +704,74 @@
           "label": "Term"
         }
       ]
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.assignment": {
+        "clause_id": "clause.assignment",
+        "taxonomy_id": "assignment",
+        "title": "Assignment",
+        "our_standard": {
+          "text": "Neither party may assign this Agreement without the other party's prior written consent."
+        },
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.bd419c53288cfb8e",
+            "kind": "signed_variant",
+            "opening": "Neither party may assign this Agreement without the other party's prior written consent.",
+            "signed": "An affiliate assignment by either party is permitted.",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.815b91fea8f0e4e2",
+            "kind": "changed_opening",
+            "opening": "Neither party may assign this Agreement even with consent.",
+            "signed": "Assignment requires a payment of one million dollars.",
+            "outcome": "signed"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-d",
+          "signed_at": null,
+          "version_files": []
+        },
+        {
+          "document_id": "deal-g",
+          "signed_at": null,
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.assignment": [
+          {
+            "precedent_id": "prec.bd419c53288cfb8e",
+            "document_id": "deal-d",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.815b91fea8f0e4e2",
+            "document_id": "deal-g",
+            "kind": "changed_opening",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

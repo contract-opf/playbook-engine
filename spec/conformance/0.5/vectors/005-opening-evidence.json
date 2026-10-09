@@ -441,6 +441,74 @@
         }
       ],
       "uncovered_clause_types": []
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.governing_law": {
+        "clause_id": "clause.governing_law",
+        "taxonomy_id": "governing_law",
+        "title": "Governing Law",
+        "our_standard": {
+          "text": "This Agreement is governed by the laws of the State of Delaware."
+        },
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.f288cd49668e1409",
+            "kind": "signed_variant",
+            "opening": "This Agreement is governed by the laws of the State of Delaware.",
+            "signed": "This Agreement is governed by the laws of the State of New York.",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.6b579b50949106dd",
+            "kind": "changed_opening",
+            "opening": "Each party's liability is capped at fifty thousand dollars.",
+            "signed": null,
+            "outcome": "struck_before_signing"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-a",
+          "signed_at": null,
+          "version_files": []
+        },
+        {
+          "document_id": "deal-g",
+          "signed_at": null,
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.governing_law": [
+          {
+            "precedent_id": "prec.f288cd49668e1409",
+            "document_id": "deal-a",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.6b579b50949106dd",
+            "document_id": "deal-g",
+            "kind": "changed_opening",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

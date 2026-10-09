@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json",
   "title": "Open Playbook Format (OPF) v0.5",
-  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 4 model-facing projection. OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 4 model-facing projection, a hard-rule `manifest`, per-clause critic `dossiers` and a `provenance_index` (issue #228). OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
   "type": "object",
   "required": [
     "opf_version",
@@ -672,6 +672,158 @@
               },
               "label": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "description": "The hard-rule manifest (OPF 0.5, issue #228): one rule per `floor.invariants[]` entry whose deletion or absence is a hard rejection, so a consumer can enforce hard-rejection recall outside both models. Derived only from the signed Floor (never from precedent counts) and MUST equal build_manifest(document) (validator-enforced). No judged verdict. Covered by identity.content_hash. Optional in the schema; the reference engine always emits it (about 2,000 tokens on a real Floor).",
+      "required": [
+        "hard_rules"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "hard_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hardRule"
+          }
+        }
+      }
+    },
+    "dossiers": {
+      "type": "object",
+      "description": "Critic dossiers (OPF 0.5, issue #228): one bounded dossier per `evidence.clauses[]` entry, keyed by clause id, each with at most two precedent excerpts chosen by a fixed order and a budget of `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4); over budget, whole parts are dropped (never cut): listed Floor rules, last first, while the dossier holding only its first excerpt is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. A dossier always keeps one complete excerpt (when the clause has any), even if that alone puts it over budget: that is the only case where a dossier may exceed its budget. Adding precedents changes which excerpts appear, never adds to a dossier (a dossier carries no count). MUST equal build_dossiers(document) (validator-enforced). Covered by identity.content_hash. Optional in the schema; the reference engine always emits it.",
+      "additionalProperties": {
+        "$ref": "#/$defs/dossier"
+      }
+    },
+    "provenance_index": {
+      "type": "object",
+      "description": "Where every dossier excerpt came from, kept or dropped for size (OPF 0.5, issue #228). Not sent to a model. `dossiers` maps a clause id to each excerpt the dossier selected, in selection order: the kept excerpts (`omitted` false), then the ones dropped whole to fit the budget (`omitted` true), so every `omitted_precedent_ids` entry resolves here to its deal; `documents` lists every deal behind those rows. MUST equal build_provenance_index(document) (validator-enforced). Covered by identity.content_hash.",
+      "required": [
+        "compiler",
+        "corpus_manifest_hash",
+        "documents",
+        "dossiers"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^x_": true
+      },
+      "properties": {
+        "compiler": {
+          "type": "object",
+          "required": [
+            "name",
+            "version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "corpus_manifest_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "document_id",
+              "signed_at",
+              "version_files"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "document_id": {
+                "type": "string"
+              },
+              "signed_at": {
+                "$ref": "#/$defs/signedAtOrNull"
+              },
+              "version_files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "sha256"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "version": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "sha256": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "description": "One entry per deal a selected excerpt was taken from, kept or omitted, sorted by `document_id`."
+        },
+        "dossiers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "precedent_id",
+                "document_id",
+                "kind",
+                "omitted"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "precedent_id": {
+                  "type": "string"
+                },
+                "document_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "signed_variant",
+                    "changed_opening",
+                    "refused_ask"
+                  ]
+                },
+                "omitted": {
+                  "type": "boolean",
+                  "description": "true when the dossier dropped this excerpt whole to fit its budget (it is then named in the dossier's `omitted_precedent_ids`); false when the dossier lists it."
+                }
               }
             }
           }
@@ -1454,6 +1606,307 @@
         "unjudged": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "hardRuleCondition": {
+      "description": "A deterministic predicate spec the consumer can evaluate outside any model, or the string \"judged\" for a rule that is not machine-evaluable. `required_phrases`: the clause text contains every (`match` all, the default) or any phrase, compared case-insensitively on normalized whitespace. `numeric_bound`: the number `pattern` (a regex with exactly one capture group) captures is at least `min` and at most `max`. `cross_reference`: the clause text cross-references the clause `clause_id`. The validator enforces the finer rules (regex compiles with one group, at least one bound, non-blank phrases).",
+      "oneOf": [
+        {
+          "const": "judged"
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "phrases"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "required_phrases"
+            },
+            "phrases": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "match": {
+              "enum": [
+                "all",
+                "any"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "pattern"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "numeric_bound"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "unit": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "clause_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "cross_reference"
+            },
+            "clause_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "hardRule": {
+      "type": "object",
+      "description": "One hard rule (OPF 0.5, issue #228), derived from one `floor.invariants[]` entry and never from precedent counts. `clause_id` / `taxonomy_id` come from the invariant's `x_taxonomy_id` (null when it names none or the corpus has no evidence for it); `required_presence`, `condition` and `permissible_proof` from its `x_required_presence`, `x_condition` and `x_permissible_proof` (defaults: false, \"judged\", []); `fallback_language` is the clause's `our_standard.text` (null when there is none). A rule that demands presence (`required_presence` true) or carries a predicate (`condition` other than \"judged\") MUST name its clause: `taxonomy_id` is then a string, because a predicate is checked against the text of the clause it names and a presence rule rejects that clause's absence (OPF-SPEC \u00a73.12.3).",
+      "required": [
+        "rule_id",
+        "clause_id",
+        "taxonomy_id",
+        "statement",
+        "required_presence",
+        "condition",
+        "permissible_proof",
+        "fallback_language"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "type": "string"
+        },
+        "clause_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taxonomy_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "statement": {
+          "type": "string"
+        },
+        "required_presence": {
+          "type": "boolean",
+          "description": "The clause's absence or deletion is a hard rejection."
+        },
+        "condition": {
+          "$ref": "#/$defs/hardRuleCondition"
+        },
+        "permissible_proof": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fallback_language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "required_presence"
+                ],
+                "properties": {
+                  "required_presence": {
+                    "const": true
+                  }
+                }
+              },
+              {
+                "required": [
+                  "condition"
+                ],
+                "properties": {
+                  "condition": {
+                    "type": "object"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "taxonomy_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "dossierExcerpt": {
+      "type": "object",
+      "description": "One precedent record as an opening-to-signed pair, verbatim and WHOLE: the record's own text, never a prefix or an ellipsis cut (a dossier over its budget drops whole excerpts instead, naming them in `omitted_precedent_ids`). `opening` is the record's `opening_text` (null when none is recorded: the excerpt is the signed text alone); `signed` its `signed_text` (null when struck before signing). A `refused_ask` excerpt carries the ask as `opening` and what the deal signed instead as `signed`.",
+      "required": [
+        "precedent_id",
+        "kind",
+        "opening",
+        "signed",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "precedent_id": {
+          "type": "string",
+          "pattern": "^prec\\.[0-9a-f]{16}$"
+        },
+        "kind": {
+          "enum": [
+            "signed_variant",
+            "changed_opening",
+            "refused_ask"
+          ],
+          "description": "Which digest list the excerpt's group came from."
+        },
+        "opening": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "signed",
+            "struck_before_signing",
+            "ask_refused"
+          ]
+        }
+      }
+    },
+    "dossier": {
+      "type": "object",
+      "description": "A bounded critic dossier for one clause (OPF 0.5, issue #228): at most two excerpts, every text WHOLE (nothing is cut part-way: a cut-off clause can drop its operative carve-out or cap and so plant a false fact). Its budget is `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4; 1,000 when there is no our standard); over budget, WHOLE parts are dropped: the listed Floor rules, last first, while the dossier holding only its first excerpt (none, when the clause has none) is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. Our standard and the identifiers are never dropped. A dossier keeps at least one complete excerpt (when the clause has any), even if that one alone puts it over budget: a dossier holding its single kept excerpt is the only one that may exceed its budget, and a dossier with no excerpt over its budget is invalid. Facts only: our standard, the signed Floor's own statements and rationale for the clause, and the selected excerpts. `n_floor_rules` is the uncapped number of Floor rules for the clause (at most three are listed, fewer when rules are dropped for size; the manifest states every one).",
+      "required": [
+        "clause_id",
+        "taxonomy_id",
+        "title",
+        "our_standard",
+        "n_floor_rules",
+        "floor_rules",
+        "excerpts",
+        "n_omitted",
+        "omitted_precedent_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clause_id": {
+          "type": "string"
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "our_standard": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        "n_floor_rules": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "floor_rules": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "rule_id",
+              "statement"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "rule_id": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "excerpts": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/dossierExcerpt"
+          }
+        },
+        "n_omitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many selected excerpts were dropped whole to fit the budget; always equals the length of `omitted_precedent_ids`."
+        },
+        "omitted_precedent_ids": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "pattern": "^prec\\.[0-9a-f]{16}$"
+          },
+          "description": "The `precedent_id` of each dropped excerpt, sorted; each resolves to its deal through `provenance_index.dossiers` (a row with `omitted` true) and to its record in `evidence.precedent` (OPF-SPEC \u00a73.12.3)."
         }
       }
     }

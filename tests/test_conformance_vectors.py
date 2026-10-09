@@ -39,6 +39,11 @@ from playbook_engine.canonicalize import (
     content_hash,
 )
 from playbook_engine.digest import build_digest_v4
+from playbook_engine.dossiers import (
+    build_derived_sections,
+    dossier_budget,
+    dossier_tokens,
+)
 
 ROOT = Path(__file__).parent.parent
 CONFORMANCE_DIR = ROOT / "spec" / "conformance"
@@ -94,6 +99,10 @@ def test_v05_vector_reproduces_exactly(filename: str) -> None:
     assert content_hash(doc) == expected["content_hash"], filename
     assert compute_section_digests(doc) == expected["section_digests"], filename
     assert build_digest_v4(doc) == expected["digest"], filename
+    # Issue #228: the manifest, dossiers and provenance index are pinned too.
+    derived = build_derived_sections(doc)
+    for name in ("manifest", "dossiers", "provenance_index"):
+        assert derived[name] == expected[name], (filename, name)
     assert expected["digest"]["digest_version"] == "4"
     assert vector["digest_version"] == "4"
     assert "full_text" not in json.dumps(expected["digest"])
@@ -108,6 +117,8 @@ def test_v05_vector_inputs_are_valid_0_5_documents(filename: str) -> None:
     vector = _load_vector_v05(filename)
     doc = copy.deepcopy(vector["input"])
     doc["digest"] = vector["expected"]["digest"]
+    for name in ("manifest", "dossiers", "provenance_index"):
+        doc[name] = vector["expected"][name]
     result = validate_document(doc)
     assert result.ok, [str(e) for e in result.errors if e.blocking]
 
@@ -232,3 +243,103 @@ def test_mutated_canonical_bytes_are_detected() -> None:
     assert tampered_expected != vector["expected"]["canonical"]
     assert canonicalize_playbook(vector["input"]) != tampered_expected
     assert canonicalize_playbook(vector["input"]) == vector["expected"]["canonical"]
+
+
+def test_v05_hard_rules_and_dossiers_vector_pins_selection_and_the_bound() -> None:
+    """008 (issue #228): rules in Floor order with their defaults, the
+    concession-then-changed-opening excerpt order over more groups than the
+    cap, a rule that demands presence or carries a predicate naming its clause,
+    a dossier over its budget that drops its second excerpt WHOLE (never a cut)
+    and then its Floor rule, and a dossier with no excerpt that drops its last
+    Floor rule whole to fit."""
+    vector = _load_vector_v05("vectors/008-hard-rules-and-dossiers.json")
+    expected = vector["expected"]
+    rules = {r["rule_id"]: r for r in expected["manifest"]["hard_rules"]}
+    assert list(rules) == [i["id"] for i in vector["input"]["floor"]["invariants"]]
+    assert rules["venue-holds"]["required_presence"] is True
+    assert rules["venue-holds"]["fallback_language"].startswith(
+        "The courts of the State of Delaware"
+    )
+    assert (
+        rules["venue-no-arbitration"]["condition"],
+        rules["venue-no-arbitration"]["required_presence"],
+    ) == (
+        "judged",
+        False,
+    )
+    assert rules["term-cap"]["condition"]["type"] == "numeric_bound"
+    assert rules["term-cap"]["fallback_language"] is None
+    assert rules["survival-reference"]["clause_id"] == "clause.survival"
+    assert rules["survival-reference"]["required_presence"] is True
+    # A rule that demands presence or carries a predicate names its clause.
+    for rule in rules.values():
+        if rule["required_presence"] or isinstance(rule["condition"], dict):
+            assert isinstance(rule["taxonomy_id"], str), rule["rule_id"]
+    assert rules["no-ghost-clause"]["clause_id"] is None
+    assert rules["no-ghost-clause"]["taxonomy_id"] == "ghost_clause"
+
+    venue = expected["dossiers"]["clause.venue"]
+    assert [(e["kind"], e["precedent_id"]) for e in venue["excerpts"]] == [
+        (
+            "signed_variant",
+            next(
+                p["id"]
+                for p in vector["input"]["evidence"]["precedent"]
+                if p["document_id"] == "deal-a" and p["taxonomy_id"] == "venue"
+            ),
+        ),
+        ("changed_opening", venue["excerpts"][1]["precedent_id"]),
+    ]
+    assert (
+        venue["excerpts"][0]["opening"] is not None
+        and "Texas" not in venue["excerpts"][0]["signed"]
+    )
+    # Term: no standard (1,000-token budget). Its first excerpt alone is over
+    # budget and is kept WHOLE; the second is dropped whole and named, then its
+    # Floor rule is dropped whole (n_floor_rules still counts it).
+    term = expected["dossiers"]["clause.term"]
+    assert term["n_floor_rules"] == 1 and term["floor_rules"] == []
+    records = {p["id"]: p for p in vector["input"]["evidence"]["precedent"]}
+    assert len(term["excerpts"]) == 1 and term["n_omitted"] == 1
+    kept = term["excerpts"][0]
+    assert kept["signed"] == records[kept["precedent_id"]]["signed_text"]["text"]
+    assert "…" not in kept["signed"]
+    assert term["omitted_precedent_ids"] == [
+        p["id"]
+        for p in records.values()
+        if p["taxonomy_id"] == "term" and p["id"] != kept["precedent_id"]
+    ]
+    assert dossier_tokens(term) > dossier_budget(None)
+    for clause_id, dossier in expected["dossiers"].items():
+        standard = dossier["our_standard"]
+        budget = dossier_budget(standard["text"] if standard else None)
+        # Only a dossier holding its single kept excerpt (no Floor rule left
+        # listed) may be over its budget.
+        assert dossier_tokens(dossier) <= budget or (
+            len(dossier["excerpts"]) == 1 and dossier["floor_rules"] == []
+        ), clause_id
+        assert dossier["n_omitted"] == len(dossier["omitted_precedent_ids"])
+        for ex in dossier["excerpts"]:  # every excerpt text is a record's own text, whole
+            record = records[ex["precedent_id"]]
+            assert ex["signed"] in (None, record["signed_text"]["text"])
+    # Survival: no excerpt; its three Floor rules exceed the budget, so the last
+    # listed is dropped whole and the dossier fits.
+    survival = expected["dossiers"]["clause.survival"]
+    assert survival["excerpts"] == [] and survival["n_floor_rules"] == 3
+    assert [r["rule_id"] for r in survival["floor_rules"]] == [
+        "survival-reference",
+        "survival-scope",
+    ]
+    assert dossier_tokens(survival) <= dossier_budget(survival["our_standard"]["text"])
+    index = expected["provenance_index"]["dossiers"]["clause.venue"]
+    assert [row["precedent_id"] for row in index] == [e["precedent_id"] for e in venue["excerpts"]]
+    assert not any(row["omitted"] for row in index)
+    # The term dossier's dropped excerpt is indexed as omitted, with its deal.
+    term_rows = expected["provenance_index"]["dossiers"]["clause.term"]
+    assert [(row["precedent_id"], row["omitted"]) for row in term_rows] == [
+        (kept["precedent_id"], False),
+        (term["omitted_precedent_ids"][0], True),
+    ]
+    assert term_rows[1]["document_id"] in {
+        d["document_id"] for d in expected["provenance_index"]["documents"]
+    }

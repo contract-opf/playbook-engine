@@ -129,6 +129,24 @@ collapse into one entry per clause (four entries; the four parties clauses
 become one). The digest grew from about 6,000 to
 about 8,100 tokens (chars/4), well under the 40,000-token budget.
 
+**The hard-rule manifest and the critic dossiers (issue #228).** Beside the
+digest the playbook carries `manifest`, `dossiers` and `provenance_index`
+(OPF-SPEC section 3.12.3), all derived from the document. The manifest has one
+rule per signed Floor invariant, three here. The two interview-promoted
+invariants name no clause, so they are `judged` rules with a null `clause_id`
+and `fallback_language`; the hand-signed liability line names
+`limitation_of_liability`, which has no standard text, so its fallback is null
+too. None states `x_required_presence`, `x_condition` or `x_permissible_proof`,
+so none demands presence and all are judged (`playbook floor sign` takes
+`--requires-presence`, `--condition` and `--proof` for a rule the signer wants
+machine-checkable, and such a rule must name its clause with `--clause`). `dossiers` holds one dossier per clause: 26, the largest 615
+tokens and the median about 153, none near its 1,000-token budget, so none
+drops an excerpt and no text is cut. Governing
+law shows the excerpt order: first the concession on record (`beta-industries`
+opened with our Delaware standard and signed the New York variant), then the
+next signed variant (`theta-logistics`' California language, signed as the
+counterparty proposed it).
+
 **What every clause opened with (issue #233).** Every precedent says what
 its clause opened with, as a fact, whatever the origin of the first draft's
 text. Of the 128 records, `opened_with` is `standard` for 91, `non_standard`

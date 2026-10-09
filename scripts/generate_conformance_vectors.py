@@ -26,16 +26,20 @@ with those formats (issues #238, #233) — git history has them. Review the resu
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import (
+    canonicalize,
     canonicalize_playbook,
     compute_section_digests,
     content_hash,
+    sha256_hex,
 )
 from playbook_engine.digest import DIGEST_VERSION_V4, build_digest_v4
+from playbook_engine.dossiers import build_derived_sections
 from playbook_engine.opf_accessors import perspective_party
 from playbook_engine.precedent import clause_counts, precedent_id
 
@@ -55,6 +59,9 @@ def _expected(doc: dict[str, Any]) -> dict[str, Any]:
         "content_hash": content_hash(doc),
         "section_digests": compute_section_digests(doc),
         "digest": build_digest_v4(doc),
+        # Issue #228: the hard-rule manifest, critic dossiers and provenance
+        # index are pure functions of the document too.
+        **build_derived_sections(doc),
     }
 
 
@@ -74,6 +81,7 @@ def _base_v05(
     precedent: list[dict[str, Any]] | None = None,
     documents: list[dict[str, Any]] | None = None,
     perspective: dict[str, str] | None = None,
+    floor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """A minimal OPF 0.5 document. Clause counts and precedent ids are
     stamped by the reference functions (``precedent.clause_counts`` /
@@ -102,7 +110,7 @@ def _base_v05(
         stamped.append({**clause, **clause_counts(clause["taxonomy_id"], records, party=party)})
     doc["evidence"] = {"clauses": stamped, "precedent": records}
     doc["posture"] = {}
-    doc["floor"] = {}
+    doc["floor"] = floor or {}
     doc["corpus"] = {"documents": documents or [], "stats": {}}
     doc["compiler"] = {
         "name": "playbook-engine",
@@ -875,6 +883,350 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             ),
         )
     )
+    # 008 — the hard-rule manifest and the critic dossiers (issue #228).
+    tid_a, tid_b, tid_c, tid_d = "venue", "term", "assignment", "survival"
+    std_d = "Sections on confidentiality and payment survive the end of this Agreement."
+    std_a = "The courts of the State of Delaware have exclusive jurisdiction."
+    v1_a = "The courts of the State of New York have exclusive jurisdiction."
+    v2_a = "The courts of the State of Texas have exclusive jurisdiction."
+    n1_a = "Disputes will be heard by the courts of the State of Oregon."
+    r1_a = "Each party waives its right to a trial by jury."
+    r2_a = "Venue lies exclusively in the courts of Mars."
+    long_b = " ".join(
+        f"Section {i} of the term provisions binds each party for the full period."
+        for i in range(80)
+    )
+    # Two long survival rules: with all three listed the survival dossier (no
+    # excerpt) is over its budget, and dropping the last listed rule brings it
+    # within it.
+    long_d = [
+        " ".join(
+            f"Survival {name} {i}: this obligation outlasts the Agreement for its full period."
+            for i in range(24)
+        )
+        for name in ("scope", "period")
+    ]
+    std_c = _STANDARD_TEXT
+    v1_c = "Either party may assign this Agreement to an affiliate without consent."
+    r1_c = "Either party may assign this Agreement freely without consent."
+    # One signing date per deal, on every record of it (a producer that records them).
+    signed_at_008 = {"deal-c": "2025-01-15", "deal-d": "2025-06-30", "deal-f": "2025-06-30"}
+    precedent_008 = [
+        _prec("deal-a", tid_a, signed_text=v1_a, opening_text=std_a, rounds=1),
+        _prec("deal-b", tid_a, signed_text=v2_a, opened_with="non_standard", paper="theirs"),
+        _prec("deal-c", tid_a, signed_text=v2_a, opened_with="non_standard", paper="theirs"),
+        _prec(
+            "deal-d",
+            tid_a,
+            signed_text=std_a,
+            standard=True,
+            opening_text=n1_a,
+            opened_with="non_standard",
+            rounds=1,
+            paper="theirs",
+        ),
+        _prec("deal-e", tid_a, signed_text=std_a, standard=True, refused=[(r1_a, 2)], rounds=1),
+        _prec("deal-f", tid_a, signed_text=std_a, standard=True, refused=[(r2_a, 2)], rounds=1),
+        _prec("deal-a", tid_b, signed_text=long_b),
+        # deal-e: no excerpt any dossier keeps cites it, so the provenance index
+        # lists it only for the term dossier's dropped (omitted) excerpt.
+        _prec("deal-e", tid_b, signed_text="The term of this Agreement is three years."),
+        # Assignment: deal-a signed the affiliate variant as proposed and
+        # deal-b conceded to it from our standard; three deals refused the
+        # same ask and kept our standard.
+        _prec("deal-a", tid_c, signed_text=v1_c, opened_with="non_standard"),
+        _prec("deal-b", tid_c, signed_text=v1_c, opening_text=std_c, rounds=1, paper="theirs"),
+        *(
+            _prec(
+                deal,
+                tid_c,
+                signed_text=std_c,
+                standard=True,
+                refused=[(r1_c, 2)],
+                rounds=1,
+                paper=paper,
+            )
+            for deal, paper in (("deal-c", "theirs"), ("deal-d", "theirs"), ("deal-f", "ours"))
+        ),
+    ]
+    for record in precedent_008:
+        if record["document_id"] in signed_at_008:
+            record["signed_at"] = signed_at_008[record["document_id"]]
+    floor_008 = {
+        "invariants": [
+            {
+                "id": "venue-holds",
+                "statement": "Venue must stay in Delaware or New York.",
+                "rationale": "Our litigation counsel sits in those two states.",
+                "x_signed_by": "Legal Owner",
+                "x_signed_at": "2026-01-01T00:00:00+00:00",
+                "x_taxonomy_id": tid_a,
+                "x_required_presence": True,
+                "x_condition": {
+                    "type": "required_phrases",
+                    "phrases": ["State of Delaware", "State of New York"],
+                    "match": "any",
+                },
+                "x_permissible_proof": ["a venue waiver signed by the General Counsel"],
+            },
+            {
+                "id": "venue-no-arbitration",
+                "statement": "Do not agree to binding arbitration of venue disputes.",
+                "x_signed_by": "Legal Owner",
+                "x_signed_at": "2026-01-01T00:00:00+00:00",
+                "x_taxonomy_id": tid_a,
+            },
+            {
+                "id": "term-cap",
+                "statement": "The term must not exceed five years.",
+                "x_signed_by": "Legal Owner",
+                "x_signed_at": "2026-01-01T00:00:00+00:00",
+                "x_taxonomy_id": tid_b,
+                "x_condition": {
+                    "type": "numeric_bound",
+                    "pattern": "([0-9]+) years",
+                    "max": 5,
+                    "unit": "years",
+                },
+            },
+            {
+                "id": "survival-reference",
+                "statement": "Survival must refer back to the term clause.",
+                "x_signed_by": "Legal Owner",
+                "x_signed_at": "2026-01-01T00:00:00+00:00",
+                "x_taxonomy_id": tid_d,
+                "x_required_presence": True,
+                "x_condition": {"type": "cross_reference", "clause_id": f"clause.{tid_b}"},
+            },
+            *(
+                {
+                    "id": f"survival-{name}",
+                    "statement": statement,
+                    "x_signed_by": "Legal Owner",
+                    "x_signed_at": "2026-01-01T00:00:00+00:00",
+                    "x_taxonomy_id": tid_d,
+                }
+                for name, statement in zip(("scope", "period"), long_d, strict=True)
+            ),
+            {
+                "id": "no-ghost-clause",
+                "statement": "Nothing here about a clause the corpus never saw.",
+                "x_signed_by": "Legal Owner",
+                "x_signed_at": "2026-01-01T00:00:00+00:00",
+                "x_taxonomy_id": "ghost_clause",
+            },
+        ]
+    }
+    doc_008 = _base_v05(
+        clauses=[
+            {
+                "id": f"clause.{tid_a}",
+                "taxonomy_id": tid_a,
+                "title": "Venue",
+                "our_standard": {
+                    "text": std_a,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "15",
+                    },
+                },
+            },
+            {"id": f"clause.{tid_b}", "taxonomy_id": tid_b, "title": "Term", "our_standard": None},
+            {
+                "id": f"clause.{tid_c}",
+                "taxonomy_id": tid_c,
+                "title": "Assignment",
+                "our_standard": {
+                    "text": std_c,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "12",
+                    },
+                },
+            },
+            {
+                "id": f"clause.{tid_d}",
+                "taxonomy_id": tid_d,
+                "title": "Survival",
+                "our_standard": {
+                    "text": std_d,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "20",
+                    },
+                },
+            },
+        ],
+        precedent=precedent_008,
+        documents=[
+            _deal("deal-a", signed_version=3, provenance="our_paper"),
+            _deal("deal-b", signed_version=3, provenance="counterparty_paper"),
+            _deal("deal-c", signed_version=3, provenance="counterparty_paper"),
+            _deal("deal-d", signed_version=3, provenance="counterparty_paper"),
+            _deal("deal-e", signed_version=3, provenance="our_paper"),
+            _deal("deal-f", signed_version=3, provenance="our_paper"),
+        ],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+        floor=floor_008,
+    )
+    # Source-file hashes for every deal but deal-f (which recorded none), and
+    # the corpus snapshot hash over them (OPF-SPEC §3.8: the canonical JSON of
+    # the sorted (document_id, version, sha256) triples).
+    for corpus_doc in doc_008["corpus"]["documents"]:
+        if corpus_doc["document_id"] != "deal-f":
+            corpus_doc["version_files"] = [
+                {
+                    "version": v,
+                    "sha256": sha256_hex(f"{corpus_doc['document_id']} version {v}"),
+                }
+                for v in (1, 2, 3)
+            ]
+    triples = sorted(
+        (d["document_id"], vf["version"], vf["sha256"])
+        for d in doc_008["corpus"]["documents"]
+        for vf in d.get("version_files", [])
+    )
+    doc_008["corpus"]["snapshot"] = {
+        "manifest_hash": sha256_hex(canonicalize([list(t) for t in triples]))
+    }
+    derived_008 = build_derived_sections(doc_008)
+    assert [r["rule_id"] for r in derived_008["manifest"]["hard_rules"]] == [
+        i["id"] for i in floor_008["invariants"]
+    ]
+    venue_008 = derived_008["dossiers"][f"clause.{tid_a}"]
+    assert [e["kind"] for e in venue_008["excerpts"]] == ["signed_variant", "changed_opening"]
+    assert venue_008["excerpts"][0]["opening"] == std_a  # the concession, not the Texas majority
+    assert venue_008["n_floor_rules"] == 2 and venue_008["n_omitted"] == 0
+    term_008 = derived_008["dossiers"][f"clause.{tid_b}"]
+    # Term: the long signed text is the first excerpt, kept WHOLE although it alone
+    # exceeds the 1,000-token budget (no our standard); the second is dropped whole
+    # and named, then the term-cap rule is dropped whole too (still over budget).
+    # Nothing is cut part-way.
+    ids_b = {p["document_id"]: p["id"] for p in precedent_008 if p["taxonomy_id"] == tid_b}
+    assert [e["signed"] for e in term_008["excerpts"]] == [long_b]
+    assert term_008["omitted_precedent_ids"] == [ids_b["deal-e"]] and term_008["n_omitted"] == 1
+    assert term_008["n_floor_rules"] == 1 and term_008["floor_rules"] == []
+    assert len(canonicalize(term_008)) // 4 > 1_000
+    # Survival: no excerpt; three Floor rules are over the budget, so the last
+    # listed one is dropped whole and the dossier fits.
+    survival_008 = derived_008["dossiers"][f"clause.{tid_d}"]
+    assert survival_008["excerpts"] == [] and survival_008["n_floor_rules"] == 3
+    assert [r["rule_id"] for r in survival_008["floor_rules"]] == [
+        "survival-reference",
+        "survival-scope",
+    ]
+    assert survival_008["floor_rules"][1]["statement"] == long_d[0]
+    with_all = copy.deepcopy(survival_008)
+    with_all["floor_rules"].append({"rule_id": "survival-period", "statement": long_d[1]})
+    assert len(canonicalize(survival_008)) // 4 <= 1_000 < len(canonicalize(with_all)) // 4
+    rules_008 = {r["rule_id"]: r for r in derived_008["manifest"]["hard_rules"]}
+    assert rules_008["survival-reference"]["clause_id"] == f"clause.{tid_d}"
+    assert rules_008["survival-reference"]["fallback_language"] == std_d
+    # Assignment: the concession's own record although deal-a is the lower
+    # document and precedent id, then the refused ask from the latest-signed
+    # deals' lower precedent id (deal-f, although deal-d is the lower document).
+    ids_c = {p["document_id"]: p["id"] for p in precedent_008 if p["taxonomy_id"] == tid_c}
+    assert ids_c["deal-a"] < ids_c["deal-b"]
+    assert ids_c["deal-f"] < ids_c["deal-d"] and min(ids_c.values()) == ids_c["deal-c"]
+    assignment_008 = derived_008["dossiers"][f"clause.{tid_c}"]
+    assert assignment_008["excerpts"] == [
+        {
+            "precedent_id": ids_c["deal-b"],
+            "kind": "signed_variant",
+            "opening": std_c,
+            "signed": v1_c,
+            "outcome": "signed",
+        },
+        {
+            "precedent_id": ids_c["deal-f"],
+            "kind": "refused_ask",
+            "opening": r1_c,
+            "signed": std_c,
+            "outcome": "ask_refused",
+        },
+    ]
+    index_008 = derived_008["provenance_index"]
+    assert index_008["corpus_manifest_hash"] == doc_008["corpus"]["snapshot"]["manifest_hash"]
+    files_008 = {d["document_id"]: d["version_files"] for d in index_008["documents"]}
+    assert files_008["deal-f"] == [] and len(files_008["deal-b"]) == 3
+    # The term dossier's dropped excerpt resolves through the index to deal-e,
+    # which only that omitted row brings into documents.
+    assert index_008["dossiers"][f"clause.{tid_b}"] == [
+        {
+            "precedent_id": term_008["excerpts"][0]["precedent_id"],
+            "document_id": "deal-a",
+            "kind": "signed_variant",
+            "omitted": False,
+        },
+        {
+            "precedent_id": ids_b["deal-e"],
+            "document_id": "deal-e",
+            "kind": "signed_variant",
+            "omitted": True,
+        },
+    ]
+    assert "deal-e" in files_008
+    assert not any(
+        row["document_id"] == "deal-e" and not row["omitted"]
+        for rows in index_008["dossiers"].values()
+        for row in rows
+    )
+    vectors.append(
+        (
+            "008-hard-rules-and-dossiers",
+            _vector_v05(
+                "hard-rules-and-dossiers",
+                "The hard-rule manifest, the critic dossiers and the provenance index "
+                "(OPF-SPEC §3.12.3). The Floor has seven invariants and the manifest seven "
+                "rules in Floor order: venue-holds names clause.venue and carries a "
+                "required_phrases condition, required_presence true and a permissible "
+                "proof, with fallback_language the clause's standard; venue-no-arbitration "
+                "states none of them (required_presence false, condition judged, no "
+                "proof); term-cap names clause.term, which has no standard "
+                "(fallback_language null), with a numeric_bound condition; "
+                "survival-reference names clause.survival (a rule that demands presence or "
+                "carries a predicate must name its clause) and carries a cross_reference "
+                "condition with required_presence true; survival-scope and survival-period "
+                "are two long judged rules on clause.survival; no-ghost-clause names a "
+                "clause with no evidence (clause_id null). The venue dossier selects two "
+                "excerpts from five candidate "
+                "groups: first the concession on record (deal-a opened with our standard "
+                "and signed the New York variant, although the Texas variant has more "
+                "deals), then the first changed opening (deal-d's Oregon opening, which "
+                "ended at our standard); its refused asks are not reached. It lists both "
+                "Floor rules. No text is ever cut part-way. The term dossier "
+                "(no standard, so a 1,000-token budget) selects two excerpts; its first, "
+                "a long signed text, alone exceeds the budget and is kept whole; the "
+                "second (deal-e's) is dropped whole and named (n_omitted 1, "
+                "omitted_precedent_ids), then its Floor rule term-cap is dropped whole "
+                "(n_floor_rules 1, none listed), since it is still over budget: a dossier "
+                "holding its single kept excerpt is the only one that may exceed its budget. "
+                "The survival dossier has a standard, no excerpt and three Floor rules that "
+                "together exceed its budget, so the last listed (survival-period) is dropped "
+                "whole and it fits (n_floor_rules 3, two listed). The assignment "
+                "dossier pins how a group's record is chosen and a refused-ask excerpt: "
+                "first the concession, deal-b's own opening-to-signed pair, although "
+                "deal-a, which signed the same variant as proposed, is the lower document "
+                "and precedent id (step 1 takes only members that opened with our "
+                "standard); then, with no changed opening and the variant's group already "
+                "chosen, the refused ask made in deal-c, deal-d and deal-f: deal-d and "
+                "deal-f share the latest signed_at and deal-f has the lower precedent_id "
+                "(deal-c has the lowest, but signed earlier; deal-d is the lower "
+                "document), so the excerpt is deal-f's ask with what it signed instead "
+                "(outcome ask_refused). Every deal but deal-f records source-file hashes "
+                "and the corpus carries their snapshot hash: the provenance index repeats "
+                "the hash and lists each excerpt deal's version_files (empty for deal-f). "
+                "Its per-clause rows are in selection order, each marked omitted false or "
+                "true: the term dossier's dropped excerpt is a row with omitted true that "
+                "resolves to deal-e, which no kept excerpt cites, and deal-e is listed in "
+                "documents for it.",
+                doc_008,
+            ),
+        )
+    )
     return vectors
 
 
@@ -915,7 +1267,8 @@ def main_v05() -> None:
             "perspective.party as the one party name -> 'party'), text = "
             "observation_builder.summarize_clause_text of the group representative; the "
             "signed variants labelled equivalent (vs_standard) collapse into one entry "
-            "and the cap applies after collapsing."
+            "and the cap applies after collapsing. manifest / dossiers / provenance_index: "
+            "playbook_engine.dossiers.build_derived_sections(input) (OPF-SPEC.md §3.12.3)."
         ),
         "vectors": manifest_entries,
     }

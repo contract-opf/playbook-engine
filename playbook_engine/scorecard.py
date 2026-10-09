@@ -33,8 +33,8 @@ error): ``playbook.opf.json``, ``observations.jsonl``,
 
 Paper side appears only under ``classification.by_paper`` and
 ``template_drift`` — diagnostics of the corpus, never inputs to the artifact.
-Fields the current OPF does not carry yet (the critic ``dossiers``, issue
-#228) are ``null`` until a playbook carries them.
+A field whose section the playbook does not carry (the critic ``dossiers``,
+issue #228) is ``null``.
 """
 
 from __future__ import annotations
@@ -49,6 +49,7 @@ from typing import Any
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
+from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
 from playbook_engine.equivalence import ROLES as EQUIVALENCE_ROLES
 from playbook_engine.equivalence import summarize as summarize_equivalence
@@ -97,7 +98,10 @@ __all__ = [
 #: ``signed_variants_n_unchanged``, ``changed_openings`` and
 #: ``uncovered_clause_types`` (digest 4); a list counts as capped against the
 #: changed openings too.
-SCORECARD_VERSION = 5
+#:
+#: v6 (issue #228): the ``dossiers`` section gains ``cut_texts``,
+#: ``excerpts_dropped``, ``over_budget_single_excerpt`` and ``max_budget``.
+SCORECARD_VERSION = 6
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -659,17 +663,70 @@ def _equivalence_section(playbook: dict[str, Any] | None, out_dir: Path) -> dict
     return summary
 
 
+def _record_texts(playbook: dict[str, Any]) -> set[str]:
+    """Every opening, signed and refused-ask text the precedent records hold."""
+    evidence = playbook.get("evidence")
+    records = evidence.get("precedent") if isinstance(evidence, dict) else None
+    texts: set[str] = set()
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        refs: list[Any] = [record.get("opening_text"), record.get("signed_text")]
+        asks = record.get("refused_asks")
+        refs.extend(asks if isinstance(asks, list) else [])
+        for ref in refs:
+            text = ref.get("text") if isinstance(ref, dict) else None
+            if isinstance(text, str):
+                texts.add(text)
+    return texts
+
+
 def _dossiers_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Critic dossier sizes (OPF 0.5, issue #228) — ``null`` until carried."""
+    """Critic dossier counts and sizes (OPF 0.5, issue #228) — ``null`` when not carried.
+
+    ``cut_texts`` counts excerpt texts that are NOT a precedent record's own
+    text whole (it must be 0: no text is ever cut part-way);
+    ``excerpts_dropped`` the selected excerpts dropped whole to fit a budget;
+    ``over_budget_single_excerpt`` every dossier over its budget, each holding
+    its single kept excerpt (the only dossier that may exceed its budget: a
+    dossier drops whole Floor rules and whole excerpts, keeping the first, to
+    fit, and the validator refuses any other over its budget);
+    ``max_budget`` the largest per-clause budget.
+    """
     dossiers = playbook.get("dossiers") if playbook is not None else None
-    if not isinstance(dossiers, dict):
+    if playbook is None or not isinstance(dossiers, dict):
         return None
-    sizes = [len(canonicalize(d)) // 4 for d in dossiers.values()]
+    known = _record_texts(playbook)
+    sizes: list[int] = []
+    budgets: list[int] = []
+    cut = dropped = over = 0
+    for dossier in dossiers.values():
+        sizes.append(len(canonicalize(dossier)) // 4)
+        if not isinstance(dossier, dict):
+            budgets.append(DOSSIER_MIN_BUDGET)
+            continue
+        standard = dossier.get("our_standard")
+        budgets.append(dossier_budget(standard.get("text") if isinstance(standard, dict) else None))
+        dropped += _count(dossier.get("n_omitted")) or 0
+        excerpts = dossier.get("excerpts")
+        if sizes[-1] > budgets[-1] and isinstance(excerpts, list) and len(excerpts) == 1:
+            over += 1
+        for excerpt in excerpts if isinstance(excerpts, list) else []:
+            if not isinstance(excerpt, dict):
+                continue
+            for key in ("opening", "signed"):
+                text = excerpt.get(key)
+                if text is not None and not (isinstance(text, str) and text in known):
+                    cut += 1
     summary = _stats(sizes)
     return {
         "count": len(sizes),
         "max_tokens": summary["max"],
         "median_tokens": summary["median"],
+        "max_budget": max(budgets) if budgets else None,
+        "cut_texts": cut,
+        "excerpts_dropped": dropped,
+        "over_budget_single_excerpt": over,
     }
 
 

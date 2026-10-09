@@ -501,6 +501,74 @@
         }
       ],
       "uncovered_clause_types": []
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.assignment": {
+        "clause_id": "clause.assignment",
+        "taxonomy_id": "assignment",
+        "title": "Assignment",
+        "our_standard": {
+          "text": "Neither party may assign this Agreement without the other party's prior written consent."
+        },
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.95e0c99f0443a47d",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "EITHER party may assign this Agreement to an affiliate, without consent",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.8ee16a97c9b307b0",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "Either party may not assign this Agreement to an affiliate without consent.",
+            "outcome": "signed"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-d",
+          "signed_at": "2025-Q4",
+          "version_files": []
+        },
+        {
+          "document_id": "deal-g",
+          "signed_at": "2024-06-30",
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.assignment": [
+          {
+            "precedent_id": "prec.95e0c99f0443a47d",
+            "document_id": "deal-d",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.8ee16a97c9b307b0",
+            "document_id": "deal-g",
+            "kind": "signed_variant",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

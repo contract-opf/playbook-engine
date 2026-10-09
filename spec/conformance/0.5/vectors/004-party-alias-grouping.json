@@ -373,6 +373,74 @@
         }
       ],
       "uncovered_clause_types": []
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.termination": {
+        "clause_id": "clause.termination",
+        "taxonomy_id": "termination",
+        "title": "Termination",
+        "our_standard": {
+          "text": "Either party may terminate this Agreement on thirty days' notice."
+        },
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.7d6e1d5aebde15a4",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "Counterparty-2 may terminate this Agreement on notice to Fixture Co.",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.348c6acf6851dd53",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "Notice of termination given to Fixture Co is effective on receipt.",
+            "outcome": "signed"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-a",
+          "signed_at": null,
+          "version_files": []
+        },
+        {
+          "document_id": "deal-d",
+          "signed_at": null,
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.termination": [
+          {
+            "precedent_id": "prec.7d6e1d5aebde15a4",
+            "document_id": "deal-a",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.348c6acf6851dd53",
+            "document_id": "deal-d",
+            "kind": "signed_variant",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

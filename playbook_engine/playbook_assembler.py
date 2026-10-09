@@ -40,6 +40,7 @@ from playbook_engine.clause_position_compiler import (
     UnclassifiedCoverage,
 )
 from playbook_engine.digest import build_digest_v4
+from playbook_engine.dossiers import build_derived_sections
 from playbook_engine.equivalence import collect_subjects, label_evidence
 from playbook_engine.observation_builder import Observation, RoundMove
 from playbook_engine.opf_accessors import (
@@ -529,6 +530,13 @@ def assemble_playbook(
     # content_hash like every other content section (it is a pure function of
     # evidence — two compiles of identical evidence carry identical digests).
     playbook["digest"] = build_digest_v4(playbook)
+
+    # --- hard-rule manifest, critic dossiers, provenance index (issue #228) ---
+    # Pure functions of the document (the Floor it carries, the clause
+    # evidence, the corpus), so they are built here, after the digest and
+    # before identity, and a writer that later changes the Floor refreshes
+    # them (dossiers.refresh_derived_sections).
+    playbook.update(build_derived_sections(playbook))
 
     # --- identity (issue #143) ---
     # content_hash/section_digests are engine-computed and always populated —

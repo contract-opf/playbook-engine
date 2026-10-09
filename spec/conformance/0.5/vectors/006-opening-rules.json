@@ -626,6 +626,74 @@
         }
       ],
       "uncovered_clause_types": []
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.venue": {
+        "clause_id": "clause.venue",
+        "taxonomy_id": "venue",
+        "title": "Venue",
+        "our_standard": {
+          "text": "The courts of the State of Delaware have exclusive jurisdiction."
+        },
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.dcd670d1fc2dfeae",
+            "kind": "signed_variant",
+            "opening": "The courts of the State of Delaware have exclusive jurisdiction.",
+            "signed": "The courts of the State of New York have exclusive jurisdiction.",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.1721b46be3ed0551",
+            "kind": "changed_opening",
+            "opening": "DISPUTES WILL BE HEARD BY THE COURTS OF THE STATE OF OREGON.",
+            "signed": "The parties will arbitrate every dispute in London.",
+            "outcome": "signed"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-a",
+          "signed_at": null,
+          "version_files": []
+        },
+        {
+          "document_id": "deal-j",
+          "signed_at": null,
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.venue": [
+          {
+            "precedent_id": "prec.dcd670d1fc2dfeae",
+            "document_id": "deal-a",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.1721b46be3ed0551",
+            "document_id": "deal-j",
+            "kind": "changed_opening",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

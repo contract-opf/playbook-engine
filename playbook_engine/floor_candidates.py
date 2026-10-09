@@ -1072,6 +1072,9 @@ def sign_floor_invariant(
     signed_by: str | None = None,
     signed_at: str | None = None,
     existing_invariants: list[dict[str, Any]] | None = None,
+    required_presence: bool | None = None,
+    condition: Any = None,
+    permissible_proof: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Record ONE verbatim, hand-authored Floor invariant (issue #103).
 
@@ -1138,6 +1141,16 @@ def sign_floor_invariant(
                               verbatim as ``x_signed_at``.
         existing_invariants:  The playbook's current ``floor.invariants``
                               list, or ``None``/``[]`` for a first-ever sign.
+        required_presence:    Whether the clause's absence or deletion is a hard
+                              rejection (issue #228). Stored as
+                              ``x_required_presence`` when given; the hard-rule
+                              manifest reads it (default there: ``False``).
+        condition:            A machine-evaluable predicate spec
+                              (``dossiers.validate_condition``) or ``"judged"``.
+                              Stored as ``x_condition`` when given.
+        permissible_proof:    What a reviewed document may show to satisfy the
+                              rule. Stored as ``x_permissible_proof`` when
+                              non-empty.
 
     Returns:
         The full, merged ``floor.invariants`` list: pre-existing entries
@@ -1160,6 +1173,14 @@ def sign_floor_invariant(
             "hard line — a Floor invariant must carry a structural record of who "
             "signed it, not just free-form rationale text."
         )
+
+    if condition is not None:
+        from playbook_engine.dossiers import validate_condition  # noqa: PLC0415
+
+        why = validate_condition(condition)
+        if why:
+            raise FloorCandidateError(f"floor sign: --condition is not valid: {why}")
+    proof = [p for p in (permissible_proof or []) if isinstance(p, str) and p.strip()]
 
     inv_id = sign_invariant_id(statement, invariant_id)
     rationale_text = rationale if rationale and rationale.strip() else _SIGN_DEFAULT_RATIONALE
@@ -1220,6 +1241,20 @@ def sign_floor_invariant(
     }
     if taxonomy_id and taxonomy_id.strip():
         entry["x_taxonomy_id"] = taxonomy_id
+    # The hard-rule manifest's fields (issue #228); each only when stated.
+    if required_presence is not None:
+        entry["x_required_presence"] = required_presence
+    if condition is not None:
+        entry["x_condition"] = condition
+    if proof:
+        entry["x_permissible_proof"] = proof
+    from playbook_engine.dossiers import floor_rule_errors  # noqa: PLC0415
+
+    rule_errors = floor_rule_errors(entry)
+    if rule_errors:
+        raise FloorCandidateError(
+            "floor sign: " + "; ".join(rule_errors) + " (pass --clause to name the clause)"
+        )
     merged.append(entry)
     return merged
 
