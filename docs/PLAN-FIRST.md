@@ -23,7 +23,7 @@ here, assume it's deterministic and needs no LLM at all.
 | `playbook project` | No | N/A (deterministic) | Compiles L5 (playbook assembly) deterministically from the observation store built by `mine`/`judge-apply`. |
 | `playbook validate` | No | N/A (deterministic) | JSON Schema validation of the output `playbook.opf.json` against `spec/playbook.schema-0.5.json`; any other `opf_version` is rejected as unsupported. |
 | `playbook inspect` | No | N/A (deterministic) | Renders the mined trail/observations as a Markdown checkpoint report (version order, signed copy, provenance, flags). |
-| `playbook view bundle` | No | N/A (deterministic) | A deterministic HTML build: the one human-readable artifact. |
+| `playbook view bundle` | No | N/A (deterministic) | A deterministic HTML build of `index.html`: the one human-readable artifact (five tabs, an optional editor that saves `overrides.json`). |
 | `playbook floor propose` / `playbook floor sign` | No | N/A (deterministic) | `propose` derives Floor candidates from `outcome: proposed_then_reversed` observations plus the Posture interview's sacred-clauses answer; `sign` records a human-authored hard line verbatim. Pure derivation and I/O, no LLM. |
 | Docker image publish (`.github/workflows/docker-publish.yml`) | No | N/A | A maintainer/CI-only release step, unrelated to running a derivation over your corpus. |
 

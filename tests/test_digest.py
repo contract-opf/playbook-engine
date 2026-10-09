@@ -99,7 +99,7 @@ def test_view_bundle_refuses_a_retired_opf_version(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, ["view", "bundle", str(out_dir)])
     assert result.exit_code == 1
     assert "unsupported opf_version '0.3'" in result.output
-    assert not (out_dir / "playbook.opf.html").exists()
+    assert not (out_dir / "index.html").exists()
 
 
 def test_view_bundle_embeds_canonical_json_and_digest(tmp_path: Path) -> None:
@@ -108,7 +108,7 @@ def test_view_bundle_embeds_canonical_json_and_digest(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["view", "bundle", str(out_dir)])
     assert result.exit_code == 0, result.output
 
-    html = (out_dir / "playbook.opf.html").read_text(encoding="utf-8")
+    html = (out_dir / "index.html").read_text(encoding="utf-8")
     assert '<script id="opf-canonical" type="application/json">' in html
     assert '<script id="opf-digest" type="application/json">' in html
 
@@ -141,7 +141,7 @@ def test_view_bundle_escapes_script_closers(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, ["view", "bundle", str(out_dir)])
     assert result.exit_code == 0, result.output
-    html = (out_dir / "playbook.opf.html").read_text(encoding="utf-8")
+    html = (out_dir / "index.html").read_text(encoding="utf-8")
     start = html.index('<script id="opf-canonical" type="application/json">')
     end = html.index("</script>", start)
     block = html[start:end]
@@ -869,10 +869,12 @@ def test_v4_validator_recomputes_the_new_clause_counts() -> None:
 
 
 def test_v4_view_bundle_states_the_new_facts_in_plain_words(tmp_path: Path) -> None:
-    """Issue #234: the bundle's readable page says how many deals opened with
-    our standard and kept it, how each variant came to be signed, which
-    openings were not signed as proposed and which clause types have no
-    evidence — and carries no judged label (that stays in the digest JSON)."""
+    """Issue #234 (page rebuilt in #241): the Playbook and Evidence tabs of
+    index.html say how many deals opened with our standard and kept it, how
+    each variant came to be signed, which openings were not signed as proposed
+    and which clause types have no evidence — and carry no judged label (the
+    labels live in the digest JSON and the Review tab)."""
+    import re
     import shutil
 
     out_dir = tmp_path / "out"
@@ -880,14 +882,24 @@ def test_v4_view_bundle_states_the_new_facts_in_plain_words(tmp_path: Path) -> N
     shutil.copy(_ROOT / "examples" / "nda" / "playbook.opf.json", out_dir / "playbook.opf.json")
     result = CliRunner().invoke(cli, ["view", "bundle", str(out_dir)])
     assert result.exit_code == 0, result.output
-    html = (out_dir / "playbook.opf.html").read_text(encoding="utf-8")
-    assert "opened with our standard in 4 signed deal(s); kept it in 2" in html
-    assert "from our standard in 2" in html
-    assert "signed as proposed in 2" in html
-    assert "Not signed as proposed (1)" in html
-    assert "struck in 1" in html
-    assert "No evidence in this corpus for: " in html
-    assert "Trade Secret Carve-Out" in html
-    assert "judged equivalent to our standard" not in html
-    assert "protective than our standard" not in html
-    assert "(digest_version 4)" in html
+    html = (out_dir / "index.html").read_text(encoding="utf-8")
+
+    def panel(tab: str) -> str:
+        m = re.search(
+            rf'<div role="tabpanel" id="tab-{tab}".*?(?=<div role="tabpanel"|<footer)', html, re.S
+        )
+        assert m, tab
+        return m.group(0)
+
+    playbook_tab, evidence_tab = panel("playbook"), panel("evidence")
+    assert "opened with our standard in 4; kept it in 2" in playbook_tab
+    assert "from our standard in 2" in evidence_tab
+    assert "signed as proposed in 2" in evidence_tab
+    assert "Openings not signed as proposed" in evidence_tab
+    assert "struck in 1" in evidence_tab
+    assert "No evidence in this corpus for: " in playbook_tab
+    assert "No evidence for" in evidence_tab
+    assert "Trade Secret Carve-Out" in playbook_tab
+    for tab_html in (playbook_tab, evidence_tab):
+        assert "judged equivalent to our standard" not in tab_html
+        assert "protective than our standard" not in tab_html

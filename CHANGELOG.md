@@ -10,6 +10,38 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **One standard flow: `index.html`, optional overrides, toaster install steps
+  (issue #241, epic #236).** `playbook view bundle OUT` now writes
+  `OUT/index.html` (it replaces `playbook.opf.html`): one self-contained page,
+  no network, with five tabs: **Start here** (identity, file paths, the toaster
+  install steps), **Playbook**, **Evidence**, **Review (optional)** and
+  **Posture & Floor**. Review lists the shortest useful set of model judgments:
+  each distinct text carrying a `vs_standard` label that the digest shows,
+  `less_protective` and `different_concept` first, with Confirm / Change label /
+  note; it never gates anything. Edits save to `OUT/overrides.json` through the
+  File System Access API (**Connect folder**, Chrome and Edge, the folder handle
+  remembered in IndexedDB per page location, and a folder read or written only
+  when its `playbook.opf.json` is the page's own playbook: same agreement type,
+  perspective and `content_hash`) or download as the same file where the API is
+  missing.
+  `overrides.json` is a small versioned file (`overrides_version` 1) whose
+  entries are keyed by stable ids (a `vs_standard` verdict cache key, the
+  Posture `system_prompt`, a Floor invariant id and field), each `basis:
+  "owner"`; `playbook project` folds it in and the new `playbook apply-overrides
+  OUT` does so on demand: a `vs_standard` override re-stamps the label `basis:
+  "owner"` (and writes the owner verdict into the verdict store), the digest,
+  dossiers, `precedent.jsonl` hash and `identity.content_hash` are recomputed,
+  and `apply-overrides` rejects a malformed or unknown-id entry (or an edit to a
+  signed Floor invariant, or to the interview's attribution rationale) with the
+  reason and changes nothing, while `playbook project` skips such entries, counts
+  them, says why and still projects. New `playbook install-steps [--file PATH]` prints the toaster install
+  steps (one constant, shared with the page's Start-here tab). The
+  `playbook-from-corpus` skill now opens with at most six lines, asks every
+  choice as a multiple-choice question (recommended option first) and always
+  closes by opening `index.html`, printing the absolute paths, printing the
+  install steps and saying review is optional; route A no longer waits on the
+  Posture interview or the Floor.
+
 - **Hard-rule manifest, critic dossiers and provenance index (issue #228,
   epic #236).** Three optional top-level sections join the single OPF 0.5
   schema beside `digest` (OPF-SPEC section 3.12.3); each is a pure function of

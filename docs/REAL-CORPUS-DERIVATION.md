@@ -48,7 +48,7 @@ Before spending any judgment budget:
    time.
 4. **Write a stage-by-stage plan** with explicit checkpoints: stage → lint →
    mine (deterministic backbone + standard check) → judge (scope /
-   classification / provenance) → project → validate → view bundle. Identify where you will
+   classification / provenance) → project → validate → view bundle (`index.html`). Identify where you will
    pause to sanity-check the backbone (trail order, signed-copy detection,
    provenance plausibility) *before* spending judgment effort on it — a bad
    backbone makes every downstream judgment worthless.

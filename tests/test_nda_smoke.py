@@ -35,6 +35,7 @@ from click.testing import CliRunner
 from click.testing import Result as CliResult
 
 from playbook_engine.cli import cli
+from playbook_engine.document_renderer import TAB_IDS
 from playbook_engine.opf_accessors import PRECEDENT_SIDECAR, verify_precedent_sidecar
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +121,15 @@ def test_nda_smoke_full_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     validate_result = _invoke(["validate", str(playbook_path)])
     assert validate_result.exit_code == 0, f"validate failed:\n{validate_result.output}"
+
+    # Issue #241: the run ends in one tabbed page, index.html, with the five tabs
+    # and the toaster install text; it embeds the playbook it was built from.
+    view_result = _invoke(["view", "bundle", str(out_dir)])
+    assert view_result.exit_code == 0, f"view bundle failed:\n{view_result.output}"
+    page = (out_dir / "index.html").read_text(encoding="utf-8")
+    assert re.findall(r'<div role="tabpanel" id="tab-([a-z-]+)"', page) == list(TAB_IDS)
+    assert "Install in the toaster" in page and "Approve &amp; activate" in page
+    assert 'id="opf-canonical"' in page
 
     playbook = json.loads(playbook_path.read_text(encoding="utf-8"))
     assert playbook["agreement_type"]["id"] == "nda"

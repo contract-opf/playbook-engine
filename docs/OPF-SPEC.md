@@ -790,10 +790,10 @@ index of §3.5.6 (`vs_standard.label`):
   transform that edits evidence text (publication, residue redaction) MUST
   re-derive the digest, precedent ids and counts afterwards.
 
-The single-file bundle artifact (`playbook.opf.html`, produced by
+The single-file page artifact (`index.html`, produced by
 `playbook view bundle`) embeds the canonical OPF JSON and the digest in
 `<script type="application/json">` blocks (ids `opf-canonical`/`opf-digest`,
-with `</` escaped as `<\/`; JSON parsing restores the value). The bare
+with every `<` escaped as `\u003c`; JSON parsing restores the value). The bare
 `playbook.opf.json` remains the canonical artifact — a consumer extracts the
 block and verifies `identity.content_hash` over the canonical serialization.
 

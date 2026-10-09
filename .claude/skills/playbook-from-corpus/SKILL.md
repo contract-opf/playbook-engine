@@ -11,9 +11,8 @@ description: >-
   "sign the floor", "my playbook has no posture", "update my playbook", or wants
   to climb the control ladder on an evidence-only playbook. Asks first whether
   this is a full derivation or an update to an existing out-dir, then walks only
-  the steps that route needs — stage, lint-corpus, mine, checkpoint/inspect,
-  judge (plan/subset/drain loop), judge-apply, project, posture interview, floor
-  propose/sign, validate, view bundle.
+  that route's steps and always ends by opening one tabbed index.html (the
+  playbook plus an optional editor) and printing the toaster install steps.
 ---
 
 # playbook-from-corpus
@@ -23,6 +22,62 @@ agreement files to a validated `playbook.opf.json`, with the agent acting as
 the LLM judge throughout the judgment stages. The engine commands (built in
 prior slices) do the work; this skill coordinates the ordered pipeline and
 decision points.
+
+---
+
+## The standard flow (the same in the terminal and in the desktop app)
+
+However this skill is invoked, a run has three beats. Nothing in them waits on
+a human decision beyond the few clickable questions at the start: the engine
+relies on model judgment throughout, and every manual step is **optional**.
+
+**1. Opening — at most six lines, then ask.** Say what will happen and what you
+need, in this shape (adapt the nouns, keep it this short):
+
+> I'll turn your agreements into a negotiation playbook and open it in your
+> browser when it is ready. Most of the run is unattended.
+> I need four things: the **folder of agreements**, **your standard form** (if
+> you have one), the **agreement type**, and **which party is "us"**.
+> Everything after that is optional — you can review the model's judgments in
+> the page, but nothing waits on it.
+
+**2. Questions are buttons.** Every choice you ask for is a multiple-choice
+question with the **recommended option first**. In Claude Code that is the
+`AskUserQuestion` tool, which the desktop app renders as clickable buttons and
+the terminal as a numbered pick list; its automatic "Other" choice is the
+free-text escape — never remove it, and never tell the user to type where a
+choice will do. Offer what you can see (folders under the current directory,
+names found in the recitals) as the options. Ask in as few calls as possible,
+and only what you cannot derive:
+
+- first call: the **route** (Step 0 below), one question;
+- second call (routes A and C): the **corpus folder**, **our standard form**
+  (options: the template files you found, then "No standard form — build from
+  the negotiated history") and the **agreement type** (the display name; offer
+  the folder-name-derived guess first);
+- third call, after you have read the recitals ("Derive party names
+  automatically", below): the **perspective party** — "which party is us?",
+  with the candidate names you derived as the options, the most frequent first.
+  The counterparty type and the alias lists you derive yourself and show for a
+  single confirm only when you are not reasonably sure. A confirm is the same
+  kind of question: **Looks right — go ahead (Recommended)** / **Something is
+  off**.
+
+**3. Closing — always, in this order** (Step 9 has the commands):
+
+1. **Open** `<out>/index.html` in the user's default browser: `open` on macOS,
+   `xdg-open` on Linux, `start` on Windows. When there is no display (a
+   headless or remote shell), skip it and print a one-line note saying so.
+2. **Print the absolute paths** of `playbook.opf.json` and of `index.html` (the
+   host paths, not the container's `/work/out`).
+3. **Print the toaster install steps**, from the engine's one constant:
+   `playbook install-steps --file <absolute path of playbook.opf.json>`.
+4. **One line**: reviewing the model's judgments, and editing the Posture and
+   Floor text, in the page is optional — what was derived stands as it is.
+
+If, before any of this, `<out>/overrides.json` exists, the user made edits in
+the page: Step 9 folds them in first (`playbook apply-overrides`, every time the
+file exists - it changes nothing once the edits are in effect).
 
 ---
 
@@ -45,24 +100,26 @@ derived from the export manifest.
 
 ---
 
-## Step 0 — Pick the route (ask this FIRST, before anything else)
+## Step 0 — Pick the route (ask this FIRST, after the opening)
 
-Most of this pipeline is expensive and unattended; the part that needs the
-human is six questions. So establish which of these the user is actually
-doing before running a single command:
+Most of this pipeline is expensive and unattended, so establish which of these
+the user is actually doing before running a single command. Ask it as ONE
+`AskUserQuestion` (recommended option first; "Other" stays):
 
-> "Before I start — which of these are you doing?
->  **A. Full derivation.** You have a folder of agreements and no playbook yet.
->     I'll run the whole pipeline: stage → judge → project → interview → render.
->     Long (mostly unattended), and I'll need ~10 minutes of your attention near
->     the end.
->  **B. Author Posture / Floor on a playbook you already have.** There's a
->     validated `playbook.opf.json` with Evidence in it, and `posture` / `floor`
->     are empty. This is six questions and a sign-off — about ten minutes, no
->     re-derivation, no corpus needed.
->  **C. Re-derive Evidence from a changed corpus, keeping what you authored.**
->     The agreements changed; the Posture and Floor you already signed should
->     survive."
+- **A. Full derivation** (recommended when the user names a folder of
+  agreements and has no playbook yet): "I'll run the whole pipeline — stage,
+  judge, project, validate — and open the playbook in your browser. Long, mostly
+  unattended, nothing for you to decide along the way."
+- **B. Author Posture / Floor on a playbook you already have**: "There is a
+  validated `playbook.opf.json` with Evidence in it and `posture` / `floor` are
+  empty. Six questions and a sign-off — about ten minutes, no re-derivation, no
+  corpus needed."
+- **C. Re-derive Evidence from a changed corpus, keeping what you authored**:
+  "The agreements changed; the Posture and Floor you already signed survive."
+
+If the user's first message already settles the route (they hand you a folder of
+agreements; they say "author my posture"), do not ask — say which route you are
+taking and go.
 
 **Route B is the common case and the cheap one.** A playbook whose `posture` and
 `floor` are `{}` is not broken — evidence-only is a complete, legitimate OPF
@@ -85,7 +142,7 @@ print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
 
 | Route | Steps to run |
 |---|---|
-| **A** — full derivation | 1 → 9 (everything below, in order) |
+| **A** — full derivation | 1 → 7, then 8 → 9. **Skip 7a/7b**: Posture and Floor are optional (the closing says how to add them), and nothing in a run waits on a human. |
 | **B** — author Posture/Floor | **7a → 7b → 8 → 9** only |
 | **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 9. The authored Posture and signed Floor invariants survive a recompile by design (`project` carries them forward verbatim); say so. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
 
@@ -106,15 +163,24 @@ placeholder: `make docker-run CORPUS=$OUT OUT=$OUT ARGS="..."`.
 
 ## Interactive setup (Route A and C only — skip for Route B)
 
-Before starting, ask the human only what you cannot derive yourself:
+Ask only what you cannot derive yourself, as clickable choices (see "The
+standard flow" above) — ONE `AskUserQuestion` call with these three questions,
+recommended option first, "Other" always available:
 
-> "Two quick questions before I begin:
-> 1. What display name should appear in the playbook? (e.g. 'Educational Affiliation Agreement')
-> 2. Do you have your own standard form/template for this agreement type? If yes I'll measure every deal against it; if not, I'll build the playbook from what your negotiated history shows (a weaker but still valid baseline)."
+1. **Which folder holds the agreements?** Options: the folders you can see that
+   look like a corpus (`./corpus`, a sibling of the current directory, anything
+   the user named). The layout rules are in `docs/QUICK-COMPILE.md`.
+2. **Do you have your own standard form for this agreement type?** Options: each
+   template-looking file you found next to the corpus (first), then "No standard
+   form — build it from what the negotiated history shows (a weaker but still
+   valid baseline)". With a form I measure every deal against it.
+3. **What is the agreement type?** (it becomes the display name, e.g.
+   "Educational Affiliation Agreement"). Options: your guess from the folder and
+   file names first, then "Other".
 
-Do **not** ask "which party is us" or "who are your counterparties" — derive
-those yourself in the next step. Record the two answers; they decide whether
-the run is template mode or emergent mode.
+Record the answers; they decide whether the run is template mode or emergent
+mode. Do **not** ask "who are your counterparties", and ask "which party is us"
+only as the multiple-choice question below, after you have read the recitals.
 
 ## Derive party names automatically (do this before `mine`)
 
@@ -142,9 +208,13 @@ populate the config yourself:**
      redact). Add each counterparty's short form too (e.g. `BSU` for "Beta
      State University") alongside the full name, or the short form leaks into
      ids/filenames unpseudonymized.
-3. Only ask the human about names you genuinely cannot resolve from the text
-   (an unrecognizable counterparty, an ambiguous "us"). Show the final lists for
-   a single confirm, then proceed.
+3. Ask the human **which party is us** as one `AskUserQuestion`, with the
+   candidate legal names you read from the recitals as the options (the one
+   that appears on most deals first, marked recommended) — it becomes
+   `perspective.party` and `our_party_aliases[0]`. Ask about other names only
+   when you genuinely cannot resolve them from the text (an unrecognizable
+   counterparty); show the final alias lists for a single confirm when you are
+   not reasonably sure, then proceed.
 4. While you're in `playbook.config.yaml`, also populate the `perspective:`
    block (issue #212) so the assembled playbook actually carries whose "us"
    it's reviewed as — a downstream consumer that renders a "from OUR
@@ -293,7 +363,10 @@ once those files are removed.
 Extraction/OCR is by far the most expensive step — a scanned PDF can OCR
 5–10× slower than a born-digital one (docling RapidOCR on CPU, up to a 600s
 per-file timeout). **Before running `stage`/`segment`/`mine`, give the human a
-concrete ETA and wait for a go-ahead** so a multi-hour run is never a surprise.
+concrete ETA** so a multi-hour run is never a surprise. When the estimate shows
+no scanned PDFs and an extraction ETA under about fifteen minutes, state it in
+one line and go on — nothing to decide. Otherwise ask for the go-ahead as one
+button question (below).
 
 Run the bundled estimator against the (staged) corpus — it only uses
 pdfplumber, so it runs on the host venv in seconds and needs no Docker:
@@ -306,9 +379,9 @@ It classifies every version (born-digital PDF / scanned PDF / DOCX), prints a
 wall-clock **extraction ETA range**, a rough extracted-token size, the `$0`
 API-cost note (key-free), and the approximate judgment load (scope,
 classification and provenance items; there are no deviation items). Show that summary
-to the human verbatim, then ask: proceed as-is, exclude the scanned agreements
-to finish faster, or OCR the scans separately? Only start extraction once they
-confirm. (Time constants are calibrated from a real 44-agreement / 161-version
+to the human verbatim, then ask ONE `AskUserQuestion` with the options **Proceed
+as-is (Recommended)**, **Exclude the scanned agreements to finish faster** and
+**OCR the scans separately**. Only start extraction once they have chosen. (Time constants are calibrated from a real 44-agreement / 161-version
 run; they are estimates — present the range, not a promise.)
 
 Once you have a corpus staged and an `$OUT` chosen, run this again as Step 2b
@@ -493,12 +566,16 @@ as the LLM, arbitrates the low-confidence parts.
    ```
 
 3. Ask the operator only the questions the content genuinely can't answer,
-   batched into one message — e.g. "These 3 files reference no counterparty
-   I can identify — do you recognize them?" Anything you *could* resolve
-   from content or metadata proceeds without a question.
+   batched into one `AskUserQuestion` call (one question per unresolved item,
+   its best reading as the recommended option, "Other" for anything else) —
+   e.g. "These 3 files reference no counterparty I can identify" with the
+   likely deals as the choices. Anything you *could* resolve from content or
+   metadata proceeds without a question.
 
 4. Show the operator the final assembled story — one short table per deal
-   (deal, version order, which file is signed) — for a single confirm, then
+   (deal, version order, which file is signed) — for a single confirm (an
+   `AskUserQuestion` with **This is right — run it (Recommended)** and
+   **Something is off**), then
    execute the plan (host venv — same reason as Step 1: this recreates
    `--out` from scratch, which a `make docker-run` mount of `$OUT` straight at
    `/work/out` cannot survive):
@@ -966,7 +1043,10 @@ artifacts, a bare heading with no body) excluded from the playbook (issue
 #210). It is `[]` only when nothing was quarantined; check it — each flag
 names how many observations of that clause type the playbook does not carry.
 
-### Step 7a — Posture interview (Rung 1) — THE ONLY STEP THAT NEEDS THE HUMAN
+### Step 7a — Posture interview (Rung 1) — OPTIONAL, route B or on request
+
+Run this step only on Route B, or when the user asks for it at any point (the
+closing of Step 9 tells them they can). A route A run never waits for it.
 
 Everything before this was derived from the corpus. Posture cannot be: it is
 *forward-looking intent*, and no pile of past agreements contains it. This is
@@ -1289,20 +1369,52 @@ A non-zero exit here means the pipeline is not done. Common causes:
 
 Do not paper over validation failures. Fix the root cause.
 
-### Step 9 — View the bundle and run the residue check
+### Step 9 — Build index.html, run the residue check, and close
+
+**First, fold in any edits the user made in the page.** If `$OUT/overrides.json`
+exists, run `apply-overrides` - always, never only when the file looks newer: a
+`posture interview` re-run with the same answers regenerates the Posture text
+and makes the playbook the newer file, silently dropping an edit that was
+already applied, and `apply-overrides` is a no-op for edits already in effect.
+The file holds the user's confirmed or changed model judgments and edited
+Posture/Floor text. The engine recomputes the digest, dossiers and
+`identity.content_hash`; you never edit the playbook by hand:
+
+```bash
+test -f "$OUT/overrides.json" && \
+make docker-run CORPUS=./out OUT=./out ARGS="apply-overrides /work/out"
+make docker-run CORPUS=./out OUT=./out ARGS="validate /work/out/playbook.opf.json"
+```
+
+A rejection (a malformed file, an id the playbook no longer carries after a
+re-derivation, or an edit to a signed or interview-attributed Floor field) changes
+nothing: read the one-line reasons it prints, tell the user which entries to
+drop, and continue without them. `playbook project` is lenient: it skips such
+entries, reports how many and why, and projects the rest, so a re-derivation
+never stops on the optional review file.
+
+**Then build the page:**
 
 ```bash
 make docker-run CORPUS=./out OUT=./out ARGS="view bundle /work/out"
 ```
 
-Writes exactly **one** human-readable artifact, self-contained (open it from
-the host — the container has no browser):
+Writes exactly **one** human-readable artifact, self-contained, no network
+(open it from the host — the container has no browser):
 
-- `$OUT/playbook.opf.html` — the **packaged internal/stakeholder playbook**.
-  One file containing the full readable document (per clause, the deals that
-  signed our standard, then the signed variants and refused asks, each with
-  its distinct-deal count; empty Posture/Floor labelled pending), a digest
-  summary, and the CANONICAL OPF JSON plus digest embedded verbatim in
+- `$OUT/index.html` — the **playbook and an optional editor**, in five tabs:
+  **Start here** (what this is, the playbook's identity, file paths, the toaster
+  install steps), **Playbook** (Posture, Floor and the digest per clause),
+  **Evidence** (per clause: how each deal's draft opened, what was signed, the
+  signed variants, the openings not signed as proposed, the refused asks, the
+  clause types with no evidence), **Review (optional)** (the shortest useful
+  list of model judgments — the `vs_standard` labels the consuming model is
+  shown, worst first — each with Confirm / Change label / note) and **Posture &
+  Floor** (the authored text, with edit fields). Edits save to
+  `$OUT/overrides.json`: the page's **Connect folder** button (Chrome, Edge)
+  writes it straight into the out-dir on every change, and **Download edits**
+  (Safari, Firefox) saves the same file for the user to drop there. The page
+  also embeds the CANONICAL OPF JSON plus digest verbatim in
   `<script type="application/json">` blocks (ids `opf-canonical`/`opf-digest`).
   It takes no alias map by design — it embeds the canonical JSON, so
   resolving real names would break hash verification. **This is NOT a
@@ -1310,7 +1422,7 @@ the host — the container has no browser):
   (whole-word, contiguous-sequence — see the verbatim-spelling requirement
   above); a misconfigured or incomplete `known_entities` list leaves real
   counterparty names in this file (skill-QA finding #57, 2026-08-24: hundreds
-  of real-name occurrences reached `playbook.opf.json`/`.html` this way). Run
+  of real-name occurrences reached `playbook.opf.json`/the page this way). Run
   the **mandatory residue check** below before calling this file shareable.
   The engine has no command that anonymizes a playbook for public release;
   treat anything leaving the org as needing its own review.
@@ -1325,7 +1437,7 @@ normalization with distinct-deal counts and citations, plus the clause types
 with no evidence at all; verdict-free except the one judged `vs_standard` label on each text; target ~40K tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
-disk** — the bundle contains it, never replaces it. A consumer extracts the
+disk** — the page contains it, never replaces it. A consumer extracts the
 `opf-canonical` block, JSON-parses it, and verifies `identity.content_hash`
 against `playbook_engine.canonicalize.content_hash`.
 
@@ -1357,7 +1469,7 @@ from playbook_engine.entity_registry import find_residue
 alias_map = json.loads(pathlib.Path('$OUT/alias_map.json').read_text())
 texts = {
     p: pathlib.Path(p).read_text()
-    for p in ('$OUT/playbook.opf.json', '$OUT/playbook.opf.html')
+    for p in ('$OUT/playbook.opf.json', '$OUT/index.html')
 }
 hits = find_residue(alias_map, texts)
 if hits:
@@ -1371,7 +1483,7 @@ else:
 
 A hit means a real name likely survived pseudonymization; fix
 `known_entities` (verbatim spelling — see above), re-run `mine`, and
-re-check before treating `playbook.opf.html` as shareable. Two honest
+re-check before treating `index.html` as shareable. Two honest
 limits, not overclaimed: (1) a hit can be a coincidental match of a
 short/common word that slipped the stopword filter — read the flagged token
 in context before assuming a leak; (2) an empty result confirms only that no
@@ -1392,10 +1504,39 @@ out-dir (`playbook project`). List anything still unresolved — quarantined
 documents you accepted, unknown aliases, a thin `floor.candidates.json` — by
 name in your round summary.
 
+**Close — always, in this order** (this is the "Closing" beat of "The standard
+flow"; do it even when you stop early, as long as `playbook.opf.json`
+validates). Use the user's real host paths — `$HOST_OUT` is the host directory
+you mounted as `OUT` (an absolute path), never the container's `/work/out`:
+
+```bash
+# (a) open the page in the default browser; skip with a note when headless
+case "$(uname -s)" in
+  Darwin) open "$HOST_OUT/index.html" ;;
+  Linux)  if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then xdg-open "$HOST_OUT/index.html"; \
+          else echo "no display here - open $HOST_OUT/index.html in a browser"; fi ;;
+  MINGW*|MSYS*|CYGWIN*) start "" "$HOST_OUT/index.html" ;;
+esac
+# (b) print the absolute paths
+echo "playbook: $HOST_OUT/playbook.opf.json"
+echo "page:     $HOST_OUT/index.html"
+# (c) the toaster install steps, from the engine's one constant
+make docker-run CORPUS=./out OUT=./out ARGS="install-steps --file $HOST_OUT/playbook.opf.json"
+# (d) one line
+echo "Reviewing the model's judgments in the page is optional - what was derived stands as it is."
+```
+
+(a) opens the page, (b) names both files, (c) prints the numbered install steps
+for the exact file to upload, (d) is the one optional-review line — then say
+what is and is not in the playbook (below) and stop.
+
 ### Correcting a result after you have read it
 
-There is no review-and-feedback surface: corrections go in at the input, and
-you re-run the affected stages.
+Corrections to the model's clause-level judgments (the `vs_standard` labels), and
+to the Posture and Floor text, belong in the **Review** and **Posture & Floor**
+tabs of `index.html`: the user makes them there, they save to `overrides.json`,
+and Step 9 folds them in. Everything else is corrected at the input, and you
+re-run the affected stages.
 
 - A **document-level fact** (provenance, which version is the signed one,
   version order): set it by hand in the deal's own
@@ -1426,13 +1567,19 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="view bundle /work/out"
 
 `project` carries the prior `playbook.opf.json`'s `posture`/`floor` forward
 **verbatim** (issue #123), so a signed Floor survives this recompile — nothing
-here re-wipes it. `view bundle` is the last line on purpose: the bundle is
+here re-wipes it — and folds `overrides.json` in again, so the user's edits in
+the page survive too. `view bundle` is the last line on purpose: `index.html` is
 whatever Step 9 last wrote, which is stale after a correction round.
 
 ---
 
 ## Guardrails
 
+- **No manual step is ever a gate.** The model's judgments stand unless the
+  owner overrides them; review in `index.html` is optional, and nothing in a run
+  (nor in the final re-derivation) waits for it. Never ask the user to
+  review something as a condition of finishing, and never write an owner
+  override yourself — the page does, with the user's own click.
 - **Do not fabricate legal content.** Every verdict must be traceable to the
   actual clause text. Low-confidence judgments are flagged, not invented.
 - **Unknown entity aliases** (party names not on the known-alias list) must be

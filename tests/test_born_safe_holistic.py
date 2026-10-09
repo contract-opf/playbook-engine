@@ -117,7 +117,7 @@ import pytest
 import yaml
 
 from playbook_engine.config import load_config
-from playbook_engine.document_renderer import render_bundle_html
+from playbook_engine.document_renderer import render_index_html
 from playbook_engine.entity_registry import entity_slug
 from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.inspection_report import write_inspection_report
@@ -487,7 +487,7 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
     write_inspection_report(out_dir, out_dir / "inspection_report.md")
     write_floor_candidates(out_dir)
 
-    render_bundle_html(out_dir, out_dir / "playbook.opf.html")
+    render_index_html(out_dir, out_dir / "index.html")
 
     known_entity_names = [ENTITY_NAME]
 
@@ -509,7 +509,7 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
         ("coherence_flags.json", out_dir / "coherence_flags.json"),
         ("floor.candidates.json", out_dir / "floor.candidates.json"),
         ("inspection_report", out_dir / "inspection_report.md"),
-        ("playbook.opf.html", out_dir / "playbook.opf.html"),
+        ("index.html", out_dir / "index.html"),
     ]
     for trail_file in sorted((out_dir / "trail").glob("*.json")):
         artifacts.append((f"trail/{trail_file.name}", trail_file))

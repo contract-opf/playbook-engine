@@ -59,6 +59,8 @@ REQUIRED_SUBCOMMANDS = [
     "project",
     "validate",
     "view",
+    "apply-overrides",
+    "install-steps",
     "inspect",
     # Step 7a/7b of SKILL.md — both are command GROUPS, handled like `view`
     # in `_all_subcommand_help_text` below (a group's own --help lists only
@@ -282,15 +284,71 @@ def test_skill_body_names_no_retired_command() -> None:
     assert "Step 7c" not in body and "## Step 11" not in body and "### Step 10" not in body
 
 
-def test_skill_step_9_is_the_bundle_and_the_residue_check() -> None:
-    """The one human-readable artifact is `view bundle`; the mandatory residue
-    check scans the canonical OPF and the bundle (the digest is a section of
-    the OPF, not a file)."""
+def test_skill_step_9_is_the_page_the_residue_check_and_the_closing() -> None:
+    """The one human-readable artifact is `view bundle`'s index.html; the mandatory
+    residue check scans the canonical OPF and the page (the digest is a section of
+    the OPF, not a file); and the run ends open -> paths -> install steps ->
+    optional-review line, in that order (issue #241)."""
     _, body = _parse_frontmatter(SKILL_MD)
     step_9 = body.split("### Step 9 —", 1)[1].split("## Guardrails", 1)[0]
     assert 'ARGS="view bundle /work/out"' in step_9
     assert "find_residue" in step_9
-    assert "playbook.opf.json" in step_9 and "playbook.opf.html" in step_9
+    assert "playbook.opf.json" in step_9 and "index.html" in step_9
+    assert "playbook.opf.html" not in body
+    closing = step_9.split("**Close — always, in this order**", 1)[1]
+    positions = [
+        closing.index(marker)
+        for marker in (
+            "# (a) open the page",
+            'open "$HOST_OUT/index.html"',
+            "xdg-open",
+            'start ""',
+            "# (b) print the absolute paths",
+            "# (c) the toaster install steps",
+            'ARGS="install-steps --file $HOST_OUT/playbook.opf.json"',
+            "# (d) one line",
+            "is optional",
+        )
+    ]
+    assert positions == sorted(positions), (
+        "closing must be open, paths, install steps, optional line"
+    )
+    assert "overrides.json" in step_9 and "apply-overrides" in step_9
+
+
+def test_skill_opening_is_brief_and_every_choice_is_a_button() -> None:
+    """The standard flow: a short opening, multiple-choice questions with the
+    recommended option first (AskUserQuestion), and the closing beat (issue #241)."""
+    _, body = _parse_frontmatter(SKILL_MD)
+    flow = body.split("## The standard flow", 1)[1].split("\n---\n", 1)[0]
+    opening = flow.split("**1. Opening", 1)[1].split("**2. Questions are buttons.**", 1)[0]
+    quoted = [line for line in opening.splitlines() if line.startswith(">")]
+    assert 0 < len(quoted) <= 6, "the opening says what will happen in at most six lines"
+    for needed in (
+        "folder of agreements",
+        "standard form",
+        "agreement type",
+        'which party is "us"',
+    ):
+        assert needed in opening
+    assert "AskUserQuestion" in flow and "recommended option first" in flow
+    for question in ("route", "corpus folder", "agreement type", "perspective party"):
+        assert question in flow.lower().replace("perspective party", "perspective party")
+    # the route question and the setup questions are choices, not prose prompts
+    step_0 = body.split("## Step 0", 1)[1].split("## Interactive setup", 1)[0]
+    assert "AskUserQuestion" in step_0 and "recommended" in step_0
+    setup = body.split("## Interactive setup", 1)[1].split("## Derive party names", 1)[0]
+    assert "AskUserQuestion" in setup
+    # a route A run never waits on the posture interview or the floor
+    assert "Skip 7a/7b" in step_0
+    assert "OPTIONAL" in body.split("### Step 7a", 1)[1].split("\n", 1)[0]
+
+
+def test_skill_names_the_overrides_and_install_commands_the_engine_has() -> None:
+    _, body = _parse_frontmatter(SKILL_MD)
+    for command in ("apply-overrides", "install-steps"):
+        assert command in body
+        assert command in _playbook_help()
 
 
 def test_skill_body_documents_q5_pre_rejection() -> None:
@@ -606,11 +664,10 @@ def test_reference_md_done_criteria_mentions_empty_pending() -> None:
 
 
 def test_reference_md_done_criterion_3_checks_the_bundle() -> None:
-    """Criterion 3's file-existence check must name the bundle.
+    """Criterion 3's file-existence check must name the page.
 
-    SKILL.md Step 9 declares `playbook.opf.html` the packaged
-    internal/stakeholder playbook — a run that stops after `validate` is not
-    actually done. Regression for issue #176: assert the criterion-3 code
+    SKILL.md Step 9 declares `index.html` the one human-readable artifact — a
+    run that stops after `validate` is not actually done. Regression for issue #176: assert the criterion-3 code
     block's own `test -f` names the artifact, not just that the string appears
     somewhere in the file. The retired report, review HTML and digest sidecar
     (issue #239) must not be required.
@@ -623,9 +680,7 @@ def test_reference_md_done_criterion_3_checks_the_bundle() -> None:
     )
     assert match, "could not locate criterion 3's code block in REFERENCE.md"
     criterion_3_block = match.group(1)
-    assert "playbook.opf.html" in criterion_3_block, (
-        "criterion 3's test command must check for playbook.opf.html"
-    )
+    assert "index.html" in criterion_3_block, "criterion 3's test command must check for index.html"
     for retired in ("report.md", "playbook.review.html", "playbook.digest.json"):
         assert retired not in criterion_3_block, f"criterion 3 still requires {retired}"
 

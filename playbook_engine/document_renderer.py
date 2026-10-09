@@ -1,35 +1,38 @@
-"""Presentational HTML rendering of a compiled playbook — ``view bundle``.
+"""``index.html`` — the one tabbed page of a compiled playbook (issue #241).
 
-Produces the *readable playbook* — a typographic, print-friendly document a
-lawyer can read top to bottom or hand to a stakeholder.
+``playbook view bundle OUT`` writes ``OUT/index.html``: ONE self-contained file
+(no network, no external script, font or stylesheet) that is both the viewer of
+a compiled playbook and an OPTIONAL editor that saves back to the out-dir.
 
-The readable document ships inside the single-file bundle
-``playbook.opf.html`` (:func:`render_bundle_html`), which packages the
-document body, plus a digest summary, plus the canonical OPF JSON and digest
-embedded as machine-readable ``<script type="application/json">`` blocks.
-This is NOT a guarantee of pseudonymization: ``known_entities`` matching is
-best-effort, and a misconfigured or incomplete list can leave real names in
-this file (see the mandatory residue check in the ``playbook-from-corpus``
-skill, issue #136) — run that check before treating the bundle as shareable.
-The bare ``playbook.opf.json`` remains the canonical source of truth on disk.
+Tabs (ids in :data:`TAB_IDS`):
 
-The bundle is built by :func:`_render_document_page` from a parsed OPF
-document, passing its extra markup through that function's explicit seams —
-so the bundle contains the whole document by construction, not by
-string-splicing rendered template text.
+- **Start here** — brief instructions, the playbook's identity (``content_hash``,
+  OPF version, perspective), file paths and the toaster install steps
+  (:mod:`playbook_engine.toaster_install`, the same constant the skill prints).
+- **Playbook** — Posture, Floor and the digest per clause: what the consuming
+  model is shown.
+- **Evidence** — the precedent per clause: how each deal's clause opened and
+  what was signed, the non-standard variants, the openings not signed as
+  proposed, the refused asks, the deal counts and the clause types the corpus
+  has no evidence for.
+- **Review (optional)** — the shortest useful list of model judgments a person
+  may confirm or change (:mod:`playbook_engine.review_rows`).
+- **Posture & Floor** — the authored text, with edit fields.
 
-Sections rendered per clause: our standard, how many deals signed it, the
-non-standard variants signed and the asks refused before signing (collapsed),
-each with its distinct-deal count and citation. Empty Posture/Floor
-sections render as an explicit "pending" note rather than being omitted.
+Edits never touch ``playbook.opf.json``: the page writes ``overrides.json``
+(:mod:`playbook_engine.overrides`) — straight into the out-dir through the File
+System Access API when the person grants the folder (Chrome, Edge), or as a
+download where the API is missing — and ``playbook apply-overrides`` (or the
+next ``playbook project``) folds it in, recomputing the digest, dossiers and
+``identity.content_hash``. Nothing in a run waits on the page.
 
-Alias handling: the document body shows the ``Counterparty-N`` aliases
-exactly as stored in ``playbook.opf.json`` — best-effort ``known_entities``
-matching, not a guarantee no raw name reached that JSON (run the mandatory
-residue check before calling it shareable). The bundle takes no alias map by
-design — it embeds the canonical JSON, so resolving real names into it would
-both leak them and break hash verification. The on-disk OPF is never
-modified.
+The canonical OPF JSON and the digest are embedded verbatim in
+``<script type="application/json">`` blocks (ids ``opf-canonical``,
+``opf-digest``). The bare ``playbook.opf.json`` remains the canonical artifact;
+the page contains it, never replaces it. This is NOT a guarantee of
+pseudonymization: ``known_entities`` matching is best-effort, so run the
+mandatory residue check (see the ``playbook-from-corpus`` skill) before treating
+the page as shareable.
 """
 
 from __future__ import annotations
@@ -39,11 +42,44 @@ import json
 from pathlib import Path
 from typing import Any
 
+from playbook_engine.digest import (
+    build_digest_v4,
+    clause_precedent_groups,
+    digest_token_estimate,
+)
+from playbook_engine.index_page_assets import CSS, JS
 from playbook_engine.opf_accessors import (
     perspective_party,
     playbook_clauses,
     playbook_precedent,
 )
+from playbook_engine.overrides import FLOOR_FIELDS, OVERRIDES_FILENAME, floor_edit_refusal
+from playbook_engine.review_rows import REVIEW_LABEL_ORDER, ReviewRows, build_review_rows
+from playbook_engine.toaster_install import PLAYBOOK_FILE, TOASTER_INSTALL_STEPS
+
+#: The tab ids of ``index.html``, in display order.
+TAB_IDS = ("start", "playbook", "evidence", "review", "posture-floor")
+
+INDEX_FILENAME = "index.html"
+
+_TAB_LABELS = {
+    "start": "Start here",
+    "playbook": "Playbook",
+    "evidence": "Evidence",
+    "review": "Review (optional)",
+    "posture-floor": "Posture & Floor",
+}
+
+_LABEL_NAMES = {
+    "less_protective": "Less protective",
+    "different_concept": "Different concept",
+    "more_protective": "More protective",
+    "equivalent": "Equivalent",
+}
+
+
+def _esc(value: Any) -> str:
+    return html_lib.escape(str(value))
 
 
 def _cite_str(ref: dict[str, Any] | None) -> str:
@@ -56,103 +92,265 @@ def _cite_str(ref: dict[str, Any] | None) -> str:
 
 
 def _quote_block(text: str, cite: str = "") -> str:
-    body = html_lib.escape(text)
-    cite_html = f'<div class="cite">{html_lib.escape(cite)}</div>' if cite else ""
-    return f"<blockquote>{body}{cite_html}</blockquote>"
+    cite_html = f'<div class="cite">{_esc(cite)}</div>' if cite else ""
+    return f"<blockquote>{_esc(text)}{cite_html}</blockquote>"
 
 
 def _group_cite(group: dict[str, Any], *facts: str) -> str:
-    """Citation line of a digest group: its citation, deal count and opening facts.
-
-    The page states facts only; the ``vs_standard`` label stays in the digest JSON."""
+    """Citation line of a digest group: its citation, deal count and opening facts."""
     bits = [_cite_str(group.get("ref")), f"{group['n_deals']} deal(s)", *facts]
     return " · ".join(b for b in bits if b)
 
 
-def _render_clause(
-    clause: dict[str, Any],
-    precedent: list[dict[str, Any]],
-    tax_labels: dict[str, str],
-    number: int,
-    *,
-    party: str | None,
-) -> str:
-    """One clause (issue #223): our standard, how many deals signed it,
-    every non-standard variant signed and every refused ask — each with its
-    distinct-deal count and citation. No stance chip, no risk marker, and
-    no judged label: the page states facts only (the one judged index, each
-    text's ``vs_standard`` label of OPF-SPEC §3.5.6, stays in the digest JSON)."""
-    from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
+def _escape_json_for_script(json_text: str) -> str:
+    """Make a JSON string safe inside a ``<script type="application/json">``.
 
+    Replaces every ``<`` with the JSON escape ``\\u003c``, so no substring can
+    close the script tag, open a comment or start a nested script.
+    ``JSON.parse``/``json.loads`` restore the original value exactly, so a
+    consumer that parses the block and re-canonicalizes still verifies
+    ``identity.content_hash`` — only the raw bytes differ, never the value.
+    """
+    return json_text.replace("<", "\\u003c")
+
+
+def _json_block(block_id: str, payload: str) -> str:
+    return f'<script id="{block_id}" type="application/json">\n{_escape_json_for_script(payload)}\n</script>\n'
+
+
+def _tax_labels(doc: dict[str, Any]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for entry in doc.get("taxonomy", {}).get("entries", []):
+        labels[str(entry.get("id", ""))] = str(entry.get("label", entry.get("id", "")))
+    return labels
+
+
+def _clause_title(clause: dict[str, Any], tax_labels: dict[str, str]) -> str:
     tid = str(clause.get("taxonomy_id", ""))
-    title = clause.get("title") or tax_labels.get(tid, tid)
-    parts: list[str] = [f'<section class="clause" id="clause-{number}">']
-    parts.append(f'<h2><span class="cnum">{number}.</span> {html_lib.escape(str(title))}</h2>')
-    meta_bits = [
-        f"taxonomy: {html_lib.escape(tax_labels.get(tid, tid))}",
+    return str(clause.get("title") or tax_labels.get(tid, tid))
+
+
+# ---------------------------------------------------------------------------
+# Start here
+# ---------------------------------------------------------------------------
+
+
+def _stats_html(doc: dict[str, Any], clauses: list[dict[str, Any]]) -> str:
+    corpus = doc.get("corpus", {})
+    stats = corpus.get("stats", {})
+    docs_total = stats.get("documents_total", len(corpus.get("documents", [])))
+    docs_in_scope = stats.get(
+        "documents_in_scope", sum(1 for d in corpus.get("documents", []) if d.get("in_scope"))
+    )
+    versions_total = stats.get("versions_total", "—")
+    n_variants = sum(c.get("n_variants") or 0 for c in clauses)
+    n_refused = sum(c.get("n_refused") or 0 for c in clauses)
+    return (
+        '<div class="stats">'
+        f"<div><b>{_esc(docs_in_scope)}/{_esc(docs_total)}</b> agreements in scope</div>"
+        f"<div><b>{_esc(versions_total)}</b> negotiation versions</div>"
+        f"<div><b>{len(clauses)}</b> clause concepts</div>"
+        f"<div><b>{n_variants}</b> signed variants</div>"
+        f"<div><b>{n_refused}</b> refused asks</div>"
+        "</div>"
+    )
+
+
+def _render_start(doc: dict[str, Any], review: ReviewRows) -> str:
+    identity = doc.get("identity", {})
+    compiler = doc.get("compiler", {})
+    perspective = doc.get("perspective")
+    persp_line = (
+        f"{_esc(perspective.get('party', ''))} (counterparty: "
+        f"{_esc(perspective.get('counterparty_type', ''))})"
+        if isinstance(perspective, dict)
+        else "not set"
+    )
+    steps = "".join(
+        "<li>"
+        + _esc(step).replace("{file}", '<code class="js-opf-path">' + PLAYBOOK_FILE + "</code>")
+        + "</li>"
+        for step in TOASTER_INSTALL_STEPS
+    )
+    n_rows = len(review.rows)
+    watermark = ""
+    if compiler.get("stub_basis_present"):
+        watermark = (
+            '<section class="pending"><strong>Caution:</strong> this playbook carries the '
+            "<code>stub_basis_present</code> watermark — some clauses were never assessed by a "
+            "real judge. Do not rely on it without review.</section>"
+        )
+    return f"""<section class="card">
+  <h2>Your playbook is ready</h2>
+  <p>This page is the playbook and an optional editor. <strong>Nothing here has to be
+  done</strong> — the model's judgments stand unless you override them.</p>
+  <ol class="steps">
+    <li>Look through the <a href="#playbook" data-goto="playbook">Playbook</a> and
+    <a href="#evidence" data-goto="evidence">Evidence</a> tabs.</li>
+    <li>Optional: in <a href="#review" data-goto="review">Review</a>, confirm or change the
+    {n_rows} model judgment{"" if n_rows == 1 else "s"} the consuming model is shown, and
+    edit your Posture and Floor text in
+    <a href="#posture-floor" data-goto="posture-floor">Posture &amp; Floor</a>.</li>
+    <li>Install the playbook in the toaster (below).</li>
+  </ol>
+</section>
+{watermark}<section class="card">
+  <h2>Install in the toaster</h2>
+  <ol class="steps">{steps}</ol>
+  <p class="hint">The file the toaster takes is <code>{PLAYBOOK_FILE}</code>, not this page.</p>
+</section>
+<section class="card">
+  <h2>This playbook</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Agreement type</th><td>{_esc(doc.get("agreement_type", {}).get("name", ""))}</td></tr>
+    <tr><th>Perspective</th><td>{persp_line}</td></tr>
+    <tr><th>OPF version</th><td>{_esc(doc.get("opf_version", ""))}</td></tr>
+    <tr><th>content_hash</th><td><code>{_esc(identity.get("content_hash", ""))}</code></td></tr>
+    <tr><th>Compiled</th><td>{_esc(compiler.get("generated_at", ""))} by
+      {_esc(compiler.get("name", "playbook-engine"))} {_esc(compiler.get("version", ""))}</td></tr>
+  </table></div>
+</section>
+<section class="card">
+  <h2>Files</h2>
+  <p class="small muted">Folder: <code class="js-folder">the folder this page is in</code></p>
+  <div class="table-wrap"><table>
+    <tr><th>File</th><th>What it is</th></tr>
+    <tr><td><code class="js-opf-path">{PLAYBOOK_FILE}</code></td>
+      <td>The canonical playbook. Upload this to the toaster.</td></tr>
+    <tr><td><code class="js-index-path">{INDEX_FILENAME}</code></td>
+      <td>This page.</td></tr>
+    <tr><td><code>{OVERRIDES_FILENAME}</code></td>
+      <td>Your optional edits from the Review and Posture &amp; Floor tabs. The assistant
+      (or <code>playbook apply-overrides</code>) folds them into the playbook.</td></tr>
+  </table></div>
+</section>"""
+
+
+# ---------------------------------------------------------------------------
+# Playbook tab
+# ---------------------------------------------------------------------------
+
+
+def _render_posture_floor_readonly(doc: dict[str, Any]) -> str:
+    posture = doc.get("posture") or {}
+    floor = doc.get("floor") or {}
+    if posture.get("system_prompt"):
+        posture_html = (
+            f'<section class="clause"><h2>Posture</h2>'
+            f"{_quote_block(str(posture['system_prompt']))}</section>"
+        )
+    else:
+        posture_html = (
+            '<section class="pending"><strong>Posture:</strong> pending (optional). Posture is '
+            "the negotiation-intent brief: short prose telling a reviewer how to lean where the "
+            "evidence leaves room. It is authored by the General Counsel, never derived from the "
+            "corpus, so this playbook ships without one and works fine on the evidence alone. "
+            '<em>To add one:</em> ask the assistant to "author my posture" (or run '
+            "<code>playbook posture interview &lt;out_dir&gt;</code>); the page is rebuilt "
+            "afterwards.</section>"
+        )
+    invariants = floor.get("invariants") or []
+    if invariants:
+        items = "".join(
+            f"<li>{_esc(inv.get('statement', inv) if isinstance(inv, dict) else inv)}</li>"
+            for inv in invariants
+        )
+        floor_html = (
+            f'<section class="clause"><h2>Floor (non-negotiable)</h2><ul>{items}</ul></section>'
+        )
+    else:
+        floor_html = (
+            '<section class="pending"><strong>Floor:</strong> pending (optional). The Floor is '
+            "the short list of walk-away invariants a review must always flag. Invariants need "
+            "the legal owner's sign-off and are never promoted from data, so this playbook ships "
+            'without any. <em>To add one:</em> ask the assistant to "propose and sign hard lines" '
+            "(or run <code>playbook floor propose &lt;out_dir&gt;</code>, then "
+            "<code>playbook floor sign</code>).</section>"
+        )
+    return posture_html + floor_html
+
+
+def _render_playbook_clause(
+    clause: dict[str, Any], dclause: dict[str, Any] | None, number: int, title: str
+) -> str:
+    standard = clause.get("our_standard") or {}
+    std_text = standard.get("text") if isinstance(standard, dict) else None
+    meta = [
         f"{clause.get('n_deals', 0)} deal(s)",
         f"our standard signed in {clause.get('n_signed_standard', 0)}",
     ]
     if clause.get("n_opened_standard"):
-        meta_bits.append(
-            f"opened with our standard in {clause['n_opened_standard']} signed deal(s); "
+        meta.append(
+            f"opened with our standard in {clause['n_opened_standard']}; "
             f"kept it in {clause.get('n_kept_standard', 0)}"
         )
-    parts.append(f'<p class="meta">{" · ".join(meta_bits)}</p>')
-
-    our_standard = clause.get("our_standard") or {}
-    std_text = our_standard.get("text") if isinstance(our_standard, dict) else None
+    positions = (dclause or {}).get("positions") or {}
+    pos_bits = [f"{positions['standard']} signed our standard"] if positions.get("standard") else []
+    for label in REVIEW_LABEL_ORDER:
+        if positions.get(label):
+            pos_bits.append(f"{positions[label]} {_LABEL_NAMES[label].lower()}")
+    if positions.get("unjudged"):
+        pos_bits.append(f"{positions['unjudged']} unjudged")
+    parts = [
+        f'<section class="clause" id="clause-{number}">',
+        f"<h2>{number}. {_esc(title)}</h2>",
+        f'<p class="meta">{_esc(" · ".join(meta))}</p>',
+    ]
+    if pos_bits:
+        parts.append(f'<p class="meta">Signed positions: {_esc(", ".join(pos_bits))}</p>')
     if std_text:
-        parts.append("<h3>Our standard</h3>")
-        parts.append(_quote_block(str(std_text), _cite_str(our_standard.get("source_ref"))))
-
-    groups = clause_precedent_groups(clause.get("taxonomy_id"), precedent, party=party)
-    if groups["signed_variants"]:
-        parts.append(
-            '<h3 title="Non-standard language signed in at least one deal, grouped by '
-            'normalized text. (OPF field: evidence.precedent[].signed_text)">'
-            "Signed variants</h3>"
-        )
-        for v in groups["signed_variants"]:
-            facts = []
-            if v.get("n_from_standard"):
-                facts.append(f"from our standard in {v['n_from_standard']}")
-            if v.get("n_unchanged"):
-                facts.append(f"signed as proposed in {v['n_unchanged']}")
-            parts.append(_quote_block(str(v["text"]), _group_cite(v, *facts)))
-    if groups["refused_asks"]:
-        parts.append(
-            f'<details><summary title="Text proposed in a draft and struck before '
-            f'signing. (OPF field: evidence.precedent[].refused_asks)">'
-            f"Refused asks ({len(groups['refused_asks'])})</summary>"
-        )
-        for a in groups["refused_asks"]:
-            parts.append(_quote_block(str(a["text"]), _group_cite(a)))
-        parts.append("</details>")
-    if groups["changed_openings"]:
-        parts.append(
-            f'<details><summary title="Non-standard language the clause opened with that '
-            f'was not signed as proposed. (OPF field: evidence.precedent[].opening_text)">'
-            f"Not signed as proposed ({len(groups['changed_openings'])})</summary>"
-        )
-        for o in groups["changed_openings"]:
-            facts = []
-            if o.get("n_to_standard"):
-                facts.append(f"signed as our standard in {o['n_to_standard']}")
-            if o.get("n_struck"):
-                facts.append(f"struck in {o['n_struck']}")
-            parts.append(_quote_block(str(o["text"]), _group_cite(o, *facts)))
-        parts.append("</details>")
+        text = str(std_text)
+        if len(text) > 700:
+            parts.append(
+                f"<details><summary>Our standard ({len(text):,} characters)</summary>"
+                f"{_quote_block(text, _cite_str(standard.get('source_ref')))}</details>"
+            )
+        else:
+            parts.append("<h3>Our standard</h3>")
+            parts.append(_quote_block(text, _cite_str(standard.get("source_ref"))))
     parts.append("</section>")
     return "\n".join(parts)
 
 
+def _render_digest_summary(
+    d_clauses: list[dict[str, Any]], token_est: int, uncovered: list[dict[str, Any]] | None
+) -> str:
+    rows = "".join(
+        "<tr>"
+        f"<td>{_esc(c.get('title') or c.get('taxonomy_id') or '')}</td>"
+        f'<td class="num">{c.get("n_signed_standard", 0)} of {c.get("n_deals", 0)}</td>'
+        f'<td class="num">{c.get("n_kept_standard", 0)} of {c.get("n_opened_standard", 0)}</td>'
+        f'<td class="num">{c.get("n_variants_total", 0)}</td>'
+        f'<td class="num">{c.get("n_changed_openings_total", 0)}</td>'
+        f'<td class="num">{c.get("n_refused_total", 0)}</td>'
+        "</tr>"
+        for c in d_clauses
+    )
+    names = [
+        str(u.get("label") or u.get("taxonomy_id")) for u in uncovered or [] if isinstance(u, dict)
+    ]
+    uncovered_line = (
+        "<p>No evidence in this corpus for: " + _esc(", ".join(names)) + ".</p>" if names else ""
+    )
+    return f"""<section class="clause" id="digest">
+  <h2>Digest (what the consuming model is shown)</h2>
+  <p>Per clause: our standard, how many deals signed it and how many opened with it and
+  kept it, the non-standard variants signed, the openings not signed as proposed and the asks
+  refused before signing, each with its distinct-deal count and citation (capped; the totals are
+  always given). Estimated size: ~{token_est:,} tokens. Verdict-free except the one judged
+  <code>vs_standard</code> label of each text (see the Review tab).</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Clause</th><th class="num">Signed our standard</th>
+    <th class="num">Opened with ours, kept it</th><th class="num">Signed variants</th>
+    <th class="num">Not signed as proposed</th><th class="num">Refused asks</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table></div>
+  {uncovered_line}
+</section>"""
+
+
 def _render_method_panel(doc: dict[str, Any]) -> str:
-    """The "Method & provenance" panel: how this document was built, from the
-    document's own numbers — so "where did this come from?" is answerable
-    without leaving the page. Every figure is computed from the OPF itself
-    (no side files), which keeps the panel honest under recompiles.
-    """
+    """The "Method & provenance" panel, from the document's own numbers."""
     corpus = doc.get("corpus", {})
     compiler = doc.get("compiler", {})
     identity = doc.get("identity", {})
@@ -171,8 +369,6 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
     unknown_paper = f", {n_unknown} undetermined" if n_unknown else ""
     n_excluded = n_total - n_in_scope if isinstance(n_total, int) else "—"
 
-    # version_ingest is a LIST of per-version records in compiled documents
-    # (a dict keyed by version id in some older fixtures) — accept both.
     def _ingest_records(d: dict[str, Any]) -> list[Any]:
         vi = d.get("version_ingest")
         if isinstance(vi, dict):
@@ -188,9 +384,6 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
         if isinstance(v, dict) and v.get("status") == "failed"
     )
     unclassified = (stats.get("unclassified") or {}).get("count", 0)
-
-    # One precedent per (deal, clause); the standard check is a
-    # deterministic fact, not a judged deviation.
     dev_counts: dict[str, int] = {}
     n_obs = 0
     for record in playbook_precedent(doc):
@@ -200,103 +393,355 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
     dev_line = ", ".join(
         f"{dev_counts[k]} {k}" for k in ("standard", "non-standard") if k in dev_counts
     )
-
     judge_line = (
-        "structural stages are deterministic; scope, provenance, and "
-        "deviation/risk judgments were made by an LLM judge, each stored with "
-        "its rationale in an auditable, content-addressed verdict store"
+        "structural stages are deterministic; scope, provenance and the vs_standard label "
+        "were judged by a model, each stored with its rationale in an auditable, "
+        "content-addressed verdict store"
     )
     if compiler.get("stub_basis_present"):
         judge_line = (
             "CAUTION: carries the stub_basis_present watermark — some clauses "
             "were never assessed by a real judge"
         )
-
     content_hash = str(identity.get("content_hash", ""))
-
-    return f"""
-<section class="clause" id="method">
+    return f"""<section class="clause" id="method">
   <h2>Method &amp; provenance</h2>
-  <p>This playbook was <b>compiled from evidence, not authored</b>. Pipeline:
-  ingest &rarr; negotiation-trail reconstruction &rarr; clause segmentation
-  &rarr; taxonomy classification &rarr; draft-to-draft diffing &rarr; LLM
-  judgment (scope / provenance / deviation &amp; risk) &rarr; deterministic
-  assembly &rarr; schema + normative validation.</p>
+  <p>This playbook was <b>compiled from evidence, not authored</b>: ingest &rarr;
+  negotiation-trail reconstruction &rarr; clause segmentation &rarr; taxonomy classification
+  &rarr; draft-to-draft diffing &rarr; model judgment (scope, provenance, vs_standard) &rarr;
+  deterministic assembly &rarr; schema + normative validation.</p>
   <ul>
-    <li><b>Corpus:</b> {n_in_scope} of {n_total} agreements in scope
-      ({n_excluded} excluded with recorded rationale), {n_versions} negotiation
-      versions; {failed_versions} version file(s) failed extraction and are
-      quarantined, not silently dropped.</li>
-    <li><b>Drafting origin:</b> {n_our} agreements on our paper,
-      {n_cp} on counterparty paper{unknown_paper} — judged from each document's
-      recitals and form structure.</li>
-    <li><b>Judged evidence:</b> {n_obs} observed clause positions
-      ({dev_line}); {unclassified} clause instances remain unclassified and are
-      counted, not hidden.</li>
+    <li><b>Corpus:</b> {n_in_scope} of {n_total} agreements in scope ({n_excluded} excluded with
+      recorded rationale), {n_versions} negotiation versions; {failed_versions} version file(s)
+      failed extraction and are quarantined, not silently dropped.</li>
+    <li><b>Drafting origin:</b> {n_our} agreements on our paper, {n_cp} on counterparty
+      paper{unknown_paper} — judged from each document's recitals and form structure.</li>
+    <li><b>Judged evidence:</b> {n_obs} observed clause positions ({dev_line}); {unclassified}
+      clause instances remain unclassified and are counted, not hidden.</li>
     <li><b>Judging:</b> {judge_line}.</li>
-    <li><b>Traceability:</b> every position cites the exact document, version,
-      and character span it came from; source files are pinned by SHA-256 in
-      the machine-readable playbook, and counterparty names are pseudonymized
-      at ingestion.</li>
-    <li><b>Integrity:</b> document content hash
-      <code>{html_lib.escape(content_hash[:16])}&hellip;</code> — any edit to
-      the compiled content changes this fingerprint.</li>
+    <li><b>Traceability:</b> every position cites the exact document, version and character span
+      it came from; source files are pinned by SHA-256 in the machine-readable playbook, and
+      counterparty names are pseudonymized at ingestion.</li>
+    <li><b>Integrity:</b> content hash <code>{_esc(content_hash[:16])}&hellip;</code> — any edit
+      to the compiled content changes this fingerprint.</li>
   </ul>
-</section>
-"""
+</section>"""
 
 
-_CSS = """
-:root { color-scheme: light; }
-body { font-family: Charter, Georgia, 'Times New Roman', serif; margin: 0;
-       background: #f8f7f4; color: #1f2937; line-height: 1.55; }
-main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
-header.cover { border-bottom: 3px double #9ca3af; margin-bottom: 2.5rem;
-               padding-bottom: 1.5rem; }
-header.cover h1 { font-size: 2rem; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
-header.cover .subtitle { color: #6b7280; font-variant: small-caps;
-                         letter-spacing: 0.08em; }
-.stats { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: 1rem;
-         font-size: 0.9rem; color: #374151; }
-.stats b { display: block; font-size: 1.3rem; color: #111827; }
-nav.toc { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
-          padding: 1rem 1.5rem; margin-bottom: 2.5rem; font-size: 0.95rem; }
-nav.toc a { color: #1d4ed8; text-decoration: none; }
-nav.toc li { margin: 0.15rem 0; }
-section.clause { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
-                 padding: 1.5rem 2rem; margin-bottom: 1.75rem;
-                 box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-section.clause h2 { font-size: 1.25rem; margin: 0 0 0.25rem; }
-section.clause h3 { font-size: 0.85rem; text-transform: uppercase;
-                    letter-spacing: 0.08em; color: #6b7280; margin: 1.25rem 0 0.5rem; }
-.cnum { color: #9ca3af; font-weight: 400; }
-p.meta { color: #6b7280; font-size: 0.85rem; margin: 0 0 0.5rem; }
-blockquote { margin: 0.5rem 0; padding: 0.6rem 1rem; background: #f9fafb;
-             border-left: 3px solid #d1d5db; font-size: 0.92rem;
-             white-space: pre-wrap; }
-blockquote .cite { margin-top: 0.4rem; font-size: 0.75rem; color: #9ca3af;
-                   font-family: ui-monospace, Menlo, monospace; }
-.variation { margin-bottom: 1rem; }
-.var-label { font-size: 0.75rem; text-transform: uppercase; color: #9ca3af;
-             margin: 0.5rem 0 0.1rem; letter-spacing: 0.06em; }
-p.rationale { font-size: 0.88rem; color: #4b5563; font-style: italic; }
-.risk { font-size: 0.78rem; color: #92400e; font-family: ui-monospace, Menlo, monospace; }
-details { margin: 0.75rem 0; }
-details summary { cursor: pointer; color: #1d4ed8; font-size: 0.92rem; }
-details ul { font-size: 0.88rem; }
-section.pending { background: #fffbeb; border: 1px solid #fde68a;
-                  border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1.75rem;
-                  color: #713f12; }
-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;
-         color: #9ca3af; font-size: 0.8rem; }
-@media print {
-  body { background: #fff; }
-  section.clause { border: none; box-shadow: none; padding: 0 0 1rem;
-                   page-break-inside: avoid; }
-  details { display: none; }
-  nav.toc { display: none; }
+def _render_playbook_tab(
+    doc: dict[str, Any],
+    digest: dict[str, Any],
+    clauses_sorted: list[dict[str, Any]],
+    tax_labels: dict[str, str],
+) -> str:
+    dby = {c.get("taxonomy_id"): c for c in digest.get("clauses", []) if isinstance(c, dict)}
+    toc = "".join(
+        f'<li><a href="#clause-{i}">{_esc(_clause_title(c, tax_labels))}</a></li>'
+        for i, c in enumerate(clauses_sorted, start=1)
+    )
+    body = "\n".join(
+        _render_playbook_clause(c, dby.get(c.get("taxonomy_id")), i, _clause_title(c, tax_labels))
+        for i, c in enumerate(clauses_sorted, start=1)
+    )
+    summary = _render_digest_summary(
+        digest.get("clauses", []),
+        digest_token_estimate(digest),
+        digest.get("uncovered_clause_types"),
+    )
+    return (
+        _render_posture_floor_readonly(doc)
+        + f'<nav class="toc card"><strong>Clauses</strong><ol>{toc}</ol></nav>\n'
+        + body
+        + "\n"
+        + summary
+        + "\n"
+        + _render_method_panel(doc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Evidence tab
+# ---------------------------------------------------------------------------
+
+
+def _outcome(record: dict[str, Any]) -> str:
+    if record.get("signed") is not True:
+        return "not signed"
+    if record.get("signed_text") is None:
+        return "struck before signing"
+    return "signed our standard" if record.get("standard") is True else "signed a variant"
+
+
+_OPENED = {
+    "standard": "our standard",
+    "non_standard": "non-standard text",
+    "absent": "absent (added later)",
 }
-"""
+
+
+def _render_deal_trail(records: list[dict[str, Any]]) -> str:
+    """One row per deal: how its draft opened and what was signed.
+
+    The Signed column is dropped when no deal carries a ``signed_at`` (a corpus
+    whose dates were coarsened away would otherwise show a column of dashes).
+    """
+    dated = any(r.get("signed_at") for r in records)
+    rows = "".join(
+        "<tr>"
+        f"<td>{_esc(r.get('document_id', ''))}</td>"
+        + (f"<td>{_esc(r.get('signed_at') or '—')}</td>" if dated else "")
+        + f"<td>{_esc(_OPENED.get(str(r.get('opened_with')), '—'))}</td>"
+        f"<td>{_esc(_outcome(r))}</td>"
+        f'<td class="num">{len(r.get("refused_asks") or [])}</td>'
+        f'<td class="num">{r.get("rounds", 0)}</td>'
+        "</tr>"
+        for r in sorted(records, key=lambda r: (str(r.get("document_id")), str(r.get("id"))))
+    )
+    return (
+        "<h3>Deal by deal: how it opened, what was signed</h3>"
+        '<div class="table-wrap"><table><thead><tr><th>Deal</th>'
+        + ("<th>Signed</th>" if dated else "")
+        + '<th>Opened with</th><th>Result</th><th class="num">Refused asks</th>'
+        '<th class="num">Rounds</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></div>"
+    )
+
+
+def _render_evidence_clause(
+    clause: dict[str, Any],
+    precedent: list[dict[str, Any]],
+    tax_labels: dict[str, str],
+    number: int,
+    *,
+    party: str | None,
+) -> str:
+    tid = clause.get("taxonomy_id")
+    title = _clause_title(clause, tax_labels)
+    records = [p for p in precedent if p.get("taxonomy_id") == tid]
+    groups = clause_precedent_groups(tid, precedent, party=party)
+    pills = [
+        f"{clause.get('n_deals', 0)} deals",
+        f"ours signed {clause.get('n_signed_standard', 0)}",
+        f"opened with ours {clause.get('n_opened_standard', 0)}, kept {clause.get('n_kept_standard', 0)}",
+        f"{len(groups['signed_variants'])} variants",
+        f"{len(groups['changed_openings'])} changed openings",
+        f"{len(groups['refused_asks'])} refused",
+    ]
+    meta = "".join(f'<span class="pill">{_esc(p)}</span>' for p in pills)
+    parts = [
+        f'<details class="clause card" id="ev-{number}">',
+        f'<summary><strong class="ev-title">{number}. {_esc(title)}</strong>'
+        f'<span class="pills">{meta}</span></summary>',
+        _render_deal_trail(records),
+    ]
+    if groups["signed_variants"]:
+        parts.append(
+            '<h3 title="Non-standard language signed in at least one deal, grouped by '
+            'normalized text. (OPF field: evidence.precedent[].signed_text)">Signed variants</h3>'
+        )
+        for v in groups["signed_variants"]:
+            facts = []
+            if v.get("n_from_standard"):
+                facts.append(f"from our standard in {v['n_from_standard']}")
+            if v.get("n_unchanged"):
+                facts.append(f"signed as proposed in {v['n_unchanged']}")
+            parts.append(_quote_block(str(v["text"]), _group_cite(v, *facts)))
+    if groups["changed_openings"]:
+        parts.append(
+            '<h3 title="Non-standard language the clause opened with that was not signed as '
+            'proposed. (OPF field: evidence.precedent[].opening_text)">'
+            "Openings not signed as proposed</h3>"
+        )
+        for o in groups["changed_openings"]:
+            facts = []
+            if o.get("n_to_standard"):
+                facts.append(f"signed as our standard in {o['n_to_standard']}")
+            if o.get("n_struck"):
+                facts.append(f"struck in {o['n_struck']}")
+            parts.append(_quote_block(str(o["text"]), _group_cite(o, *facts)))
+    if groups["refused_asks"]:
+        parts.append(
+            '<h3 title="Text proposed in a draft and struck before signing. '
+            '(OPF field: evidence.precedent[].refused_asks)">Refused asks</h3>'
+        )
+        for a in groups["refused_asks"]:
+            parts.append(_quote_block(str(a["text"]), _group_cite(a)))
+    parts.append("</details>")
+    return "\n".join(parts)
+
+
+def _render_evidence_tab(
+    doc: dict[str, Any],
+    digest: dict[str, Any],
+    clauses_sorted: list[dict[str, Any]],
+    tax_labels: dict[str, str],
+) -> str:
+    precedent = playbook_precedent(doc)
+    party = perspective_party(doc)
+    body = "\n".join(
+        _render_evidence_clause(c, precedent, tax_labels, i, party=party)
+        for i, c in enumerate(clauses_sorted, start=1)
+    )
+    uncovered = [u for u in digest.get("uncovered_clause_types") or [] if isinstance(u, dict)]
+    if uncovered:
+        names = ", ".join(_esc(u.get("label") or u.get("taxonomy_id")) for u in uncovered)
+        uncovered_html = (
+            f'<section class="card"><h2>No evidence for</h2><p>{names}.</p>'
+            '<p class="hint">Recognised clause types with no precedent in this corpus; nothing '
+            "more is claimed.</p></section>"
+        )
+    else:
+        uncovered_html = ""
+    return (
+        '<section class="card"><h2>Precedent per clause</h2>'
+        "<p>Facts only: for each clause, how each deal's draft opened and what was signed, the "
+        "non-standard language that was signed, the openings that were not signed as proposed "
+        "and the asks refused before signing. Open a clause to see it.</p></section>\n"
+        + body
+        + "\n"
+        + uncovered_html
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review tab
+# ---------------------------------------------------------------------------
+
+
+def _render_review_tab(review: ReviewRows) -> str:
+    chips = [("all", "All"), ("todo", "Not reviewed yet")] + [
+        (label, _LABEL_NAMES[label]) for label in REVIEW_LABEL_ORDER
+    ]
+    filters = "".join(
+        f'<button type="button" data-filter="{f}" data-name="{_esc(name)}" aria-pressed="false">'
+        f"{_esc(name)}</button>"
+        for f, name in chips
+    )
+    extra = []
+    if review.n_not_shown:
+        extra.append(
+            f"{review.n_not_shown} other judged text(s) are not in the digest, so they change "
+            "nothing the model sees and are not listed."
+        )
+    if review.n_unjudged:
+        extra.append(
+            f"{review.n_unjudged} text(s) in the digest have no label yet (run "
+            "<code>playbook judge</code> to queue them)."
+        )
+    return f"""<section class="card">
+  <h2>Review (optional)</h2>
+  <p>The consuming model is shown one label for each non-standard text — equivalent to our
+  standard, more or less protective, or a different concept — and checks it against the cited
+  text. These are the labels it is shown, worst first. <strong>Nothing waits on this
+  list:</strong> confirm what is right, change what is not, skip the rest. Your word is final
+  and is recorded as <code>owner</code>.</p>
+  <p class="hint">{" ".join(extra)}</p>
+  <div class="savebar">
+    <button type="button" class="btn" id="btn-connect" hidden>Connect folder</button>
+    <button type="button" class="btn secondary" id="btn-reconnect" hidden>Reconnect folder</button>
+    <button type="button" class="btn secondary" id="btn-download">Download edits</button>
+    <span id="save-status" role="status" aria-live="polite"></span>
+  </div>
+  <p class="hint" id="save-note" hidden>This browser cannot save into a folder (Chrome and Edge
+  can). Use <strong>Download edits</strong> and put the downloaded <code>{OVERRIDES_FILENAME}</code>
+  next to <code>{PLAYBOOK_FILE}</code>.</p>
+  <p class="hint">Connect folder: choose the folder this page is in; edits are saved to
+  <code>{OVERRIDES_FILENAME}</code> there as you make them.</p>
+  <p class="progress" id="review-progress"></p>
+</section>
+<noscript><section class="pending">The Review tab needs scripting to list the labels. The
+labels themselves are in the digest of <code>{PLAYBOOK_FILE}</code>.</section></noscript>
+<div class="filters" role="group" aria-label="Filter">{filters}</div>
+<div class="bulk">
+  <button type="button" class="btn secondary" id="bulk-confirm">Confirm all in this view</button>
+  <button type="button" class="btn secondary" id="bulk-undo">Undo all in this view</button>
+</div>
+<div id="review-list"></div>
+<p id="review-empty" hidden class="muted">Nothing to show for this filter.</p>
+<p><button type="button" class="btn secondary" id="review-more" hidden>Show more</button></p>"""
+
+
+# ---------------------------------------------------------------------------
+# Posture & Floor tab
+# ---------------------------------------------------------------------------
+
+
+def _edit_box(target: str, ident: str, field: str | None, label: str, text: str) -> str:
+    field_attr = f' data-field="{_esc(field)}"' if field else ""
+    return (
+        f'<div class="edit-box"><label><strong>{_esc(label)}</strong>'
+        f'<textarea class="edit" data-target="{target}" data-id="{_esc(ident)}"{field_attr}>'
+        f"{_esc(text)}</textarea></label>"
+        '<span class="edited-flag" hidden>edited</span> '
+        '<button type="button" class="btn secondary revert" hidden>Revert</button></div>'
+    )
+
+
+def _render_posture_floor_tab(doc: dict[str, Any]) -> str:
+    posture = doc.get("posture") or {}
+    invariants = [
+        i for i in (doc.get("floor") or {}).get("invariants") or [] if isinstance(i, dict)
+    ]
+    if posture.get("system_prompt"):
+        gen = posture.get("generation") or {}
+        posture_html = (
+            '<section class="card"><h2>Posture</h2>'
+            f'<p class="meta">version {_esc(posture.get("version", ""))}'
+            f"{' · ' + _esc(gen.get('generated_at')) if gen.get('generated_at') else ''}</p>"
+            + _edit_box(
+                "posture", "system_prompt", None, "Posture text", str(posture["system_prompt"])
+            )
+            + "</section>"
+        )
+    else:
+        posture_html = (
+            '<section class="pending"><strong>Posture:</strong> none yet. It is authored by the '
+            "General Counsel from a short interview (<code>playbook posture interview</code>); "
+            "this page edits one that exists.</section>"
+        )
+    if invariants:
+        boxes = []
+        for inv in invariants:
+            ident = str(inv.get("id", ""))
+            signer = f" · signed by {_esc(inv['x_signed_by'])}" if inv.get("x_signed_by") else ""
+            fields = []
+            for field in FLOOR_FIELDS:
+                if not isinstance(inv.get(field), str):
+                    continue
+                refusal = floor_edit_refusal(inv, field)
+                if refusal is None:
+                    fields.append(_edit_box("floor", ident, field, field.capitalize(), inv[field]))
+                else:
+                    # Not authored text the page may replace: shown, with why.
+                    fields.append(
+                        f'<div class="edit-box"><strong>{_esc(field.capitalize())}</strong>'
+                        f"<p>{_esc(inv[field])}</p>"
+                        f'<p class="meta">Not editable here: {_esc(refusal)}.</p></div>'
+                    )
+            boxes.append(
+                f'<section class="card"><h2>{_esc(ident)}</h2>'
+                f'<p class="meta">Floor invariant{signer}</p>' + "".join(fields) + "</section>"
+            )
+        floor_html = "".join(boxes)
+    else:
+        floor_html = (
+            '<section class="pending"><strong>Floor:</strong> no invariants yet. They need the '
+            "legal owner's sign-off (<code>playbook floor propose</code>, then "
+            "<code>playbook floor sign</code>); this page edits ones that exist.</section>"
+        )
+    return (
+        '<section class="card"><h2>Posture &amp; Floor</h2>'
+        "<p>The authored text, with edit fields. An edit is saved to "
+        f"<code>{OVERRIDES_FILENAME}</code> (see the Review tab to connect a folder or download "
+        "it) and folded into the playbook by the engine, which recomputes the digest and "
+        "<code>content_hash</code>. Optional.</p>"
+        "</section>" + posture_html + floor_html
+    )
+
+
+# ---------------------------------------------------------------------------
+# The page
+# ---------------------------------------------------------------------------
 
 
 def _read_opf(out_dir: Path) -> tuple[str, dict[str, Any]]:
@@ -319,124 +764,81 @@ def _write_atomic(out_file: Path, text: str) -> None:
     tmp.replace(out_file)
 
 
-def _render_document_page(
-    doc: dict[str, Any],
-    *,
-    extra_sections: str = "",
-    trailing_blocks: str = "",
-) -> str:
-    """Build the readable document page from an already-parsed OPF document.
+def _initial_overrides(out_dir: Path) -> str | None:
+    """The text of a well-formed ``overrides.json`` already in *out_dir*, else ``None``."""
+    path = out_dir / OVERRIDES_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+        return text if isinstance(json.loads(text), dict) else None
+    except (OSError, ValueError):
+        return None
 
-    This is the single place the document body is constructed, and the seam
-    the bundle composes through. Both callers get the same body by
-    construction rather than by pattern-matching on rendered template text:
 
-        extra_sections:  extra ``<section>`` markup placed after the Method &
-                         provenance panel and before the ``<footer>`` — where
-                         ``render_bundle_html`` puts its digest summary.
-        trailing_blocks: markup placed at the very end of ``<body>`` — where
-                         ``render_bundle_html`` puts its machine-readable
-                         ``<script type="application/json">`` payloads.
+def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
+    """Render ``index.html`` for the playbook in *out_dir*; write it to *out_file* when given.
 
-    Both default to empty, which yields the plain document.
+    Raises:
+        FileNotFoundError: ``playbook.opf.json`` missing from *out_dir*.
     """
+    raw, doc = _read_opf(out_dir)
+    digest = doc.get("digest") or build_digest_v4(doc)
     agreement = doc.get("agreement_type", {})
     name = agreement.get("name", agreement.get("id", "Playbook"))
     identity = doc.get("identity", {})
     compiler = doc.get("compiler", {})
-    corpus = doc.get("corpus", {})
-    stats = corpus.get("stats", {})
 
-    tax_labels: dict[str, str] = {}
-    for entry in doc.get("taxonomy", {}).get("entries", []):
-        tax_labels[str(entry.get("id", ""))] = str(entry.get("label", entry.get("id", "")))
-
+    tax_labels = _tax_labels(doc)
     clauses = playbook_clauses(doc)
-    clauses_sorted = sorted(
-        clauses, key=lambda c: tax_labels.get(str(c.get("taxonomy_id", "")), "")
-    )
+    clauses_sorted = sorted(clauses, key=lambda c: _clause_title(c, tax_labels).lower())
+    review = build_review_rows(doc)
 
-    docs_total = stats.get("documents_total", len(corpus.get("documents", [])))
-    docs_in_scope = stats.get(
-        "documents_in_scope",
-        sum(1 for d in corpus.get("documents", []) if d.get("in_scope")),
+    panels = {
+        "start": _render_start(doc, review),
+        "playbook": _render_playbook_tab(doc, digest, clauses_sorted, tax_labels),
+        "evidence": _render_evidence_tab(doc, digest, clauses_sorted, tax_labels),
+        "review": _render_review_tab(review),
+        "posture-floor": _render_posture_floor_tab(doc),
+    }
+    tab_buttons = "".join(
+        f'<button type="button" role="tab" id="t-{tid}" data-tab="{tid}" '
+        f'aria-controls="tab-{tid}" aria-selected="{"true" if tid == "start" else "false"}">'
+        f"{_esc(_TAB_LABELS[tid])}"
+        + ('<span class="count" id="tab-review-count"></span>' if tid == "review" else "")
+        + "</button>"
+        for tid in TAB_IDS
     )
-    versions_total = stats.get("versions_total", "—")
-    acceptable_label, rejected_label = "signed variants", "refused asks"
-    n_acceptable = sum(c.get("n_variants") or 0 for c in clauses)
-    n_rejected = sum(c.get("n_refused") or 0 for c in clauses)
-
-    toc_items = "".join(
-        f'<li><a href="#clause-{i}">{html_lib.escape(str(c.get("title") or tax_labels.get(str(c.get("taxonomy_id", "")), "")))}</a>'
-        + "</li>"
-        for i, c in enumerate(clauses_sorted, start=1)
-    )
-
-    precedent = playbook_precedent(doc)
-    party = perspective_party(doc)
-    clause_html = "\n".join(
-        _render_clause(c, precedent, tax_labels, i, party=party)
-        for i, c in enumerate(clauses_sorted, start=1)
+    tab_panels = "".join(
+        f'<div role="tabpanel" id="tab-{tid}" aria-labelledby="t-{tid}">{panels[tid]}</div>\n'
+        for tid in TAB_IDS
     )
 
     posture = doc.get("posture") or {}
-    floor = doc.get("floor") or {}
-    posture_html = (
-        f'<section class="clause"><h2>Posture</h2><blockquote>'
-        f"{html_lib.escape(str(posture.get('system_prompt', '')))}</blockquote></section>"
+    pf_data = {
+        "posture": {"system_prompt": posture.get("system_prompt")}
         if posture.get("system_prompt")
-        else (
-            '<section class="pending"><strong>Posture:</strong> pending (optional). '
-            "Posture is the negotiation-intent brief: short prose telling a reviewer "
-            "— human or AI — how to lean where the evidence leaves room (what to "
-            "hold, what to trade, tone). It is authored by the General Counsel, "
-            "never derived from the corpus, so this playbook ships without one. "
-            "A consuming review application works fine without it, running on the "
-            "evidence sections alone. <em>To enable:</em> run "
-            "<code>playbook posture interview &lt;out_dir&gt;</code> (see "
-            "<code>playbook posture questions</code> for the question set), then "
-            "re-validate and re-render this bundle — the content hash changes. "
-            "<em>Why:</em> reviews gain your intent, not just your history.</section>"
-        )
-    )
-    invariants = floor.get("invariants") or []
-    if invariants:
-        floor_items = "".join(
-            f"<li>{html_lib.escape(str(inv.get('text', inv) if isinstance(inv, dict) else inv))}</li>"
-            for inv in invariants
-        )
-        floor_html = (
-            f'<section class="clause"><h2>Floor (non-negotiable)</h2>'
-            f"<ul>{floor_items}</ul></section>"
-        )
-    else:
-        floor_html = (
-            '<section class="pending"><strong>Floor:</strong> pending (optional). '
-            "The Floor is the short list of walk-away invariants — categorical red "
-            "lines a review must always flag and can never waive (e.g. an "
-            "indemnification cap below your minimum). Invariants require the legal "
-            "owner's sign-off and are never auto-promoted from data, so this "
-            "playbook ships without any: nothing is treated as non-negotiable "
-            "until you say so, and a consuming review application works fine in "
-            "that state. <em>To enable:</em> run "
-            "<code>playbook floor propose &lt;out_dir&gt;</code> to derive "
-            "candidates from observed reversals (written to "
-            "<code>floor.candidates.json</code>, a review sidecar), accept the "
-            "ones you mean by editing <code>floor.invariants</code>, then "
-            "re-validate and re-render this bundle. <em>Why:</em> Floor "
-            "violations are flagged on every review, categorically — independent "
-            "of model judgment.</section>"
-        )
-
-    watermark = ""
-    if compiler.get("stub_basis_present"):
-        watermark = (
-            '<section class="pending"><strong>Caution:</strong> this playbook '
-            "carries the <code>stub_basis_present</code> watermark — some clauses "
-            "were never assessed by a real judge. Do not rely on it without "
-            "review.</section>"
-        )
-
+        else None,
+        "floor": [
+            {f: i.get(f) for f in ("id", *FLOOR_FIELDS)}
+            for i in (doc.get("floor") or {}).get("invariants") or []
+            if isinstance(i, dict)
+        ],
+    }
+    raw_perspective = doc.get("perspective")
+    perspective: dict[str, Any] = raw_perspective if isinstance(raw_perspective, dict) else {}
+    # What the page checks a folder's playbook.opf.json against before it reads or
+    # writes overrides.json there (the folder must hold THIS playbook).
+    meta = {
+        "content_hash": identity.get("content_hash"),
+        "agreement_type": agreement.get("id"),
+        "perspective": {
+            "party": perspective.get("party"),
+            "counterparty_type": perspective.get("counterparty_type"),
+        },
+        "overrides_file": OVERRIDES_FILENAME,
+    }
+    initial = _initial_overrides(out_dir)
     generated_at = compiler.get("generated_at", "")
     version_line = " · ".join(
         str(x)
@@ -448,156 +850,54 @@ def _render_document_page(
         )
         if x
     )
+    scripts = (
+        "<!-- Machine-readable payloads. Extract a block, JSON-parse it, and verify\n"
+        "     identity.content_hash over the canonical serialization (see\n"
+        '     playbook_engine/canonicalize.py). "<" is escaped as "\\u003c" inside the\n'
+        "     blocks; JSON parsing restores the original text exactly. -->\n"
+        + _json_block("opf-canonical", raw)
+        + _json_block("opf-digest", json.dumps(digest, indent=1, ensure_ascii=False))
+        + _json_block("page-meta", json.dumps(meta, ensure_ascii=False))
+        + _json_block("review-rows", json.dumps(review.rows, ensure_ascii=False))
+        + _json_block("pf-data", json.dumps(pf_data, ensure_ascii=False))
+        + (_json_block("overrides-initial", initial) if initial is not None else "")
+    )
 
-    method_html = _render_method_panel(doc)
-
-    return f"""<!DOCTYPE html>
+    html_out = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html_lib.escape(str(name))} — Negotiation Playbook</title>
-<style>{_CSS}</style>
+<title>{_esc(name)} — Playbook</title>
+<link rel="icon" href="data:,">
+<style>{CSS}</style>
 </head>
 <body>
 <main>
 <header class="cover">
   <div class="subtitle">Negotiation Playbook</div>
-  <h1>{html_lib.escape(str(name))}</h1>
-  <p class="meta">{html_lib.escape(version_line)}</p>
-  <div class="stats">
-    <div><b>{docs_in_scope}/{docs_total}</b> agreements in scope</div>
-    <div><b>{versions_total}</b> negotiation versions</div>
-    <div><b>{len(clauses)}</b> clause concepts</div>
-    <div><b>{n_acceptable}</b> {acceptable_label}</div>
-    <div><b>{n_rejected}</b> {rejected_label}</div>
-  </div>
+  <h1>{_esc(name)}</h1>
+  <p class="meta">{_esc(version_line)}</p>
+  {_stats_html(doc, clauses)}
 </header>
-{watermark}
-<nav class="toc"><strong>Clauses</strong><ol>{toc_items}</ol></nav>
-{posture_html}
-{floor_html}
-{clause_html}
-{method_html}
-{extra_sections}<footer>
-Compiled by {html_lib.escape(str(compiler.get("name", "playbook-engine")))}
-{html_lib.escape(str(compiler.get("version", "")))} — evidence-derived; every
-position traces to cited corpus text. Confidential work product.
+<div role="tablist" aria-label="Playbook">{tab_buttons}</div>
+{tab_panels}<footer>
+Compiled by {_esc(compiler.get("name", "playbook-engine"))} {_esc(compiler.get("version", ""))} —
+evidence-derived; every position traces to cited corpus text. Confidential work product.
+Not a guarantee of pseudonymization: run the residue check before sharing.
 </footer>
 </main>
-{trailing_blocks}</body>
+{scripts}<script>{JS}</script>
+</body>
 </html>
 """
-
-
-def _escape_json_for_script(json_text: str) -> str:
-    """Make a JSON string safe inside a ``<script type="application/json">``.
-
-    Replaces ``</`` with ``<\\/`` so no substring can close the script tag.
-    ``JSON.parse``/``json.loads`` restore the original value exactly, so a
-    consumer that parses the block and re-canonicalizes still verifies
-    ``identity.content_hash`` — only the raw bytes differ, never the value.
-    """
-    return json_text.replace("</", "<\\/")
-
-
-def _render_digest_summary(
-    d_clauses: list[dict[str, Any]],
-    token_est: int,
-    uncovered: list[dict[str, Any]] | None = None,
-) -> str:
-    """Digest-section summary table (digest_version 4)."""
-    rows = "".join(
-        "<tr>"
-        f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
-        f"<td>{c.get('n_signed_standard', 0)} of {c.get('n_deals', 0)}</td>"
-        f"<td>{c.get('n_kept_standard', 0)} of {c.get('n_opened_standard', 0)}</td>"
-        f"<td>{c.get('n_variants_total', 0)}</td>"
-        f"<td>{c.get('n_changed_openings_total', 0)}</td>"
-        f"<td>{c.get('n_refused_total', 0)}</td>"
-        "</tr>"
-        for c in d_clauses
-    )
-    names = [
-        str(u.get("label") or u.get("taxonomy_id")) for u in uncovered or [] if isinstance(u, dict)
-    ]
-    uncovered_line = (
-        "<p>No evidence in this corpus for: " + html_lib.escape(", ".join(names)) + ".</p>"
-        if names
-        else ""
-    )
-    return f"""<section class="clause" id="digest">
-  <h2>Digest (model-facing projection)</h2>
-  <p>This bundle embeds a compact digest of the precedent record, verdict-free
-  except the one judged <code>vs_standard</code> index of each text
-  (digest_version 4) — per clause: our standard, how many deals signed it and
-  how many opened with it and kept it, the non-standard variants signed (with
-  how many were conceded from our standard and how many signed as proposed),
-  the openings not signed as proposed and the asks refused before signing,
-  each with its distinct-deal count and citation (capped; the totals are
-  always given).
-  Estimated size: ~{token_est:,} tokens. The machine blocks below carry the
-  digest and the canonical OPF JSON; the bare <code>playbook.opf.json</code>
-  remains the canonical artifact.</p>
-  <table>
-    <thead><tr><th>Clause</th><th>Signed our standard</th>
-    <th>Opened with our standard, kept it</th><th>Signed variants</th>
-    <th>Not signed as proposed</th><th>Refused asks</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-  {uncovered_line}
-</section>
-"""
-
-
-def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
-    """Render the single-file OPF bundle: ``playbook.opf.html``.
-
-    The full human document (including the Method & provenance panel), plus
-    a digest summary section, with the
-    CANONICAL OPF JSON and the digest embedded verbatim in
-    ``<script type="application/json">`` blocks:
-
-    - ``id="opf-canonical"`` — the on-disk ``playbook.opf.json`` text. The
-      bare JSON file remains the canonical artifact; this block contains it,
-      never replaces it. A consumer extracts the block, parses it, and
-      verifies ``identity.content_hash`` over the canonical serialization
-      (``playbook_engine.canonicalize``).
-    - ``id="opf-digest"`` — the digest section (built on the fly when the
-      document carries none).
-
-    Deliberately takes no alias map: the bundle embeds the canonical JSON
-    verbatim, so resolving real names into it would both leak them and break
-    hash verification. This is NOT a guarantee of pseudonymization —
-    ``known_entities`` matching is best-effort; run the mandatory residue
-    check (``playbook-from-corpus`` skill, issue #136) before treating the
-    bundle as shareable.
-    """
-    from playbook_engine.digest import build_digest_v4, digest_token_estimate  # noqa: PLC0415
-
-    raw, doc = _read_opf(out_dir)
-    digest = doc.get("digest") or build_digest_v4(doc)
-
-    d_clauses = digest.get("clauses", [])
-    token_est = digest_token_estimate(digest)
-    digest_summary = _render_digest_summary(
-        d_clauses, token_est, digest.get("uncovered_clause_types")
-    )
-
-    scripts = (
-        "<!-- Machine-readable payloads. Extract a block, JSON-parse it, and verify\n"
-        "     identity.content_hash over the canonical serialization (see\n"
-        '     playbook_engine/canonicalize.py). "</" is escaped as "<\\/" inside the\n'
-        "     blocks; JSON parsing restores the original text exactly. -->\n"
-        f'<script id="opf-canonical" type="application/json">\n'
-        f"{_escape_json_for_script(raw)}\n</script>\n"
-        f'<script id="opf-digest" type="application/json">\n'
-        f"{_escape_json_for_script(json.dumps(digest, indent=1, ensure_ascii=False))}\n</script>\n"
-    )
-
-    html_out = _render_document_page(doc, extra_sections=digest_summary, trailing_blocks=scripts)
-
     if out_file is not None:
         _write_atomic(out_file, html_out)
-
     return html_out
+
+
+__all__ = [
+    "INDEX_FILENAME",
+    "TAB_IDS",
+    "render_index_html",
+]
