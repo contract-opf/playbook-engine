@@ -206,7 +206,7 @@ def test_quickstart_commands_run(quickstart_run: _QuickstartRun) -> None:
     # artifact. Assert against the file `view bundle` wrote: it must carry the
     # Floor and Posture the interview step authored (not the empty-section
     # markers) and embed the canonical OPF JSON verbatim (issue #93).
-    bundle_path = quickstart_run.out_dir / "playbook.opf.html"
+    bundle_path = quickstart_run.out_dir / "index.html"
     assert bundle_path.exists(), f"quickstart did not produce {bundle_path}"
     bundle_text = bundle_path.read_text(encoding="utf-8")
     assert 'id="opf-canonical"' in bundle_text

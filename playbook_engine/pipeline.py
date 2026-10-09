@@ -109,6 +109,12 @@ from playbook_engine.observation_builder import (
     truncate_move_summaries,
     truncate_search_snippets,
 )
+from playbook_engine.overrides import (
+    OVERRIDES_FILENAME,
+    OverridesError,
+    fold_overrides,
+    load_overrides,
+)
 from playbook_engine.pdf_ingester import ingest_pdf
 from playbook_engine.playbook_assembler import (
     _strip_invisible,
@@ -4742,6 +4748,10 @@ def project_playbook(
                                         its ``posture`` and ``floor`` sections, which a
                                         recompile carries forward verbatim (issue #123).
                                         Absent on a first compile.
+    - ``overrides.json``              — the owner's optional edits (issue #241), folded
+                                        into the projection when present: label
+                                        confirmations and changes, Posture and Floor text.
+                                        Absent unless the Review tab of ``index.html`` saved it.
 
     All L5 logic is deterministic given the store — zero LLM calls.
 
@@ -4890,6 +4900,34 @@ def project_playbook(
         round_moves=round_moves,
         equivalence_judge=equivalence_judge,
     )
+
+    # Issue #241: the owner's optional corrections (`overrides.json`, saved by
+    # the Review tab of index.html) are folded into the projection, and the
+    # digest, dossiers and identity recomputed by the engine. Absent file, no
+    # step. The file is optional and never gates a run: after a re-derivation
+    # from a changed corpus a stale entry is the normal case, so an entry that
+    # cannot be applied (or a file that cannot be read) is skipped, counted and
+    # reported with its reason, and the projection continues. `playbook
+    # apply-overrides` is the strict command.
+    overrides_path = out_dir / OVERRIDES_FILENAME
+    if overrides_path.is_file():
+        skipped: list[str] = []
+        try:
+            entries = load_overrides(overrides_path)
+        except OverridesError as exc:
+            entries = []
+            skipped = list(exc.problems)
+            progress(f"  overrides: {OVERRIDES_FILENAME} could not be used, none applied")
+        if entries:
+            playbook, applied = fold_overrides(playbook, entries, out_dir, strict=False)
+            skipped = applied.skipped
+            progress(
+                f"  overrides: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} "
+                f"({applied.n_changed} changed the playbook, {applied.unchanged} already in "
+                f"effect, {len(skipped)} skipped)"
+            )
+        for reason in skipped:
+            progress(f"  overrides skipped: {reason}")
 
     write_playbook(playbook, out_file)
     progress(f"Playbook written: {out_file}")

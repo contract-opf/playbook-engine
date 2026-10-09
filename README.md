@@ -42,11 +42,14 @@ playbook validate out/quickstart-demo/playbook.opf.json
 playbook view bundle out/quickstart-demo
 ```
 
-The payoff is that last command: it writes `out/quickstart-demo/playbook.opf.html`,
-the one human-readable artifact — the playbook, carrying the hard lines and
-posture the interview step above authored, plus its canonical OPF JSON and
-digest embedded verbatim. The consuming review application reads
-`playbook.opf.json` itself.
+The payoff is that last command: it writes `out/quickstart-demo/index.html`,
+the one human-readable artifact — a single tabbed page (Start here, Playbook,
+Evidence, an optional Review, Posture & Floor) carrying the hard lines and
+posture the interview step above authored, the toaster install steps, and its
+canonical OPF JSON and digest embedded verbatim. Open it in a browser; reviewing
+or editing anything in it is optional, and edits save to `overrides.json`
+(`playbook apply-overrides` folds them in). The consuming review application
+reads `playbook.opf.json` itself.
 [examples/README.md](examples/README.md) walks through every step's
 expected output, plus the Docker variant.
 

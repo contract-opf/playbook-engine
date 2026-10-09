@@ -476,21 +476,24 @@ The derivation is **done** when all four conditions hold:
    echo "Exit: $?"   # must be 0
    ```
 
-3. **The packaged artifact is generated** (`playbook.opf.html` exists in
-   `out/`).
+3. **The packaged artifact is generated** (`index.html` exists in `out/`).
 
-   SKILL.md Step 9 names `playbook.opf.html` as the **packaged
-   internal/stakeholder playbook**; it is produced on every route (A, B and
-   C all reach Step 9). A run that stops after `validate` without `view
-   bundle` is not done: the GC has the canonical JSON but not the one
-   human-readable artifact. The digest is not a separate file: it is the
-   `digest` section of `playbook.opf.json`. `playbook.opf.html` is **not** a
-   guarantee of pseudonymization on its own — SKILL.md Step 9's mandatory
-   residue check must be run before treating it as shareable, and nothing in
-   the engine anonymizes a playbook for public release.
+   SKILL.md Step 9 names `index.html` as the **one human-readable artifact**
+   (the playbook and an optional editor, five tabs); it is produced on every
+   route (A, B and C all reach Step 9). A run that stops after `validate`
+   without `view bundle` is not done: the GC has the canonical JSON but not the
+   page, and the closing (open the page, print both paths, print the toaster
+   install steps, one line saying review is optional) has not happened. The
+   digest is not a separate file: it is the `digest` section of
+   `playbook.opf.json`. `index.html` is **not** a guarantee of pseudonymization
+   on its own — SKILL.md Step 9's mandatory residue check must be run before
+   treating it as shareable, and nothing in the engine anonymizes a playbook
+   for public release. If `overrides.json` exists, run
+   `apply-overrides` (always, whatever the file times; it is a no-op once the
+   edits are in effect), re-validate, rebuild the page.
 
    ```bash
-   test -f ./out/playbook.opf.html
+   test -f ./out/index.html
    echo "Exit: $?"   # must be 0
    ```
 

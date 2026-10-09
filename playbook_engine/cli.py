@@ -1343,7 +1343,9 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
     ingest work, zero LLM calls.
 
     Re-running ``project`` after changing the projection logic changes the
-    playbook without re-mining the corpus.
+    playbook without re-mining the corpus. An optional ``overrides.json`` in
+    OUT_DIR (the edits saved by the page ``view bundle`` writes) is folded in
+    here too; see ``apply-overrides``.
 
     OUT_DIR must already contain the observation store produced by
     ``playbook mine``.
@@ -3132,7 +3134,7 @@ def scorecard_cmd(out_dir: Path, compare_path: Path | None, scorecard_path: Path
 
 @cli.group(name="view")
 def view_group() -> None:
-    """Render the human-readable OPF bundle."""
+    """Render the tabbed playbook page (index.html)."""
 
 
 @view_group.command(name="bundle")
@@ -3143,29 +3145,39 @@ def view_group() -> None:
     type=click.Path(path_type=Path),
     default=None,
     help=(
-        "Write the HTML to this file (default: <out_dir>/playbook.opf.html). "
+        "Write the HTML to this file (default: <out_dir>/index.html). "
         "Also prints the path on success."
     ),
 )
 def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
-    """Render the single-file OPF bundle: OUT_DIR/playbook.opf.html.
+    """Render the one tabbed page of a playbook: OUT_DIR/index.html.
 
-    The full human document plus a digest summary, with the CANONICAL OPF
-    JSON and the digest embedded verbatim in <script type="application/json">
-    blocks (ids: opf-canonical, opf-digest). The bare playbook.opf.json
-    remains the canonical artifact; the bundle contains it, never replaces
-    it — a consumer extracts the JSON block and verifies
-    identity.content_hash. The bundle stays alias-only. This is NOT a
-    guarantee of pseudonymization — known_entities matching is best-effort,
-    so run the mandatory residue check (see the playbook-from-corpus skill)
-    before treating the bundle as shareable.
+    A single self-contained file (no network) with five tabs: Start here
+    (identity, file paths, toaster install steps), Playbook, Evidence, Review
+    (optional: the model judgments a person may confirm or change) and
+    Posture & Floor (with edit fields). Open it in a browser; its Review and
+    Posture & Floor edits save to OUT_DIR/overrides.json (Connect folder in
+    Chrome or Edge, otherwise Download edits), which ``playbook
+    apply-overrides`` folds into the playbook. Nothing waits on the page.
+
+    The CANONICAL OPF JSON and the digest are embedded verbatim in
+    <script type="application/json"> blocks (ids: opf-canonical,
+    opf-digest). The bare playbook.opf.json remains the canonical artifact;
+    the page contains it, never replaces it — a consumer extracts the JSON
+    block and verifies identity.content_hash. The page stays alias-only. This
+    is NOT a guarantee of pseudonymization — known_entities matching is
+    best-effort, so run the mandatory residue check (see the
+    playbook-from-corpus skill) before treating the page as shareable.
     """
     import json as _json  # noqa: PLC0415
 
-    from playbook_engine.document_renderer import render_bundle_html  # noqa: PLC0415
+    from playbook_engine.document_renderer import (  # noqa: PLC0415
+        INDEX_FILENAME,
+        render_index_html,
+    )
 
     resolved = out_dir.resolve()
-    dest = out_file.resolve() if out_file else resolved / "playbook.opf.html"
+    dest = out_file.resolve() if out_file else resolved / INDEX_FILENAME
 
     opf_path = resolved / "playbook.opf.json"
     if opf_path.exists():
@@ -3177,12 +3189,85 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
         _refuse_unsupported_opf_version(doc, opf_path)
 
     try:
-        render_bundle_html(resolved, out_file=dest)
+        render_index_html(resolved, out_file=dest)
     except FileNotFoundError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
     click.secho(f"OK  {dest}", fg="green")
+
+
+@cli.command(name="apply-overrides")
+@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def apply_overrides_cmd(out_dir: Path) -> None:
+    """Fold OUT_DIR/overrides.json into OUT_DIR/playbook.opf.json.
+
+    ``overrides.json`` is the optional, versioned file the Review and Posture
+    & Floor tabs of index.html save: the owner's confirmations and changes of
+    the model's ``vs_standard`` labels (each re-stamped ``basis: owner``) and
+    edited Posture and Floor text. The digest, dossiers, manifest,
+    ``precedent.jsonl`` hash and ``identity.content_hash`` are recomputed by
+    the engine, and the result is validated. ``playbook project`` folds the
+    same file in on every projection.
+
+    A malformed file, or an entry naming an id the playbook does not carry,
+    is rejected with the reason and NOTHING changes. Re-applying an applied
+    file is a no-op. Rebuild the page afterwards: ``playbook view bundle``.
+    """
+    from playbook_engine.overrides import (  # noqa: PLC0415
+        OVERRIDES_FILENAME,
+        OverridesError,
+        apply_overrides_to_dir,
+    )
+
+    resolved = out_dir.resolve()
+    try:
+        result = apply_overrides_to_dir(resolved)
+    except FileNotFoundError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    except OverridesError as exc:
+        click.secho(
+            f"ERROR: {OVERRIDES_FILENAME} was rejected; nothing was changed:", fg="red", err=True
+        )
+        for problem in exc.problems:
+            click.secho(f"  {problem}", fg="red", err=True)
+        raise SystemExit(1) from exc
+
+    if result.n_changed:
+        bits = ", ".join(f"{n} {target}" for target, n in result.changed.items() if n)
+        click.secho(
+            f"OK  {result.n_changed} override(s) applied ({bits}); "
+            f"{result.unchanged} already in effect — {resolved / 'playbook.opf.json'}",
+            fg="green",
+        )
+        click.echo("  rebuild the page: playbook view bundle " + str(resolved))
+    else:
+        click.secho(
+            f"OK  no change ({result.unchanged} override(s) already in effect) — "
+            f"{resolved / 'playbook.opf.json'}",
+            fg="green",
+        )
+
+
+@cli.command(name="install-steps")
+@click.option(
+    "--file",
+    "file_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="The playbook file to name in the steps (default: playbook.opf.json).",
+)
+def install_steps_cmd(file_path: Path | None) -> None:
+    """Print the numbered steps to install a compiled playbook in the contract-toaster.
+
+    The same text the "Start here" tab of index.html shows. Pass --file with
+    the absolute path of playbook.opf.json to name the exact file to upload.
+    """
+    from playbook_engine.toaster_install import PLAYBOOK_FILE, install_steps  # noqa: PLC0415
+
+    for line in install_steps(str(file_path) if file_path is not None else PLAYBOOK_FILE):
+        click.echo(line)
 
 
 @cli.group(name="posture")

@@ -89,19 +89,22 @@ def test_help_tree_walk_reaches_every_known_command() -> None:
     Also pins the command surface itself (issue #239): every command is on the
     corpus -> playbook -> toaster golden path (stage, lint-corpus, mine,
     segment/judge and their apply steps, project, posture, floor, validate,
-    the one ``view bundle`` artifact, precedent, scorecard, doctor, inspect,
+    the one ``view bundle`` page (index.html), ``apply-overrides`` for its
+    optional edits, ``install-steps`` (issue #241), precedent, scorecard, doctor, inspect,
     induce-taxonomy / taxonomy merge, resolve-citation). A new command must be
     added here on purpose.
     """
     texts = _all_help_texts()
     expected = {
         "(root)",
+        "apply-overrides",
         "doctor",
         "floor",
         "floor propose",
         "floor sign",
         "induce-taxonomy",
         "inspect",
+        "install-steps",
         "judge",
         "judge-apply",
         "lint-corpus",

@@ -155,9 +155,8 @@ OK  out/quickstart-demo/playbook.opf.json
 
 ### 7. View it
 
-Renders the one human-readable artifact: a self-contained, no-network HTML
-bundle that carries the whole playbook (hard lines, posture, and every
-clause's precedent) plus the canonical OPF JSON and digest as machine-readable
+Renders the one human-readable page: a self-contained, no-network `index.html`
+with five tabs, plus the canonical OPF JSON and digest as machine-readable
 blocks:
 
 ```sh
@@ -167,13 +166,24 @@ playbook view bundle out/quickstart-demo
 Expected output:
 
 ```text
-OK  out/quickstart-demo/playbook.opf.html
+OK  out/quickstart-demo/index.html
 ```
 
-Open `out/quickstart-demo/playbook.opf.html` in a browser to see the result.
-Step 5's interview means its Floor and Posture sections now carry real
-content instead of the empty-section markers. The toaster reads
-`playbook.opf.json` directly; the bundle is for people.
+Open `out/quickstart-demo/index.html` in a browser. Its tabs:
+
+- **Start here**: the playbook's identity (`content_hash`, OPF version,
+  perspective), the file paths, and the steps to install it in the toaster.
+- **Playbook**: the posture, floor and digest per clause.
+- **Evidence**: each clause's precedent (how it opened, what was signed, what
+  was refused, deal counts).
+- **Review (optional)**: the model's judgments you may confirm or change.
+- **Posture & Floor**: the authored text, with edit fields.
+
+Review and edits are optional; they save to `overrides.json` (the page's
+Connect folder button in Chrome or Edge, otherwise Download edits), which
+`playbook apply-overrides` folds in. Step 5's interview means the Floor and
+Posture sections now carry real content instead of the empty-section markers.
+The toaster reads `playbook.opf.json` directly; the page is for people.
 <!-- quickstart:end -->
 
 `out/quickstart-demo/` (and `out/` generally) is `.gitignore`d — safe to

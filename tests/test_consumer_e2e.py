@@ -21,7 +21,7 @@ from pathlib import Path
 import yaml
 
 from playbook_engine.config import load_config
-from playbook_engine.document_renderer import render_bundle_html
+from playbook_engine.document_renderer import render_index_html
 from playbook_engine.opf_accessors import playbook_clauses
 from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.taxonomy import load_taxonomy
@@ -124,7 +124,7 @@ def test_bundle_reads_real_v05_playbook(tmp_path: Path) -> None:
     out_dir = _compile_real_playbook(tmp_path)
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
-    html = render_bundle_html(out_dir)
+    html = render_index_html(out_dir)
     titles = [c["title"] for c in doc["evidence"]["clauses"]]
     assert titles, "fixture must compile at least one clause"
     for title in titles:
@@ -148,6 +148,6 @@ def test_bundle_shows_real_v05_precedent(tmp_path: Path) -> None:
     assert signed and signed[0]["signed"] is True
     assert "Delaware" in signed[0]["signed_text"]["text"], "premise: the deal signed Delaware"
 
-    html = render_bundle_html(out_dir)
+    html = render_index_html(out_dir)
     assert "Delaware" in html
     assert "Signed variants" in html

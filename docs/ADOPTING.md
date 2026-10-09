@@ -12,8 +12,9 @@ quickstart — see the main [README's Installation
 section](../README.md#installation) for the Docker alternative. After
 that, the fixture walkthrough itself is well under a minute. You end with
 a validating `playbook.opf.json` and — the part worth pausing on —
-`playbook view bundle`, the one human-readable artifact: your hard lines,
-your posture and, per clause, what your deals actually signed. That loop
+`playbook view bundle`, which writes `index.html`, the one human-readable
+artifact: your hard lines, your posture and, per clause, what your deals
+actually signed. That loop
 (corpus → playbook → a reviewer's reading) is the whole product in miniature;
 the consuming review application reads the same `playbook.opf.json`.
 
@@ -143,7 +144,7 @@ The LLM-judgment stages run three ways — pick one
 
 ```sh
 playbook inspect ./out          # inspection report: coverage, confidence, flags
-playbook view bundle ./out      # human-readable playbook, one self-contained file
+playbook view bundle ./out      # ./out/index.html: the playbook and an optional editor, one self-contained file
 ```
 
 With a template, each distinct non-standard text a deal signed, opened with
@@ -154,10 +155,21 @@ the table), with a one-sentence reason. It lets "the same concept phrased
 five ways" read as one thing instead of five. An independent model
 (`claude-opus-5-5` at `xhigh` effort) checks every drafted label blind and
 settles disagreements; nothing waits for you. Start from the labels that
-matter: `less_protective` and `different_concept`. If you disagree with a
-label, re-apply it with `"basis": "owner"` through `playbook judge-apply` and
-re-project: your correction wins over any agent or check answer. A text with
-no label yet is `null`, and `playbook project` says how many are left.
+matter: `less_protective` and `different_concept`. The Review tab of
+`index.html` lists exactly the labels the consuming model is shown, worst
+first, each with Confirm / Change label / a note; it is optional and nothing
+waits on it. **Connect folder** (Chrome, Edge) saves your edits straight to
+`./out/overrides.json` as you make them; elsewhere **Download edits** gives you
+the same file to drop there. `playbook apply-overrides ./out` (or the next
+`playbook project`, which skips and reports any entry it cannot apply instead of
+stopping) folds it in: the label is re-stamped `"basis": "owner"`,
+your word wins over any agent or check answer, and the digest and
+`content_hash` are recomputed by the engine. `apply-overrides` rejects a malformed file, or an entry for a
+text the playbook no longer carries, with the reason and changes
+nothing. The Posture & Floor tab edits the authored text the same way, except a
+Floor invariant you signed (change it with `playbook floor sign`) and the
+attribution rationale of an interview-promoted one, which are shown read-only. A text
+with no label yet is `null`, and `playbook project` says how many are left.
 
 Judge the output the way you'd judge an associate's memo: every position
 cites `document / version / clause`. Follow a few citations —
