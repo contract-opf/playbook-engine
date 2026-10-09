@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
+from playbook_engine.dossiers import refresh_derived_sections
 from playbook_engine.floor_candidates import (
     FloorCandidateError,
     promote_interview_q4_invariants,
@@ -698,6 +699,8 @@ def apply_posture_interview(
         floor_section = dict(doc.get("floor") or {})
         floor_section["invariants"] = floor_invariants
         doc["floor"] = floor_section
+        # The manifest and the dossiers read the Floor (issue #228).
+        refresh_derived_sections(doc)
     if "identity" in doc:
         doc["identity"]["content_hash"] = content_hash(doc)
         doc["identity"]["section_digests"] = compute_section_digests(doc)

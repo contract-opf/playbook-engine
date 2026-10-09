@@ -10,6 +10,57 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Hard-rule manifest, critic dossiers and provenance index (issue #228,
+  epic #236).** Three optional top-level sections join the single OPF 0.5
+  schema beside `digest` (OPF-SPEC section 3.12.3); each is a pure function of
+  the document that `playbook validate` recomputes and `identity.content_hash`
+  covers, and none holds a judged verdict. `manifest.hard_rules[]` has one
+  rule per `floor.invariants[]` entry, in Floor order and never from precedent
+  counts: `{rule_id, clause_id, taxonomy_id, statement, required_presence,
+  condition, permissible_proof, fallback_language}`. `condition` is a
+  machine-evaluable predicate spec (`required_phrases`, `numeric_bound`,
+  `cross_reference`) or `"judged"`; `fallback_language` is the clause's
+  `our_standard.text`. The Floor stays free-form natural language, so a signer
+  states the rest with the vendor keys `x_taxonomy_id`, `x_required_presence`,
+  `x_condition` and `x_permissible_proof` (validated), and unstated means
+  presence not demanded and judged. `playbook floor sign` gains
+  `--requires-presence/--no-requires-presence`, `--condition` and `--proof`.
+  `dossiers[clause_id]` is one bounded dossier per evidence clause with at
+  most two excerpts: our standard, the signed Floor's own statements and
+  rationale for the clause and the excerpts, each one precedent
+  record as a verbatim opening to signed pair with its precedent id. The
+  excerpts are chosen by a fixed order over digest 4's groups (a concession on
+  record, then the first changed opening, then the remaining signed variants
+  and the refused asks), each showing its group's latest-signed record, ties
+  broken on the lowest precedent id (a concession's record is always one that
+  opened with our standard). No text is ever cut part-way, because a cut-off
+  clause can lose its carve-out or cap: every excerpt, our standard and listed
+  Floor rule is whole. The budget is `max(1000, 3 x tokens(our standard))`
+  tokens (1,000 with no standard); over budget, whole listed Floor rules are
+  dropped, last first, only while they do not fit beside our standard, the
+  identifiers and the first excerpt (`n_floor_rules` still counts them all and
+  the manifest states each), then whole excerpts in reverse selection order
+  keeping the first, until it fits. A dossier always keeps one complete
+  excerpt (when the clause has any), even if that alone puts it over budget:
+  that is the only case where a dossier may exceed its budget, and the
+  validator refuses any other over its budget. Each dossier names the
+  excerpts it dropped (`n_omitted`, `omitted_precedent_ids`). A Floor rule that
+  demands presence or carries a predicate must name its clause
+  (`x_taxonomy_id`); `playbook floor sign` and the validator refuse it
+  otherwise. `provenance_index` (not for
+  a model) lists the compiler, the corpus snapshot hash, the source deals and
+  file hashes behind the excerpts, kept or dropped, and which excerpts each
+  dossier selected, each marked `omitted` when it was dropped, so every
+  omitted id resolves to its deal.
+  `playbook floor sign` and the Posture interview's Q4 promotion re-derive the
+  sections when they change the Floor. `playbook scorecard` now reports the
+  dossier count, sizes, texts cut (always 0), excerpts dropped and the dossiers
+  over budget, each holding its single kept excerpt
+  (`over_budget_single_excerpt`). Conformance: every `spec/conformance/0.5/` vector
+  expects the new sections and vector 008 pins rules, selection order and the
+  budget. The NDA example is regenerated: 3 rules and 26 dossiers, the
+  largest 615 tokens.
+
 - **Digest 4: held and conceded counts, variant provenance, openings not
   signed as proposed, uncovered clause types and the equivalence label
   (issue #234, epic #236).** `digest_version` "4" replaces digest 3 in place

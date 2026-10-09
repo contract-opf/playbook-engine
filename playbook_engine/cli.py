@@ -15,6 +15,7 @@ from playbook_engine import __version__
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import ConfigError, load_config
 from playbook_engine.corpus_linter import lint_corpus
+from playbook_engine.dossiers import refresh_derived_sections, validate_condition
 from playbook_engine.floor_candidates import (
     FloorCandidateError,
     sign_floor_invariant,
@@ -3428,6 +3429,34 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
     ),
 )
 @click.option(
+    "--requires-presence/--no-requires-presence",
+    "required_presence",
+    default=None,
+    help=(
+        "Whether the clause's absence or deletion is a hard rejection. Recorded "
+        "as x_required_presence for the hard-rule manifest; unstated means the "
+        "manifest does not demand presence."
+    ),
+)
+@click.option(
+    "--condition",
+    "condition",
+    default=None,
+    help=(
+        "A machine-evaluable predicate for the hard-rule manifest, as JSON: "
+        '{"type": "required_phrases", "phrases": [...]}, '
+        '{"type": "numeric_bound", "pattern": "<one capture group>", "min"/"max": n} or '
+        '{"type": "cross_reference", "clause_id": "..."}; or the word judged. '
+        "Unstated means judged."
+    ),
+)
+@click.option(
+    "--proof",
+    "permissible_proof",
+    multiple=True,
+    help="What a reviewed document may show to satisfy the rule (repeatable).",
+)
+@click.option(
     "--config",
     "config_path",
     type=click.Path(exists=True, path_type=Path),
@@ -3441,6 +3470,9 @@ def floor_sign_cmd(
     invariant_id: str | None,
     taxonomy_id: str | None,
     rationale: str | None,
+    required_presence: bool | None,
+    condition: str | None,
+    permissible_proof: tuple[str, ...],
     config_path: Path | None,
 ) -> None:
     """Record a verbatim, hand-authored Floor invariant.
@@ -3509,6 +3541,19 @@ def floor_sign_cmd(
             raise SystemExit(1)
 
     import datetime  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    parsed_condition: Any = None
+    if condition is not None:
+        try:
+            parsed_condition = condition if condition.strip() == "judged" else json.loads(condition)
+        except json.JSONDecodeError as exc:
+            click.secho(f"ERROR: --condition is not valid JSON: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        why = validate_condition(parsed_condition)
+        if why:
+            click.secho(f"ERROR: --condition is not valid: {why}", fg="red", err=True)
+            raise SystemExit(1)
 
     doc = load_opf_file(opf_path)
     existing_invariants = (doc.get("floor") or {}).get("invariants") or []
@@ -3522,6 +3567,9 @@ def floor_sign_cmd(
             signed_by=signed_by,
             signed_at=signed_at,
             existing_invariants=existing_invariants,
+            required_presence=required_presence,
+            condition=parsed_condition,
+            permissible_proof=list(permissible_proof),
         )
     except FloorCandidateError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
@@ -3533,6 +3581,8 @@ def floor_sign_cmd(
         floor_section = dict(doc.get("floor") or {})
         floor_section["invariants"] = invariants
         doc["floor"] = floor_section
+        # The manifest and the dossiers read the Floor (issue #228).
+        refresh_derived_sections(doc)
         # MUST recompute — floor is part of identity.content_hash (see
         # posture.apply_posture_interview, the reference pattern this
         # mirrors); a stale hash silently misdescribes the document to any

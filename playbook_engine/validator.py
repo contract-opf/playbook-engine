@@ -980,6 +980,75 @@ def _check_digest(doc: dict[str, Any], result: ValidationResult) -> None:
         )
 
 
+def _check_floor_rules(doc: dict[str, Any], result: ValidationResult) -> None:
+    """The manifest extension keys of a ``floor.invariants[]`` entry must be well-formed.
+
+    ``x_required_presence``, ``x_condition`` and ``x_permissible_proof`` feed
+    the hard-rule manifest (OPF-SPEC §3.12.3); a malformed one would be
+    silently ignored there, so it is blocking here.
+    """
+    from playbook_engine.dossiers import floor_rule_errors  # noqa: PLC0415
+
+    floor = doc.get("floor")
+    invariants = floor.get("invariants") if isinstance(floor, dict) else None
+    for i, inv in enumerate(invariants if isinstance(invariants, list) else []):
+        if isinstance(inv, dict):
+            for why in floor_rule_errors(inv):
+                result.add(why, path=f"floor.invariants[{i}]")
+
+
+def _check_manifest_and_dossiers(doc: dict[str, Any], result: ValidationResult) -> None:
+    """A present ``manifest`` / ``dossiers`` / ``provenance_index`` MUST equal its recomputation.
+
+    Like the digest (issue #223) each is a pure function of the document
+    (issue #228): one that differs describes a Floor, evidence or corpus the
+    document does not carry. Every dossier must also carry at most
+    ``MAX_EXCERPTS`` excerpts and stay within its budget unless it holds
+    exactly one (whole) excerpt: a dossier with two excerpts, or none, over
+    its budget is refused.
+    """
+    from playbook_engine import dossiers as dz  # noqa: PLC0415
+
+    present = [name for name in dz.DERIVED_SECTIONS if doc.get(name) is not None]
+    if not present:
+        return
+    dossiers = doc.get("dossiers")
+    if isinstance(dossiers, dict):
+        for clause_id, dossier in dossiers.items():
+            if not isinstance(dossier, dict):
+                continue
+            excerpts = dossier.get("excerpts")
+            n_excerpts = len(excerpts) if isinstance(excerpts, list) else 0
+            if n_excerpts > dz.MAX_EXCERPTS:
+                result.add(
+                    f"dossier {clause_id!r} carries {n_excerpts} excerpts "
+                    f"(at most {dz.MAX_EXCERPTS})",
+                    path=f"dossiers.{clause_id}.excerpts",
+                )
+            standard = dossier.get("our_standard")
+            budget = dz.dossier_budget(standard.get("text") if isinstance(standard, dict) else None)
+            if n_excerpts != 1 and dz.dossier_tokens(dossier) > budget:
+                result.add(
+                    f"dossier {clause_id!r} is {dz.dossier_tokens(dossier)} tokens, over its "
+                    f"{budget}-token budget, and lists {n_excerpts} excerpts (a dossier drops "
+                    "whole Floor rules and whole excerpts, keeping the first, to fit; only a "
+                    "dossier holding its single kept excerpt may exceed the budget)",
+                    path=f"dossiers.{clause_id}",
+                )
+    try:
+        expected = dz.build_derived_sections(doc)
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        result.add(f"{present[0]} cannot be recomputed from this document: {exc}", path=present[0])
+        return
+    for name in present:
+        if doc[name] != expected[name]:
+            result.add(
+                f"{name} does not equal its recomputation from the document — it was edited, "
+                "or built from a different Floor or evidence (re-run `playbook project`)",
+                path=name,
+            )
+
+
 def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
     """Issue #143 / #178: a present ``identity.content_hash``
     or ``identity.section_digests`` must match what
@@ -1079,6 +1148,8 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_perspective_present(doc, result)
     _check_identity_hash(doc, result)
     _check_digest(doc, result)
+    _check_floor_rules(doc, result)
+    _check_manifest_and_dossiers(doc, result)
     return result
 
 

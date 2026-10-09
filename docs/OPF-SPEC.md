@@ -117,7 +117,10 @@ A playbook is a single JSON object:
   "corpus": { ... },            // §3.8 — provenance/audit + content addresses
   "compiler": { ... },          // §3.9 — generation metadata
   "identity": { ... },          // §3.10 — content hash + section digests (NEW)
-  "digest": { ... }             // §3.12 — compact model-facing projection (OPTIONAL)
+  "digest": { ... },            // §3.12 — compact model-facing projection (OPTIONAL)
+  "manifest": { ... },          // §3.12.3 — hard-rule manifest, from the Floor (OPTIONAL)
+  "dossiers": { ... },          // §3.12.3 — per-clause critic dossiers, bounded by a budget (OPTIONAL)
+  "provenance_index": { ... }   // §3.12.3 — where the dossier excerpts came from (OPTIONAL)
 }
 ```
 
@@ -533,6 +536,8 @@ A Floor entry is a **natural-language invariant**: one checkable statement a jud
 }
 ```
 
+An invariant MAY carry vendor-namespace keys (§10.1) that feed the hard-rule manifest (§3.12.3): `x_taxonomy_id` (the clause type it is about), `x_required_presence` (boolean), `x_condition` (a predicate spec or `"judged"`) and `x_permissible_proof` (list of strings). A validator rejects a malformed one. `playbook floor sign --clause ... --requires-presence --condition ... --proof ...` writes them.
+
 **Normative rules:**
 1. **Evaluation is judgment; coverage and consequence are deterministic.** A dedicated Floor judge — separate from the model doing the review — evaluates each invariant against the clause under review and returns `clear`, `violation`, or `needs_review`. The consumer's deterministic obligations are the **coverage gate** (every invariant present MUST be evaluated and logged on every review; an unevaluated invariant fails the run, fail-closed) and the **consequence rule** (a `violation` verdict forces the negotiation-unacceptable outcome; `needs_review` forces human escalation; the model under review and the Posture can override neither).
 2. One Floor, both paper contexts: the same invariants are judged whether reviewing our paper's diff or the counterparty paper's extracted clauses — not two modes.
@@ -792,6 +797,141 @@ with `</` escaped as `<\/`; JSON parsing restores the value). The bare
 `playbook.opf.json` remains the canonical artifact — a consumer extracts the
 block and verifies `identity.content_hash` over the canonical serialization.
 
+#### 3.12.3 `manifest`, `dossiers`, `provenance_index` (OPF 0.5, issue #228)
+
+Three more OPTIONAL top-level sections the reference compiler always emits
+beside the digest, so a consumer can enforce hard-rejection recall outside
+both models and give its critic pass bounded, deeper context. Like the digest
+each is a **pure function of the document**: a validator recomputes it
+(`playbook_engine/dossiers.py`, defined by vector 008, §10.2) and rejects any
+difference, and each participates in `identity.content_hash`. None holds a
+judged verdict. A writer that changes the Floor after assembly
+(`playbook floor sign`, the Posture interview's Q4 promotion) MUST re-derive
+them before restamping `identity`.
+
+**`manifest`** — `{hard_rules: [...]}`, one rule per `floor.invariants[]`
+entry, in Floor order, and **only from the signed Floor, never from precedent
+counts**: `{rule_id, clause_id, taxonomy_id, statement, required_presence,
+condition, permissible_proof, fallback_language}`.
+
+- `rule_id` is the invariant's `id`; `statement` its text, verbatim.
+- `taxonomy_id` is the invariant's `x_taxonomy_id` and `clause_id` the
+  `evidence.clauses[].id` of that clause type; both `null` when the invariant
+  names none, and `clause_id` `null` when the corpus has no evidence for it.
+- `required_presence` — the clause's absence or deletion is a hard rejection.
+  The invariant's `x_required_presence`; `false` when unstated (an invariant
+  that does not say the clause must appear never demands its presence).
+- **A rule that demands presence or carries a predicate names its clause.** An
+  invariant with `x_required_presence` `true`, or an `x_condition` other than
+  `"judged"`, MUST also carry `x_taxonomy_id`: a predicate is checked against
+  the text of the clause it names, and a presence rule rejects that clause's
+  absence, so a rule with no clause could not be enforced by a consumer
+  outside both models. The validator, `playbook floor sign` and the schema
+  (`$defs.hardRule`: `taxonomy_id` is a string whenever `required_presence`
+  is `true` or `condition` is a predicate) all refuse the unanchored form. An
+  invariant that states neither is a `"judged"` rule and may name no clause.
+- `condition` — a deterministic predicate spec the consumer evaluates outside
+  any model, or the string `"judged"` for a rule that is not machine-evaluable
+  (the default, and the only value when `x_condition` is absent). The specs:
+  `{"type": "required_phrases", "phrases": [...], "match": "all"|"any"}` (the
+  clause text contains every, or any, phrase, compared case-insensitively on
+  normalized whitespace); `{"type": "numeric_bound", "pattern": "<regex with
+  exactly one capture group>", "min"?: n, "max"?: n, "unit"?: s}` (the number
+  captured is within the bounds); `{"type": "cross_reference", "clause_id":
+  "..."}` (the clause text cross-references that clause).
+- `permissible_proof` — what a reviewed document may show to satisfy the rule
+  (`x_permissible_proof`, else `[]`).
+- `fallback_language` — the clause's `our_standard.text` to insert when the
+  protection is absent; `null` when the clause has no standard.
+
+**`dossiers`** — `{clause id: dossier}`, one per `evidence.clauses[]` entry,
+bounded by a **budget** and carrying **at most two precedent excerpts**:
+`{clause_id, taxonomy_id, title, our_standard: {text}|null, n_floor_rules,
+floor_rules: [{rule_id, statement, rationale?}] (at most three, fewer when
+dropped for size; `n_floor_rules` counts every one), excerpts, n_omitted,
+omitted_precedent_ids}`. The rationale is the signed Floor's own
+words for the clause (its `x_taxonomy_id` invariants) and the excerpts are the
+edge cases and counter-arguments on record. A dossier carries no count (the
+digest has them). Nothing is judged and nothing is summarised by a model.
+
+**No text is ever cut part-way.** Every excerpt text (`opening`, `signed`),
+our standard and every listed Floor rule appears **whole** or not at all: a
+cut-off clause can drop its operative carve-out or cap and so plant a false
+fact. There are no prefix cuts and no ellipsis truncation.
+
+An **excerpt** is one precedent record rendered as an opening-to-signed pair,
+`{precedent_id, kind, opening, signed, outcome}`: `opening` is the record's
+`opening_text` and `signed` its `signed_text`, verbatim; with no recorded
+`opening_text` the excerpt is the signed text alone (`opening` `null`); a
+record whose clause was struck before signing has `signed` `null` and
+`outcome` `struck_before_signing`. Selection is deterministic, in this order,
+each candidate contributing one record of its group, and a group or a record
+already chosen being skipped, until two are chosen:
+
+1. the first digest-4 `signed_variants` group with `n_from_standard` > 0 (a
+   concession on record; `kind` `signed_variant`), its record taken only
+   among the members whose clause opened with our standard (`opened_with`
+   "standard"), so the excerpt is the concession's own opening-to-signed
+   pair;
+2. the first `changed_openings` group (language that did not survive as
+   proposed; `kind` `changed_opening`);
+3. the remaining `signed_variants` groups, in digest-4 order, then the
+   `refused_asks` groups (`kind` `refused_ask`: `opening` is the ask, `signed`
+   what the deal signed instead, `outcome` `ask_refused`).
+
+A group's record is its (eligible) member with the latest `signed_at`
+(unknown last), **ties broken on the lowest `precedent_id`** (code-point
+order). This is not the record the digest cites (§3.12.2 breaks its ties on
+`document_id`). A `refused_asks` group's record is chosen the same way among
+the records that made the ask, and the excerpt shows that record's
+earliest-round ask in the group. The collapsed `equivalent` entry of the
+digest stands for its groups in group order: step 1 takes the first of them
+with `n_from_standard` > 0, step 3 the first of them. Adding precedents can
+change which excerpts appear and so the texts the dossier holds, never add
+to it: a precedent that leaves the selection unchanged leaves the dossier
+byte-identical.
+
+**Budget.** A dossier's budget is `max(1000, 3 × tokens(our_standard.text))`
+tokens (a text's tokens are its characters / 4; a dossier's size is its
+canonical JSON characters / 4), or 1,000 when the clause has no
+`our_standard`: a clause whose own standard is long is not forced to drop the
+evidence beside it. When a dossier is over budget, **whole parts are
+dropped**, never cut, in this order:
+
+1. the **listed Floor rules, last first**, while the dossier holding only its
+   first excerpt (none, when the clause has none) is still over budget: a
+   rule gives way only to the parts that are never dropped, which are our
+   standard, the clause's identifiers and that first excerpt. `n_floor_rules`
+   still counts every rule, and the manifest states each one verbatim;
+2. then the **excerpts, in reverse selection order, keeping the first**,
+   until the dossier fits. A dossier **always keeps at least one complete
+   excerpt** (when the clause has any).
+
+So a Floor rule is listed in preference to a second excerpt, and a second
+excerpt is never dropped when it fits beside the rules left listed. Our
+standard and the clause's identifiers are never dropped (the budget is at
+least three times our standard's tokens). A dossier may exceed its budget in
+**one case only**: it holds its single kept excerpt, every listed Floor rule
+dropped, and keeping that excerpt whole puts it over. The scorecard counts
+every such dossier as `over_budget_single_excerpt`. Any other dossier over its
+budget is invalid: a validator refuses one with two excerpts, or with none
+(its standard and identifiers alone exceed the budget). Each dropped excerpt
+is named: `n_omitted` is their number and `omitted_precedent_ids` their
+`precedent_id`s, sorted, so the critic knows more evidence exists; each
+resolves through the provenance index (below) to its deal, and by id to its
+record in `evidence.precedent`. Selection order, determinism and
+byte-identical re-runs are unchanged by the budget.
+
+**`provenance_index`** — not sent to a model: `{compiler: {name, version},
+corpus_manifest_hash, documents, dossiers}`. `dossiers` maps a clause id to
+the `{precedent_id, document_id, kind, omitted}` of each excerpt the dossier
+selected, in selection order: first the excerpts it lists (`omitted` `false`,
+in dossier order), then the ones it dropped whole to fit its budget
+(`omitted` `true`), so every `omitted_precedent_ids` entry resolves here to
+its deal and kind. `documents` has one `{document_id, signed_at,
+version_files: [{version, sha256}]}` per deal behind those rows, kept or
+omitted (sorted by id).
+
 ### 3.13 Identifier uniqueness (normative, effective 2026-07-29)
 
 Every sibling-scoped id below MUST be **unique among its siblings**:
@@ -927,7 +1067,7 @@ separately-stamped vector set, never an in-place edit of an existing one.
 
 Each vector under `spec/conformance/0.5/vectors/` is a self-contained,
 plain-JSON `{input, expected}` pair (`canonical`, `content_hash`,
-`section_digests`, `digest`) — **an independent, non-Python implementation
+`section_digests`, `digest`, and, since issue #228, `manifest`, `dossiers`, `provenance_index`) — **an independent, non-Python implementation
 that reproduces every vector's `expected.*` from its `input` is conformant**
 with canonicalization and digest construction for that format version, with
 no dependency on this repo. `tests/test_conformance_vectors.py` is this
@@ -938,7 +1078,7 @@ grouping by §3.5.4's grouping key (including its counterparty-alias and
 `perspective.party` neutralization), the `n_deals`/`last_signed` ordering,
 the cap with uncapped totals, refused-ask grouping across deals, the
 sentence-boundary summary, and `perspective` carried as `null` when the
-document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order and `uncovered_clause_types`. The canonical-serialization algorithm itself is stated in
+document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order and `uncovered_clause_types`; vector 008 pins the hard-rule manifest (a presence or predicate rule names its clause), the dossier excerpt order (the concession's own record, the `signed_at` then lowest-`precedent_id` record order and a refused-ask excerpt) and the budget (a whole excerpt dropped and named, a single over-budget excerpt kept whole with its Floor rule dropped, and the last Floor rule dropped whole from a dossier with no excerpt so that it fits), and the provenance index with its corpus snapshot hash, source-file hashes and the dropped excerpt indexed as `omitted` with its deal (§3.12.3). The canonical-serialization algorithm itself is stated in
 `spec/conformance/README.md`. (The OPF 0.3 / digest 2 vector set, which also
 pinned key ordering, Unicode emission and float/int formatting edge cases,
 was retired with that format, issue #238; those edge cases are unit-tested

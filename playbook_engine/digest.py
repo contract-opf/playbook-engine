@@ -101,10 +101,20 @@ def _earliest(values: list[Any]) -> Any:
     return min(keyed)[1] if keyed else None
 
 
-def _latest_first_key(record: dict[str, Any]) -> tuple[bool, tuple[int, ...], str]:
-    """Sort key: latest ``signed_at`` first (unknown last), then document_id."""
+def _latest_first_key(record: dict[str, Any]) -> tuple[bool, tuple[int, ...], str, str]:
+    """Sort key: latest ``signed_at`` first (unknown last), then document_id, then id.
+
+    The id is the final tie-break, so the order is total even between two
+    records of one deal (a deal has one record per clause type, so only a
+    hand-built document has them).
+    """
     k = _signed_at_key(record.get("signed_at"))
-    return (k is None, tuple(-x for x in (k or (0, 0, 0))), str(record.get("document_id")))
+    return (
+        k is None,
+        tuple(-x for x in (k or (0, 0, 0))),
+        str(record.get("document_id")),
+        str(record.get("id")),
+    )
 
 
 def playbook_precedent_records(playbook: dict[str, Any]) -> list[dict[str, Any]]:
@@ -162,6 +172,22 @@ def clause_precedent_groups(
 
     ``n_deals`` counts distinct deals (``document_id``) — never rows.
     """
+    grouped = clause_precedent_groups_with_members(taxonomy_id, precedent, party=party)
+    return {name: [entry for entry, _ in rows] for name, rows in grouped.items()}
+
+
+def clause_precedent_groups_with_members(
+    taxonomy_id: Any, precedent: list[dict[str, Any]], *, party: str | None
+) -> dict[str, list[tuple[dict[str, Any], list[Any]]]]:
+    """:func:`clause_precedent_groups` with every group's members.
+
+    Same groups in the same order; each row is ``(entry, members)``:
+    ``members`` the group's precedent records for ``signed_variants`` and
+    ``changed_openings``, and its ``(ask, record)`` pairs (each ask in the
+    group with the record carrying it) for ``refused_asks``. The critic
+    dossiers (:mod:`playbook_engine.dossiers`) choose their excerpt records
+    from these.
+    """
     from playbook_engine.observation_builder import summarize_clause_text  # noqa: PLC0415
     from playbook_engine.precedent import (  # noqa: PLC0415
         changed_opening_members,
@@ -183,7 +209,7 @@ def clause_precedent_groups(
         g = variants.setdefault(key, {"members": []})
         g["members"].append(p)
 
-    variant_out: list[tuple[Any, dict[str, Any]]] = []
+    variant_out: list[tuple[Any, dict[str, Any], list[dict[str, Any]]]] = []
     for key, g in variants.items():
         members = g["members"]
         rep = sorted(members, key=_latest_first_key)[0]
@@ -214,7 +240,7 @@ def clause_precedent_groups(
             tuple(-x for x in (last_key or (0, 0, 0))),
             key,
         )
-        variant_out.append((sort_key, entry))
+        variant_out.append((sort_key, entry, members))
     variant_out.sort(key=lambda t: t[0])
 
     refused: dict[str, dict[str, Any]] = {}
@@ -230,13 +256,14 @@ def clause_precedent_groups(
             g["deals"].add(p.get("document_id"))
             g["ids"].add(str(p.get("id")))
 
-    refused_out: list[tuple[Any, dict[str, Any]]] = []
+    refused_out: list[tuple[Any, dict[str, Any], list[Any]]] = []
     for key, g in refused.items():
         rep_ask, _rep_p = sorted(
             g["asks"],
             key=lambda ap: (
                 ap[0].get("round") if isinstance(ap[0].get("round"), int) else 0,
                 str(ap[1].get("document_id")),
+                str(ap[1].get("id")),
             ),
         )[0]
         n = len(g["deals"])
@@ -247,12 +274,12 @@ def clause_precedent_groups(
             "ref": rep_ask.get("ref"),
             "precedent_ids": sorted(g["ids"]),
         }
-        refused_out.append(((-n, key), entry))
+        refused_out.append(((-n, key), entry, g["asks"]))
     refused_out.sort(key=lambda t: t[0])
 
-    changed_out: list[tuple[Any, dict[str, Any]]] = []
+    changed_out: list[tuple[Any, dict[str, Any], list[dict[str, Any]]]] = []
     for key, members in changed_opening_members(records, party=party).items():
-        rep = sorted(members, key=lambda m: str(m.get("document_id")))[0]
+        rep = sorted(members, key=lambda m: (str(m.get("document_id")), str(m.get("id"))))[0]
         n = len({m.get("document_id") for m in members})
         entry = {
             "text": summarize_clause_text(rep["opening_text"]["text"]),
@@ -267,13 +294,13 @@ def clause_precedent_groups(
             "ref": rep["opening_text"].get("ref"),
             "precedent_ids": sorted({str(m.get("id")) for m in members}),
         }
-        changed_out.append(((-n, key), entry))
+        changed_out.append(((-n, key), entry, members))
     changed_out.sort(key=lambda t: t[0])
 
     return {
-        "signed_variants": [e for _, e in variant_out],
-        "refused_asks": [e for _, e in refused_out],
-        "changed_openings": [e for _, e in changed_out],
+        "signed_variants": [(e, members) for _, e, members in variant_out],
+        "refused_asks": [(e, pairs) for _, e, pairs in refused_out],
+        "changed_openings": [(e, members) for _, e, members in changed_out],
     }
 
 
@@ -296,27 +323,45 @@ _VARIANT_TIERS = {
 }
 
 
-def _arrange_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Order the signed variants by label tier and collapse the equivalent ones.
+def arrange_variant_slots(variants: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """The digest's signed-variant order as *slots* of underlying group entries.
 
     *variants* are :func:`clause_precedent_groups`' ``signed_variants`` (one
-    per grouping key). Every group labelled ``equivalent`` becomes ONE entry,
-    ``{label: "equivalent", n_deals, n_texts, n_from_standard, n_unchanged,
-    last_signed, exemplars, precedent_ids}``: ``n_deals`` the distinct deals
-    across the groups, ``n_texts`` how many distinct texts collapsed into it,
-    ``exemplars`` the first :data:`_EQUIVALENT_EXEMPLARS` groups' ``{text,
-    ref}`` in group order. The rest stay individual, ordered
-    ``less_protective``/``different_concept`` first, then unjudged, then
-    ``more_protective`` (each tier in group order); the collapsed entry is
-    last. The digest cap applies to the result.
+    per grouping key). Every group labelled ``equivalent`` shares ONE slot
+    (in group order), closing the list; every other group is a slot of its
+    own, ordered ``less_protective``/``different_concept`` first, then
+    unjudged, then ``more_protective`` (each tier in group order).
+    :func:`_arrange_variants` renders the slots; the critic dossiers read
+    them to pick excerpts in exactly the digest's order.
     """
     equivalent = [v for v in variants if v.get("label") == "equivalent"]
     rest = [v for v in variants if v.get("label") != "equivalent"]
     ordered = sorted(
         enumerate(rest), key=lambda iv: (_VARIANT_TIERS.get(iv[1].get("label"), 1), iv[0])
     )
-    out = [v for _, v in ordered]
+    slots = [[v] for _, v in ordered]
     if equivalent:
+        slots.append(equivalent)
+    return slots
+
+
+def _arrange_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order the signed variants by label tier and collapse the equivalent ones.
+
+    The slots of :func:`arrange_variant_slots`: the equivalent slot becomes
+    ONE entry, ``{label: "equivalent", n_deals, n_texts, n_from_standard,
+    n_unchanged, last_signed, exemplars, precedent_ids}``: ``n_deals`` the
+    distinct deals across the groups, ``n_texts`` how many distinct texts
+    collapsed into it, ``exemplars`` the first :data:`_EQUIVALENT_EXEMPLARS`
+    groups' ``{text, ref}`` in group order. The digest cap applies to the
+    result.
+    """
+    out: list[dict[str, Any]] = []
+    for slot in arrange_variant_slots(variants):
+        if slot[0].get("label") != "equivalent":
+            out.append(slot[0])
+            continue
+        equivalent = slot
         ids = sorted({pid for v in equivalent for pid in v["precedent_ids"]})
         out.append(
             {

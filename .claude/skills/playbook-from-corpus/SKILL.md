@@ -1229,6 +1229,19 @@ playbook floor sign $OUT --statement "Limitation of liability, if present, must 
 # (validated against --config's taxonomy — pass --config when you use --clause)
 ```
 
+`--clause` is also what ties the hard line to its clause in the playbook's
+hard-rule `manifest` and in that clause's critic dossier. Three more optional
+flags make the rule machine-checkable for the consuming reviewer, and only when
+the human states them: `--requires-presence` (the clause's absence is itself a
+hard rejection), `--condition '<json>'` (one of `{"type": "required_phrases",
+"phrases": [...]}`, `{"type": "numeric_bound", "pattern": "<regex with one
+capture group>", "max": n}` or `{"type": "cross_reference", "clause_id": "..."}`;
+unstated means judged by the model), and `--proof "<what satisfies the rule>"`
+(repeatable). Never invent them. `--requires-presence` and any non-judged
+`--condition` need `--clause` too: a rule with no clause has nothing to check
+and `floor sign` refuses it. `floor sign` re-derives the manifest and the
+dossiers for you.
+
 `--signed-by` is recorded as a structural `x_signed_by` field, not folded into
 `--rationale` — `playbook validate` warns on any `floor.invariants` entry that
 carries neither this nor a Posture-interview attribution

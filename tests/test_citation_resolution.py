@@ -356,6 +356,10 @@ def test_source_uri_optional() -> None:
     without_uri = json.loads(json.dumps(base))
     without_uri["corpus"]["documents"][0]["version_files"] = entries
 
+    from playbook_engine.dossiers import refresh_derived_sections
+
     for candidate in (with_uri, without_uri):
+        # The provenance index copies the source file hashes of the corpus.
+        refresh_derived_sections(candidate)
         result = validate_document(candidate)
         assert result.ok, [str(e) for e in result.errors]

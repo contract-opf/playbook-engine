@@ -473,6 +473,72 @@
         }
       ],
       "uncovered_clause_types": []
+    },
+    "manifest": {
+      "hard_rules": []
+    },
+    "dossiers": {
+      "clause.limitation_of_liability": {
+        "clause_id": "clause.limitation_of_liability",
+        "taxonomy_id": "limitation_of_liability",
+        "title": "Limitation of Liability",
+        "our_standard": null,
+        "n_floor_rules": 0,
+        "floor_rules": [],
+        "excerpts": [
+          {
+            "precedent_id": "prec.764fe7983c7e3ea4",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.",
+            "outcome": "signed"
+          },
+          {
+            "precedent_id": "prec.22c50d618e1622cd",
+            "kind": "signed_variant",
+            "opening": null,
+            "signed": "Liability is capped at 1 times the fees paid.",
+            "outcome": "signed"
+          }
+        ],
+        "n_omitted": 0,
+        "omitted_precedent_ids": []
+      }
+    },
+    "provenance_index": {
+      "compiler": {
+        "name": "playbook-engine",
+        "version": "1.0.0"
+      },
+      "corpus_manifest_hash": null,
+      "documents": [
+        {
+          "document_id": "deal-1",
+          "signed_at": null,
+          "version_files": []
+        },
+        {
+          "document_id": "deal-8",
+          "signed_at": "2025-05-05",
+          "version_files": []
+        }
+      ],
+      "dossiers": {
+        "clause.limitation_of_liability": [
+          {
+            "precedent_id": "prec.764fe7983c7e3ea4",
+            "document_id": "deal-8",
+            "kind": "signed_variant",
+            "omitted": false
+          },
+          {
+            "precedent_id": "prec.22c50d618e1622cd",
+            "document_id": "deal-1",
+            "kind": "signed_variant",
+            "omitted": false
+          }
+        ]
+      }
     }
   }
 }

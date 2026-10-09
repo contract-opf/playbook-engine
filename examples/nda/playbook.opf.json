@@ -6904,8 +6904,874 @@
       }
     ]
   },
+  "manifest": {
+    "hard_rules": [
+      {
+        "rule_id": "exclusions-from-confidential-information",
+        "clause_id": null,
+        "taxonomy_id": null,
+        "statement": "Do not concede on Exclusions from Confidential Information.",
+        "required_presence": false,
+        "condition": "judged",
+        "permissible_proof": [],
+        "fallback_language": null
+      },
+      {
+        "rule_id": "survival-of-confidentiality-obligations",
+        "clause_id": null,
+        "taxonomy_id": null,
+        "statement": "Do not concede on Survival of Confidentiality Obligations.",
+        "required_presence": false,
+        "condition": "judged",
+        "permissible_proof": [],
+        "fallback_language": null
+      },
+      {
+        "rule_id": "limitation-of-liability-confidentiality-carveout",
+        "clause_id": "clause.limitation_of_liability",
+        "taxonomy_id": "limitation_of_liability",
+        "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
+        "required_presence": false,
+        "condition": "judged",
+        "permissible_proof": [],
+        "fallback_language": null
+      }
+    ]
+  },
+  "dossiers": {
+    "clause.assignment": {
+      "clause_id": "clause.assignment",
+      "taxonomy_id": "assignment",
+      "title": "Assignment",
+      "our_standard": {
+        "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.06586e19496e2d17",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "Neither party may assign this Agreement without the prior written consent of the other party.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.compelled_disclosure": {
+      "clause_id": "clause.compelled_disclosure",
+      "taxonomy_id": "compelled_disclosure",
+      "title": "Compelled Disclosure",
+      "our_standard": {
+        "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.ffa283342815c2f1",
+          "kind": "changed_opening",
+          "opening": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
+          "signed": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.2cbae90493c10f2c",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.confidentiality_of_discussions": {
+      "clause_id": "clause.confidentiality_of_discussions",
+      "taxonomy_id": "confidentiality_of_discussions",
+      "title": "Confidentiality of the Discussions",
+      "our_standard": {
+        "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.c702c528edd53cfc",
+          "kind": "signed_variant",
+          "opening": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
+          "signed": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.counterparts": {
+      "clause_id": "clause.counterparts",
+      "taxonomy_id": "counterparts",
+      "title": "Counterparts",
+      "our_standard": {
+        "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.2b8c18c025c782ba",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "This Agreement may be signed in counterparts, each of which is deemed an original.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.definition_confidential_info": {
+      "clause_id": "clause.definition_confidential_info",
+      "taxonomy_id": "definition_confidential_info",
+      "title": "Definition of Confidential Information",
+      "our_standard": {
+        "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.dispute_resolution_venue": {
+      "clause_id": "clause.dispute_resolution_venue",
+      "taxonomy_id": "dispute_resolution_venue",
+      "title": "Dispute Resolution & Venue",
+      "our_standard": {
+        "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.6afc0a36d68064d1",
+          "kind": "signed_variant",
+          "opening": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+          "signed": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.48aa9562d17197c1",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.entire_agreement_amendment": {
+      "clause_id": "clause.entire_agreement_amendment",
+      "taxonomy_id": "entire_agreement_amendment",
+      "title": "Entire Agreement & Amendment",
+      "our_standard": {
+        "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.71f92977817972f3",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.exclusions_from_confidential": {
+      "clause_id": "clause.exclusions_from_confidential",
+      "taxonomy_id": "exclusions_from_confidential",
+      "title": "Exclusions from Confidential Information",
+      "our_standard": {
+        "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.500fb6712293bc21",
+          "kind": "changed_opening",
+          "opening": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; or (c) is lawfully obtained from a third party without restriction.",
+          "signed": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.55b0f3a1eb6df7c8",
+          "kind": "refused_ask",
+          "opening": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of confidentiality.",
+          "signed": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
+          "outcome": "ask_refused"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.export_control": {
+      "clause_id": "clause.export_control",
+      "taxonomy_id": "export_control",
+      "title": "Export Control",
+      "our_standard": {
+        "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.governing_law": {
+      "clause_id": "clause.governing_law",
+      "taxonomy_id": "governing_law",
+      "title": "Governing Law",
+      "our_standard": {
+        "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.7377a6430df64a98",
+          "kind": "signed_variant",
+          "opening": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
+          "signed": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.95daf3a231f7a092",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "This Agreement is governed by the laws of the State of California.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.injunctive_relief": {
+      "clause_id": "clause.injunctive_relief",
+      "taxonomy_id": "injunctive_relief",
+      "title": "Injunctive Relief",
+      "our_standard": {
+        "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.2c865b84ebf3c0a3",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.limitation_of_liability": {
+      "clause_id": "clause.limitation_of_liability",
+      "taxonomy_id": "limitation_of_liability",
+      "title": "Limitation of Liability",
+      "our_standard": null,
+      "n_floor_rules": 1,
+      "floor_rules": [
+        {
+          "rule_id": "limitation-of-liability-confidentiality-carveout",
+          "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
+          "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy."
+        }
+      ],
+      "excerpts": [
+        {
+          "precedent_id": "prec.20c4e3248b6371c9",
+          "kind": "changed_opening",
+          "opening": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
+          "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.no_license_ip_ownership": {
+      "clause_id": "clause.no_license_ip_ownership",
+      "taxonomy_id": "no_license_ip_ownership",
+      "title": "No License / IP Ownership",
+      "our_standard": {
+        "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.no_obligation_to_proceed": {
+      "clause_id": "clause.no_obligation_to_proceed",
+      "taxonomy_id": "no_obligation_to_proceed",
+      "title": "No Obligation to Proceed",
+      "our_standard": {
+        "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.no_warranty_as_is": {
+      "clause_id": "clause.no_warranty_as_is",
+      "taxonomy_id": "no_warranty_as_is",
+      "title": "No Warranty / AS IS",
+      "our_standard": {
+        "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.06c38c92f6004e39",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.notice_of_unauthorized_disclosure": {
+      "clause_id": "clause.notice_of_unauthorized_disclosure",
+      "taxonomy_id": "notice_of_unauthorized_disclosure",
+      "title": "Notice of Unauthorized Disclosure",
+      "our_standard": {
+        "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.3f8aa27f9cd908e1",
+          "kind": "signed_variant",
+          "opening": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
+          "signed": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.notices": {
+      "clause_id": "clause.notices",
+      "taxonomy_id": "notices",
+      "title": "Notices",
+      "our_standard": {
+        "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.2073b49cb1024c74",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.parties_and_recitals": {
+      "clause_id": "clause.parties_and_recitals",
+      "taxonomy_id": "parties_and_recitals",
+      "title": "Parties & Recitals",
+      "our_standard": {
+        "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\")."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.1073f6d32012245b",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.permitted_disclosure_reps": {
+      "clause_id": "clause.permitted_disclosure_reps",
+      "taxonomy_id": "permitted_disclosure_reps",
+      "title": "Permitted Disclosure to Representatives",
+      "our_standard": {
+        "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.purpose_permitted_use": {
+      "clause_id": "clause.purpose_permitted_use",
+      "taxonomy_id": "purpose_permitted_use",
+      "title": "Purpose & Permitted Use",
+      "our_standard": {
+        "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.residuals": {
+      "clause_id": "clause.residuals",
+      "taxonomy_id": "residuals",
+      "title": "Residuals",
+      "our_standard": null,
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.f922f60ac2c2e0d6",
+          "kind": "refused_ask",
+          "opening": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
+          "signed": null,
+          "outcome": "ask_refused"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.return_or_destruction": {
+      "clause_id": "clause.return_or_destruction",
+      "taxonomy_id": "return_or_destruction",
+      "title": "Return or Destruction of Materials",
+      "our_standard": {
+        "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.severability": {
+      "clause_id": "clause.severability",
+      "taxonomy_id": "severability",
+      "title": "Severability",
+      "our_standard": {
+        "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.719f0154b3680941",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "If any provision is held invalid, the remaining provisions remain in effect.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.standard_of_care": {
+      "clause_id": "clause.standard_of_care",
+      "taxonomy_id": "standard_of_care",
+      "title": "Standard of Care",
+      "our_standard": {
+        "text": "Recipient shall protect Confidential Information using reasonable care."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.e2b6ad2c7f66af4a",
+          "kind": "signed_variant",
+          "opening": "Recipient shall protect Confidential Information using reasonable care.",
+          "signed": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.886f17441be8ec35",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.survival_period": {
+      "clause_id": "clause.survival_period",
+      "taxonomy_id": "survival_period",
+      "title": "Survival of Confidentiality Obligations",
+      "our_standard": {
+        "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.574e5b7400141bcf",
+          "kind": "changed_opening",
+          "opening": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+          "signed": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
+          "outcome": "signed"
+        },
+        {
+          "precedent_id": "prec.1c2c87601dffd71b",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    },
+    "clause.term": {
+      "clause_id": "clause.term",
+      "taxonomy_id": "term",
+      "title": "Term",
+      "our_standard": {
+        "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period."
+      },
+      "n_floor_rules": 0,
+      "floor_rules": [],
+      "excerpts": [
+        {
+          "precedent_id": "prec.19ed7beb1f83508e",
+          "kind": "signed_variant",
+          "opening": null,
+          "signed": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
+          "outcome": "signed"
+        }
+      ],
+      "n_omitted": 0,
+      "omitted_precedent_ids": []
+    }
+  },
+  "provenance_index": {
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.1"
+    },
+    "corpus_manifest_hash": "sha256:c284938b666b9e9ce227a50be6e0fc261b2bdb45ee9505c190b3d78907a4c183",
+    "documents": [
+      {
+        "document_id": "beta-industries",
+        "signed_at": null,
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:42eae28cd9fa452e26dba885f3dd6714779556313546300619dc459f26aabd27"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:df81497a431b7dbdeb107eed681d35be05f5aa3cae20942db1267339f8d21ef3"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:c9f7d72255081e554f13684183b2a9e85f05b200aeddb2c0134e9d46523411f0"
+          },
+          {
+            "version": 4,
+            "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c"
+          }
+        ]
+      },
+      {
+        "document_id": "epsilon-systems",
+        "signed_at": null,
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:8104868c062a44eb4f2b31e33db7974039e8e920ee3354d4be15c7ead99a5557"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:8a53ed0ab1c013d16a0ff1867ab4bfc807dbe34d2329a081d3457eb77eab9e7d"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7"
+          }
+        ]
+      },
+      {
+        "document_id": "gamma-holdings",
+        "signed_at": null,
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:29fb022891851ccb8f66de4c52b18f41eb256f1082138bfc07fcd7f70812795c"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:48b7005ca01c2133af35a245e54b142d87afdfb24700cedab3f6d4eaa6ecb28e"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef"
+          }
+        ]
+      },
+      {
+        "document_id": "theta-logistics",
+        "signed_at": null,
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:c682033c302468f8686e7917338ba93fe7c91bef0ff2d4743a897273166861fe"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:262350199981d164c6255d524956a4f6ae26923fa016d1d4c2199fc7c5f5c9c7"
+          }
+        ]
+      },
+      {
+        "document_id": "zeta-diagnostics",
+        "signed_at": null,
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:f9c34ff87a57be86f8d8ca55c0e237b4e9f5cb836d5ab9f34a050815aa723f88"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:e993ecb19874472daf459063e423c3aaa9ad8018f6f59c50c8344e0607c24eb9"
+          },
+          {
+            "version": 3,
+            "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d"
+          }
+        ]
+      }
+    ],
+    "dossiers": {
+      "clause.assignment": [
+        {
+          "precedent_id": "prec.06586e19496e2d17",
+          "document_id": "theta-logistics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.compelled_disclosure": [
+        {
+          "precedent_id": "prec.ffa283342815c2f1",
+          "document_id": "epsilon-systems",
+          "kind": "changed_opening",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.2cbae90493c10f2c",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.confidentiality_of_discussions": [
+        {
+          "precedent_id": "prec.c702c528edd53cfc",
+          "document_id": "gamma-holdings",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.counterparts": [
+        {
+          "precedent_id": "prec.2b8c18c025c782ba",
+          "document_id": "theta-logistics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.definition_confidential_info": [],
+      "clause.dispute_resolution_venue": [
+        {
+          "precedent_id": "prec.6afc0a36d68064d1",
+          "document_id": "beta-industries",
+          "kind": "signed_variant",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.48aa9562d17197c1",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.entire_agreement_amendment": [
+        {
+          "precedent_id": "prec.71f92977817972f3",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.exclusions_from_confidential": [
+        {
+          "precedent_id": "prec.500fb6712293bc21",
+          "document_id": "zeta-diagnostics",
+          "kind": "changed_opening",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.55b0f3a1eb6df7c8",
+          "document_id": "beta-industries",
+          "kind": "refused_ask",
+          "omitted": false
+        }
+      ],
+      "clause.export_control": [],
+      "clause.governing_law": [
+        {
+          "precedent_id": "prec.7377a6430df64a98",
+          "document_id": "beta-industries",
+          "kind": "signed_variant",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.95daf3a231f7a092",
+          "document_id": "theta-logistics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.injunctive_relief": [
+        {
+          "precedent_id": "prec.2c865b84ebf3c0a3",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.limitation_of_liability": [
+        {
+          "precedent_id": "prec.20c4e3248b6371c9",
+          "document_id": "zeta-diagnostics",
+          "kind": "changed_opening",
+          "omitted": false
+        }
+      ],
+      "clause.no_license_ip_ownership": [],
+      "clause.no_obligation_to_proceed": [],
+      "clause.no_warranty_as_is": [
+        {
+          "precedent_id": "prec.06c38c92f6004e39",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.notice_of_unauthorized_disclosure": [
+        {
+          "precedent_id": "prec.3f8aa27f9cd908e1",
+          "document_id": "gamma-holdings",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.notices": [
+        {
+          "precedent_id": "prec.2073b49cb1024c74",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.parties_and_recitals": [
+        {
+          "precedent_id": "prec.1073f6d32012245b",
+          "document_id": "beta-industries",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.permitted_disclosure_reps": [],
+      "clause.purpose_permitted_use": [],
+      "clause.residuals": [
+        {
+          "precedent_id": "prec.f922f60ac2c2e0d6",
+          "document_id": "zeta-diagnostics",
+          "kind": "refused_ask",
+          "omitted": false
+        }
+      ],
+      "clause.return_or_destruction": [],
+      "clause.severability": [
+        {
+          "precedent_id": "prec.719f0154b3680941",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.standard_of_care": [
+        {
+          "precedent_id": "prec.e2b6ad2c7f66af4a",
+          "document_id": "beta-industries",
+          "kind": "signed_variant",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.886f17441be8ec35",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.survival_period": [
+        {
+          "precedent_id": "prec.574e5b7400141bcf",
+          "document_id": "theta-logistics",
+          "kind": "changed_opening",
+          "omitted": false
+        },
+        {
+          "precedent_id": "prec.1c2c87601dffd71b",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ],
+      "clause.term": [
+        {
+          "precedent_id": "prec.19ed7beb1f83508e",
+          "document_id": "zeta-diagnostics",
+          "kind": "signed_variant",
+          "omitted": false
+        }
+      ]
+    }
+  },
   "identity": {
-    "content_hash": "sha256:46f76f34b560a9c8a620f07f75ce94077751b3f14a1f4cb99cb5ff18ab527179",
+    "content_hash": "sha256:da897d3e818cee2aca7a4cf2ddf940fd25858f0fe4e8e19849314483a3b736cf",
     "section_digests": {
       "evidence": "sha256:025848111a68be211f85957c47f8bf1f776ecbb5456edeb3be85709a3554493f",
       "posture": "sha256:ac1a4e441ff5cad870bf7c565d3602c06aa28cd6a44533428e6b992e80473b77",

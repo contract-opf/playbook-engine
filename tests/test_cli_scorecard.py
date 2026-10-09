@@ -128,6 +128,10 @@ _FIELD_NAMES = frozenset(
         "dossiers",
         "max_tokens",
         "median_tokens",
+        "max_budget",
+        "cut_texts",
+        "excerpts_dropped",
+        "over_budget_single_excerpt",
         "equivalence",
         "by_role",
         "totals",
@@ -218,7 +222,14 @@ _NDA_FLAT_KEYS = frozenset(
         "digest.signed_variants_n_unchanged",
         "digest.token_estimate",
         "digest.uncovered_clause_types",
-        "dossiers",
+        # Issue #228: the NDA example carries one dossier per clause.
+        "dossiers.count",
+        "dossiers.cut_texts",
+        "dossiers.excerpts_dropped",
+        "dossiers.max_budget",
+        "dossiers.max_tokens",
+        "dossiers.median_tokens",
+        "dossiers.over_budget_single_excerpt",
         "dropped_observations.by_reason.removed_origin_undetermined",
         # Issue #240: no verdict store in this run, so every eligible text is
         # unjudged; the section is present (all zero) either way.
@@ -359,7 +370,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 5
+    assert card["scorecard_version"] == 6
     assert card["opf_version"] == "0.5"
     assert card["corpus"] == {
         "documents": 6,
@@ -444,13 +455,21 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     assert per_deal["n"] == cls["deals"]
     assert per_deal["min"] <= per_deal["median"] <= per_deal["max"]
 
-    # OPF 0.5 carries opened_with (#233) but not yet dossiers (#228): null, not an error.
+    # OPF 0.5 carries opened_with (#233) and the critic dossiers (#228).
     assert sum(precedent["records_by_opened_with"].values()) == precedent["records"]
     assert sum(precedent["openings_by_opened_with"].values()) == precedent["openings"] > 0
     assert set(precedent["openings_by_opened_with"]) <= {"standard", "non_standard"}
     # Every signed record of a fresh store has its opening determined (#233).
     assert precedent["signed_opened_with_undetermined"] == 0
-    assert card["dossiers"] is None
+    dossiers = card["dossiers"]
+    assert dossiers["count"] == len(playbook["dossiers"]) > 0
+    assert 0 < dossiers["median_tokens"] <= dossiers["max_tokens"] <= dossiers["max_budget"]
+    # No text is ever cut part-way (#228); a small example drops nothing.
+    assert dossiers["cut_texts"] == 0
+    assert dossiers["excerpts_dropped"] == sum(
+        d["n_omitted"] for d in playbook["dossiers"].values()
+    )
+    assert dossiers["over_budget_single_excerpt"] == 0
     # The opening drift is the template drift's twin over `opened_with`.
     opening = card["opening_drift"]
     assert opening["clauses"] == drift["clauses"]

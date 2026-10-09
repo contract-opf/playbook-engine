@@ -24,13 +24,75 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.5.json` | `0c5a27b8a20d53012da8edde20363be012a61f3242b1639df98aca5cabfffb62` |
-| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `3c5271a6d34f3793aefb7c094c3885542620c34740ff6bc6c5040a3580a64a5a` |
+| `playbook.schema-0.5.json` | `50de992a5960356a4137e0f09dbc77f3eb4902c5b4dd99a1767c9332b2f20c8b` |
+| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `2718c523458d81cfaccd756bb71a554385bd2e7a47cbaec8b7ffc87d3e1cca3c` |
 
 Current `DIGEST_VERSION`: **4** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-09 — OPF 0.5: hard-rule manifest, critic dossiers, provenance index (issue #228)
+
+In-place addition to the unfrozen `playbook.schema-0.5.json` (epic #236; 0.5
+has no consumer until contract-opf/contract-toaster#128 vendors it, which
+freezes it). `digest_version` stays "4".
+
+- **New optional top-level sections** `manifest`, `dossiers` and
+  `provenance_index` (OPF-SPEC section 3.12.3): `manifest.hard_rules[]`
+  `{rule_id, clause_id, taxonomy_id, statement, required_presence, condition,
+  permissible_proof, fallback_language}`, one per `floor.invariants[]` entry;
+  `dossiers` a map from clause id to a dossier `{clause_id, taxonomy_id, title,
+  our_standard, n_floor_rules, floor_rules[], excerpts[], n_omitted,
+  omitted_precedent_ids}` of at most two excerpts `{precedent_id, kind,
+  opening, signed, outcome}` within a budget (below), no text ever cut; `provenance_index` `{compiler,
+  corpus_manifest_hash, documents[], dossiers}`, where `dossiers` maps a clause
+  id to the `{precedent_id, document_id, kind, omitted}` of each excerpt the
+  dossier selected, kept (`omitted` false) then dropped for size (`omitted`
+  true), and `documents` lists every deal behind those rows, so each
+  `omitted_precedent_ids` entry resolves to its deal.
+- **Floor invariants** may carry the vendor keys `x_required_presence`,
+  `x_condition` (a `required_phrases`, `numeric_bound` or `cross_reference`
+  predicate spec, or `"judged"`) and `x_permissible_proof`, besides the existing
+  `x_taxonomy_id`. An invariant with `x_required_presence` true or a predicate
+  `x_condition` MUST carry `x_taxonomy_id` (a rule with no clause cannot be
+  enforced outside both models); the schema's `hardRule` likewise requires a
+  string `taxonomy_id` for such a rule. `floor.invariants[]` is otherwise
+  unchanged.
+- **New normative validator rules:** a present `manifest`, `dossiers` or
+  `provenance_index` MUST equal its reference construction over the document
+  (`playbook_engine/dossiers.py`, vector 008); every dossier MUST carry at most
+  two excerpts and be within its budget unless it holds exactly one excerpt
+  (one with two excerpts, or none, over its budget is refused); a
+  malformed `x_required_presence`, `x_condition` or `x_permissible_proof`, or
+  a presence or predicate rule naming no clause, is an error. A writer that changes the
+  Floor MUST re-derive the sections.
+- **Dossier construction** (normative through that recomputation): each
+  excerpt shows one record of its group, the latest `signed_at` then the
+  lowest `precedent_id` (a concession's record taken only among the members
+  that opened with our standard). **No text is ever cut part-way**: every
+  excerpt text, our standard and each listed Floor rule is whole, because a
+  cut-off clause can lose its carve-out or cap and so plant a false fact. The
+  budget is `max(1000, 3 * tokens(our_standard.text))` (1,000 with no
+  standard); over budget, whole parts are dropped: first the listed Floor
+  rules, last first, while the dossier holding only its first excerpt is
+  still over budget (`n_floor_rules` still counts them all), then excerpts in
+  reverse selection order, keeping the first, until it fits. Our standard and
+  the identifiers are never dropped. A dossier always keeps one complete excerpt
+  (when the clause has any), even if that alone puts it over budget: that is
+  the only case where a dossier may exceed its budget. Each dossier names the
+  excerpts it dropped: `n_omitted` and `omitted_precedent_ids` (sorted).
+- **Conformance:** `spec/conformance/0.5/` `expected` gains `manifest`,
+  `dossiers` and `provenance_index` in every vector; vector 008 is new and
+  also pins a refused-ask excerpt, a presence rule naming its clause, a dropped
+  and named excerpt, a single over-budget excerpt kept whole with its Floor
+  rule dropped, a Floor rule dropped whole from a dossier with no excerpt so
+  that it fits, and a provenance index with a corpus snapshot hash,
+  source-file hashes and the dropped excerpt indexed as `omitted` with its
+  deal.
+- **Unchanged:** the digest, the precedent record, the grouping key,
+  canonicalization and `identity` (the sections join `content_hash` like any
+  other top-level content).
 
 ### 2026-10-09 — OPF 0.5: digest 4 (issue #234)
 
