@@ -1,7 +1,7 @@
 # Open Playbook Format (OPF) — Specification
 
 **Version:** 1.0
-**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler emits and validates exactly one document shape, `opf_version` "0.5" (the verdict-free per-deal precedent record, §3.5.4, with the opening evidence of §3.5.5 and a `digest_version` "3" digest, §3.12.1). The 0.1–0.4 shapes and digest 2 were retired (owner decision 2026-10-06: no installed consumer needs them); their schemas and text stay in git history and in contract-opf/opf.
+**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler emits and validates exactly one document shape, `opf_version` "0.5" (the verdict-free per-deal precedent record, §3.5.4, with the opening evidence of §3.5.5 and a `digest_version` "4" digest, §3.12.2). The 0.1–0.4 shapes and digest 2 were retired (owner decision 2026-10-06: no installed consumer needs them); their schemas and text stay in git history and in contract-opf/opf.
 **Serialization:** JSON (canonical). YAML permitted for authoring; tools MUST accept both and treat them as equivalent.
 **Issue references:** #NNN citations throughout are design provenance from the project's original development tracker.
 **License:** This file is specification text and is additionally licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0), per the repository `LICENSE` — alongside the Apache-2.0 license covering this repository.
@@ -226,7 +226,10 @@ facts only:
     "n_deals": 6,                      // distinct deals with a precedent for this clause
     "n_signed_standard": 2,            // distinct signed deals that signed our standard
     "n_variants": 2,                   // distinct non-standard texts signed (signed deals)
-    "n_refused": 0                     // distinct refused-ask texts
+    "n_refused": 0,                    // distinct refused-ask texts
+    "n_opened_standard": 4,            // distinct signed deals whose clause opened with our standard (§3.5.5)
+    "n_kept_standard": 2,              // of those, deals that signed our standard
+    "n_changed_openings": 0            // distinct non-standard openings not signed as proposed (§3.12.2)
   } ],
   "precedent": [ {                     // one per (deal, clause type)
     "id": "prec.7377a6430df64a98",
@@ -271,7 +274,7 @@ Field semantics:
   `YYYY-Qn` once coarsened for publication). **The reference compiler never
   emits `signed_at`:** it extracts no signing date and never fabricates one,
   so in reference output the field is absent from every precedent and
-  §3.12.1's `first_signed`/`last_signed` are always `null`. The field (and
+  §3.12.2's `first_signed`/`last_signed` are always `null`. The field (and
   the `last_signed` ordering it feeds) exists for a third-party producer
   that does record signing dates; the 0.5 conformance vectors that set it
   model such a producer.
@@ -285,8 +288,8 @@ Field semantics:
   taxonomy_id, signed_text.text or ""]))[:16]` (hex; `canonical` is §3.10's
   canonical JSON). Stable across recompiles of the same evidence.
 
-**Grouping key** (normative). The clause counts below and §3.12.1's digest
-group texts — signed variants, refused asks — by an exact key computed from
+**Grouping key** (normative). The clause counts below and §3.12.2's digest
+group texts — signed variants, refused asks, changed openings — by an exact key computed from
 the text and the document alone, so a validator or an independent port
 recomputes it with nothing but the document. It differs from `standard`'s
 normalization only in its party names: `standard` neutralizes the
@@ -331,7 +334,8 @@ cannot express them):
   `precedent[].document_id` resolves to `corpus.documents[]`, and `signed`
   agrees with that document's `signed_version` (non-null ⇔ `signed`) when
   recorded. `standard: true` requires a non-null `signed_text`.
-- Each clause's `n_deals` / `n_signed_standard` / `n_variants` / `n_refused`
+- Each clause's `n_deals` / `n_signed_standard` / `n_variants` / `n_refused` /
+  `n_opened_standard` / `n_kept_standard` / `n_changed_openings`
   equal what `precedent` implies (grouping texts by the grouping key above —
   not by `standard`'s normalization, whose party names are not in the
   document). Every count is distinct deals or distinct texts — never rows.
@@ -475,7 +479,7 @@ once a template is configured), checks every draft with a separate
 `playbook judge-apply --check`), writes the labels at `playbook project` and
 reports drafted / checked / agreed / adjudicated / unchecked counts in
 `playbook scorecard`. Digest 4 (issue #234) uses the labels to collapse
-equivalent variants into one entry; `digest_version` "3" ignores them.
+equivalent variants into one entry (§3.12.2).
 
 ### 3.6 `posture` (NEW) — negotiation intent as generated prose
 
@@ -654,32 +658,57 @@ Normative rules:
 - OPTIONAL in the schema; the reference compiler always emits it. Producers
   targeting ~40K tokens (chars/4) satisfy the intent.
 
-An OPF 0.5 document carries `digest_version` "3" (§3.12.1) until digest 4 lands (epic #236).
+An OPF 0.5 document carries `digest_version` "4" (§3.12.2).
 
 > **History (retired 2026-10-07, issue #238).** `digest_version` "2" was the
 > digest of an OPF 0.3 document (stances, preferred variations, frequency-
 > banded exemplar forms). It was retired with 0.3; its definition and
 > conformance vectors are in git history.
+>
+> **History (replaced in place 2026-10-09, issue #234).** `digest_version` "3"
+> (per clause: our standard, the deal counts, the grouped signed variants and
+> refused asks) is replaced by digest 4, which is digest 3 plus the fields of
+> §3.12.2. Nothing consumed digest 3; the engine emits and validates only
+> digest 4, and its definition and vectors are in git history.
 
-#### 3.12.1 `digest_version` "3" (OPF 0.4–0.5, issue #223)
+#### 3.12.1 `digest_version` "3" (retired)
 
-The verdict-free projection of §3.5.4's precedent record:
+Replaced in place by digest 4 (§3.12.2, issue #234). Section number left
+unassigned so the numbering of §3.12.2 is stable.
+
+#### 3.12.2 `digest_version` "4" (OPF 0.5, issues #223, #234, #240)
+
+The verdict-free projection of §3.5.4's precedent record, plus the one judged
+index of §3.5.6 (`vs_standard.label`):
 
 ```jsonc
 "digest": {
-  "digest_version": "3",
+  "digest_version": "4",
   "perspective": { "party": "...", "counterparty_type": "..." } | null,  // copy of §3.1
   "agreement_type": { "id": "...", "name": "..." },
   "corpus": { "n_deals": 6, "n_signed": 6, "first_signed": null, "last_signed": null },
   "clauses": [ {
     "id": "...", "taxonomy_id": "...", "title": "...", "our_standard": {...} | null,
-    "n_deals": 6, "n_signed_standard": 4,
-    "signed_variants": [ { "text": "...", "n_deals": 2, "last_signed": null,
+    "n_deals": 6, "n_signed_standard": 2,
+    "n_opened_standard": 4, "n_kept_standard": 2,
+    "positions": { "standard": 2, "equivalent": 0, "more_protective": 0,
+                   "less_protective": 0, "different_concept": 2, "unjudged": 2 },
+    "signed_variants": [
+      { "text": "...", "n_deals": 2, "last_signed": null,
+        "n_from_standard": 2, "n_unchanged": 0, "label": "less_protective" | ... | null,
+        "ref": Citation, "precedent_ids": ["prec.…"] },
+      { "label": "equivalent", "n_deals": 3, "n_texts": 2, "n_from_standard": 1,
+        "n_unchanged": 2, "last_signed": null,
+        "exemplars": [ { "text": "...", "ref": Citation } ],       // at most two
+        "precedent_ids": ["prec.…"] }                               // the collapsed entry
+    ],
+    "refused_asks":    [ { "text": "...", "n_deals": 1, "label": ... | null,
                            "ref": Citation, "precedent_ids": ["prec.…"] } ],
-    "refused_asks":    [ { "text": "...", "n_deals": 1, "ref": Citation,
-                           "precedent_ids": ["prec.…"] } ],
-    "n_variants_total": 1, "n_refused_total": 0
-  } ]
+    "changed_openings": [ { "text": "...", "n_deals": 3, "n_to_standard": 1, "n_struck": 1,
+                            "label": ... | null, "ref": Citation, "precedent_ids": ["prec.…"] } ],
+    "n_variants_total": 2, "n_refused_total": 0, "n_changed_openings_total": 1
+  } ],
+  "uncovered_clause_types": [ { "taxonomy_id": "...", "label": "..." } ]
 }
 ```
 
@@ -692,24 +721,66 @@ The verdict-free projection of §3.5.4's precedent record:
   (§3.5.4); likewise every `signed_variants[].last_signed`, so the
   `last_signed` ordering key only applies to a producer that records
   signing dates).
+- Every count is distinct signed deals read from `evidence.precedent` with
+  `signed: true`; paper side partitions nothing.
+- `n_opened_standard` — deals whose `opened_with` is `"standard"`;
+  `n_kept_standard` — of those, deals whose `standard` is `true`. Both equal
+  the same-named `evidence.clauses[]` counts.
+- `positions` — the signed deals that signed a text for the clause, by what
+  that text is: `standard` (the signed text is our standard language; equals
+  `n_signed_standard`), each `vs_standard.label` (§3.5.6) of a non-standard
+  signed text, and `unjudged` (a non-standard signed text with no label).
+  All six keys are always present.
 - `signed_variants` — the non-standard `signed_text` of signed deals,
   grouped by §3.5.4's grouping key (exact; counterparty aliases and
   `perspective.party` neutralized — not `standard`'s configured party
-  names); `n_deals` distinct deals;
-  `text` is the sentence-boundary summary (≤ 300 chars) of the group's
-  representative (latest `signed_at`, then lowest `document_id`) and `ref`
-  its citation; ordered `n_deals` desc, `last_signed` desc (unknown last),
-  then grouping key.
+  names); `n_deals` distinct deals; `text` is the sentence-boundary summary
+  (≤ 300 chars) of the group's representative (latest `signed_at`, then
+  lowest `document_id`) and `ref` its citation. Within a tier the order is
+  `n_deals` desc, `last_signed` desc (unknown last), then grouping key.
+  - `n_from_standard` — deals in the group whose `opened_with` is
+    `"standard"`: the variant is a concession from our standard on record.
+  - `n_unchanged` — deals in the group whose `opened_with` is
+    `"non_standard"` and whose `opening_text` is `null`: signed exactly as it
+    opened. (`"absent"` and `null` count in neither.)
+  - `label` — the representative's `vs_standard.label`, or `null` when it is
+    not judged. An index to check against the cited text, never an
+    instruction. The label is orthogonal to the opening facts: a variant can
+    be both a concession and `equivalent`.
+  - **Collapse.** Every group whose `label` is `equivalent` is replaced by ONE
+    entry (always last): `{label: "equivalent", n_deals (distinct deals
+    across the collapsed groups), n_texts (groups collapsed), n_from_standard,
+    n_unchanged (summed), last_signed (latest), exemplars (the first two
+    groups in the order above, each {text, ref}), precedent_ids (all)}`. It
+    has no `text` or `ref` of its own.
+  - **Order.** Individual entries come in four tiers: `less_protective` and
+    `different_concept` first, then those with a `null` label, then
+    `more_protective`; the collapsed entry closes the list.
 - `refused_asks` — every refused ask, grouped the same way, representative
-  the earliest-round ask (then lowest `document_id`); ordered `n_deals`
-  desc, then grouping key.
-- Both lists are capped (top 5, tightened stepwise to 1 until the digest
-  fits the ~40K-token budget); `n_variants_total` / `n_refused_total` are
-  always the uncapped totals and equal `evidence.clauses[].n_variants` /
-  `n_refused`.
+  the earliest-round ask (then lowest `document_id`), with the
+  representative's `label`; ordered `n_deals` desc, then grouping key.
+- `changed_openings` — non-standard opening language that was not signed as
+  proposed: precedents with `opened_with` `"non_standard"` and a non-null
+  `opening_text`, excluding a precedent whose opening's grouping key equals
+  the grouping key of one of its own `refused_asks` (already shown as a
+  refused ask). Grouped by the grouping key of `opening_text.text`; `text`
+  and `ref` are the summary and citation of the representative (lowest
+  `document_id`); `n_to_standard` counts deals whose `standard` is `true`,
+  `n_struck` deals whose `signed_text` is `null`; `label` is the
+  representative's. Ordered `n_deals` desc, then grouping key.
+- The three lists are capped together (top 5, tightened stepwise to 1 until
+  the digest fits the ~40K-token budget), the cap applying after the
+  equivalent variants collapse. `n_variants_total` / `n_refused_total` /
+  `n_changed_openings_total` are always the uncapped totals of distinct texts
+  and equal `evidence.clauses[].n_variants` / `n_refused` /
+  `n_changed_openings`.
+- `uncovered_clause_types` — every classifier-eligible `taxonomy.entries[]`
+  entry (`status` `active` or `custom`) with no `evidence.clauses[]` entry,
+  `{taxonomy_id, label}`, sorted by `taxonomy_id`, never capped. It means "a
+  recognised clause type with no precedent in this corpus", nothing more.
 - No `full_text`; no stance, band, risk or deviation field.
 - **When present, the digest MUST equal the reference construction over the
-  document** (`build_digest`, defined by the 0.5 conformance vectors,
+  document** (`build_digest_v4`, defined by the 0.5 conformance vectors,
   §10.2) — a validator recomputes it and rejects any difference. A
   transform that edits evidence text (publication, residue redaction) MUST
   re-derive the digest, precedent ids and counts afterwards.
@@ -862,12 +933,12 @@ with canonicalization and digest construction for that format version, with
 no dependency on this repo. `tests/test_conformance_vectors.py` is this
 engine's own check against the same frozen vectors; see
 `spec/conformance/0.5/README.md` for what each vector isolates: canonical
-serialization of 0.5-shaped documents and digest 3 construction — variant
+serialization of 0.5-shaped documents and digest 4 construction — variant
 grouping by §3.5.4's grouping key (including its counterparty-alias and
 `perspective.party` neutralization), the `n_deals`/`last_signed` ordering,
 the cap with uncapped totals, refused-ask grouping across deals, the
 sentence-boundary summary, and `perspective` carried as `null` when the
-document has none; vector 005 carries the opening evidence of §3.5.5 (canonicalized and validated, not projected into digest 3). The canonical-serialization algorithm itself is stated in
+document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order and `uncovered_clause_types`. The canonical-serialization algorithm itself is stated in
 `spec/conformance/README.md`. (The OPF 0.3 / digest 2 vector set, which also
 pinned key ordering, Unicode emission and float/int formatting edge cases,
 was retired with that format, issue #238; those edge cases are unit-tested
@@ -949,7 +1020,8 @@ opening evidence, so it must be re-mined, not only re-projected.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 and 0.5 carry no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
-- **0.5 (issue #240)** — Equivalence label (§3.5.6): an optional `vs_standard` `{label, reason, basis, check} | null` on `signed_text`, `opening_text` and each `refused_asks[]` entry, judged once per distinct text against our standard and blind-checked by an independent model; three new validator MUSTs. `digest_version` is unchanged until digest 4 (issue #234).
+- **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set is regenerated for digest 4 with vectors 006 and 007.
+- **0.5 (issue #240)** — Equivalence label (§3.5.6): an optional `vs_standard` `{label, reason, basis, check} | null` on `signed_text`, `opening_text` and each `refused_asks[]` entry, judged once per distinct text against our standard and blind-checked by an independent model; three new validator MUSTs.
 - **0.5** — Opening evidence (§3.5.5): every precedent record gains `opened_with` (`standard` | `non_standard` | `absent` | `null`) and `opening_text` is recorded for any distinct opening, whatever its origin (0.4 recorded it only for our standard struck before signing). Three new validator MUSTs. The optional top-level `curation` section (§3.11) and `identity.section_digests.curation` are removed: the 0.5 schema rejects them (issue #233, after the review loop that produced pins was retired in issue #239). New schema file `playbook.schema-0.5.json`; it replaces 0.4 in the reference engine (no consumer ever bound 0.4). `digest_version` "3" is unchanged until digest 4 lands (epic #236); 0.5 has no consumer until contract-opf/contract-toaster#128 vendors it.
 - **Retirement (issue #238)** — The reference engine reads and writes only 0.4 (now 0.5); OPF 0.1–0.3 and `digest_version` "2" are retired (validators reject them as unsupported). Not a new shape: 0.4 is unchanged. §3.5.1–§3.5.3 and §3.12's digest 2 rules are replaced by history notes.
 - **0.4** — Verdict-free per-deal precedent record as the evidence shape (§3.5.4): `evidence.{clauses, precedent}` with distinct-deal counts, deterministic `standard`, three-valued paper metadata that gates nothing, and recomputable precedent ids; `digest_version` "3" (§3.12.1) with `perspective`, grouped signed variants and refused asks, and a digest-equals-recomputation rule; judged verdicts only under `x_judgments`. New schema file `playbook.schema-0.4.json`; 0.3 frozen.

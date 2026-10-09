@@ -24,20 +24,50 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.5.json` | `341841651bc850179b59f5c633483f35c9adc6cfffe9530806dc8c55f9538670` |
-| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `2e34e85d37f08187f3b54e1c97225708806f318feab20a1b51d281f354308781` |
+| `playbook.schema-0.5.json` | `0c5a27b8a20d53012da8edde20363be012a61f3242b1639df98aca5cabfffb62` |
+| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `3c5271a6d34f3793aefb7c094c3885542620c34740ff6bc6c5040a3580a64a5a` |
 
-Current `DIGEST_VERSION`: **3** (`playbook_engine/digest.py`) — the only
+Current `DIGEST_VERSION`: **4** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-09 — OPF 0.5: digest 4 (issue #234)
+
+In-place change to the unfrozen `playbook.schema-0.5.json` and a new
+`digest_version` "4" that **replaces digest 3** (epic #236; 0.5 has no consumer
+until contract-opf/contract-toaster#128 vendors it, and digest 3 never
+shipped to one). The digest-3 construction is deleted; `spec/conformance/0.5/`
+is regenerated for digest 4 rather than kept beside a digest-3 set.
+
+- **`digest.clauses[]`** gains `n_opened_standard`, `n_kept_standard`,
+  `positions` `{standard, equivalent, more_protective, less_protective,
+  different_concept, unjudged}`, `changed_openings[]` `{text, n_deals,
+  n_to_standard, n_struck, label, ref, precedent_ids}` and
+  `n_changed_openings_total`. Each `signed_variants[]` entry gains
+  `n_from_standard`, `n_unchanged` and `label`; each `refused_asks[]` entry
+  gains `label`. The signed variants labelled `equivalent` (#240) collapse
+  into one entry `{label, n_deals, n_texts, n_from_standard, n_unchanged,
+  last_signed, exemplars (at most two {text, ref}), precedent_ids}`, listed
+  last; `less_protective` and `different_concept` come first, then unjudged,
+  then `more_protective`; the cap applies after collapsing. The top level
+  gains `uncovered_clause_types` `[{taxonomy_id, label}]`.
+- **`evidence.clauses[]`** gains the required counts `n_opened_standard`,
+  `n_kept_standard` and `n_changed_openings`, derived from
+  `evidence.precedent` like the existing `n_*` counts.
+- **New normative validator rules:** the digest MUST equal `build_digest_v4`
+  over the document; the three new clause counts MUST equal what
+  `evidence.precedent` implies.
+- **Unchanged:** the grouping key, precedent ids, the `standard` fact, the
+  `vs_standard` field and its rules, canonicalization and `identity`.
 
 ### 2026-10-09 — OPF 0.5: the `vs_standard` equivalence label (issue #240)
 
 In-place addition to the unfrozen `playbook.schema-0.5.json` (epic #236; 0.5
 has no consumer until contract-opf/contract-toaster#128 vendors it, so
-nothing published binds the previous shape). `digest_version` stays "3"; the
-digest hook (collapsing equivalent variants, label counts) is #234's.
+nothing published binds the previous shape). `digest_version` stayed "3" here;
+the digest hook (collapsing equivalent variants, label counts) landed with
+digest 4 (issue #234, above).
 
 - **New optional field `vs_standard`** on `evidence.precedent[].signed_text`,
   `.opening_text` and each `.refused_asks[]` entry: `{label, reason, basis,

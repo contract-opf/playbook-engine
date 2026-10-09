@@ -3,7 +3,7 @@
 Assembles the full OPF 0.5 playbook document (issue #223) — the only format
 the engine emits or validates (issue #238): the verdict-free per-deal
 precedent record as ``evidence`` (``playbook_engine/precedent.py``) plus a
-digest_version 3 digest, empty-but-present ``posture``/``floor``, and an
+digest_version 4 digest, empty-but-present ``posture``/``floor``, and an
 ``identity`` block carrying ``content_hash`` + per-section digests
 (issue #143) — and ``write_playbook`` writes
 ``playbook.opf.json``.  The assembled document is self-validated via the
@@ -39,7 +39,7 @@ from playbook_engine.clause_position_compiler import (
     ClausePosition,
     UnclassifiedCoverage,
 )
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.equivalence import collect_subjects, label_evidence
 from playbook_engine.observation_builder import Observation, RoundMove
 from playbook_engine.opf_accessors import (
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from playbook_engine.agent_judge import StoreBackedEquivalenceJudge
 
 #: The one OPF version the engine emits and validates (issue #238): the
-#: verdict-free per-deal precedent record (issue #223) plus a digest_version 3
+#: verdict-free per-deal precedent record (issue #223) plus a digest_version 4
 #: digest. Older formats were retired; git history and contract-opf/opf keep
 #: them.
 OPF_VERSION = "0.5"
@@ -368,7 +368,7 @@ def assemble_playbook(
 
     Returns:
         A validated OPF 0.5 playbook dict (precedent-record ``evidence``,
-        empty-but-present ``posture``/``floor``, a digest_version 3
+        empty-but-present ``posture``/``floor``, a digest_version 4
         ``digest``, and an ``identity`` block carrying
         ``content_hash``/``section_digests`` — see issue #143).
 
@@ -489,7 +489,7 @@ def assemble_playbook(
     # BEFORE the digest is built, so the digest groups texts by their
     # post-strip form (issue #35) — otherwise an intra-word ZWSP
     # splits what should be one dedupe group into two, and the embedded
-    # digest diverges from build_digest() recomputed over the shipped
+    # digest diverges from build_digest_v4() recomputed over the shipped
     # (stripped) playbook, breaking the "digest is a pure function of the
     # evidence section" invariant that content_hash lineage relies on.
     playbook = _strip_invisible(playbook)
@@ -523,12 +523,12 @@ def assemble_playbook(
     # `compiler` is closed to extensions (OPF-SPEC §10.1).
     playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
 
-    # --- digest (digest_version 3) ---
+    # --- digest (digest_version 4) ---
     # The compact model-facing projection of the evidence section. Computed
     # after stripping (above) and before identity so it is covered by
     # content_hash like every other content section (it is a pure function of
     # evidence — two compiles of identical evidence carry identical digests).
-    playbook["digest"] = build_digest(playbook)
+    playbook["digest"] = build_digest_v4(playbook)
 
     # --- identity (issue #143) ---
     # content_hash/section_digests are engine-computed and always populated —

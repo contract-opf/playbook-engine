@@ -61,6 +61,14 @@ def _quote_block(text: str, cite: str = "") -> str:
     return f"<blockquote>{body}{cite_html}</blockquote>"
 
 
+def _group_cite(group: dict[str, Any], *facts: str) -> str:
+    """Citation line of a digest group: its citation, deal count and opening facts.
+
+    The page states facts only; the ``vs_standard`` label stays in the digest JSON."""
+    bits = [_cite_str(group.get("ref")), f"{group['n_deals']} deal(s)", *facts]
+    return " · ".join(b for b in bits if b)
+
+
 def _render_clause(
     clause: dict[str, Any],
     precedent: list[dict[str, Any]],
@@ -71,8 +79,9 @@ def _render_clause(
 ) -> str:
     """One clause (issue #223): our standard, how many deals signed it,
     every non-standard variant signed and every refused ask — each with its
-    distinct-deal count and citation. No stance chip, no risk marker: the
-    document carries no judged verdict."""
+    distinct-deal count and citation. No stance chip, no risk marker, and
+    no judged label: the page states facts only (the one judged index, each
+    text's ``vs_standard`` label of OPF-SPEC §3.5.6, stays in the digest JSON)."""
     from playbook_engine.digest import clause_precedent_groups  # noqa: PLC0415
 
     tid = str(clause.get("taxonomy_id", ""))
@@ -84,6 +93,11 @@ def _render_clause(
         f"{clause.get('n_deals', 0)} deal(s)",
         f"our standard signed in {clause.get('n_signed_standard', 0)}",
     ]
+    if clause.get("n_opened_standard"):
+        meta_bits.append(
+            f"opened with our standard in {clause['n_opened_standard']} signed deal(s); "
+            f"kept it in {clause.get('n_kept_standard', 0)}"
+        )
     parts.append(f'<p class="meta">{" · ".join(meta_bits)}</p>')
 
     our_standard = clause.get("our_standard") or {}
@@ -100,9 +114,12 @@ def _render_clause(
             "Signed variants</h3>"
         )
         for v in groups["signed_variants"]:
-            parts.append(
-                _quote_block(str(v["text"]), f"{_cite_str(v.get('ref'))} · {v['n_deals']} deal(s)")
-            )
+            facts = []
+            if v.get("n_from_standard"):
+                facts.append(f"from our standard in {v['n_from_standard']}")
+            if v.get("n_unchanged"):
+                facts.append(f"signed as proposed in {v['n_unchanged']}")
+            parts.append(_quote_block(str(v["text"]), _group_cite(v, *facts)))
     if groups["refused_asks"]:
         parts.append(
             f'<details><summary title="Text proposed in a draft and struck before '
@@ -110,9 +127,21 @@ def _render_clause(
             f"Refused asks ({len(groups['refused_asks'])})</summary>"
         )
         for a in groups["refused_asks"]:
-            parts.append(
-                _quote_block(str(a["text"]), f"{_cite_str(a.get('ref'))} · {a['n_deals']} deal(s)")
-            )
+            parts.append(_quote_block(str(a["text"]), _group_cite(a)))
+        parts.append("</details>")
+    if groups["changed_openings"]:
+        parts.append(
+            f'<details><summary title="Non-standard language the clause opened with that '
+            f'was not signed as proposed. (OPF field: evidence.precedent[].opening_text)">'
+            f"Not signed as proposed ({len(groups['changed_openings'])})</summary>"
+        )
+        for o in groups["changed_openings"]:
+            facts = []
+            if o.get("n_to_standard"):
+                facts.append(f"signed as our standard in {o['n_to_standard']}")
+            if o.get("n_struck"):
+                facts.append(f"struck in {o['n_struck']}")
+            parts.append(_quote_block(str(o["text"]), _group_cite(o, *facts)))
         parts.append("</details>")
     parts.append("</section>")
     return "\n".join(parts)
@@ -472,31 +501,51 @@ def _escape_json_for_script(json_text: str) -> str:
     return json_text.replace("</", "<\\/")
 
 
-def _render_digest_summary(d_clauses: list[dict[str, Any]], token_est: int) -> str:
-    """Digest-section summary table (digest_version 3)."""
+def _render_digest_summary(
+    d_clauses: list[dict[str, Any]],
+    token_est: int,
+    uncovered: list[dict[str, Any]] | None = None,
+) -> str:
+    """Digest-section summary table (digest_version 4)."""
     rows = "".join(
         "<tr>"
         f"<td>{html_lib.escape(str(c.get('title') or c.get('taxonomy_id') or ''))}</td>"
         f"<td>{c.get('n_signed_standard', 0)} of {c.get('n_deals', 0)}</td>"
+        f"<td>{c.get('n_kept_standard', 0)} of {c.get('n_opened_standard', 0)}</td>"
         f"<td>{c.get('n_variants_total', 0)}</td>"
+        f"<td>{c.get('n_changed_openings_total', 0)}</td>"
         f"<td>{c.get('n_refused_total', 0)}</td>"
         "</tr>"
         for c in d_clauses
     )
+    names = [
+        str(u.get("label") or u.get("taxonomy_id")) for u in uncovered or [] if isinstance(u, dict)
+    ]
+    uncovered_line = (
+        "<p>No evidence in this corpus for: " + html_lib.escape(", ".join(names)) + ".</p>"
+        if names
+        else ""
+    )
     return f"""<section class="clause" id="digest">
   <h2>Digest (model-facing projection)</h2>
-  <p>This bundle embeds a compact, verdict-free digest of the precedent record
-  (digest_version 3) — per clause: our standard, how many deals signed it, the
-  non-standard variants signed and the asks refused before signing, each with
-  its distinct-deal count and citation (capped; the totals are always given).
+  <p>This bundle embeds a compact digest of the precedent record, verdict-free
+  except the one judged <code>vs_standard</code> index of each text
+  (digest_version 4) — per clause: our standard, how many deals signed it and
+  how many opened with it and kept it, the non-standard variants signed (with
+  how many were conceded from our standard and how many signed as proposed),
+  the openings not signed as proposed and the asks refused before signing,
+  each with its distinct-deal count and citation (capped; the totals are
+  always given).
   Estimated size: ~{token_est:,} tokens. The machine blocks below carry the
   digest and the canonical OPF JSON; the bare <code>playbook.opf.json</code>
   remains the canonical artifact.</p>
   <table>
-    <thead><tr><th>Clause</th><th>Signed our standard</th><th>Signed variants</th>
-    <th>Refused asks</th></tr></thead>
+    <thead><tr><th>Clause</th><th>Signed our standard</th>
+    <th>Opened with our standard, kept it</th><th>Signed variants</th>
+    <th>Not signed as proposed</th><th>Refused asks</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  {uncovered_line}
 </section>
 """
 
@@ -524,14 +573,16 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     check (``playbook-from-corpus`` skill, issue #136) before treating the
     bundle as shareable.
     """
-    from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
+    from playbook_engine.digest import build_digest_v4, digest_token_estimate  # noqa: PLC0415
 
     raw, doc = _read_opf(out_dir)
-    digest = doc.get("digest") or build_digest(doc)
+    digest = doc.get("digest") or build_digest_v4(doc)
 
     d_clauses = digest.get("clauses", [])
     token_est = digest_token_estimate(digest)
-    digest_summary = _render_digest_summary(d_clauses, token_est)
+    digest_summary = _render_digest_summary(
+        d_clauses, token_est, digest.get("uncovered_clause_types")
+    )
 
     scripts = (
         "<!-- Machine-readable payloads. Extract a block, JSON-parse it, and verify\n"

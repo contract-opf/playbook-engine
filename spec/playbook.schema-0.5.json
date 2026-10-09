@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json",
   "title": "Open Playbook Format (OPF) v0.5",
-  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 3 model-facing projection. OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 4 model-facing projection. OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
   "type": "object",
   "required": [
     "opf_version",
@@ -578,13 +578,14 @@
     },
     "digest": {
       "type": "object",
-      "description": "digest_version 3 \u2014 the compact model-facing projection of the 0.5 evidence (playbook_engine/digest.py build_digest_v3). Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields. Covered by identity.content_hash like every content section.",
+      "description": "digest_version 4 \u2014 the compact model-facing projection of the 0.5 evidence (playbook_engine/digest.py build_digest_v4): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v4(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` label, an index and never an instruction. Covered by identity.content_hash like every content section.",
       "required": [
         "digest_version",
         "perspective",
         "agreement_type",
         "corpus",
-        "clauses"
+        "clauses",
+        "uncovered_clause_types"
       ],
       "additionalProperties": false,
       "patternProperties": {
@@ -593,7 +594,7 @@
       "properties": {
         "digest_version": {
           "type": "string",
-          "const": "3"
+          "const": "4"
         },
         "perspective": {
           "description": "Copy of the document's top-level `perspective` (null when absent) \u2014 the digest always says who 'us' is.",
@@ -653,6 +654,26 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/digestClause"
+          }
+        },
+        "uncovered_clause_types": {
+          "type": "array",
+          "description": "Every classifier-eligible taxonomy entry (status `active` or `custom`) with no `evidence.clauses[]` entry, sorted by taxonomy_id and never capped: a recognised clause type with no precedent in this corpus, nothing more.",
+          "items": {
+            "type": "object",
+            "required": [
+              "taxonomy_id",
+              "label"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "taxonomy_id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
           }
         }
       }
@@ -782,7 +803,10 @@
         "n_deals",
         "n_signed_standard",
         "n_variants",
-        "n_refused"
+        "n_refused",
+        "n_opened_standard",
+        "n_kept_standard",
+        "n_changed_openings"
       ],
       "additionalProperties": false,
       "properties": {
@@ -817,6 +841,21 @@
           "type": "integer",
           "minimum": 0,
           "description": "Distinct refused-ask texts, grouped the same way."
+        },
+        "n_opened_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened with our standard (`opened_with` is `standard`)."
+        },
+        "n_kept_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those deals, the ones whose signed text is our standard language (`standard: true`)."
+        },
+        "n_changed_openings": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct non-standard openings that were not signed as proposed (a signed deal's `opened_with` is `non_standard` and `opening_text` is set), grouped by the \u00a73.5.4 grouping key, excluding an opening that is also one of the same deal's refused asks. Equals the digest's `n_changed_openings_total`."
         }
       }
     },
@@ -980,10 +1019,14 @@
     },
     "digestVariant": {
       "type": "object",
+      "description": "One non-standard text signed in at least one deal (one \u00a73.5.4 grouping key).",
       "required": [
         "text",
         "n_deals",
         "last_signed",
+        "n_from_standard",
+        "n_unchanged",
+        "label",
         "ref",
         "precedent_ids"
       ],
@@ -1000,6 +1043,26 @@
         },
         "last_signed": {
           "$ref": "#/$defs/signedAtOrNull"
+        },
+        "n_from_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deals in the group whose clause opened with our standard: the variant is a concession on record."
+        },
+        "n_unchanged": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deals in the group whose clause opened non-standard and was signed exactly as it opened (`opening_text` null)."
+        },
+        "label": {
+          "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
+          "enum": [
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "different_concept",
+            null
+          ]
         },
         "ref": {
           "$ref": "#/$defs/citation"
@@ -1018,6 +1081,7 @@
       "required": [
         "text",
         "n_deals",
+        "label",
         "ref",
         "precedent_ids"
       ],
@@ -1030,6 +1094,16 @@
         "n_deals": {
           "type": "integer",
           "minimum": 1
+        },
+        "label": {
+          "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
+          "enum": [
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "different_concept",
+            null
+          ]
         },
         "ref": {
           "$ref": "#/$defs/citation"
@@ -1052,10 +1126,15 @@
         "our_standard",
         "n_deals",
         "n_signed_standard",
+        "n_opened_standard",
+        "n_kept_standard",
+        "positions",
         "signed_variants",
         "refused_asks",
+        "changed_openings",
         "n_variants_total",
-        "n_refused_total"
+        "n_refused_total",
+        "n_changed_openings_total"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1079,12 +1158,32 @@
           "type": "integer",
           "minimum": 0
         },
+        "n_opened_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened with our standard."
+        },
+        "n_kept_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, deals whose signed text is our standard language."
+        },
+        "positions": {
+          "$ref": "#/$defs/digestPositions"
+        },
         "signed_variants": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/digestVariant"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/digestVariant"
+              },
+              {
+                "$ref": "#/$defs/digestEquivalentVariants"
+              }
+            ]
           },
-          "description": "Non-standard signed variants, ordered n_deals desc, last_signed desc, then normalized text; capped (see n_variants_total)."
+          "description": "Signed variants: `less_protective` and `different_concept` first, then unjudged, then `more_protective`, each tier ordered n_deals desc, last_signed desc, then normalized text; the single collapsed `equivalent` entry last. The cap applies after collapsing (see n_variants_total)."
         },
         "refused_asks": {
           "type": "array",
@@ -1100,6 +1199,18 @@
         "n_refused_total": {
           "type": "integer",
           "minimum": 0
+        },
+        "changed_openings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestChangedOpening"
+          },
+          "description": "Non-standard openings not signed as proposed, ordered n_deals desc, then normalized text; capped (see n_changed_openings_total)."
+        },
+        "n_changed_openings_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Uncapped number of changed openings; equals evidence.clauses[].n_changed_openings."
         }
       }
     },
@@ -1178,6 +1289,171 @@
             }
           ],
           "description": "The independent blind check of this verdict; null = not checked yet."
+        }
+      }
+    },
+    "digestEquivalentVariants": {
+      "type": "object",
+      "description": "All signed variants labelled `equivalent` to our standard, collapsed into ONE entry.",
+      "required": [
+        "label",
+        "n_deals",
+        "n_texts",
+        "n_from_standard",
+        "n_unchanged",
+        "last_signed",
+        "exemplars",
+        "precedent_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "const": "equivalent"
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Distinct deals that signed any of the collapsed texts."
+        },
+        "n_texts": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many distinct texts (\u00a73.5.4 grouping keys) collapsed into this entry."
+        },
+        "n_from_standard": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_signed": {
+          "$ref": "#/$defs/signedAtOrNull"
+        },
+        "exemplars": {
+          "type": "array",
+          "maxItems": 2,
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "text",
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "ref": {
+                "$ref": "#/$defs/citation"
+              }
+            }
+          },
+          "description": "At most two of the collapsed texts, in group order (n_deals desc, last_signed desc, then normalized text)."
+        },
+        "precedent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "digestChangedOpening": {
+      "type": "object",
+      "description": "Non-standard opening language that was not signed as proposed (one \u00a73.5.4 grouping key of `opening_text`).",
+      "required": [
+        "text",
+        "n_deals",
+        "n_to_standard",
+        "n_struck",
+        "label",
+        "ref",
+        "precedent_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Sentence-boundary summary (\u2264 300 chars) of the representative (lowest document_id) opening."
+        },
+        "n_deals": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "n_to_standard": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deals in the group whose signed text is our standard language."
+        },
+        "n_struck": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Deals in the group whose clause was struck (`signed_text` null)."
+        },
+        "label": {
+          "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
+          "enum": [
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "different_concept",
+            null
+          ]
+        },
+        "ref": {
+          "$ref": "#/$defs/citation"
+        },
+        "precedent_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "digestPositions": {
+      "type": "object",
+      "description": "Distinct signed deals that signed a text for the clause, by position: our standard, each `vs_standard` label of a non-standard text, or unjudged.",
+      "required": [
+        "standard",
+        "equivalent",
+        "more_protective",
+        "less_protective",
+        "different_concept",
+        "unjudged"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "standard": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "equivalent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "more_protective": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "less_protective": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "different_concept": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unjudged": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

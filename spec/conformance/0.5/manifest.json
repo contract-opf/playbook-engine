@@ -2,19 +2,19 @@
   "format_version": {
     "opf_version": "0.5",
     "engine_version": "1.0.0",
-    "digest_version": "3"
+    "digest_version": "4"
   },
-  "algorithm": "canonical / content_hash / section_digests: exactly as the 0.3 set (../manifest.json). digest: playbook_engine.digest.build_digest(input) with the default token_budget, which for opf_version 0.5 is build_digest_v3 (OPF-SPEC.md §3.12.1): signed variants and refused asks grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent.normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', then deviation_classifier.normalize_for_standard with the document's perspective.party as the one party name -> 'party'), text = observation_builder.summarize_clause_text of the group representative.",
+  "algorithm": "canonical / content_hash / section_digests: exactly as the 0.3 set (../manifest.json). digest: playbook_engine.digest.build_digest_v4(input) with the default token_budget, which for opf_version 0.5 is build_digest_v4 (OPF-SPEC.md §3.12.2): signed variants, refused asks and changed openings grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent.normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', then deviation_classifier.normalize_for_standard with the document's perspective.party as the one party name -> 'party'), text = observation_builder.summarize_clause_text of the group representative; the signed variants labelled equivalent (vs_standard) collapse into one entry and the cap applies after collapsing.",
   "vectors": [
     {
       "name": "minimal-no-perspective",
       "file": "vectors/001-minimal-no-perspective.json",
-      "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null."
+      "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 4 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null, uncovered_clause_types is an empty list."
     },
     {
       "name": "variants-refused-and-exclusions",
       "file": "vectors/002-variants-refused-and-exclusions.json",
-      "description": "One clause, eight deals, pinning digest_version 3 grouping and every exclusion rule: two deals signed our standard (n_signed_standard 2, never a variant); variant A signed in three deals, one spelled with different case/punctuation (exact normalization merges it) — its representative is the deal with the latest signed_at, a YYYY-Qn quarter that sorts at the quarter's first day; variant B differs from A by the negator 'not' only and stays a separate group; an unsigned deal's text is never a signed variant; a deal whose standard was struck (signed_text null, opening_text set) contributes no variant. The same refused ask in three deals (three spellings) is one group with n_deals 3 whose representative is the earliest-round ask. perspective is copied into the digest."
+      "description": "One clause, eight deals, pinning digest_version 4 grouping and every exclusion rule: two deals signed our standard (n_signed_standard 2, never a variant); variant A signed in three deals, one spelled with different case/punctuation (exact normalization merges it) — its representative is the deal with the latest signed_at, a YYYY-Qn quarter that sorts at the quarter's first day; variant B differs from A by the negator 'not' only and stays a separate group; an unsigned deal's text is never a signed variant; a deal whose standard was struck (signed_text null, opening_text set) contributes no variant. The same refused ask in three deals (three spellings) is one group with n_deals 3 whose representative is the earliest-round ask. perspective is copied into the digest."
     },
     {
       "name": "cap-totals-and-summary",
@@ -29,7 +29,17 @@
     {
       "name": "opening-evidence",
       "file": "vectors/005-opening-evidence.json",
-      "description": "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text for seven deals of one clause. deal-a opened with our standard and signed an edit (opening_text = the standard); deal-b opened non-standard and signed our standard (opening_text recorded whatever its origin); deal-c opened non-standard and signed it unchanged (opened_with non_standard, opening_text null); deal-d added the clause in round 2 (opened_with absent, opening_text null); deal-e is unsigned (opened_with and opening_text null); deal-f's only edit is case (same grouping key, so opening_text null); deal-g opened non-standard and struck it before signing (opening_text set, signed_text null, no refused ask). The digest is unaffected: opening evidence is not projected into digest_version 3."
+      "description": "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text for seven deals of one clause. deal-a opened with our standard and signed an edit (opening_text = the standard); deal-b opened non-standard and signed our standard (opening_text recorded whatever its origin); deal-c opened non-standard and signed it unchanged (opened_with non_standard, opening_text null); deal-d added the clause in round 2 (opened_with absent, opening_text null); deal-e is unsigned (opened_with and opening_text null); deal-f's only edit is case (same grouping key, so opening_text null); deal-g opened non-standard and struck it before signing (opening_text set, signed_text null, no refused ask). The digest projects it as n_opened_standard 2 (deal-a, deal-f) / n_kept_standard 1 (deal-f), one signed variant (deal-a, -c, -d) carrying n_from_standard 1 and n_unchanged 1 (deal-d's absent clause counts in neither), and two changed openings (deal-b's, which ended at our standard, and deal-g's struck one)."
+    },
+    {
+      "name": "opening-rules",
+      "file": "vectors/006-opening-rules.json",
+      "description": "The digest 4 opening rules (OPF-SPEC §3.12.2) on one clause with ten deals. n_opened_standard counts signed deals whose opened_with is standard (deal-a's edited standard, deal-b's struck standard, deal-i's kept one) and n_kept_standard those that signed our standard (deal-i only). Variants carry n_from_standard (deal-a conceded the New York variant from our standard) and n_unchanged (deal-d signed its non-standard opening as proposed); deal-g's 'absent' clause counts in neither. changed_openings: deal-c's non-standard opening that ended at our standard and deal-j's respelling of it are ONE entry (n_deals 2, n_to_standard 1); deal-f's struck opening with no refused ask is included (n_struck 1); deal-e's struck opening is also one of its own refused asks, so it is shown as a refused ask only; deal-h is unsigned and ignored."
+    },
+    {
+      "name": "equivalence-label-and-coverage",
+      "file": "vectors/007-equivalence-label-and-coverage.json",
+      "description": "The vs_standard label in the digest (OPF-SPEC §3.5.6, §3.12.2) and uncovered_clause_types. Signed variants labelled equivalent (three deals, two distinct texts; the respelled text merges under the grouping key) collapse into ONE entry with n_deals 3, n_texts 2, two exemplars and the concession count; the rest are listed individually in tier order: less_protective (two deals), different_concept, the unjudged one (a signed text with no label), more_protective, then the collapsed entry. positions counts signed deals by standard, each label and unjudged. The refused ask and the changed opening carry their labels. The taxonomy lists one covered entry, an active and a custom entry with no evidence (uncovered_clause_types, sorted by taxonomy_id) and an inactive entry (never listed)."
     }
   ]
 }

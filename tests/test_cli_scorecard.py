@@ -43,7 +43,7 @@ from playbook_engine.agent_segmenter import (
 )
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.cli import cli
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.pipeline import _observation_classification_basis
@@ -115,6 +115,12 @@ _FIELD_NAMES = frozenset(
         "capped_clauses",
         "signed_variant_groups",
         "refused_ask_groups",
+        "n_opened_standard",
+        "n_kept_standard",
+        "signed_variants_n_from_standard",
+        "signed_variants_n_unchanged",
+        "changed_openings",
+        "uncovered_clause_types",
         "queues",
         "judge_pending",
         "judge_pending_by_kind",
@@ -201,11 +207,17 @@ _NDA_FLAT_KEYS = frozenset(
         "corpus.signed",
         "corpus.versions",
         "digest.capped_clauses",
+        "digest.changed_openings",
         "digest.clauses",
         "digest.digest_version",
+        "digest.n_kept_standard",
+        "digest.n_opened_standard",
         "digest.refused_ask_groups",
         "digest.signed_variant_groups",
+        "digest.signed_variants_n_from_standard",
+        "digest.signed_variants_n_unchanged",
         "digest.token_estimate",
+        "digest.uncovered_clause_types",
         "dossiers",
         "dropped_observations.by_reason.removed_origin_undetermined",
         # Issue #240: no verdict store in this run, so every eligible text is
@@ -347,7 +359,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 4
+    assert card["scorecard_version"] == 5
     assert card["opf_version"] == "0.5"
     assert card["corpus"] == {
         "documents": 6,
@@ -385,7 +397,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
         card["dropped_observations"]["count"]
         == (playbook["corpus"]["stats"]["dropped_observations"]["count"])
     )
-    assert card["digest"]["digest_version"] == "3"
+    assert card["digest"]["digest_version"] == "4"
     assert card["digest"]["token_estimate"] > 0
     assert card["digest"]["clauses"] == len(playbook["digest"]["clauses"])
     digest_clauses = playbook["digest"]["clauses"]
@@ -395,6 +407,29 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     )
     assert card["digest"]["refused_ask_groups"] == sum(
         c.get("n_refused_total", 0) for c in digest_clauses
+    )
+    # Digest 4 (issue #234): the counts the acceptance run reports.
+    assert card["digest"]["n_opened_standard"] == sum(
+        c["n_opened_standard"] for c in digest_clauses
+    )
+    assert card["digest"]["n_kept_standard"] == sum(c["n_kept_standard"] for c in digest_clauses)
+    assert card["digest"]["changed_openings"] == sum(
+        c["n_changed_openings_total"] for c in digest_clauses
+    )
+    assert card["digest"]["uncovered_clause_types"] == len(
+        playbook["digest"]["uncovered_clause_types"]
+    )
+    precedent_records = playbook["evidence"]["precedent"]
+    variants = [
+        r
+        for r in precedent_records
+        if r["signed"] is True and r["standard"] is not True and r["signed_text"] is not None
+    ]
+    assert card["digest"]["signed_variants_n_from_standard"] == sum(
+        1 for r in variants if r["opened_with"] == "standard"
+    )
+    assert card["digest"]["signed_variants_n_unchanged"] == sum(
+        1 for r in variants if r["opened_with"] == "non_standard" and r["opening_text"] is None
     )
     assert precedent["openings"] == sum(
         1 for r in playbook["evidence"]["precedent"] if r.get("opening_text") is not None
@@ -729,7 +764,7 @@ def test_digest_capped_clauses_count_lists_shorter_than_their_totals(
     # The real digest builder under a budget it cannot meet tightens every
     # list to its floor of one entry, so clauses with more groups than that
     # show fewer than their uncapped *_total.
-    doc["digest"] = build_digest(doc, token_budget=1)
+    doc["digest"] = build_digest_v4(doc, token_budget=1)
     path.write_text(json.dumps(doc), encoding="utf-8")
     clauses = doc["digest"]["clauses"]
     capped = [

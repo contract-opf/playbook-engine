@@ -77,7 +77,7 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
           precedent per (deal, clause) (signed_text, standard, rounds/moved,
           opened_with, opening_text, refused_asks, paper as metadata only);
           clause n_* counts
-          and the digest_version 3 digest are derived from it (precedent.py)
+          and the digest_version 4 digest are derived from it (precedent.py)
         - every evidence count counts DISTINCT DEALS; nothing is read from a
           judged verdict or risk direction
         - one format only: OPF 0.1–0.4 and digest 2 were retired (issues #238, #233)

@@ -9,7 +9,8 @@ lists:
 
 ``evidence.clauses[]``
     One entry per clause type: ``{id, taxonomy_id, title, our_standard,
-    n_deals, n_signed_standard, n_variants, n_refused}``. Every count is
+    n_deals, n_signed_standard, n_variants, n_refused, n_opened_standard,
+    n_kept_standard, n_changed_openings}``. Every count is
     derived from ``evidence.precedent`` (the validator recomputes them).
 
 ``evidence.precedent[]``
@@ -58,6 +59,7 @@ __all__ = [
     "PAPER_UNKNOWN",
     "PRECEDENT_ID_PREFIX",
     "build_precedent_evidence",
+    "changed_opening_members",
     "clause_counts",
     "normalize_variant_text",
     "paper_of_corpus_document",
@@ -119,7 +121,7 @@ _COUNTERPARTY_TOKEN = "counterparty"
 
 
 def normalize_variant_text(text: str, *, party: str | None) -> str:
-    """Grouping key for signed variants, refused asks and openings (OPF 0.5 / digest 3).
+    """Grouping key for signed variants, refused asks and openings (OPF 0.5 / digest 4).
 
     Normative as OPF-SPEC §3.5.4 "Grouping key". The standard check's
     exact-after-normalization rule
@@ -453,10 +455,38 @@ def restamp_evidence(
         clause.update(clause_counts(clause["taxonomy_id"], precedent, party=party))
 
 
+def changed_opening_members(
+    records: list[dict[str, Any]], *, party: str | None
+) -> dict[str, list[dict[str, Any]]]:
+    """The precedent records behind a clause's changed openings, by grouping key.
+
+    A changed opening (digest 4, issue #234) is non-standard opening language
+    that was not signed as proposed: a signed deal's record whose
+    ``opened_with`` is ``"non_standard"`` and whose ``opening_text`` is
+    non-null (a distinct opening), excluding a record whose opening grouping
+    key equals the grouping key of one of its own ``refused_asks`` (that text
+    is already a refused ask). Keyed by the §3.5.4 grouping key of
+    ``opening_text.text``; each value is the group's members, one record per
+    deal. *records* are the precedent records of ONE clause type.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for p in records:
+        if p.get("signed") is not True or p.get("opened_with") != OPENED_NON_STANDARD:
+            continue
+        key = _entry_key(p.get("opening_text"), party)
+        if not key:
+            continue
+        refused_keys = {_entry_key(ask, party) for ask in (p.get("refused_asks") or [])}
+        if key in refused_keys:
+            continue
+        groups.setdefault(key, []).append(p)
+    return groups
+
+
 def clause_counts(
     taxonomy_id: str, precedent: list[dict[str, Any]], *, party: str | None
 ) -> dict[str, int]:
-    """The four ``evidence.clauses[]`` counts one clause's precedent implies.
+    """The seven ``evidence.clauses[]`` counts one clause's precedent implies.
 
     - ``n_deals``: distinct deals with a precedent record for the clause.
     - ``n_signed_standard``: distinct signed deals whose signed text is our
@@ -465,9 +495,15 @@ def clause_counts(
       grouped by :func:`normalize_variant_text` with *party* (the document's
       ``perspective.party``, :func:`~playbook_engine.opf_accessors.perspective_party`).
     - ``n_refused``: distinct refused-ask texts, grouped the same way.
+    - ``n_opened_standard`` (issue #234): distinct signed deals whose
+      ``opened_with`` is ``"standard"``.
+    - ``n_kept_standard``: of those, deals whose ``standard`` is true.
+    - ``n_changed_openings``: distinct changed openings
+      (:func:`changed_opening_members`), grouped by the same key.
 
     Shared by the assembler and the validator's count cross-check, and equal
-    to the digest's ``n_variants_total``/``n_refused_total``.
+    to the digest's ``n_variants_total``/``n_refused_total``/
+    ``n_changed_openings_total``.
     """
     records = [p for p in precedent if isinstance(p, dict) and p.get("taxonomy_id") == taxonomy_id]
     deals = {p.get("document_id") for p in records}
@@ -490,11 +526,19 @@ def clause_counts(
         for key in (_entry_key(ask, party),)
         if key
     }
+    opened_standard = [
+        p for p in records if p.get("signed") is True and p.get("opened_with") == OPENED_STANDARD
+    ]
     return {
         "n_deals": len(deals),
         "n_signed_standard": len(standard_deals),
         "n_variants": len(variants),
         "n_refused": len(refused),
+        "n_opened_standard": len({p.get("document_id") for p in opened_standard}),
+        "n_kept_standard": len(
+            {p.get("document_id") for p in opened_standard if p.get("standard") is True}
+        ),
+        "n_changed_openings": len(changed_opening_members(records, party=party)),
     }
 
 

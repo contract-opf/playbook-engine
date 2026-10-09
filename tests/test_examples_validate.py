@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
-from playbook_engine.digest import build_digest
+from playbook_engine.digest import build_digest_v4
 from playbook_engine.validator import validate_document
 
 ROOT = Path(__file__).parent.parent
@@ -83,10 +83,10 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     assert len(invariants) >= 2, "NDA example must demonstrate >=2 floor.invariants"
 
     # Issue #223: the NDA example is the OPF 0.5 reference artifact — the
-    # verdict-free per-deal precedent record with a digest_version 3 digest.
+    # verdict-free per-deal precedent record with a digest_version 4 digest.
     assert doc["opf_version"] == "0.5"
-    assert doc["digest"]["digest_version"] == "3"
-    assert doc["digest"] == build_digest(doc), "NDA example digest is stale"
+    assert doc["digest"]["digest_version"] == "4"
+    assert doc["digest"] == build_digest_v4(doc), "NDA example digest is stale"
     assert doc["digest"]["perspective"] == doc["perspective"]
 
     clauses = doc["evidence"]["clauses"]
