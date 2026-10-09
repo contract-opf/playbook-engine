@@ -1,44 +1,34 @@
 """Presentational HTML rendering of a compiled playbook — ``view bundle``.
 
-Companion to :mod:`playbook_engine.viewer` with a different job: where
-``view render`` produces the *review/annotation surface* (numbered items,
-comment boxes, feedback export), this module produces the *readable
-playbook* — a typographic, print-friendly document a lawyer can read top to
-bottom or hand to a stakeholder.
+Produces the *readable playbook* — a typographic, print-friendly document a
+lawyer can read top to bottom or hand to a stakeholder.
 
-The readable document is no longer an artifact of its own. It ships inside
-the single-file bundle ``playbook.opf.html`` (:func:`render_bundle_html`),
-which packages the same document body, plus a digest summary, plus the
-canonical OPF JSON and digest embedded as machine-readable
-``<script type="application/json">`` blocks. This is NOT a guarantee of
-pseudonymization: ``known_entities`` matching is best-effort, and a
-misconfigured or incomplete list can leave real names in this file (see the
-mandatory residue check in the ``playbook-from-corpus`` skill, issue #136) —
-run that check before treating the bundle as shareable. The bare
-``playbook.opf.json`` remains the canonical source of truth on disk.
-:func:`render_document_html` stays as the internal document renderer the
-bundle composes; it is no longer exposed as its own CLI command (the former
-``playbook view document`` deprecated alias was removed — use ``view
-bundle``).
+The readable document ships inside the single-file bundle
+``playbook.opf.html`` (:func:`render_bundle_html`), which packages the
+document body, plus a digest summary, plus the canonical OPF JSON and digest
+embedded as machine-readable ``<script type="application/json">`` blocks.
+This is NOT a guarantee of pseudonymization: ``known_entities`` matching is
+best-effort, and a misconfigured or incomplete list can leave real names in
+this file (see the mandatory residue check in the ``playbook-from-corpus``
+skill, issue #136) — run that check before treating the bundle as shareable.
+The bare ``playbook.opf.json`` remains the canonical source of truth on disk.
 
-Both renderings are built by :func:`_render_document_page` from a parsed OPF
-document, with the bundle passing its extra markup through that function's
-explicit seams — so the bundle contains the whole document by construction,
-not by string-splicing rendered template text.
+The bundle is built by :func:`_render_document_page` from a parsed OPF
+document, passing its extra markup through that function's explicit seams —
+so the bundle contains the whole document by construction, not by
+string-splicing rendered template text.
 
 Sections rendered per clause: our standard, how many deals signed it, the
 non-standard variants signed and the asks refused before signing (collapsed),
 each with its distinct-deal count and citation. Empty Posture/Floor
-sections render as an explicit "pending GC interview" note rather than being
-omitted — same honesty-first convention as the after-action report.
+sections render as an explicit "pending" note rather than being omitted.
 
 Alias handling: the document body shows the ``Counterparty-N`` aliases
 exactly as stored in ``playbook.opf.json`` — best-effort ``known_entities``
 matching, not a guarantee no raw name reached that JSON (run the mandatory
 residue check before calling it shareable). The bundle takes no alias map by
 design — it embeds the canonical JSON, so resolving real names into it would
-both leak them and break hash verification. Internal-eyes review with real
-names lives in ``view render --alias-map``. The on-disk OPF is never
+both leak them and break hash verification. The on-disk OPF is never
 modified.
 """
 
@@ -54,7 +44,6 @@ from playbook_engine.opf_accessors import (
     playbook_clauses,
     playbook_precedent,
 )
-from playbook_engine.viewer import _resolve_aliases_in_doc
 
 
 def _cite_str(ref: dict[str, Any] | None) -> str:
@@ -472,43 +461,6 @@ position traces to cited corpus text. Confidential work product.
 """
 
 
-def render_document_html(
-    out_dir: Path, out_file: Path | None = None, alias_map: dict[str, str] | None = None
-) -> str:
-    """Render ``playbook.opf.json`` as a readable, print-friendly document.
-
-    Internal rendering entry point: the readable document is no longer a
-    user-facing artifact of its own — it ships inside the single-file bundle
-    (``render_bundle_html`` / ``playbook view bundle``), which composes this
-    same body through ``_render_document_page``. Kept as a function because
-    the bundle and the alias-resolving internal path both need it.
-
-    Args:
-        out_dir:   Directory containing ``playbook.opf.json``.
-        out_file:  If given, write the HTML there atomically (parent dirs
-                   created); the HTML string is returned regardless.
-        alias_map: Optional held-out ``alias -> real name`` map — same
-                   contract as ``view render`` (issue #146): resolution
-                   affects the rendered HTML only, never the stored OPF.
-
-    Returns:
-        Self-contained HTML string (no scripts, no external requests).
-
-    Raises:
-        FileNotFoundError: ``playbook.opf.json`` missing from *out_dir*.
-    """
-    _, doc = _read_opf(out_dir)
-    if alias_map:
-        doc = _resolve_aliases_in_doc(doc, alias_map)
-
-    html_out = _render_document_page(doc)
-
-    if out_file is not None:
-        _write_atomic(out_file, html_out)
-
-    return html_out
-
-
 def _escape_json_for_script(json_text: str) -> str:
     """Make a JSON string safe inside a ``<script type="application/json">``.
 
@@ -552,9 +504,8 @@ def _render_digest_summary(d_clauses: list[dict[str, Any]], token_est: int) -> s
 def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     """Render the single-file OPF bundle: ``playbook.opf.html``.
 
-    The full human document (the same body :func:`render_document_html`
-    produces, including the Method & provenance panel), plus a digest
-    summary section, with the
+    The full human document (including the Method & provenance panel), plus
+    a digest summary section, with the
     CANONICAL OPF JSON and the digest embedded verbatim in
     ``<script type="application/json">`` blocks:
 
@@ -571,8 +522,7 @@ def render_bundle_html(out_dir: Path, out_file: Path | None = None) -> str:
     hash verification. This is NOT a guarantee of pseudonymization —
     ``known_entities`` matching is best-effort; run the mandatory residue
     check (``playbook-from-corpus`` skill, issue #136) before treating the
-    bundle as shareable. Internal-eyes review with real names belongs to
-    ``view render --alias-map``.
+    bundle as shareable.
     """
     from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
 

@@ -514,14 +514,17 @@ def test_floor_invariant_posture_interview_marker_suppresses_the_warning() -> No
     assert not any("structural attribution" in e.message for e in result.errors)
 
 
-def test_floor_invariant_review_feedback_marker_suppresses_the_warning() -> None:
+def test_floor_invariant_review_feedback_marker_no_longer_attributes() -> None:
+    """The review-feedback path (`view apply`) is retired (issue #239): its
+    rationale marker attributes nothing, so such an invariant warns like any
+    other that no engine path produced."""
     result = validate_document(
         _with_invariant(
             "Proposed then reversed before signing. Accepted via review feedback "
             "(floor candidate cand-001)."
         )
     )
-    assert not any("structural attribution" in e.message for e in result.errors)
+    assert any("structural attribution" in e.message for e in result.errors)
 
 
 def test_floor_invariant_agent_typed_rationale_still_warns() -> None:

@@ -227,8 +227,7 @@ def scope_gate(
         # reach scope.json UNCONDITIONALLY (pipeline.py's per-document loop
         # calls scope_log.record(...) for every scope_decision regardless of
         # in_scope), and from there is echoed into the inspection report
-        # (inspection_report._load_scope / _render_document) and the AAR's
-        # report.md (aar._build_corpus_coverage). `judge` is an arbitrary
+        # (inspection_report._load_scope / _render_document). `judge` is an arbitrary
         # ScopeJudge delegate — an LLM call in production — so `exc`'s message
         # is not provably structural (it can carry a JSON-parse snippet of the
         # model's own response, an SDK error embedding request content, or

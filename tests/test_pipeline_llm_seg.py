@@ -41,12 +41,6 @@ import yaml
 
 from playbook_engine import extraction
 from playbook_engine import pipeline as pipeline_module
-from playbook_engine import publisher as publisher_module
-from playbook_engine.aar import (
-    build_after_action_data,
-    build_after_action_report,
-    write_after_action_report,
-)
 from playbook_engine.clause_classifier import AMBIGUITY_THRESHOLD
 from playbook_engine.clause_differ import ClauseDiff, TextHunk
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
@@ -54,6 +48,7 @@ from playbook_engine.config import load_config
 from playbook_engine.docx_ingester import TextUnit, TrackedChange, TrackedChanges
 from playbook_engine.entity_registry import EntityRegistry
 from playbook_engine.extraction import ExtractionCache, ExtractorLabel, extract_blocks
+from playbook_engine.inspection_report import write_inspection_report
 from playbook_engine.llm_segmenter import SegmentationLLMError
 from playbook_engine.llm_segmenter_batch import (
     NormalizeTrailError,
@@ -75,6 +70,7 @@ from playbook_engine.pipeline import (
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.validator import validate_document
+from tests.entity_scan import entity_backstop_scan
 
 # ---------------------------------------------------------------------------
 # RTF fixture helpers (same convention as test_pipeline_project.py /
@@ -722,21 +718,16 @@ def test_classified_from_taxonomy_by_path_is_not_asserted_confidence_1_judge() -
     assert cc.is_ambiguous, "a below-threshold LLM-segmenter confidence must read as ambiguous"
 
 
-def test_llm_segmentation_low_confidence_surfaces_in_after_action_review(tmp_path: Path) -> None:
+def test_llm_segmentation_confidence_is_below_the_ambiguity_threshold_on_every_observation(
+    tmp_path: Path,
+) -> None:
     """A below-threshold LLM-segmenter classification confidence must actually
-    reach the after-action report's needs-attention section — the concrete
-    downstream confidence-based review gate in this repo (aar._build_needs_attention,
-    fed by classification_confidences -> build_observations -> Observation.confidence).
+    reach the observation store — the confidence a downstream reader gates on
+    (classification_confidences -> build_observations -> Observation.confidence).
 
     Before the #86 fix, confidence=1.0 meant these clauses could never trip
-    this gate; the LLM misclassifying an indemnification clause would present
-    as a certainty in the observation store.
-
-    Since #181, this flat by-design confidence (pipeline._LLM_SEGMENTER_CONFIDENCE)
-    is rolled into a single aggregate "spot-check" row rather than one
-    per-observation "low confidence" row — asserting individual "low
-    confidence" text here would defeat that aggregation, so this checks for
-    the aggregate row instead.
+    a confidence-based review gate; the LLM misclassifying an indemnification
+    clause would present as a certainty in the observation store.
     """
     corpus_dir, config_path, out_dir = _make_corpus(tmp_path, two_versions=False)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
@@ -755,21 +746,9 @@ def test_llm_segmentation_low_confidence_surfaces_in_after_action_review(tmp_pat
     raw_obs = read_observations_jsonl(out_dir / "observations.jsonl")
     classified_obs = [o for o in raw_obs if o["taxonomy_id"] is not None]
     assert classified_obs, "must have at least one LLM-classified observation to check"
-    assert all(o["confidence"] < 0.5 for o in classified_obs), (
+    assert all(o["confidence"] < AMBIGUITY_THRESHOLD for o in classified_obs), (
         "LLM-segmented classifications must carry a confidence below the "
-        "after-action report's low-confidence threshold"
-    )
-
-    data = build_after_action_data(out_dir)
-    needs_attention = data["needs_attention"]
-    assert any("spot-check" in "".join(item.get("reasons", [])) for item in needs_attention), (
-        f"expected the aggregate spot-check needs_attention item; got {needs_attention}"
-    )
-    assert not any(
-        "low confidence" in "".join(item.get("reasons", [])) for item in needs_attention
-    ), (
-        "flat by-design LLM-segmenter confidence must NOT also produce "
-        f"individual low-confidence rows; got {needs_attention}"
+        "ambiguity threshold, never an asserted certainty"
     )
 
 
@@ -1005,8 +984,8 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     body names that entity as the FIRST TOKEN of the uncovered text (see
     ``_ENTITY_LEAK_BODY``'s docstring for exactly why that specific shape
     matters) leaked the RAW counterparty name into corpus_manifest.json,
-    playbook.opf.json, AND review.json — and would trip publisher's hard,
-    unsuppressible step-4 entity backstop on compile. This fix instead never
+    playbook.opf.json, AND review.json — and would trip the independent
+    no-known-entity scan on compile. This fix instead never
     embeds a raw text slice in the QA error message at all (see
     ``segmentation_qa._check_coverage``), so no alias-matching edge case can
     reintroduce this leak. corpus_manifest.json is never length-truncated
@@ -1054,13 +1033,12 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     assert _ENTITY_LEAK_NAME not in published_text
     assert _ENTITY_LEAK_NAME not in json.dumps(playbook), "double-check the in-memory dict too"
 
-    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
-    # must find zero hits — the compiled playbook must already be born-safe
-    # by the time it reaches publish.
+    # The independent no-known-entity scan (tests/entity_scan.py) must find
+    # zero hits — the compiled playbook must already be born-safe.
     registry = EntityRegistry.load(tmp_path / "registry.json")
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [_ENTITY_LEAK_NAME], "sanity: the entity really was registered"
-    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+    assert entity_backstop_scan(playbook, known_entity_names) == []
 
 
 def test_taxonomy_gate_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
@@ -1131,15 +1109,14 @@ def test_taxonomy_gate_error_never_leaks_raw_entity_name(tmp_path: Path) -> None
         "double-check the in-memory dict too"
     )
 
-    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
-    # must find zero hits — the compiled playbook must already be born-safe
-    # by the time it reaches publish.
+    # The independent no-known-entity scan (tests/entity_scan.py) must find
+    # zero hits — the compiled playbook must already be born-safe.
     registry = EntityRegistry.load(tmp_path / "registry.json")
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [_TAXONOMY_LEAK_ENTITY_NAME], (
         "sanity: the entity really was registered"
     )
-    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+    assert entity_backstop_scan(playbook, known_entity_names) == []
 
 
 def test_taxonomy_gate_non_string_id_quarantines_with_taxonomy_reason(tmp_path: Path) -> None:
@@ -1311,10 +1288,7 @@ def test_hints_error_never_leaks_raw_entity_name_via_path(tmp_path: Path) -> Non
     hints.yaml, in a corpus where the document folder is named after a
     provenance.known_entities entry, used to write the raw entity name
     straight into quarantine.json's reason field — even though #83 already
-    aliases quarantine.json's document_id field separately — and from there
-    into the after-action report too (aar._load_quarantine ->
-    _build_needs_attention embeds quarantine's reason verbatim; see
-    playbook_engine/aar.py:576). (HintsError carries no partial_corpus_doc —
+    aliases quarantine.json's document_id field separately. (HintsError carries no partial_corpus_doc —
     unlike SegmentationQAError — so it never reaches corpus_manifest.json at
     all; see _make_mixed_corpus_with_malformed_hints.) This fix instead
     names the file by its bare filename ("hints.yaml"), never embedding the
@@ -1365,20 +1339,16 @@ def test_hints_error_never_leaks_raw_entity_name_via_path(tmp_path: Path) -> Non
     manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
     assert _HINTS_LEAK_ENTITY_NAME not in manifest_text
 
-    # The after-action report IS the verified second consumer of
-    # quarantine.json's reason field (aar._load_quarantine ->
-    # _build_needs_attention, playbook_engine/aar.py:576, embeds q["reason"]
-    # verbatim into "needs_attention" reasons) — read the WRITTEN
-    # report.md/report.json, not an in-memory dict.
-    write_after_action_report(out_dir, out_dir / "report.md")
-    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
-    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
-    assert _HINTS_LEAK_ENTITY_NAME not in report_md
-    assert _HINTS_LEAK_ENTITY_NAME not in report_json
+    # The inspection report is the checkpoint a human reads next to
+    # quarantine.json — read the WRITTEN inspection.md, not an in-memory
+    # dict.
+    write_inspection_report(out_dir, out_dir / "inspection.md")
+    inspection_md = (out_dir / "inspection.md").read_text(encoding="utf-8")
+    assert _HINTS_LEAK_ENTITY_NAME not in inspection_md
 
     # Belt-and-braces (issue #96 review correction: an earlier attempt's
     # comments overstated this as THE documented propagation path — it
-    # isn't; the after-action report above is). playbook.opf.json has no
+    # isn't). playbook.opf.json has no
     # quarantine section, and quarantine.json is not among corpus_manifest's
     # sources either — so neither artifact was ever reachable by this leak.
     # These assertions stay true either way; they just aren't proof of
@@ -1390,15 +1360,14 @@ def test_hints_error_never_leaks_raw_entity_name_via_path(tmp_path: Path) -> Non
         "double-check the in-memory dict too"
     )
 
-    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
-    # must find zero hits — the compiled playbook must already be born-safe
-    # by the time it reaches publish.
+    # The independent no-known-entity scan (tests/entity_scan.py) must find
+    # zero hits — the compiled playbook must already be born-safe.
     registry = EntityRegistry.load(tmp_path / "registry.json")
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [_HINTS_LEAK_ENTITY_NAME], (
         "sanity: the entity really was registered"
     )
-    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+    assert entity_backstop_scan(playbook, known_entity_names) == []
 
 
 def test_hints_error_never_leaks_raw_entity_name_via_yaml_content_snippet(
@@ -1467,11 +1436,9 @@ def test_hints_error_never_leaks_raw_entity_name_via_yaml_content_snippet(
     # snippet gone.
     assert "line" in reason and "column" in reason
 
-    write_after_action_report(out_dir, out_dir / "report.md")
-    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
-    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
-    assert entity_name not in report_md
-    assert entity_name not in report_json
+    write_inspection_report(out_dir, out_dir / "inspection.md")
+    inspection_md = (out_dir / "inspection.md").read_text(encoding="utf-8")
+    assert entity_name not in inspection_md
 
     manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
     assert entity_name not in manifest_text
@@ -1481,13 +1448,12 @@ def test_hints_error_never_leaks_raw_entity_name_via_yaml_content_snippet(
     assert entity_name not in published_text
     assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
 
-    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
-    # must find zero hits — the compiled playbook must already be born-safe
-    # by the time it reaches publish.
+    # The independent no-known-entity scan (tests/entity_scan.py) must find
+    # zero hits — the compiled playbook must already be born-safe.
     registry = EntityRegistry.load(tmp_path / "registry.json")
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [entity_name], "sanity: the entity really was registered"
-    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+    assert entity_backstop_scan(playbook, known_entity_names) == []
 
 
 def test_hints_error_never_leaks_raw_entity_name_via_yaml_problem_token(
@@ -1568,24 +1534,21 @@ def test_hints_error_never_leaks_raw_entity_name_via_yaml_problem_token(
     # token gone.
     assert "line" in reason and "column" in reason
 
-    write_after_action_report(out_dir, out_dir / "report.md")
-    report_md = (out_dir / "report.md").read_text(encoding="utf-8")
-    report_json = (out_dir / "report.json").read_text(encoding="utf-8")
-    assert entity_name not in report_md
-    assert entity_name not in report_json
+    write_inspection_report(out_dir, out_dir / "inspection.md")
+    inspection_md = (out_dir / "inspection.md").read_text(encoding="utf-8")
+    assert entity_name not in inspection_md
 
     playbook = project_playbook(out_dir, cfg, taxonomy)
     published_text = (out_dir / "playbook.opf.json").read_text(encoding="utf-8")
     assert entity_name not in published_text
     assert entity_name not in json.dumps(playbook), "double-check the in-memory dict too"
 
-    # publisher's hard, unsuppressible step-4 backstop (_entity_backstop_scan)
-    # must find zero hits — the compiled playbook must already be born-safe
-    # by the time it reaches publish.
+    # The independent no-known-entity scan (tests/entity_scan.py) must find
+    # zero hits — the compiled playbook must already be born-safe.
     registry = EntityRegistry.load(tmp_path / "registry.json")
     known_entity_names = list(registry.alias_map().values())
     assert known_entity_names == [entity_name], "sanity: the entity really was registered"
-    assert publisher_module._entity_backstop_scan(playbook, known_entity_names) == []
+    assert entity_backstop_scan(playbook, known_entity_names) == []
 
 
 def test_quarantine_reason_defense_in_depth_pseudonymization_fires(tmp_path: Path) -> None:
@@ -1688,15 +1651,14 @@ def test_quarantine_and_manifest_document_ids_reconcile_across_pseudonymization(
     document_id, while corpus_manifest.json is written after and carries the
     ALIASED id. A quarantined document now ALSO gets a partial
     corpus_manifest.json entry (see pipeline._build_quarantine_corpus_doc),
-    and a consumer that cross-references the two files by document_id (e.g.
-    aar._build_needs_attention, to avoid double-counting a quarantined
-    document as if the compiled playbook covered it too) could never
-    recognize the overlap while the ids were spelled differently — silently
-    OVERSTATING coverage. Exercised end-to-end through the real pipeline
-    (not a hand-written manifest/quarantine fixture) with the quarantined
-    document's folder actually NAMED after the known entity, so this proves
-    the pipeline reconciles the ids — not just that aar.py's arithmetic is
-    correct given already-matching inputs.
+    and a consumer that cross-references the two files by document_id (to
+    avoid double-counting a quarantined document as if the compiled playbook
+    covered it too) could never recognize the overlap while the ids were
+    spelled differently — silently OVERSTATING coverage. Exercised
+    end-to-end through the real pipeline (not a hand-written
+    manifest/quarantine fixture) with the quarantined document's folder
+    actually NAMED after the known entity, so this proves the pipeline
+    reconciles the ids.
     """
     entity_name = "Fictional University"
     corpus_dir, config_path, out_dir = _make_mixed_corpus_with_known_entities(
@@ -1732,19 +1694,6 @@ def test_quarantine_and_manifest_document_ids_reconcile_across_pseudonymization(
         "partial-record entry EXACTLY — otherwise a consumer that cross-references "
         "the two files by document_id can never recognize the overlap"
     )
-
-    # aar.build_after_action_data's coverage line must not double-count the
-    # quarantined document's own partial manifest entry as "covered".
-    data = build_after_action_data(out_dir)
-    summary = [
-        i for i in data["needs_attention"] if any("quarantined vs" in r for r in i["reasons"])
-    ]
-    assert len(summary) == 1
-    # Exactly ONE document (deal-001) genuinely contributed playbook content;
-    # the quarantined document's own partial record must not inflate this to 2.
-    assert any("covers 1 of 2" in r for r in summary[0]["reasons"]), summary[0]["reasons"]
-    report = build_after_action_report(out_dir)
-    assert "covers 1 of 2" in report
 
 
 # ---------------------------------------------------------------------------

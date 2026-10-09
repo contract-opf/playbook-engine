@@ -6,13 +6,11 @@ Counts agreements/versions, classifies each PDF as born-digital vs scanned
 range plus rough corpus-size and judgment-load estimates. Uses only pdfplumber
 (no docling/torch), so it runs on the host venv in seconds.
 
-Usage: .venv/bin/python estimate_runtime.py <corpus_dir> [out_dir] [--with-deviation-judge]
+Usage: .venv/bin/python estimate_runtime.py <corpus_dir> [out_dir]
 
-The judgment-load line covers what a default derivation asks the agent to
-judge — scope, classification and provenance. Deviation items are queued only
-when the run opts into the advisory deviation judge (``playbook mine
---with-deviation-judge``, issue #220); pass the same flag here to include
-them in the estimate.
+The judgment-load line covers what a derivation asks the agent to judge —
+scope, classification and provenance. There are no deviation items: deviation
+is the deterministic standard check.
 
 If an ``out_dir`` with a warm extraction cache exists (``<out>/extraction_cache.jsonl``,
 written by a prior/parallel ``mine``/``judge``/``segment`` run over the same
@@ -247,8 +245,7 @@ def fmt(seconds: float) -> str:
 
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if a != "--with-deviation-judge"]
-    with_deviation_judge = len(args) != len(sys.argv) - 1
+    args = sys.argv[1:]
     corpus = args[0] if args else "."
     # Default out_dir mirrors the CLI (<corpus>/../out); override with the
     # second positional argument.
@@ -351,12 +348,8 @@ def main() -> None:
     print("LLM API cost              : $0  (key-free; agent is the judge)")
     print(f"Judgment load (rough)     : ~{versions} scope+provenance + deduped")
     print("                            classification items for the agent to judge")
-    if with_deviation_judge:
-        print("                            + a few hundred deduped deviation items")
-        print("                            (--with-deviation-judge: advisory layer)")
-    else:
-        print("                            (no deviation items — deviation is the")
-        print("                            deterministic standard check by default)")
+    print("                            (no deviation items — deviation is the")
+    print("                            deterministic standard check)")
     print("=" * 60)
     if n_uncached:
         print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")

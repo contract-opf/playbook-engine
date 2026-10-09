@@ -12,9 +12,10 @@ quickstart — see the main [README's Installation
 section](../README.md#installation) for the Docker alternative. After
 that, the fixture walkthrough itself is well under a minute. You end with
 a validating `playbook.opf.json` and — the part worth pausing on —
-`playbook render-prompt`, which turns it into a system prompt you can
-paste into any chat LLM next to a contract. That loop (corpus → playbook →
-prompt → review) is the whole product in miniature.
+`playbook view bundle`, the one human-readable artifact: your hard lines,
+your posture and, per clause, what your deals actually signed. That loop
+(corpus → playbook → a reviewer's reading) is the whole product in miniature;
+the consuming review application reads the same `playbook.opf.json`.
 
 ## Stage 1 — Point it at your own agreements
 
@@ -34,7 +35,7 @@ each change); PDF and RTF work; scans need the Docker runtime's OCR path (below)
 > pass through `ocrmypdf` (tesseract) before the version is recorded as
 > failed. A version that timed out is never cached as failed (in neither the
 > extraction cache nor the per-deal stage cache), so the next `mine` retries
-> it. Either way, check the published playbook afterwards:
+> it. Either way, check the compiled playbook afterwards:
 > `corpus.documents[].x_mixed_extractors` is `true` for a deal whose versions
 > came through different extractors (a common source of noisy clause
 > alignment), and `x_ingest_reason` gives the per-version reason in the same
@@ -142,7 +143,7 @@ The LLM-judgment stages run three ways — pick one
 
 ```sh
 playbook inspect ./out          # inspection report: coverage, confidence, flags
-playbook view render ./out      # human-readable playbook walkthrough
+playbook view bundle ./out      # human-readable playbook, one self-contained file
 ```
 
 Judge the output the way you'd judge an associate's memo: every position
@@ -165,11 +166,9 @@ deal, or your risk tolerance, calls for.
   document. Evidence is **advisory by contract** (OPF-SPEC.md §5): the
   app reading it reasons over the history and is free to weigh it
   however its own rules see fit — a review engine's system prompt, a
-  human reviewer's judgment. `playbook render-prompt` says so loudly
-  rather than silently: an evidence-only playbook's rendered prompt
-  opens with an **ADVISORY ONLY — NOTHING BELOW IS BINDING** banner
-  instead of quietly shipping unmarked guidance. Stopping here is a
-  real endpoint, not an unfinished state.
+  human reviewer's judgment. The rendered bundle says so plainly: an
+  empty Posture or Floor is labelled "pending (optional)" rather than
+  omitted. Stopping here is a real endpoint, not an unfinished state.
 
 - **Rung 1 — say what you want (~10 min).** `playbook posture interview`
   asks six questions — rounds, leverage, risk appetite, sacred clauses,
@@ -198,76 +197,56 @@ deal, or your risk tolerance, calls for.
 - **Rung 2 — sign the corpus's proposals (~minutes).** Every ask your
   history reversed before signing is a *candidate* hard line — a pattern
   the compiler can surface but must never assert on its own. `playbook
-  floor propose` collects them into `floor.candidates.json` (folding in
-  Rung 1's sacred-clauses answer too, if you've already signed one — it
-  renders as an inert "already signed" row here, not a control, so
-  nothing gets asked twice). `playbook view render` puts the candidates
-  in a "Proposed hard lines" checklist above the clause sections of
-  `playbook.review.html`, each with its evidence citation and an accept /
-  reject / undecided control (undecided by default — nothing here expires
-  unreviewed, it just keeps reappearing). Decide, click **Export
-  feedback**, then run `playbook view apply`: `accept` signs the
-  candidate into `floor.invariants` with attribution; `reject` records
-  that a human looked and declined, so it will not be re-proposed. Every
-  promotion here traces to an explicit accept in `feedback.json` —
-  nothing is inferred into force.
+  floor propose` collects them into `floor.candidates.json` and prints a
+  table (folding in Rung 1's sacred-clauses answer too, if you've already
+  signed one; clause types your flexible-clauses answer names arrive
+  pre-marked `"decision": "rejected"`, attributed back to that answer).
+  Read the table with the evidence citations beside it; for each candidate
+  you want as a hard line, run `playbook floor sign` with its statement or
+  your own wording — a conditional hard line ("limitation of liability, if
+  present, must not be unilateral in the counterparty's favor") needs your
+  words anyway, since a candidate only ever reads "Do not concede on …".
+  `floor sign` records who signed it. A candidate nobody signs just
+  reappears next time — nothing expires unreviewed, and nothing is inferred
+  into force.
 
-- **Rung 3 — correct the record (open-ended, optional).** The same
-  review HTML's per-clause audit surface, collapsed by default and
-  sorted attention-first: a pinned position that conflicts with freshly
-  recomputed evidence sorts to the top, with why stated right in the
-  summary line before you expand anything. Three correction kinds
-  round-trip through `feedback.json` and `playbook view apply`: **pin**
-  an attorney-asserted position (it survives recompiles, and evidence
-  that later disagrees is flagged, never silently dropped or silently
-  kept); correct **classification** (which taxonomy entry a clause
-  belongs to); or leave a free-text **note**. A document-level
-  correction (provenance, which version is the signed one, version
-  order) is reported as not applied, because a clause item cites no
-  single deal; set it by hand in that deal's `hints.yaml` and re-mine.
-  There's no finish line — audit one clause or every clause, once or
-  after every recompile.
+- **Rung 3 — correct the record (open-ended, optional).** There is no
+  review surface to annotate; corrections go in at the input and you
+  re-run the affected stages. A document-level fact (provenance, which
+  version is the signed one, version order) goes in that deal's
+  `hints.yaml`; a clause's classification or a provenance call you now
+  disagree with gets a corrected verdict (`playbook judge-apply`); then
+  re-mine and re-project. The Posture and Floor you authored survive the
+  recompile verbatim. There's no finish line — audit one clause or every
+  clause, once or after every recompile.
 
 **Which rung do you need?** Only Rungs 1 and 2 create binding content — a
 Posture (soft) or a signed Floor invariant (hard); Rung 3 only improves
 the evidence those judgments rest on, it authors nothing new. Every rung
 past 0 is optional and independent — sign a hard line without ever
-running the interview, or run the interview and never touch the audit
-surface. What makes stopping early safe is the same asymmetry
+running the interview, or run the interview and never correct a record. What makes stopping early safe is the same asymmetry
 OPF-SPEC.md §5 sets out: your consuming app's own rules always keep the
 last word over advisory Evidence — Rung 0 leans on exactly that — but a
 signed Floor invariant is the one section a conformant consumer may never
 quietly override, no matter how far up the ladder you climb.
 
-`playbook.review.html` leads with this same ladder: a triage header
-naming the same three ways to act (interview, sign, audit), the Rung 2
-checklist directly under it, then the Rung 3 audit — collapsed and
-attention-sorted — below that. This section is the narrative form of
-that page.
-
-## Stage 3 — Make it yours (curation + posture)
+## Stage 3 — Make it yours (posture + floor)
 
 The concrete tools behind Rungs 1–3 above, roughly in the order you'd
 reach for them:
 
-- **Pin what the corpus gets wrong.** An attorney pin
-  (`curation.pins[]`) overrides a compiled stance and *survives
-  recompiles*; if fresh evidence later contradicts a pin, the engine flags
-  the conflict deterministically instead of silently dropping either.
 - **Run the posture interview.** A short structured interview (rounds,
   risk appetite, what's sacred, audience) becomes `posture.system_prompt` —
   your negotiation intent, grounded in the compiled evidence.
 - **Author the Floor.** The compiler *proposes* candidates from every
-  ask your history reversed; you decide which become invariants. Keep it
-  minimal — the admission test in the spec (§3.7.1) exists so the Floor
-  never regrows into a rigid per-clause script.
+  ask your history reversed; you decide which become invariants, with
+  `playbook floor sign`. Keep it minimal — the admission test in the spec
+  (§3.7.1) exists so the Floor never regrows into a rigid per-clause script.
+- **Fix what the corpus gets wrong at the input.** `hints.yaml` for
+  document-level facts, a corrected verdict for a judgment, then re-mine.
 
 ## Stage 4 — Use it
 
-- **Anywhere, today:** `playbook render-prompt` → paste into any chat LLM
-  with the contract under review. The prompt encodes the determinism
-  boundary in plain language: hard lines are non-negotiable, posture shapes
-  judgment, evidence is cited history.
 - **In tooling:** consume `playbook.opf.json` directly — it's stable,
   schema-validated JSON with content-addressed citations. The
   [bundle boundary](OPF-BUNDLE-BOUNDARY.md) doc says exactly what a
@@ -275,7 +254,7 @@ reach for them:
 - **Query precedent** instead of loading the whole document (see below).
 - **Recompile on every new deal.** The playbook is not a trained model;
   "retraining" is re-running the compiler. Caches make incremental runs
-  cheap, pins survive, and `corpus.snapshot.manifest_hash` records exactly
+  cheap, your Posture and Floor survive, and `corpus.snapshot.manifest_hash` records exactly
   which corpus state produced which playbook.
 
 ### Querying precedent
@@ -314,20 +293,16 @@ returns the hash-verified file and the clause's location in it.
 
 ## Stage 5 — Share it (optional)
 
-`playbook publish` produces a **party-anonymous** export: role-label
-party ("the company" / "the counterparty"), quarter-coarsened dates,
-numbered deal pseudonyms, a deterministic no-known-entity backstop (a
-hard, unconditional fail if any registered real name survives), and a
-full-surface semantic-residue judgment + independent verify pass. By
-default that judgment runs on stub judges (`basis="stub"`) — no LLM is
-wired into `publish` itself — so it writes `residue_report.json` for
-review rather than a sign-off. The
-[`playbook-from-corpus` skill](../.claude/skills/playbook-from-corpus/SKILL.md)
-supplies the LLM/agent classification of that report before a human
-signs off (or wire a real judge — see `playbook_engine/export_profile.py`).
-That's what makes it plausible to publish a real playbook as an
-educational artifact — or just to share one across teams — without
-shipping your counterparties' names.
+The engine has no command that anonymizes a playbook for public release.
+What it gives you is born-safe pseudonymization at ingest (every configured
+counterparty name becomes a `Counterparty-N` alias before anything is
+written) and, in the
+[`playbook-from-corpus` skill](../.claude/skills/playbook-from-corpus/SKILL.md),
+a mandatory residue check to run over the compiled playbook and the bundle.
+That check is best-effort — it only knows the names you told the engine
+about — so anything leaving the org needs its own review. A public example
+of a real derived playbook stays available as a static artifact at
+[contract-opf/playbooks](https://github.com/contract-opf/playbooks).
 
 ## Why bet on the format?
 

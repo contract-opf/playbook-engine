@@ -19,7 +19,6 @@ import pytest
 from playbook_engine.clause_position_compiler import (
     compile_clause_positions,
 )
-from playbook_engine.deviation_classifier import RiskDelta
 from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import (
@@ -75,8 +74,7 @@ _TAXONOMY = {
     ],
 }
 
-_NEUTRAL = RiskDelta(direction="neutral", magnitude="none")
-_WORSE_MINOR = RiskDelta(direction="worse", magnitude="minor")
+_NEUTRAL = {"direction": "neutral", "magnitude": "none"}
 
 
 def _obs(
@@ -84,7 +82,7 @@ def _obs(
     provenance: str = "our_paper",
     outcome: str = "signed",
     deviation: str = "none",
-    risk_delta: RiskDelta = _NEUTRAL,
+    risk_delta: dict[str, str] = _NEUTRAL,
     text: str = "Mutual indemnification.",
     doc_id: str = "deal_001",
     version: str = "v2",
@@ -102,7 +100,7 @@ def _obs(
             char_span=None,
         ),
         deviation=deviation,
-        risk_delta=risk_delta.to_dict(),
+        risk_delta=dict(risk_delta),
         provenance=provenance,
         outcome=outcome,
         basis=basis,
@@ -204,7 +202,6 @@ def test_assemble_small_corpus_end_to_end() -> None:
             "indemnification",
             provenance="our_paper",
             deviation="substantive",
-            risk_delta=_WORSE_MINOR,
             outcome="signed",
             doc_id="deal_002",
             version="v1",
@@ -213,7 +210,6 @@ def test_assemble_small_corpus_end_to_end() -> None:
             "governing_law",
             provenance="counterparty_paper",
             deviation="substantive",
-            risk_delta=_WORSE_MINOR,
             text="Counterparty home-state law.",
             clause_path="12",
         ),
@@ -371,7 +367,8 @@ def test_assemble_identity_present_with_content_hash_and_section_digests() -> No
     pb = _minimal_playbook()
     identity = pb["identity"]
     assert re.match(_HASH_RE, identity["content_hash"])
-    # Issue #147: "curation" is a fourth digest, always computed.
+    # "curation" is a fourth digest, always computed (a format-level rule of
+    # OPF 0.4; the engine no longer emits a curation section).
     assert set(identity["section_digests"].keys()) == {"evidence", "posture", "floor", "curation"}
     for h in identity["section_digests"].values():
         assert re.match(_HASH_RE, h)
@@ -440,56 +437,27 @@ def test_assemble_identity_schema_valid() -> None:
 
 
 def test_assemble_compiler_stub_watermark_false_by_default() -> None:
-    """No stub-basis observations → the playbook is not watermarked."""
+    """No stub scope decision → the playbook is not watermarked."""
     pb = _minimal_playbook()
     assert pb["compiler"]["stub_basis_present"] is False
-
-
-def test_assemble_compiler_stub_watermark_true_when_observation_is_stub() -> None:
-    """issue #101: when any observation fed into the playbook has
-    basis="stub" (no judge configured at all), the assembled playbook's
-    compiler block must be watermarked so a consuming review application can
-    refuse to run against it without human review."""
-    pb = _minimal_playbook(
-        obs_list=[
-            _obs("indemnification", basis="stub"),
-            _obs("governing_law", clause_path="12"),
-        ]
-    )
-    assert pb["compiler"]["stub_basis_present"] is True
 
 
 def test_assemble_compiler_stub_watermark_schema_valid() -> None:
     """The watermarked playbook must still be schema-valid (stub_basis_present
     is a declared optional property, not an ad hoc extra field)."""
-    pb = _minimal_playbook(obs_list=[_obs("indemnification", basis="stub")])
+    pb = _minimal_playbook(scope_bases=["stub"])
+    assert pb["compiler"]["stub_basis_present"] is True
     result = validate_document(pb)
     errors = [str(e) for e in result.errors if e.blocking]
     assert errors == [], errors
 
 
-def test_assemble_compiler_stub_watermark_true_when_observation_needs_review() -> None:
-    """issue #101: the *default zero-LLM* deviation stub (``_NullDeviationJudge``)
-    emits basis="needs_review", never "stub" (a judge protocol IS wired, it's
-    just the stub default) — so the watermark must also fire on
-    "needs_review" (and "judge_error"), not only the strict "stub" basis, or
-    a real default ``playbook mine`` + ``playbook project`` run never
-    watermarks its output."""
-    pb = _minimal_playbook(
-        obs_list=[
-            _obs("indemnification", basis="needs_review"),
-            _obs("governing_law", clause_path="12"),
-        ]
-    )
-    assert pb["compiler"]["stub_basis_present"] is True
-
-
 def test_assemble_compiler_stub_watermark_true_when_scope_basis_is_stub() -> None:
     """issue #101: the default zero-LLM scope stub (``_AllInScopeJudge``)
-    puts basis="stub" on the ScopeDecision, never on an Observation — the
-    watermark must also fire from ``scope_bases`` (threaded in from
-    scope.json by the caller), or a default compile with an otherwise fully
-    LLM-judged deviation path still fails to watermark."""
+    puts basis="stub" on the ScopeDecision — the watermark fires from
+    ``scope_bases`` (threaded in from scope.json by the caller). An
+    observation's basis never watermarks: its deviation is the deterministic
+    standard check (issue #239)."""
     pb = _minimal_playbook(scope_bases=["stub"])
     assert pb["compiler"]["stub_basis_present"] is True
 
@@ -1011,7 +979,7 @@ def test_v04_one_precedent_per_deal_and_clause_with_facts_only() -> None:
     }
     # The unsigned deal counts as a deal but never as a signed variant.
     assert (clauses["governing_law"]["n_deals"], clauses["governing_law"]["n_variants"]) == (1, 0)
-    assert "x_judgments" not in pb
+    assert "x_judgments" not in pb and "curation" not in pb
 
 
 def test_v04_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
@@ -1022,47 +990,6 @@ def test_v04_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
         p["id"] for p in b["evidence"]["precedent"]
     ]
     assert a["identity"]["content_hash"] == b["identity"]["content_hash"]
-
-
-def test_v04_judged_verdicts_go_to_x_judgments_never_into_precedent() -> None:
-    """An opt-in judged run (basis "judge", what a real deviation judge's
-    verdict carries) keeps its verdicts — under x_judgments, keyed by
-    precedent id. A stub/needs_review row is not a judgment."""
-    observations = [
-        _std(
-            _obs(
-                "indemnification",
-                deviation="substantive",
-                risk_delta=_WORSE_MINOR,
-                text="Supplier indemnifies only for gross negligence.",
-                basis="judge",
-            ),
-            False,
-        ),
-        _std(
-            _obs(
-                "governing_law",
-                clause_path="12",
-                text="Delaware law governs this agreement.",
-                basis="needs_review",
-            ),
-            False,
-        ),
-    ]
-    pb = _assemble_04(observations, [_corpus_doc("deal_001")])
-    assert validate_document(pb).ok
-    ids = {p["taxonomy_id"]: p["id"] for p in pb["evidence"]["precedent"]}
-    assert pb["x_judgments"] == [
-        {
-            "precedent_id": ids["indemnification"],
-            "deviation": "substantive",
-            "risk_delta": {"direction": "worse", "magnitude": "minor"},
-            "basis": "judge",
-        }
-    ]
-    for record in pb["evidence"]["precedent"]:
-        assert "deviation" not in record and "risk_delta" not in record
-    assert "deviation" not in json.dumps(pb["digest"])
 
 
 def test_v04_fragment_rows_never_become_precedent() -> None:

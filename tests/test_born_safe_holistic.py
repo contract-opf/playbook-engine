@@ -6,8 +6,7 @@ found and fixed REACTIVELY between 2026-08-02 and 2026-08-04 (#81, #83, #96,
 the durable guard issue #98 asks for: it plants ONE synthetic
 ``provenance.known_entities`` name (``ENTITY_NAME`` below) in every plausible
 input position SIMULTANEOUSLY, runs the real pipeline end-to-end (mine ->
-project -> inspection report -> AAR -> floor propose -> view ->
-publish), and asserts the raw name survives in NONE of the written artifact
+project -> inspection report -> floor propose -> view bundle), and asserts the raw name survives in NONE of the written artifact
 files — only its alias. A future field that forgets to scrub gets caught
 here instead of by a reviewer's luck.
 
@@ -94,11 +93,6 @@ Artifacts DELIBERATELY excluded from the leak sweep, not overlooked:
                                 ALIASED document_id AFTER the pseudonymization
                                 pass, exactly like trail/ below, so it is now
                                 swept in the loop with everything else.
-  - viewer_notes.md:           only produced by chat_curate.apply_curate_commands
-                                from a human-typed note string plus an
-                                ALREADY-pseudonymized clause title -- not
-                                exercised by the automatic mine/project/
-                                publish flow this test drives end-to-end.
 
 MUTATION-TESTED (see the module-level comment at the bottom of this file for
 the exact command): reverting version_orderer._yaml_error_detail to its
@@ -109,8 +103,7 @@ load-bearing, not a snapshot that would pass regardless.
 SECURITY NOTE: every name/institution in this file is synthetic
 ("Fictional University", "Alpha Corp") — no real counterparty, no EXOS
 reference. No live LLM anywhere: every judge is a fake/deterministic
-callable, matching test_pipeline_llm_seg.py's / test_publish.py's existing
-convention.
+callable, matching test_pipeline_llm_seg.py's existing convention.
 """
 
 from __future__ import annotations
@@ -123,19 +116,16 @@ from typing import Any
 import pytest
 import yaml
 
-from playbook_engine import publisher as publisher_module
-from playbook_engine.aar import write_after_action_report
 from playbook_engine.config import load_config
-from playbook_engine.document_renderer import render_bundle_html, render_document_html
+from playbook_engine.document_renderer import render_bundle_html
 from playbook_engine.entity_registry import entity_slug
-from playbook_engine.export_profile import RedactionFinding, VerifyFinding
 from playbook_engine.floor_candidates import write_floor_candidates
 from playbook_engine.inspection_report import write_inspection_report
 from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.segmentation_grounding import Block, SegNode
 from playbook_engine.taxonomy import load_taxonomy
-from playbook_engine.viewer import render_review_html
+from tests.entity_scan import entity_backstop_scan
 
 _TAXONOMY_PATH = Path(__file__).parent.parent / "spec" / "taxonomy" / "affiliation-agreement.yaml"
 
@@ -358,27 +348,6 @@ def _build_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 # ---------------------------------------------------------------------------
-# Fake publish judges (no LLM, no network — matches test_publish.py)
-# ---------------------------------------------------------------------------
-
-
-class _CleanRedactionJudge:
-    def evaluate_batch(self, samples: Any) -> list[RedactionFinding]:
-        return [
-            RedactionFinding(path=s.path, has_residue=False, rationale="No residue found.")
-            for s in samples
-        ]
-
-
-class _CleanVerifyJudge:
-    def evaluate_batch(self, samples: Any) -> list[VerifyFinding]:
-        return [
-            VerifyFinding(path=s.path, leaked=False, rationale="Independently confirmed clean.")
-            for s in samples
-        ]
-
-
-# ---------------------------------------------------------------------------
 # Leak scanner
 # ---------------------------------------------------------------------------
 
@@ -515,30 +484,17 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
     write_playbook(playbook, out_dir / "playbook.opf.json")  # already written by project_playbook;
     # re-affirms the on-disk file is what we scan below, not the in-memory dict.
 
-    write_after_action_report(out_dir, out_dir / "report.md")  # also writes report.json
     write_inspection_report(out_dir, out_dir / "inspection_report.md")
     write_floor_candidates(out_dir)
 
-    render_document_html(
-        out_dir, out_dir / "playbook.document.html"
-    )  # alias_map=None: born-safe path
     render_bundle_html(out_dir, out_dir / "playbook.opf.html")
-    render_review_html(out_dir, out_dir / "playbook.review.html")
 
     known_entity_names = [ENTITY_NAME]
-    report = publisher_module.publish_playbook(
-        playbook,
-        redaction_judge=_CleanRedactionJudge(),
-        verify_judge=_CleanVerifyJudge(),
-        known_entity_names=known_entity_names,
-        published_at="2026-08-04T00:00:00Z",
-    )
-    write_playbook(report.doc, out_dir / "playbook.public.json")
 
-    # Required by the ticket: the deterministic backstop itself must see
-    # zero hits on the published doc.
-    backstop_hits = publisher_module._entity_backstop_scan(report.doc, known_entity_names)
-    assert backstop_hits == [], f"publisher._entity_backstop_scan found hits: {backstop_hits}"
+    # The independent no-known-entity scan (tests/entity_scan.py) must see
+    # zero hits on the compiled playbook: it is born-safe as written.
+    backstop_hits = entity_backstop_scan(playbook, known_entity_names)
+    assert backstop_hits == [], f"the no-known-entity scan found hits: {backstop_hits}"
 
     # ---- Sweep every persisted artifact this ticket lists (plus scope.json,
     # found during the audit and not in the ticket's original list) --------
@@ -552,13 +508,8 @@ def test_born_safe_holistic_no_raw_entity_leak(tmp_path: Path) -> None:
         ("playbook.opf.json", out_dir / "playbook.opf.json"),
         ("coherence_flags.json", out_dir / "coherence_flags.json"),
         ("floor.candidates.json", out_dir / "floor.candidates.json"),
-        ("report.md (aar)", out_dir / "report.md"),
-        ("report.json (aar)", out_dir / "report.json"),
         ("inspection_report", out_dir / "inspection_report.md"),
-        ("playbook.document.html", out_dir / "playbook.document.html"),
         ("playbook.opf.html", out_dir / "playbook.opf.html"),
-        ("playbook.review.html", out_dir / "playbook.review.html"),
-        ("playbook publish output", out_dir / "playbook.public.json"),
     ]
     for trail_file in sorted((out_dir / "trail").glob("*.json")):
         artifacts.append((f"trail/{trail_file.name}", trail_file))

@@ -113,8 +113,8 @@ class SegmentationQAError(Exception):
     identifier-shaped case is a KNOWINGLY-ACCEPTED residual, not an absolute
     guarantee: identifier shape does not rule out a normalized/snake_cased
     entity name, and neither the whole-word pseudonymizer
-    (``entity_registry._fuzzy_name_pattern``) nor the publish backstop
-    (``publisher._entity_backstop_scan``) reliably catches one — see
+    (``entity_registry._fuzzy_name_pattern``) nor the residue check
+    (``entity_registry.find_residue``) reliably catches one — see
     ``_safe_taxonomy_id_repr`` for the reproduced case.
 
     This guarantee does NOT extend to the grounding gate. A
@@ -341,10 +341,9 @@ def _safe_taxonomy_id_repr(taxonomy_id: object) -> str:
     be echoed verbatim, and is caught by neither the whole-word
     pseudonymizer (``entity_registry._fuzzy_name_pattern`` skips a name
     glued to an adjacent ``\\w`` character, including its own underscores)
-    nor the publish backstop (``publisher._entity_backstop_scan`` —
-    defeated the same way: underscores also survive its
-    punctuation-stripping normalization, so neither the padded-substring
-    nor the collapsed check fires). The ticket accepts this bound anyway —
+    nor the residue check (``entity_registry.find_residue`` — defeated the
+    same way: underscores also survive its tokenization, so no token of the
+    name is matched). The ticket accepts this bound anyway —
     it is what keeps the near-miss-typo case debuggable; a future change to
     widen or narrow ``_TAXONOMY_ID_SHAPE_RE`` should re-examine this
     trade-off, not assume the shape is name-safe.

@@ -31,7 +31,7 @@ This module proves the two concrete regressions the fix closes:
 
 SECURITY NOTE: the entity name below is synthetic ("Example University") —
 no real counterparty. No live LLM anywhere: the default stub judges
-(``_AllInScopeJudge``/``_NullClassificationJudge``/``_NullDeviationJudge``)
+(``_AllInScopeJudge``/``_NullClassificationJudge``)
 handle every document, matching test_pipeline_judgment_cache.py's convention.
 """
 

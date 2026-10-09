@@ -202,10 +202,8 @@ class HintsError(ValueError):
     full path it was loaded from, and never any text read out of the file
     itself (see ``Hints.load`` and ``_yaml_error_detail``). A caller
     (``pipeline.mine_corpus``) persists ``str(this)`` verbatim into
-    ``quarantine.json``'s ``reason`` field for a quarantined document, and
-    from there it also reaches the after-action report
-    (``aar._build_needs_attention`` embeds it into "needs_attention"
-    reasons). *path*'s parent directory is the document folder, typically
+    ``quarantine.json``'s ``reason`` field for a quarantined document.
+    *path*'s parent directory is the document folder, typically
     named after the counterparty, and hints.yaml's own content can likewise
     contain a counterparty name (e.g. a mistyped ``order:`` entry). Either
     would leak the raw name even on a corpus with

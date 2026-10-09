@@ -114,8 +114,10 @@ DROPPED_REASONS = frozenset(
     }
 )
 
-#: ``PendingQueue`` record kinds (agent_judge / agent_segmenter).
-PENDING_KINDS = frozenset({"classify", "deviation", "provenance", "scope", "segment"})
+#: ``PendingQueue`` record kinds (agent_judge / agent_segmenter). A kind added
+#: through ``agent_judge.register_verdict_kind`` must be added here too, or its
+#: pending items are counted under ``other``.
+PENDING_KINDS = frozenset({"classify", "provenance", "scope", "segment"})
 
 #: Observation ``provenance`` values — the paper-side diagnostic split.
 PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})

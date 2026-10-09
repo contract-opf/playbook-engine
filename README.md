@@ -39,14 +39,14 @@ playbook mine examples/judge-fixture/corpus --config examples/judge-fixture/conf
 playbook project out/quickstart-demo --config examples/judge-fixture/config.yaml
 playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
 playbook validate out/quickstart-demo/playbook.opf.json
-playbook view render out/quickstart-demo
-playbook render-prompt out/quickstart-demo/playbook.opf.json --out out/quickstart-demo/review-prompt.md
+playbook view bundle out/quickstart-demo
 ```
 
-The payoff is that last command: it composes the playbook — now carrying
-the hard lines and posture the interview step above authored — into a
-**review-ready system prompt**, written to `out/quickstart-demo/review-prompt.md`,
-ready to paste into any chat LLM next to a contract you're reviewing.
+The payoff is that last command: it writes `out/quickstart-demo/playbook.opf.html`,
+the one human-readable artifact — the playbook, carrying the hard lines and
+posture the interview step above authored, plus its canonical OPF JSON and
+digest embedded verbatim. The consuming review application reads
+`playbook.opf.json` itself.
 [examples/README.md](examples/README.md) walks through every step's
 expected output, plus the Docker variant.
 
@@ -60,10 +60,10 @@ for the exact commands). A faster, bare-bones structural check of the same
 corpus is available via `make smoke-nda`.
 
 Ready for your own agreements? See **[docs/ADOPTING.md](docs/ADOPTING.md)**
-— the path from a messy folder of deals to a curated, publishable playbook.
-Not sure how much of that curation to do? ADOPTING.md's [control
-ladder](docs/ADOPTING.md#how-much-control-do-you-want) lays out four
-rungs from zero-effort to full audit, each with an honest cost.
+— the path from a messy folder of deals to a playbook the review model can
+use. Not sure how much of that authoring to do? ADOPTING.md's [control
+ladder](docs/ADOPTING.md#how-much-control-do-you-want) lays out the rungs
+from zero-effort to signed hard lines, each with an honest cost.
 
 Want to see this run at real scale, not a six-deal fixture? A genuine,
 corpus-derived playbook — 44 real negotiated agreements, 24 clauses, 555
@@ -109,10 +109,10 @@ Some things adopters tend to care about, built in from the start:
   `known_entities` matching is best-effort (whole-word, contiguous-sequence)
   — a misconfigured or incomplete list can still leave real names in a
   stored artifact, so this is not a guarantee of pseudonymization on its
-  own. `playbook publish` is what actually guarantees it: a deterministic
-  no-known-entity backstop plus a semantic-residue report over every
-  free-text surface — reviewed by an LLM/agent (the `playbook-from-corpus`
-  skill, or a wired judge) rather than by `publish` itself. A few raw-source
+  own: run the skill's mandatory residue check before sharing a compiled
+  playbook, and treat anything leaving the org as needing its own review —
+  the engine has no command that anonymizes a playbook for public release.
+  A few raw-source
   working files under `$OUT` (the judge queues — content a human reviews
   and answers *before* the pseudonymization pass ever runs) are not
   pseudonymized and must be handled as sensitive — see
@@ -121,16 +121,15 @@ Some things adopters tend to care about, built in from the start:
   namespace at the sanctioned levels; extensions travel with the document
   and participate in its content hash.
 - **Content-addressed identity.** Canonical serialization, whole-document
-  `content_hash`, per-section digests — lineage is reconstructible, and
-  attorney-pinned curation survives recompiles with deterministic
-  conflict-flagging.
+  `content_hash`, per-section digests — lineage is reconstructible, and the
+  Posture and Floor a person authored survive recompiles verbatim.
 
 ## How the compiler works
 
 **Deterministic where possible, LLM only for judgment.** Extraction,
 segmentation, version ordering, diffing, and assembly are reproducible
 code paths; the LLM is reserved for semantic calls (what kind of clause is
-this, did the risk shift, does this violate an invariant). Runs are cheap,
+this, which side drafted it). Runs are cheap,
 repeatable, and cache-aware — recompiling after adding one deal re-judges
 only what changed.
 
@@ -231,7 +230,7 @@ Two guards run without being asked:
 | Path | What's there |
 |---|---|
 | [`docs/OPF-SPEC.md`](docs/OPF-SPEC.md) | The Open Playbook Format standard, v1.0 (the keystone) |
-| [`docs/ADOPTING.md`](docs/ADOPTING.md) | The adopter's path: quickstart → your corpus → curation → publishing |
+| [`docs/ADOPTING.md`](docs/ADOPTING.md) | The adopter's path: quickstart → your corpus → posture and floor → using the playbook |
 | [`docs/prompts/create-playbook.md`](docs/prompts/create-playbook.md) | The launch prompt for the Claude Code skill path (`claude "$(cat …)"`) |
 | [`docs/PLAN-FIRST.md`](docs/PLAN-FIRST.md) | Running on a Claude plan vs an API key, stage by stage |
 | [`docs/CORPUS-LAYOUT.md`](docs/CORPUS-LAYOUT.md) | How to organize your input directory (and what to do if you can't) |

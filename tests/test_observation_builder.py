@@ -7,13 +7,14 @@ text.  No real agreements are referenced.  Fictional party/document names.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_differ import ClauseDiff
 from playbook_engine.clause_tree import ClauseNode
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.deviation_classifier import DeviationResult
 from playbook_engine.entity_registry import EntityRegistry, pseudonymize_text
 from playbook_engine.observation_builder import (
     DROPPED_ORIGIN_UNDETERMINED,
@@ -36,9 +37,6 @@ from playbook_engine.tracked_changes_overlay import HunkEnrichment
 # Helpers
 # ---------------------------------------------------------------------------
 
-_NEUTRAL = RiskDelta(direction="neutral", magnitude="none")
-_WORSE = RiskDelta(direction="worse", magnitude="material")
-
 
 def _cd(
     taxonomy_id: str | None,
@@ -58,16 +56,8 @@ def _cd(
     )
 
 
-def _dr(deviation: str = "none", basis: str = "deterministic") -> DeviationResult:
-    rd = (
-        _NEUTRAL
-        if basis == "deterministic"
-        else RiskDelta(
-            direction="worse" if deviation == "substantive" else "neutral",
-            magnitude="material" if deviation == "substantive" else "none",
-        )
-    )
-    return DeviationResult(deviation=deviation, risk_delta=rd, basis=basis)
+def _dr(deviation: str = "none") -> DeviationResult:
+    return DeviationResult(deviation=deviation)
 
 
 # Our standard (template) clause text per taxonomy_id — the origin reference
@@ -360,12 +350,32 @@ def test_build_observations_full_text_not_truncated() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_observations_deviation_and_risk_delta() -> None:
-    dr = DeviationResult(deviation="substantive", risk_delta=_WORSE, basis="judge")
-    diffs = [(_cd("ind"), dr)]
-    obs = build_observations("doc1", "v2", "our_paper", diffs, [])
-    assert obs[0].deviation == "substantive"
-    assert obs[0].risk_delta == {"direction": "worse", "magnitude": "material"}
+def test_build_observations_deviation_is_the_standard_fact_and_risk_a_constant() -> None:
+    """The deviation IS the standard check; nothing assesses risk, so every
+    observation carries the same neutral/none placeholder whatever the
+    per-row result said (issue #239)."""
+    text = _STD["ind"]
+    standard_obs, other_obs = build_observations(
+        "doc1",
+        "v2",
+        "our_paper",
+        [
+            (_cd("ind", text_after=text, path="1"), _dr("substantive")),
+            (_cd("gov", text_after="A negotiated governing law.", path="2"), _dr("none")),
+        ],
+        [],
+        standard_text_by_tid=_STD,
+    )
+    assert standard_obs.standard is True and standard_obs.deviation == "none"
+    assert other_obs.standard is False and other_obs.deviation == "substantive"
+    for o in (standard_obs, other_obs):
+        assert o.basis == "deterministic"
+        assert o.risk_delta == {"direction": "neutral", "magnitude": "none"}
+
+
+def test_without_a_standard_reference_nothing_is_standard() -> None:
+    obs = build_observations("doc1", "v2", "our_paper", [(_cd("ind"), _dr("none"))], [])
+    assert (obs[0].standard, obs[0].deviation) == (False, "substantive")
 
 
 # ---------------------------------------------------------------------------
@@ -397,10 +407,10 @@ def test_build_observations_same_clause_path_deduplicated() -> None:
 def test_write_read_observations_jsonl_roundtrip(tmp_path) -> None:
     """Acceptance criterion: observations.jsonl matches hand-checked expectations."""
     diffs = [
-        (_cd("ind", text_after="Alice shall indemnify Beta."), _dr(basis="deterministic")),
+        (_cd("ind", text_after="Alice shall indemnify Beta."), _dr()),
         (
             _cd("gov", kind="modified", text_before="Old law.", text_after="New York law governs."),
-            DeviationResult(deviation="reworded_equivalent", risk_delta=_NEUTRAL, basis="judge"),
+            _dr("substantive"),
         ),
     ]
     obs = build_observations("deal1", "v2", "our_paper", diffs, [])
@@ -413,7 +423,7 @@ def test_write_read_observations_jsonl_roundtrip(tmp_path) -> None:
     assert rows[0]["outcome"] == "signed"
     assert rows[0]["provenance"] == "our_paper"
     assert rows[1]["taxonomy_id"] == "gov"
-    assert rows[1]["deviation"] == "reworded_equivalent"
+    assert rows[1]["deviation"] == "substantive"
 
 
 def test_write_observations_jsonl_atomic_no_tmp_left(tmp_path) -> None:
@@ -682,7 +692,7 @@ def test_observation_to_dict_serializes_attribution() -> None:
         text_summary="text",
         citation=ObservationCitation("doc1", "v2", "1", None),
         deviation="substantive",
-        risk_delta={"direction": "worse", "magnitude": "material"},
+        risk_delta={"direction": "neutral", "magnitude": "none"},
         provenance="counterparty_paper",
         outcome="signed",
         attribution=HunkEnrichment(author="Bob", date=None, tracked_type="deletion"),
@@ -1117,10 +1127,9 @@ _KNOWN_ENTITY = "State University"
 def test_fallback_backing_observation_carries_verbatim_pseudonymized_precedent_text(
     tmp_path,
 ) -> None:
-    """A worse-risk, signed, our-paper observation (clause_position_compiler's
-    fallback criteria) must carry the full untruncated precedent clause text,
-    and that text must pseudonymize to alias-only — never the raw entity name
-    — via the #153 born-safe path."""
+    """A signed, our-paper observation must carry the full untruncated
+    precedent clause text, and that text must pseudonymize to alias-only —
+    never the raw entity name — via the #153 born-safe path."""
     long_text = (
         f"Alpha Corp shall indemnify {_KNOWN_ENTITY} against third-party claims "
         "arising from the placement programme, provided that such claims are "
@@ -1128,14 +1137,12 @@ def test_fallback_backing_observation_carries_verbatim_pseudonymized_precedent_t
     )
     assert len(long_text) > 200  # must actually exceed the text_summary cap
 
-    dr = DeviationResult(deviation="substantive", risk_delta=_WORSE, basis="judge")
-    diffs = [(_cd("ind", text_after=long_text), dr)]
+    diffs = [(_cd("ind", text_after=long_text), _dr("substantive"))]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [])[0]
 
-    # A judged, worse-risk signed our-paper row.
+    # A signed our-paper row.
     assert obs.provenance == "our_paper"
     assert obs.outcome == "signed"
-    assert obs.risk_delta["direction"] == "worse"
 
     # Verbatim precedent text, alongside the existing summary + citation.
     assert obs.full_text == long_text
@@ -1156,10 +1163,9 @@ def test_fallback_backing_observation_carries_verbatim_pseudonymized_precedent_t
 def test_acceptable_if_backing_observation_carries_verbatim_pseudonymized_precedent_text(
     tmp_path,
 ) -> None:
-    """A neutral-risk, signed, actually-deviated observation
-    (clause_position_compiler's acceptable_if criteria) must carry the full
-    untruncated precedent clause text, and that text must pseudonymize to
-    alias-only via the #153 born-safe path."""
+    """A signed, non-standard observation must carry the full untruncated
+    precedent clause text, and that text must pseudonymize to alias-only via
+    the #153 born-safe path."""
     long_text = (
         f"{_KNOWN_ENTITY} shall provide reasonable cooperation to Alpha Corp "
         "in connection with any third-party claim, reworded but materially "
@@ -1167,15 +1173,13 @@ def test_acceptable_if_backing_observation_carries_verbatim_pseudonymized_preced
     )
     assert len(long_text) > 200
 
-    dr = DeviationResult(deviation="reworded_equivalent", risk_delta=_NEUTRAL, basis="judge")
-    diffs = [(_cd("coop", text_after=long_text), dr)]
+    diffs = [(_cd("coop", text_after=long_text), _dr("substantive"))]
     obs = build_observations("doc1", "v2", "our_paper", diffs, [])[0]
 
-    # A judged, neutral-risk signed row.
+    # A signed, non-standard row.
     assert obs.outcome == "signed"
-    assert obs.risk_delta["direction"] == "neutral"
-    assert obs.deviation != "none"
-    assert obs.basis == "judge"  # not in _UNJUDGED_BASES
+    assert obs.deviation == "substantive"
+    assert obs.basis == "deterministic"
 
     # Verbatim precedent text, alongside the existing summary + citation.
     assert obs.full_text == long_text
@@ -1287,34 +1291,24 @@ def test_multi_node_clause_is_one_signed_observation_from_terminal_tree() -> Non
     assert conf.citation.version_id == "signed_final"
 
 
-def test_merged_observation_carries_worst_risk_and_weakest_basis() -> None:
-    """Merging nodes never hides a concession (the worse-risk row is the
-    representative) nor launders an unjudged node into a judged one (the
-    weakest basis wins); confidence is the lowest among the rows."""
-    worse = DeviationResult(
-        deviation="substantive",
-        risk_delta=RiskDelta(direction="worse", magnitude="minor"),
-        basis="judge",
-    )
-    # deviation="needs_review" + basis="needs_review" is the sentinel
-    # agent_judge._deviation_needs_review emits for a changed clause that has
-    # no stored verdict.
-    neutral_unjudged = DeviationResult(
-        deviation="needs_review",
-        risk_delta=RiskDelta(direction="neutral", magnitude="none"),
-        basis="needs_review",
-    )
+def test_merged_observation_is_one_standard_fact_over_the_merged_text() -> None:
+    """Merging nodes never hides a non-standard node: the merged observation's
+    standard fact is the merged text against the whole template clause; the
+    non-standard row is the representative whose attribution it carries, and
+    confidence is the lowest among the rows."""
+    standard_first = "First part of the clause."
+    std = {"ind": standard_first}
     rows = [
         (
             _terminal_cd(
                 "ind",
                 "1",
-                "First part of the clause.",
+                standard_first,
                 (0, 25),
                 kind="modified",
                 before="First draft part of the clause.",
             ),
-            neutral_unjudged,
+            _dr("none"),
         ),
         (
             _terminal_cd(
@@ -1325,18 +1319,25 @@ def test_merged_observation_carries_worst_risk_and_weakest_basis() -> None:
                 kind="modified",
                 before="Second draft part of the clause.",
             ),
-            worse,
+            _dr("substantive"),
         ),
         (_terminal_cd("ind", "3", "Third, unchanged part.", (53, 75)), _dr()),
     ]
     obs = build_observations(
-        "doc1", 3, "our_paper", rows, [], classification_confidences=[0.8, 0.6, 0.95]
+        "doc1",
+        3,
+        "our_paper",
+        rows,
+        [],
+        classification_confidences=[0.8, 0.6, 0.95],
+        standard_text_by_tid=std,
     )
     assert len(obs) == 1
     merged = obs[0]
+    assert merged.standard is False
     assert merged.deviation == "substantive"
-    assert merged.risk_delta == {"direction": "worse", "magnitude": "minor"}
-    assert merged.basis == "needs_review"
+    assert merged.risk_delta == {"direction": "neutral", "magnitude": "none"}
+    assert merged.basis == "deterministic"
     assert merged.confidence == 0.6
     assert merged.citation.clause_path == "1"
 
@@ -1346,7 +1347,14 @@ def test_all_unchanged_group_keeps_deterministic_none() -> None:
         (_terminal_cd("ind", "1", "First part of the clause.", (0, 25)), _dr()),
         (_terminal_cd("ind", "2", "Second part of the clause.", (26, 52)), _dr()),
     ]
-    obs = build_observations("doc1", 3, "our_paper", rows, [])
+    obs = build_observations(
+        "doc1",
+        3,
+        "our_paper",
+        rows,
+        [],
+        standard_text_by_tid={"ind": ["First part of the clause.", "Second part of the clause."]},
+    )
     assert len(obs) == 1
     assert (obs[0].deviation, obs[0].basis) == ("none", "deterministic")
     assert obs[0].risk_delta == {"direction": "neutral", "magnitude": "none"}
@@ -1420,7 +1428,7 @@ def test_our_standard_clause_replaced_before_signing_is_our_concession() -> None
             "doc1",
             3,
             provenance,
-            [(removed, _dr("substantive", basis="judge")), (replacement, _dr())],
+            [(removed, _dr("substantive")), (replacement, _dr())],
             [],
             ordinal_by_vid=_ORDINALS,
             standard_text_by_tid=_STD,
@@ -1440,7 +1448,7 @@ def test_our_standard_clause_struck_outright_is_our_concession() -> None:
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("substantive", basis="judge")), (other, _dr())],
+        [(removed, _dr("substantive")), (other, _dr())],
         [],
         ordinal_by_vid=_ORDINALS,
         standard_text_by_tid=_STD,
@@ -1471,9 +1479,9 @@ def test_unsigned_deal_removed_rows_never_concede_nor_refuse() -> None:
             3,
             provenance,
             [
-                (ours_struck, _dr("substantive", basis="judge")),
-                (ours_replaced, _dr("substantive", basis="judge")),
-                (theirs_struck, _dr("substantive", basis="judge")),
+                (ours_struck, _dr("substantive")),
+                (ours_replaced, _dr("substantive")),
+                (theirs_struck, _dr("substantive")),
                 (replacement, _dr()),
             ],
             [],
@@ -1545,7 +1553,7 @@ def test_removed_row_whose_text_survives_in_terminal_is_neither_reversed_nor_sig
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("none", basis="alignment")), (kept, _dr())],
+        [(removed, _dr("none")), (kept, _dr())],
         [],
         ordinal_by_vid=_ORDINALS,
         terminal_clauses=tree,
@@ -1776,7 +1784,7 @@ def test_v1_narrowing_restored_to_our_standard_by_signing_is_a_refused_ask() -> 
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("substantive", basis="judge")), (restored, _dr())],
+        [(removed, _dr("substantive")), (restored, _dr())],
         [],
         ordinal_by_vid=_ORDINALS,
         dropped=dropped,
@@ -1807,7 +1815,7 @@ def test_our_standard_replaced_by_a_superset_of_its_words_is_our_concession() ->
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("substantive", basis="judge")), (signed, _dr())],
+        [(removed, _dr("substantive")), (signed, _dr())],
         [],
         ordinal_by_vid=_ORDINALS,
         dropped=dropped,
@@ -1830,7 +1838,7 @@ def test_removed_text_verbatim_inside_a_signed_clause_still_survives() -> None:
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("none", basis="alignment")), (signed, _dr())],
+        [(removed, _dr("none")), (signed, _dr())],
         [],
         dropped=dropped,
         standard_text_by_tid={"survival": "Obligations survive for five years."},
@@ -1853,7 +1861,7 @@ def test_struck_text_equal_to_a_later_template_node_is_our_language() -> None:
             "doc1",
             3,
             "our_paper",
-            [(removed, _dr("substantive", basis="judge")), (kept, _dr())],
+            [(removed, _dr("substantive")), (kept, _dr())],
             [],
             ordinal_by_vid=_ORDINALS,
             standard_text_by_tid=standards,
@@ -1867,7 +1875,7 @@ def test_struck_text_equal_to_a_later_template_node_is_our_language() -> None:
         "doc1",
         3,
         "our_paper",
-        [(removed, _dr("substantive", basis="judge")), (kept, _dr())],
+        [(removed, _dr("substantive")), (kept, _dr())],
         [],
         standard_text_by_tid={"insurance": first},
     )
@@ -1937,13 +1945,11 @@ def test_struck_first_version_text_that_edits_our_clause_is_their_ask(
     draft that negates our clause or deletes its carve-out, struck before
     signing in favour of our standard, is THEIR refused ask — never our
     concession — even though the old 0.92 Jaccard called it our language."""
-    from playbook_engine.deviation_classifier import (  # noqa: PLC0415
-        REWORDED_EQUIVALENT_THRESHOLD,
-        _text_jaccard,
-    )
-
-    # The case this test exists for: the retired similarity bar absorbed it.
-    assert _text_jaccard(struck, standard) >= REWORDED_EQUIVALENT_THRESHOLD
+    # The case this test exists for: the retired similarity bar (token-set
+    # Jaccard >= 0.92) absorbed it.
+    struck_tokens = {t for t in re.split(r"\W+", struck.lower()) if t}
+    standard_tokens = {t for t in re.split(r"\W+", standard.lower()) if t}
+    assert len(struck_tokens & standard_tokens) / len(struck_tokens | standard_tokens) >= 0.9
     signed = _added_row(tid, standard)
     dropped: dict[str, int] = {}
     obs = build_observations(
@@ -2150,7 +2156,6 @@ def test_alignment_confidence_carried_from_real_alignment_to_observations() -> N
         terminal_clauses=versions[-1][1],
         terminal_version_id="v3",
         standard_text_by_tid=_STD,
-        deterministic_deviations=True,
     )
     by_outcome = {(o.taxonomy_id, o.outcome): o for o in obs}
 
@@ -2246,7 +2251,6 @@ def test_appended_carve_out_stays_modified_and_keeps_tracked_attribution() -> No
         terminal_clauses=versions[-1][1],
         terminal_version_id="v2",
         standard_text_by_tid={"limitation_of_liability": v1_text},
-        deterministic_deviations=True,
     )
     signed = [o for o in obs if o.outcome == "signed"]
     assert len(signed) == 1

@@ -21,8 +21,8 @@ import playbook_engine.pipeline as pipeline
 from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import load_config
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.extraction import ExtractorLabel
+from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import _template_observations_from_classified, mine_corpus
 from playbook_engine.taxonomy import load_taxonomy
 
@@ -81,25 +81,6 @@ def _cc(path: str, tid: str | None, text: str) -> ClassifiedClause:
         else ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified")
     )
     return ClassifiedClause(node=node, classification=cls)
-
-
-class _RecordingDeviationJudge:
-    """Records the our_standard each assess_batch call received."""
-
-    def __init__(self) -> None:
-        self.standards: list[str] = []
-
-    def assess_batch(self, items: list, our_standard: str) -> list:
-        self.standards.append(our_standard)
-        return [
-            DeviationResult(
-                deviation="none",
-                risk_delta=RiskDelta(direction="neutral", magnitude="none"),
-                basis="judge",
-                rationale="test",
-            )
-            for _ in items
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -168,29 +149,32 @@ def test_template_segmented_via_llm_path(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(pipeline, "_llm_segment_file", fake_llm_segment_file)
 
-    judge = _RecordingDeviationJudge()
     mine_corpus(
         corpus_dir=corpus_dir,
         config=cfg,
         taxonomy=taxonomy,
         out_dir=out_dir,
         use_llm_segmentation=True,
-        deviation_judge=judge,
     )
 
     # The template went through the SAME segmentation path as the documents.
     assert ("template", "template", "template.rtf") in calls
-    # And its classified clause populated our_standard for deviation judging.
-    assert any(s.strip() for s in judge.standards), (
-        f"no non-empty our_standard reached the deviation judge: {judge.standards!r}"
-    )
+    # And its classified clauses became our standard: the template
+    # observations carry their full text.
+    template_obs = read_observations_jsonl(out_dir / "template_observations.jsonl")
+    standards = {o["taxonomy_id"]: o["full_text"] for o in template_obs}
+    assert (
+        standards.get("indemnification") == "The party shall indemnify the other (canonical form)."
+    ), standards
+    # The negotiated documents differ from it, so none is our standard.
+    deal_obs = read_observations_jsonl(out_dir / "observations.jsonl")
+    assert deal_obs and all(o["standard"] is False for o in deal_obs)
 
 
 def test_template_signature_block_stripped_on_llm_path(tmp_path: Path, monkeypatch) -> None:
     """#217: on the agent/LLM segmentation path in template mode, the template's
-    execution block never reaches template_observations.jsonl or any
-    our_standard handed to the deviation judge (pipeline strips it before
-    classifying the template)."""
+    execution block never reaches template_observations.jsonl — the source of
+    every our_standard (pipeline strips it before classifying the template)."""
     corpus_dir, config_path, out_dir, template_path = _make_corpus_with_template(tmp_path)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
     cfg = load_config(config_path)
@@ -235,21 +219,18 @@ def test_template_signature_block_stripped_on_llm_path(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(pipeline, "_llm_segment_file", fake_llm_segment_file)
 
-    judge = _RecordingDeviationJudge()
     mine_corpus(
         corpus_dir=corpus_dir,
         config=cfg,
         taxonomy=taxonomy,
         out_dir=out_dir,
         use_llm_segmentation=True,
-        deviation_judge=judge,
     )
 
     template_obs = (out_dir / "template_observations.jsonl").read_text(encoding="utf-8")
     assert "insurance" in template_obs, "the template's last clause must still be observed"
     for marker in ("IN WITNESS WHEREOF", "By:"):
         assert marker not in template_obs
-        assert all(marker not in s for s in judge.standards), judge.standards
 
 
 def test_template_deterministic_path_unchanged(tmp_path: Path, monkeypatch) -> None:

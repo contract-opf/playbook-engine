@@ -13,7 +13,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from playbook_engine.canonicalize import canonicalize, content_hash
+from playbook_engine.canonicalize import content_hash
 from playbook_engine.cli import cli
 from playbook_engine.digest import (
     DIGEST_VERSION,
@@ -24,7 +24,7 @@ from playbook_engine.digest import (
 from playbook_engine.validator import validate_document
 
 # ---------------------------------------------------------------------------
-# CLI: digest + view bundle on a real compile
+# CLI: the digest inside the OPF + view bundle on a real compile
 # ---------------------------------------------------------------------------
 
 
@@ -58,54 +58,10 @@ def test_compiled_playbook_is_v04_with_digest_v3(tmp_path: Path) -> None:
     assert pb["digest"] == build_digest(pb)
     # digest participates in content_hash: recompute and compare
     assert pb["identity"]["content_hash"] == content_hash(pb)
-
-
-def test_digest_cmd_writes_sidecar(tmp_path: Path) -> None:
-    out_dir = _compiled_out_dir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["digest", str(out_dir)])
-    assert result.exit_code == 0, result.output
-    sidecar = json.loads((out_dir / "playbook.digest.json").read_text())
-    pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert sidecar == pb["digest"]
-    assert "tokens" in result.output
-
-
-def test_digest_cmd_sidecar_matches_canonical_size(tmp_path: Path) -> None:
-    """The on-disk sidecar must not exceed the canonical-chars/4 estimate it reports.
-
-    Regression for issue #211: the sidecar used to be pretty-printed
-    (indent=1), so a consumer measuring the actual file on disk saw ~20%+
-    more bytes than the reported "~N tokens" estimate — the ~40K-token
-    budget promise silently depended on the consumer re-canonicalizing
-    rather than reading the artifact as shipped.
-    """
-    out_dir = _compiled_out_dir(tmp_path)
-    runner = CliRunner()
-    result = runner.invoke(cli, ["digest", str(out_dir)])
-    assert result.exit_code == 0, result.output
-
-    raw = (out_dir / "playbook.digest.json").read_text(encoding="utf-8")
-    sidecar = json.loads(raw)
-    expected = canonicalize(sidecar)
-    # Exactly the canonical form plus a single trailing newline for the
-    # on-disk file — no extra whitespace from pretty-printing.
-    assert raw == expected + "\n"
-    assert len(raw.rstrip("\n")) == len(expected)
-
-
-def test_digest_cmd_truncated_opf_reports_error_no_traceback(tmp_path: Path) -> None:
-    """A hand-edited/truncated playbook.opf.json fails cleanly (issue #57), not a traceback."""
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    (out_dir / "playbook.opf.json").write_text('{"truncated":', encoding="utf-8")
-    runner = CliRunner()
-    result = runner.invoke(cli, ["digest", str(out_dir)])
-    assert result.exit_code == 1
-    assert "ERROR" in result.output
-    # A raw JSONDecodeError propagating uncaught would surface as some other
-    # exception type here; the handled path always exits via SystemExit(1).
-    assert isinstance(result.exception, SystemExit)
+    # The digest lives inside the OPF; there is no standalone sidecar (the
+    # `digest` command was retired, issue #239).
+    assert not (out_dir / "playbook.digest.json").exists()
+    assert "digest" not in cli.commands
 
 
 def _retired_0_3_out_dir(tmp_path: Path) -> Path:
@@ -133,16 +89,6 @@ def _retired_0_3_out_dir(tmp_path: Path) -> Path:
     }
     (out_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
     return out_dir
-
-
-def test_digest_cmd_refuses_a_retired_opf_version(tmp_path: Path) -> None:
-    """`playbook digest` refuses a 0.3 document instead of copying its
-    retired digest_version "2" section out verbatim (issue #238)."""
-    out_dir = _retired_0_3_out_dir(tmp_path)
-    result = CliRunner().invoke(cli, ["digest", str(out_dir)])
-    assert result.exit_code == 1
-    assert "unsupported opf_version '0.3'" in result.output
-    assert not (out_dir / "playbook.digest.json").exists()
 
 
 def test_view_bundle_refuses_a_retired_opf_version(tmp_path: Path) -> None:

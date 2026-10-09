@@ -27,7 +27,6 @@ from playbook_engine.agent_judge import (
     PendingQueue,
     ScopeNeedsReviewError,
     StoreBackedClassificationJudge,
-    StoreBackedDeviationJudge,
     StoreBackedProvenanceJudge,
     StoreBackedScopeJudge,
     VerdictStore,
@@ -37,7 +36,6 @@ from playbook_engine.agent_judge import (
 from playbook_engine.clause_classifier import ClassificationJudge
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
-from playbook_engine.deviation_classifier import DeviationJudge
 from playbook_engine.provenance_detector import ProvenanceJudge
 from playbook_engine.scope_gate import ScopeJudge
 
@@ -214,7 +212,7 @@ class TestPendingQueue:
         path = tmp_path / "pending.jsonl"
         q = PendingQueue(path)
         q.add("key1", "classify", {"text": "a"})
-        q.add("key2", "deviation", {"hunk": "b"})
+        q.add("key2", "provenance", {"preamble": "b"})
         lines = path.read_text().splitlines()
         assert len(lines) == 2
 
@@ -449,319 +447,6 @@ class TestStoreBackedClassificationJudge:
 
 
 # ---------------------------------------------------------------------------
-# StoreBackedDeviationJudge
-# ---------------------------------------------------------------------------
-
-
-class TestStoreBackedDeviationJudge:
-    """AC-1, AC-2, AC-3, AC-5, AC-6 for deviation."""
-
-    def test_implements_protocol(self, tmp_path: Path) -> None:
-        """AC-6: StoreBackedDeviationJudge is a valid DeviationJudge."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        assert isinstance(judge, DeviationJudge)
-
-    def test_miss_returns_needs_review_sentinel(self, tmp_path: Path) -> None:
-        """AC-2: store miss → needs_review sentinel returned."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
-
-        results = judge.assess_batch(items, our_standard="Standard text.")
-
-        assert len(results) == 1
-        assert results[0].basis == "needs_review"
-        assert results[0].deviation == "needs_review"
-        assert results[0].confidence is None
-
-    def test_miss_records_pending_entry(self, tmp_path: Path) -> None:
-        """AC-2: store miss → exactly one pending entry written."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        items = [{"hunk": "[BEFORE]\nold\n[AFTER]\nnew"}]
-
-        judge.assess_batch(items, our_standard="Standard.")
-
-        path = tmp_path / "judge" / "pending.jsonl"
-        lines = path.read_text().splitlines()
-        assert len(lines) == 1
-        record = json.loads(lines[0])
-        assert record["kind"] == "deviation"
-        assert "hunk" in record["payload"]
-        assert "our_standard" in record["payload"]
-
-    def test_hit_returns_stored_verdict_as_deviation_result(self, tmp_path: Path) -> None:
-        """AC-1: store hit → DeviationResult with stored values, basis='judge'."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        hunk = "[BEFORE]\nProvide services\n[AFTER]\nProvide extended services"
-        our_standard = "Provide services as agreed."
-        items = [{"hunk": hunk}]
-
-        # Build the payload the judge will use to look up the store — the
-        # hash key is content-only (stage/hunk/our_standard); traceability
-        # context like clause_path is deliberately excluded (issue #109).
-        payload = {
-            "stage": "deviation",
-            "hunk": hunk,
-            "our_standard": our_standard,
-        }
-        store.put(
-            payload,
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                "basis": "judge",
-                "rationale": "Services extended beyond agreed scope.",
-                "confidence": 0.85,
-            },
-        )
-
-        results = judge.assess_batch(items, our_standard=our_standard)
-
-        assert len(results) == 1
-        assert results[0].deviation == "substantive"
-        assert results[0].risk_delta.direction == "worse"
-        assert results[0].risk_delta.magnitude == "minor"
-        assert results[0].basis == "judge"
-        assert results[0].confidence == pytest.approx(0.85)
-
-    def test_malformed_verdict_is_isolated_not_batch_poisoning(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A single malformed stored verdict must not poison the whole batch (issue #182).
-
-        A RiskDelta invariant violation (direction='neutral' requires
-        magnitude='none') previously raised out of assess_batch; the caller's
-        blanket except then quarantined EVERY clause in the taxonomy group as
-        basis='judge_error'. The bad verdict must be isolated to its own item
-        (re-queued as needs_review) while the rest of the batch replays — and
-        the isolation must be logged at WARNING (previously silent, which is
-        exactly what let an invalid "basis": "llm" in every deviation verdict
-        go unnoticed for a full overnight run before this fix).
-        """
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        our_standard = "Standard clause."
-
-        good_hunk = "[BEFORE]\na\n[AFTER]\nb"
-        bad_hunk = "[BEFORE]\nc\n[AFTER]\nd"
-        store.put(
-            {"stage": "deviation", "hunk": good_hunk, "our_standard": our_standard},
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                "basis": "judge",
-            },
-        )
-        # Invalid: neutral direction must have magnitude 'none'.
-        store.put(
-            {"stage": "deviation", "hunk": bad_hunk, "our_standard": our_standard},
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "neutral", "magnitude": "minor"},
-                "basis": "judge",
-            },
-        )
-
-        with caplog.at_level(logging.WARNING, logger="playbook_engine.agent_judge"):
-            results = judge.assess_batch(
-                [{"hunk": good_hunk}, {"hunk": bad_hunk}], our_standard=our_standard
-            )
-
-        assert len(results) == 2
-        # Good item replays normally.
-        assert results[0].deviation == "substantive"
-        assert results[0].basis == "judge"
-        # Bad item is isolated: re-queued as needs_review, not judge_error over the batch.
-        assert results[1].deviation == "needs_review"
-        assert results[1].basis == "needs_review"
-        assert any(
-            "malformed stored verdict" in r.message.lower() and r.levelno == logging.WARNING
-            for r in caplog.records
-        ), [r.message for r in caplog.records]
-
-    def test_hit_does_not_write_to_pending_queue(self, tmp_path: Path) -> None:
-        """AC-1: store hit → no pending entry written."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        hunk = "[BEFORE]\nold\n[AFTER]\nnew"
-        our_standard = "Standard."
-
-        payload = {
-            "stage": "deviation",
-            "hunk": hunk,
-            "our_standard": our_standard,
-        }
-        store.put(
-            payload,
-            {
-                "deviation": "none",
-                "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                "basis": "judge",
-                "rationale": "",
-                "confidence": 0.9,
-            },
-        )
-
-        judge.assess_batch([{"hunk": hunk}], our_standard=our_standard)
-
-        queue_path = tmp_path / "judge" / "pending.jsonl"
-        assert not queue_path.exists()
-
-    def test_duplicate_payloads_in_batch_produce_one_pending_entry(self, tmp_path: Path) -> None:
-        """AC-3: duplicate items in one assess_batch call → exactly one pending entry."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        hunk = "[BEFORE]\nProvide service\n[AFTER]\nProvide extended service"
-        items = [{"hunk": hunk}, {"hunk": hunk}]
-
-        results = judge.assess_batch(items, our_standard="Standard.")
-
-        assert len(results) == 2
-        for r in results:
-            assert r.basis == "needs_review"
-
-        path = tmp_path / "judge" / "pending.jsonl"
-        lines = path.read_text().splitlines()
-        assert len(lines) == 1, (
-            "Two identical items in one batch must produce exactly one pending entry"
-        )
-
-    def test_pending_payload_contains_full_our_standard(self, tmp_path: Path) -> None:
-        """AC-5 (deviation): pending payload must carry full our_standard text."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        long_standard = "Standard clause text. " * 30  # > 500 chars
-        items = [{"hunk": "[BEFORE]\nold\n[AFTER]\nnew"}]
-
-        judge.assess_batch(items, our_standard=long_standard)
-
-        path = tmp_path / "judge" / "pending.jsonl"
-        record = json.loads(path.read_text().splitlines()[0])
-        stored_standard = record["payload"]["our_standard"]
-        assert len(stored_standard) > 500, (
-            f"Full our_standard must be stored untruncated; got len={len(stored_standard)}"
-        )
-        assert stored_standard == long_standard
-
-    def test_result_count_matches_input_count(self, tmp_path: Path) -> None:
-        """Result list length must equal input item count (protocol contract)."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        items = [{"hunk": f"[BEFORE]\n{i}\n[AFTER]\n{i}_new"} for i in range(4)]
-        results = judge.assess_batch(items, our_standard="Standard.")
-        assert len(results) == 4
-
-    def test_pending_payload_records_context(self, tmp_path: Path) -> None:
-        """Issue #109: pending payload records taxonomy_id/clause_path/document_id
-        context when the item carries it."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        items = [
-            {
-                "hunk": "[BEFORE]\nold\n[AFTER]\nnew",
-                "taxonomy_id": "indemnification",
-                "clause_path": "3.2",
-                "document_id": "doc-a",
-            }
-        ]
-
-        judge.assess_batch(items, our_standard="Standard.")
-
-        path = tmp_path / "judge" / "pending.jsonl"
-        record = json.loads(path.read_text().splitlines()[0])
-        payload = record["payload"]
-        assert payload["taxonomy_id"] == "indemnification"
-        assert payload["clause_path"] == "3.2"
-        assert payload["document_id"] == "doc-a"
-
-    def test_pending_payload_records_version_context(self, tmp_path: Path) -> None:
-        """Issue #166: pending payload records version_from/version_to when the
-        item carries it, so a relocation-triage reviewer can find the right
-        $OUT/normalized/<document_id>/*.clauses.json files without having to
-        pair-scan pending.jsonl for a counterpart hunk that may not exist."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        items = [
-            {
-                "hunk": "[BEFORE]\nold\n[AFTER]\nnew",
-                "taxonomy_id": "indemnification",
-                "clause_path": "3.2",
-                "document_id": "doc-a",
-                "version_from": "v1",
-                "version_to": "v2",
-            }
-        ]
-
-        judge.assess_batch(items, our_standard="Standard.")
-
-        path = tmp_path / "judge" / "pending.jsonl"
-        record = json.loads(path.read_text().splitlines()[0])
-        payload = record["payload"]
-        assert payload["version_from"] == "v1"
-        assert payload["version_to"] == "v2"
-
-    def test_content_hash_ignores_context_preserving_cross_doc_dedup(self, tmp_path: Path) -> None:
-        """Issue #109: two items with identical hunk+our_standard but different
-        clause_path/taxonomy_id/document_id must share one pending entry AND
-        one cache key — the content-hash key must not include traceability
-        context, or the exact same clause appearing in two different
-        documents would never dedup."""
-        store, pending = _make_store_and_pending(tmp_path)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        hunk = "[BEFORE]\nProvide services\n[AFTER]\nProvide extended services"
-        items = [
-            {
-                "hunk": hunk,
-                "taxonomy_id": "services",
-                "clause_path": "1.1",
-                "document_id": "doc-a",
-                "version_from": "v1",
-                "version_to": "v2",
-            },
-            {
-                "hunk": hunk,
-                "taxonomy_id": "services",
-                "clause_path": "9.9",
-                "document_id": "doc-b",
-                "version_from": "v9",
-                "version_to": "v10",
-            },
-        ]
-
-        results = judge.assess_batch(items, our_standard="Standard.")
-
-        assert len(results) == 2
-        path = tmp_path / "judge" / "pending.jsonl"
-        lines = path.read_text().splitlines()
-        assert len(lines) == 1, (
-            "Identical hunk/our_standard from two different documents must "
-            "produce exactly one pending entry — context must not affect the hash"
-        )
-
-        # Now confirm a store hit for doc-a's payload also serves doc-b's
-        # identical hunk/standard — i.e. the store key really is content-only.
-        store2 = VerdictStore(tmp_path / "judge2" / "verdicts.jsonl")
-        pending2 = PendingQueue(tmp_path / "judge2" / "pending.jsonl")
-        store2.put(
-            {"stage": "deviation", "hunk": hunk, "our_standard": "Standard."},
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                "basis": "judge",
-                "rationale": "",
-                "confidence": 0.8,
-            },
-        )
-        judge2 = StoreBackedDeviationJudge(store=store2, pending=pending2)
-        results2 = judge2.assess_batch(items, our_standard="Standard.")
-        assert results2[0].basis == "judge"
-        assert results2[1].basis == "judge"
-
-
-# ---------------------------------------------------------------------------
 # StoreBackedProvenanceJudge
 # ---------------------------------------------------------------------------
 
@@ -980,28 +665,6 @@ class TestVerdictStoreRoundTrip:
         store2 = VerdictStore(path)
         assert store2.get(payload) == verdict
 
-    def test_deviation_verdict_round_trips(self, tmp_path: Path) -> None:
-        path = tmp_path / "verdicts.jsonl"
-        payload = {
-            "stage": "deviation",
-            "hunk": "[BEFORE]\nold\n[AFTER]\nnew",
-            "our_standard": "Standard.",
-            "clause_path": "3.1",
-        }
-        verdict = {
-            "deviation": "substantive",
-            "risk_delta": {"direction": "worse", "magnitude": "material"},
-            "basis": "judge",
-            "rationale": "Material adverse change.",
-            "confidence": 0.88,
-        }
-
-        store1 = VerdictStore(path)
-        store1.put(payload, verdict)
-
-        store2 = VerdictStore(path)
-        assert store2.get(payload) == verdict
-
     def test_provenance_verdict_round_trips(self, tmp_path: Path) -> None:
         path = tmp_path / "verdicts.jsonl"
         payload = {
@@ -1208,50 +871,11 @@ class TestStoreBackedScopeJudge:
 class TestValidateVerdictBasisWhitelist:
     """Issue #247: validate_verdict's contract is "any verdict accepted here is
     guaranteed to replay" — but it only rejected _UNRESOLVED_VERDICT_BASES and
-    otherwise accepted any ``_BASIS_VALUES``-valid basis. A plausible-but-nonstandard
-    value (e.g. "reworded_equivalent", emitted naturally by an LLM judge that finds
-    a hunk equivalent) passed here but crashed deviation_classifier.assess_deviations /
-    clause_classifier.classify_tree on the next replay, outside the quarantine catch
-    set — aborting the whole corpus run after the verdict was already committed to
-    the append-only verdicts.jsonl.
+    otherwise accepted any valid basis. A plausible-but-nonstandard value
+    passed here but crashed clause_classifier.classify_tree on the next
+    replay, outside the quarantine catch set — aborting the whole corpus run
+    after the verdict was already committed to the append-only verdicts.jsonl.
     """
-
-    def test_deviation_rejects_reworded_equivalent_basis(self) -> None:
-        """ "reworded_equivalent" is a valid _BASIS_VALUES member but is not one of
-        the bases assess_deviations accepts from a replayed verdict — it must be
-        rejected here, not on the next mine round."""
-        with pytest.raises(ValueError, match="basis"):
-            validate_verdict(
-                "deviation",
-                {
-                    "deviation": "reworded_equivalent",
-                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                    "basis": "reworded_equivalent",
-                },
-            )
-
-    def test_deviation_rejects_deterministic_basis(self) -> None:
-        """ "deterministic" is likewise valid but not replayable."""
-        with pytest.raises(ValueError, match="basis"):
-            validate_verdict(
-                "deviation",
-                {
-                    "deviation": "none",
-                    "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                    "basis": "deterministic",
-                },
-            )
-
-    def test_deviation_accepts_judge_basis(self) -> None:
-        """The one basis a producer-supplied deviation verdict may carry."""
-        validate_verdict(
-            "deviation",
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "material"},
-                "basis": "judge",
-            },
-        )
 
     def test_classify_rejects_exact_match_basis(self) -> None:
         """ "exact_match" is a valid _BASIS_VALUES member but classify_tree raises
@@ -1285,8 +909,7 @@ class TestValidateVerdictBasisWhitelist:
         )
 
     def test_classify_accepts_unclassified_basis(self) -> None:
-        """ "unclassified" is engine-accepted on replay for classify (unlike
-        deviation, which has no equivalent placeholder basis)."""
+        """ "unclassified" is engine-accepted on replay for classify."""
         validate_verdict(
             "classify",
             {"taxonomy_id": None, "confidence": 0.0, "basis": "unclassified"},
@@ -1322,9 +945,7 @@ class TestValidateVerdictBasisWhitelist:
 class TestValidateVerdictConfidenceType:
     """Issue #161: a stringified confidence (a common LLM-producer mistake)
     must raise an actionable ``ValueError`` naming the field, not a bare
-    ``TypeError`` from the dataclass's ``0.0 <= confidence <= 1.0`` comparison
-    — and a deviation verdict's confidence, which skipped validation
-    entirely, must now be type/range-checked too.
+    ``TypeError`` from the dataclass's ``0.0 <= confidence <= 1.0`` comparison.
     """
 
     def test_classify_string_confidence_raises_value_error_not_type_error(self) -> None:
@@ -1361,76 +982,87 @@ class TestValidateVerdictConfidenceType:
                 {"provenance": "unknown", "basis": "llm", "confidence": 0.9},
             )
 
-    def test_deviation_string_confidence_is_now_rejected(self) -> None:
-        """Previously accepted silently — DeviationResult skipped confidence
-        validation entirely."""
-        with pytest.raises(ValueError, match="confidence"):
-            validate_verdict(
-                "deviation",
-                {
-                    "deviation": "substantive",
-                    "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                    "basis": "judge",
-                    "confidence": "0.7",
-                },
-            )
 
-    def test_deviation_out_of_range_confidence_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="confidence"):
-            validate_verdict(
-                "deviation",
-                {
-                    "deviation": "substantive",
-                    "risk_delta": {"direction": "worse", "magnitude": "minor"},
-                    "basis": "judge",
-                    "confidence": 1.5,
-                },
-            )
+# ---------------------------------------------------------------------------
+# The kind seam (issue #239): a new judge kind registers its verdict shape and
+# its rubric; judge-apply, the rubric stamp and the queue then work per kind.
+# ---------------------------------------------------------------------------
 
-    def test_deviation_null_confidence_is_accepted(self) -> None:
-        """None is the documented sentinel for deterministic paths."""
-        validate_verdict(
-            "deviation",
-            {
-                "deviation": "none",
-                "risk_delta": {"direction": "neutral", "magnitude": "none"},
-                "basis": "judge",
-                "confidence": None,
-            },
+
+class TestJudgeKindSeam:
+    """A kind that is not built in plugs into validation, inference, the
+    rubric framework, the queue and the store without touching any of them."""
+
+    @pytest.fixture
+    def widget_kind(self, monkeypatch: pytest.MonkeyPatch) -> str:
+        from playbook_engine import agent_judge, rubric
+
+        monkeypatch.setattr(agent_judge, "_VERDICT_KINDS", dict(agent_judge._VERDICT_KINDS))
+        monkeypatch.setattr(rubric, "RUBRIC_PROMPT_VERSIONS", dict(rubric.RUBRIC_PROMPT_VERSIONS))
+        monkeypatch.setattr(rubric, "_DERIVED_SURFACES", dict(rubric._DERIVED_SURFACES))
+        monkeypatch.setattr(rubric, "JUDGE_KINDS", rubric.JUDGE_KINDS)
+
+        def validate(verdict: dict[str, Any]) -> None:
+            if verdict.get("equivalent") not in (True, False):
+                raise ValueError("'equivalent' must be a JSON boolean")
+
+        agent_judge.register_verdict_kind("widget", validate, lambda v: "equivalent" in v)
+        rubric.register_judge_kind(
+            "widget", "v1", lambda *, taxonomy, agreement_type: {"answers": [True, False]}
         )
+        return "widget"
 
-    def test_deviation_valid_numeric_confidence_is_accepted(self) -> None:
-        validate_verdict(
-            "deviation",
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "material"},
-                "basis": "judge",
-                "confidence": 0.7,
-            },
+    def test_builtin_kinds_are_exactly_the_non_deviation_ones(self) -> None:
+        from playbook_engine import rubric
+
+        assert set(rubric.JUDGE_KINDS) == {"classify", "provenance", "scope"}
+
+    def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:
+        from playbook_engine.agent_judge import infer_verdict_kind
+
+        verdict = {"deviation": "substantive", "risk_delta": {"direction": "worse"}}
+        assert infer_verdict_kind(verdict) is None
+        with pytest.raises(ValueError, match="unknown pending-item kind"):
+            validate_verdict("deviation", verdict)
+
+    def test_registered_kind_is_validated_at_apply_time(self, widget_kind: str) -> None:
+        validate_verdict(widget_kind, {"equivalent": True})
+        with pytest.raises(ValueError, match="JSON boolean"):
+            validate_verdict(widget_kind, {"equivalent": "yes"})
+
+    def test_registered_kind_is_inferred_from_its_shape(self, widget_kind: str) -> None:
+        from playbook_engine.agent_judge import infer_verdict_kind
+
+        assert infer_verdict_kind({"equivalent": False}) == widget_kind
+        # The built-in shapes still infer to themselves.
+        assert infer_verdict_kind({"in_scope": True}) == "scope"
+        assert infer_verdict_kind({"taxonomy_id": None}) == "classify"
+
+    def test_registered_kind_gets_a_rubric_version(self, widget_kind: str) -> None:
+        from playbook_engine import rubric
+
+        version = rubric.rubric_version(widget_kind)
+        assert version.startswith("v1+")
+        assert widget_kind in rubric.current_versions()
+
+    def test_registered_kind_round_trips_through_queue_and_store(
+        self, widget_kind: str, tmp_path: Path
+    ) -> None:
+        from playbook_engine import rubric
+
+        store, pending = _make_store_and_pending(tmp_path)
+        payload = {"stage": widget_kind, "left": "a", "right": "b"}
+        key = _payload_key(payload)
+        version = rubric.rubric_version(widget_kind)
+        assert pending.add(key, widget_kind, payload, version) is True
+
+        queued = json.loads((tmp_path / "judge" / "pending.jsonl").read_text().splitlines()[0])
+        assert queued["kind"] == widget_kind and queued["rubric_version"] == version
+
+        store.put_by_key(
+            key, {"equivalent": True}, rubric=rubric.RubricStamp(kind=widget_kind, version=version)
         )
-
-    def test_deviation_result_rejects_out_of_range_confidence_directly(self) -> None:
-        """The dataclass itself must range-check confidence (issue #161),
-        not only the validate_verdict apply-time gate — a direct construction
-        elsewhere in the codebase must not be able to bank a bad value."""
-        from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
-
-        with pytest.raises(ValueError, match="confidence"):
-            DeviationResult(
-                deviation="substantive",
-                risk_delta=RiskDelta(direction="worse", magnitude="minor"),
-                basis="judge",
-                confidence=1.5,
-            )
-
-    def test_deviation_result_rejects_string_confidence_directly(self) -> None:
-        from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
-
-        with pytest.raises(ValueError, match="confidence"):
-            DeviationResult(
-                deviation="substantive",
-                risk_delta=RiskDelta(direction="worse", magnitude="minor"),
-                basis="judge",
-                confidence="0.7",
-            )
+        record = VerdictStore(tmp_path / "judge" / "verdicts.jsonl").get_record(payload)
+        assert record is not None
+        assert record.verdict == {"equivalent": True}
+        assert record.rubric_kind == widget_kind and record.rubric_version == version

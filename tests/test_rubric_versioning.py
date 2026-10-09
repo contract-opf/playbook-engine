@@ -1,8 +1,8 @@
 """Tests for rubric/judgment versioning of the store-backed judges.
 
 The hazard being closed: ``agent_judge._payload_key`` hashes clause CONTENT
-only, so a change to the judging *criteria* — the taxonomy, the deviation
-vocabulary, the prose rubric in the ``playbook-from-corpus`` skill — left
+only, so a change to the judging *criteria* — the taxonomy, the prose rubric
+in the ``playbook-from-corpus`` skill — left
 every previously banked verdict replaying forever. A live re-derivation
 seeded ~1,444 stored verdicts and re-queued only 246; nothing could say
 whether the ~1,200 replays were still valid.
@@ -13,7 +13,7 @@ Acceptance criteria verified here:
         stamp survives a store round-trip.
   AC-2: A store hit whose stamp matches the current rubric replays.
   AC-3: A store hit whose stamp does NOT match re-queues instead of replaying
-        — for all four judge kinds.
+        — for every judge kind.
   AC-4: An UNSTAMPED (pre-versioning) verdict still replays by default — no
         banked human judgment is thrown away on upgrade — but is counted and
         reported, and re-queues under --strict-rubric.
@@ -23,8 +23,6 @@ Acceptance criteria verified here:
         from the loaded YAML or from the taxonomy embedded in an OPF document.
   AC-7: ``judge --plan-only`` reports "N stored verdicts were made under an
         older rubric".
-  AC-8: ``judge-migrate`` adopts unstamped verdicts (preserving the verdict),
-        and only re-stamps known-stale ones under --accept-stale.
 
 SECURITY NOTE: every fixture here is synthetic — programmatically built
 clause text, or the pre-committed ``examples/judge-fixture/`` corpus. No real
@@ -45,7 +43,6 @@ from playbook_engine.agent_judge import (
     PendingQueue,
     ScopeNeedsReviewError,
     StoreBackedClassificationJudge,
-    StoreBackedDeviationJudge,
     StoreBackedProvenanceJudge,
     StoreBackedScopeJudge,
     VerdictStore,
@@ -131,9 +128,9 @@ def _queued(tmp_path: Path) -> list[dict[str, Any]]:
 
 class TestRubricVersion:
     def test_shape_is_manual_plus_derived(self) -> None:
-        version = rubric_version("deviation")
+        version = rubric_version("provenance")
         manual, _, derived = version.partition("+")
-        assert manual == RUBRIC_PROMPT_VERSIONS["deviation"]
+        assert manual == RUBRIC_PROMPT_VERSIONS["provenance"]
         assert len(derived) == 12 and derived.isalnum()
 
     def test_every_kind_has_a_version(self) -> None:
@@ -180,8 +177,8 @@ class TestRubricVersion:
         )
 
     def test_taxonomy_digest_agrees_across_dataclass_and_opf_dict(self) -> None:
-        """The viewer digests the OPF-embedded taxonomy; mining digests the
-        loaded YAML. They must agree or a reviewer correction lands stale."""
+        """A consumer digests the OPF-embedded taxonomy; mining digests the
+        loaded YAML. They must agree or a stored verdict reads as stale."""
         as_opf = {
             "source": "custom",
             "entries": [
@@ -209,10 +206,15 @@ class TestRubricVersion:
             "scope", agreement_type=widened
         )
 
-    def test_deviation_version_is_taxonomy_independent(self) -> None:
-        """Deviation judging does not consult the taxonomy, so a taxonomy edit
-        must not invalidate deviation verdicts ("and only those")."""
-        assert rubric_version("deviation", taxonomy=_TAX_A) == rubric_version("deviation")
+    def test_provenance_version_is_taxonomy_independent(self) -> None:
+        """Provenance judging does not consult the taxonomy, so a taxonomy edit
+        must not invalidate provenance verdicts ("and only those")."""
+        assert rubric_version("provenance", taxonomy=_TAX_A) == rubric_version("provenance")
+
+    def test_deviation_is_no_longer_a_judge_kind(self) -> None:
+        assert "deviation" not in JUDGE_KINDS
+        with pytest.raises(RubricError):
+            rubric_version("deviation")
 
 
 # ---------------------------------------------------------------------------
@@ -302,27 +304,6 @@ class TestVerdictStoreStamping:
         VerdictStore(path).put({"a": 1}, {"v": 1})
         line = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
         assert "rubric" not in line
-
-    def test_restamp_keeps_verdict_and_preserves_the_prior_line(self, tmp_path: Path) -> None:
-        path = tmp_path / "v.jsonl"
-        store = VerdictStore(path)
-        store.put_by_key("k1", {"taxonomy_id": "confidentiality"})
-        assert store.restamp("k1", RubricStamp(kind="classify", version="v1+new")) is True
-
-        lines = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
-        assert len(lines) == 2, "re-stamp must append, leaving an audit trail"
-        assert "rubric" not in lines[0]
-        assert lines[1]["rubric"] == {"kind": "classify", "version": "v1+new"}
-
-        reloaded = VerdictStore(path).get_record_by_key("k1")
-        assert reloaded is not None
-        assert reloaded.verdict == {"taxonomy_id": "confidentiality"}, "verdict must survive"
-        assert reloaded.rubric_version == "v1+new"
-
-    def test_restamp_unknown_key_is_a_no_op(self, tmp_path: Path) -> None:
-        assert VerdictStore(tmp_path / "v.jsonl").restamp("nope", RubricStamp("classify", "v")) is (
-            False
-        )
 
     def test_records_and_len(self, tmp_path: Path) -> None:
         store = VerdictStore(tmp_path / "v.jsonl")
@@ -420,51 +401,6 @@ class TestClassifyJudgeRubric:
         assert result.taxonomy_id == "confidentiality"
         assert judge.rubric.total(STATE_STALE) == 1
         assert _queued(tmp_path) == []
-
-
-class TestDeviationJudgeRubric:
-    _ITEM = {"hunk": "[BEFORE] 30 days\n[AFTER] 90 days", "taxonomy_id": "term"}
-    _STANDARD = "Notice period of 30 days."
-
-    def _seed(self, tmp_path: Path, version: str | None) -> tuple[VerdictStore, PendingQueue]:
-        store, pending = _store_and_queue(tmp_path)
-        payload = {"stage": "deviation", "hunk": self._ITEM["hunk"], "our_standard": self._STANDARD}
-        stamp = RubricStamp(kind="deviation", version=version) if version else None
-        store.put(
-            payload,
-            {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "material"},
-                "basis": "judge",
-                "rationale": "Tripled the notice period.",
-            },
-            rubric=stamp,
-        )
-        return store, pending
-
-    def test_current_stamp_replays(self, tmp_path: Path) -> None:
-        store, pending = self._seed(tmp_path, rubric_version("deviation"))
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        [result] = judge.assess_batch([dict(self._ITEM)], self._STANDARD)
-        assert result.deviation == "substantive"
-        assert _queued(tmp_path) == []
-
-    def test_stale_stamp_requeues_with_traceability_context(self, tmp_path: Path) -> None:
-        store, pending = self._seed(tmp_path, "v1+staleaaaaaa")
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        [result] = judge.assess_batch([dict(self._ITEM)], self._STANDARD)
-        assert result.deviation == "needs_review"
-        [queued] = _queued(tmp_path)
-        assert queued["kind"] == "deviation"
-        assert queued["payload"]["taxonomy_id"] == "term"
-        assert queued["rubric_version"] == rubric_version("deviation")
-
-    def test_legacy_replays(self, tmp_path: Path) -> None:
-        store, pending = self._seed(tmp_path, None)
-        judge = StoreBackedDeviationJudge(store=store, pending=pending)
-        [result] = judge.assess_batch([dict(self._ITEM)], self._STANDARD)
-        assert result.deviation == "substantive"
-        assert judge.rubric.total(STATE_LEGACY) == 1
 
 
 class TestProvenanceJudgeRubric:
@@ -567,25 +503,34 @@ def test_one_policy_tallies_every_kind(tmp_path: Path) -> None:
         "taxonomy_ids": sorted(e.id for e in _TAX_A.entries),
     }
     store.put(classify_payload, {"taxonomy_id": "confidentiality"}, rubric=None)
+    scope_payload = {
+        "stage": "scope",
+        "agreement_type_id": _AGREEMENT_A.id,
+        "document_id": "doc-1",
+        "clause_heads": ["Confidentiality"],
+    }
     store.put(
-        {"stage": "deviation", "hunk": "h", "our_standard": "s"},
-        {
-            "deviation": "none",
-            "risk_delta": {"direction": "neutral", "magnitude": "none"},
-            "basis": "judge",
-        },
-        rubric=RubricStamp("deviation", "v0+obsolete0000"),
+        scope_payload,
+        {"in_scope": True, "scope_rationale": "fits", "scope_confidence": 0.9},
+        rubric=RubricStamp("scope", "v0+obsolete0000"),
     )
 
     StoreBackedClassificationJudge(store=store, pending=pending, rubric=policy).classify_batch(
         [_node("Confidentiality", "Body of Confidentiality.")], _TAX_A
     )
-    StoreBackedDeviationJudge(store=store, pending=pending, rubric=policy).assess_batch(
-        [{"hunk": "h"}], "s"
-    )
+    with pytest.raises(ScopeNeedsReviewError):
+        StoreBackedScopeJudge(store=store, pending=pending, rubric=policy).judge(
+            ClauseTree(
+                document_id="doc-1",
+                version="v1",
+                source_file="doc.docx",
+                nodes=[_node("Confidentiality", "Body of Confidentiality.")],
+            ),
+            _AGREEMENT_A,
+        )
 
     assert policy.breakdown(STATE_LEGACY) == {"classify": 1}
-    assert policy.breakdown(STATE_STALE) == {"deviation": 1}
+    assert policy.breakdown(STATE_STALE) == {"scope": 1}
 
 
 def test_pending_queue_records_rubric_version_only_when_given(tmp_path: Path) -> None:
@@ -623,12 +568,6 @@ def judged_out(tmp_path: Path) -> Path:
     verdicts = tmp_path / "verdicts-in.jsonl"
     canned = {
         "classify": {"taxonomy_id": None, "confidence": 0.4, "basis": "unclassified"},
-        "deviation": {
-            "deviation": "none",
-            "risk_delta": {"direction": "neutral", "magnitude": "none"},
-            "basis": "judge",
-            "rationale": "No material change.",
-        },
         "provenance": {"provenance": "counterparty_paper", "confidence": 0.8, "basis": "llm"},
         "scope": {
             "in_scope": True,
@@ -672,7 +611,8 @@ def test_judge_reports_current_rubric_versions(judged_out: Path) -> None:
     )
     assert result.exit_code == 0
     assert "rubric  :" in result.output
-    assert "deviation=" in result.output
+    assert "scope=" in result.output
+    assert "deviation=" not in result.output
 
 
 def test_plan_only_reports_stale_verdicts(
@@ -734,135 +674,7 @@ def test_judge_reports_legacy_store(judged_out: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "carry no rubric version" in result.stderr
-    assert "judge-migrate" in result.stderr
-
-
-def test_judge_migrate_dry_run_reports_without_writing(judged_out: Path) -> None:
-    store_path = judged_out / "judge" / "verdicts.jsonl"
-    before = store_path.read_text(encoding="utf-8")
-    store_path.write_text(
-        "\n".join(
-            json.dumps({k: v for k, v in json.loads(x).items() if k != "rubric"})
-            for x in before.splitlines()
-            if x.strip()
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    after_strip = store_path.read_text(encoding="utf-8")
-
-    result = _invoke("judge-migrate", str(judged_out), "--config", str(_CONFIG_PATH), "--dry-run")
-    assert result.exit_code == 0, result.output
-    assert "DRY RUN" in result.output
-    assert "legacy" in result.output
-    assert store_path.read_text(encoding="utf-8") == after_strip, "dry run must not write"
-
-
-def test_judge_migrate_adopts_legacy_and_silences_the_warning(judged_out: Path) -> None:
-    """AC-8: migration preserves the verdict and converts unknown → current."""
-    store_path = judged_out / "judge" / "verdicts.jsonl"
-    original = [
-        json.loads(x) for x in store_path.read_text(encoding="utf-8").splitlines() if x.strip()
-    ]
-    store_path.write_text(
-        "".join(
-            json.dumps({k: v for k, v in rec.items() if k != "rubric"}) + "\n" for rec in original
-        ),
-        encoding="utf-8",
-    )
-
-    result = _invoke("judge-migrate", str(judged_out), "--config", str(_CONFIG_PATH))
-    assert result.exit_code == 0, result.output
-    assert "re-stamped" in result.output
-
-    migrated = VerdictStore(store_path)
-    assert len(migrated) == len(original)
-    for rec in original:
-        stored = migrated.get_record_by_key(rec["key"])
-        assert stored is not None
-        assert stored.verdict == rec["verdict"], "migration must not alter the judgment"
-        assert stored.rubric_version is not None
-
-    result = _invoke(
-        "judge",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(judged_out),
-        "--plan-only",
-    )
-    assert "carry no rubric version" not in result.stderr
-
-
-def test_judge_migrate_leaves_stale_alone_without_accept_stale(
-    judged_out: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for kind in JUDGE_KINDS:
-        monkeypatch.setitem(RUBRIC_PROMPT_VERSIONS, kind, "v99")
-    store_path = judged_out / "judge" / "verdicts.jsonl"
-    before = store_path.read_text(encoding="utf-8")
-
-    result = _invoke("judge-migrate", str(judged_out), "--config", str(_CONFIG_PATH))
-    assert result.exit_code == 0, result.output
-    assert "nothing to re-stamp" in result.output
-    assert store_path.read_text(encoding="utf-8") == before
-
-
-def test_judge_migrate_accept_stale_restamps(
-    judged_out: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for kind in JUDGE_KINDS:
-        monkeypatch.setitem(RUBRIC_PROMPT_VERSIONS, kind, "v99")
-
-    result = _invoke(
-        "judge-migrate", str(judged_out), "--config", str(_CONFIG_PATH), "--accept-stale"
-    )
-    assert result.exit_code == 0, result.output
-    assert "re-stamped" in result.output
-
-    result = _invoke(
-        "judge",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(judged_out),
-        "--plan-only",
-    )
-    assert "older rubric" not in result.stderr
-
-
-def test_judge_migrate_kind_filter(judged_out: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for kind in JUDGE_KINDS:
-        monkeypatch.setitem(RUBRIC_PROMPT_VERSIONS, kind, "v99")
-
-    result = _invoke(
-        "judge-migrate",
-        str(judged_out),
-        "--config",
-        str(_CONFIG_PATH),
-        "--accept-stale",
-        "--kind",
-        "provenance",
-    )
-    assert result.exit_code == 0, result.output
-
-    # Only provenance may have been advanced; every other kind keeps its old stamp.
-    store = VerdictStore(judged_out / "judge" / "verdicts.jsonl")
-    advanced = {
-        rec.rubric_kind
-        for _k, rec in store.records()
-        if rec.rubric_version and rec.rubric_version.startswith("v99+")
-    }
-    assert advanced <= {"provenance"}
-
-
-def test_judge_migrate_without_store_exits_nonzero(tmp_path: Path) -> None:
-    (tmp_path / "out").mkdir()
-    result = _invoke("judge-migrate", str(tmp_path / "out"), "--config", str(_CONFIG_PATH))
-    assert result.exit_code != 0
-    assert "no verdict store" in result.stderr
+    assert "judge-migrate" not in result.stderr
 
 
 def test_stale_requeue_is_not_reported_as_a_malformed_verdict_loop(

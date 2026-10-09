@@ -25,7 +25,6 @@ from playbook_engine.clause_position_compiler import (
 )
 from playbook_engine.deviation_classifier import (
     DeviationResult,
-    RiskDelta,
     assess_deviations_deterministic,
 )
 from playbook_engine.observation_builder import (
@@ -39,7 +38,7 @@ from playbook_engine.observation_builder import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-_NEUTRAL = RiskDelta(direction="neutral", magnitude="none")
+_NEUTRAL = {"direction": "neutral", "magnitude": "none"}
 
 
 def _obs(
@@ -62,7 +61,7 @@ def _obs(
             char_span=None,
         ),
         deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
+        risk_delta=dict(_NEUTRAL),
         provenance=provenance,
         outcome=outcome,
     )
@@ -193,7 +192,7 @@ def test_our_standard_absent_when_template_text_empty() -> None:
             document_id="template", version="template", clause_path="8", char_span=None
         ),
         deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
+        risk_delta=dict(_NEUTRAL),
         provenance="our_paper",
         outcome="signed",
     )
@@ -214,7 +213,7 @@ def test_our_standard_carries_full_text() -> None:
             document_id="template", version="template", clause_path="8", char_span=None
         ),
         deviation="none",
-        risk_delta=_NEUTRAL.to_dict(),
+        risk_delta=dict(_NEUTRAL),
         provenance="our_paper",
         outcome="signed",
     )
@@ -413,7 +412,6 @@ def _consumer_deal(
         [],
         ordinal_by_vid={"v1": 1, "v2": 2, "v3": 3},
         standard_text_by_tid=_STD_ONLY,
-        deterministic_deviations=True,
     )
 
 
@@ -479,7 +477,6 @@ def test_consumer_path_multi_node_clause_is_standard_as_a_whole() -> None:
         rows,
         [],
         standard_text_by_tid=_STD_ONLY,
-        deterministic_deviations=True,
     )
     assert len(obs) == 1
     assert obs[0].standard is True

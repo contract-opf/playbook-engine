@@ -56,11 +56,8 @@ REQUIRED_SUBCOMMANDS = [
     "mine",
     "judge",
     "judge-apply",
-    # SKILL.md's Route B and Step 6 (issue #158) cite judge-migrate --dry-run.
-    "judge-migrate",
     "project",
     "validate",
-    "report",
     "view",
     "inspect",
     # Step 7a/7b of SKILL.md — both are command GROUPS, handled like `view`
@@ -69,10 +66,16 @@ REQUIRED_SUBCOMMANDS = [
     # only appear in the SUBcommand's help).
     "posture",
     "floor",
-    # Step 11 of SKILL.md (issue #137) — publish cites --redact-terms.
-    "publish",
-    # Step 7c of SKILL.md (issue #130) — curate cites --command/--file/--by.
+]
+
+# Commands retired by issue #239 — the skill must not send anyone to them.
+RETIRED_SUBCOMMANDS = [
     "curate",
+    "digest",
+    "judge-migrate",
+    "publish",
+    "render-prompt",
+    "report",
 ]
 
 
@@ -139,12 +142,12 @@ def _all_subcommand_help_text() -> str:
     nonexistent flag (the --no-resume incident) without false-flagging a
     real flag that just belongs to a different subcommand. ``view`` is a
     command GROUP whose own --help lists only subcommand names, so its
-    subcommands' help (where flags like --alias-map live) is included too.
+    subcommands' help is included too.
     """
     subcmds = list(REQUIRED_SUBCOMMANDS)
     texts = [_subcommand_help(subcmd) for subcmd in subcmds]
     for group, group_subs in (
-        ("view", ("render", "apply")),
+        ("view", ("bundle",)),
         ("posture", ("questions", "interview")),
         ("floor", ("propose", "sign")),
     ):
@@ -231,7 +234,7 @@ def test_frontmatter_description_contains_use_when() -> None:
         "Unattended judge-drain loop",
         "Project",
         "Validate",
-        "Report",
+        "Inspect",
         "View",
         "Guardrails",
     ],
@@ -250,110 +253,64 @@ def test_skill_body_references_judge_apply() -> None:
     assert "judge-apply" in body
 
 
-def test_skill_body_references_feedback_reentry() -> None:
-    """SKILL.md body must document the feedback re-entry flow (view apply)."""
-    _, body = _parse_frontmatter(SKILL_MD)
-    assert "view apply" in body or "view --apply" in body or "feedback" in body.lower()
+def test_skill_body_names_no_retired_command() -> None:
+    """SKILL.md must not send anyone to a command issue #239 retired.
 
-
-def test_view_apply_invocations_include_feedback_file_argument() -> None:
-    """Every ``playbook view apply`` command line must pass FEEDBACK_FILE.
-
-    Regression test for issue #145 (audit finding #0/#31): Step 7b used to
-    read ``playbook view apply $OUT`` with only one positional argument,
-    but ``view_apply_cmd`` (playbook_engine/cli.py) declares ``out_dir``
-    AND a required ``feedback_file`` positional with no default — the
-    documented one-argument form always fails with a CLI usage error at
-    exactly the moment a human has just finished reviewing Floor
-    candidates. Every ``playbook view apply ...`` line in the doc body
-    must carry a second path argument.
+    The retired surfaces (curation, the review HTML and its feedback loop,
+    the after-action report, render-prompt, publish, the digest sidecar,
+    judge-migrate and the deviation judge) left the corpus -> playbook ->
+    toaster path; a skill step that still tells the agent to run one is a
+    step that fails at the CLI.
     """
     _, body = _parse_frontmatter(SKILL_MD)
-    invocations = re.findall(r"^playbook view apply .*$", body, re.MULTILINE)
-    assert invocations, "expected at least one 'playbook view apply' invocation in SKILL.md"
-    for line in invocations:
-        tokens = line.split()
-        assert len(tokens) >= 5, (
-            f"'playbook view apply' invocation is missing the required "
-            f"FEEDBACK_FILE argument: {line!r}"
-        )
+    for retired in (
+        "playbook curate",
+        "playbook digest",
+        "playbook publish",
+        "playbook report",
+        "render-prompt",
+        "view render",
+        "view apply",
+        "judge-migrate",
+        "--with-deviation-judge",
+        "playbook.review.html",
+        "playbook.digest.json",
+        "feedback.json",
+        "x_judgments",
+    ):
+        assert retired not in body, f"SKILL.md still cites the retired surface {retired!r}"
+    assert "Step 7c" not in body and "## Step 11" not in body and "### Step 10" not in body
 
 
-def test_step_11_publish_documents_config_and_redact_terms_flags() -> None:
-    """Step 11's publish guidance must cite both --redact-terms and --config.
-
-    Regression test for issue #142 (skill QA audit finding #37): the residue
-    procedure named ``re-mine`` as the only remediation and never mentioned
-    ``publish --redact-terms`` (the GC-residue-review fix that needs no
-    re-mine) or ``publish --config`` (restores a domain-flavored corpus's
-    prior scan leniency, e.g. for the affiliation-agreement corpus this
-    skill is actually run against). Both flags are real ``publish`` options
-    (see ``playbook publish --help``); Step 11 must tell the agent to reach
-    for them.
-    """
+def test_skill_step_9_is_the_bundle_and_the_residue_check() -> None:
+    """The one human-readable artifact is `view bundle`; the mandatory residue
+    check scans the canonical OPF and the bundle (the digest is a section of
+    the OPF, not a file)."""
     _, body = _parse_frontmatter(SKILL_MD)
-    step_11 = body.split("## Step 11", 1)[1].split("## Feedback re-entry", 1)[0]
-    assert "--redact-terms" in step_11, "Step 11 must cite --redact-terms as sanctioned residue fix"
-    assert "--config" in step_11, "Step 11 must cite --config for domain-corpus scan leniency"
-    fenced_blocks = re.findall(r"```bash\n(.*?)```", step_11, re.DOTALL)
-    publish_blocks = [block for block in fenced_blocks if 'ARGS="publish' in block]
-    assert publish_blocks, "expected at least one 'publish' ARGS command block in Step 11"
-    assert any("--config" in block for block in publish_blocks), (
-        "Step 11's publish command example should demonstrate --config, "
-        "not just mention it in prose"
-    )
+    step_9 = body.split("### Step 9 —", 1)[1].split("## Guardrails", 1)[0]
+    assert 'ARGS="view bundle /work/out"' in step_9
+    assert "find_residue" in step_9
+    assert "playbook.opf.json" in step_9 and "playbook.opf.html" in step_9
 
 
-def test_skill_body_documents_q5_auto_rejection() -> None:
+def test_skill_body_documents_q5_pre_rejection() -> None:
     """SKILL.md must disclose that Q5 (flexible_clauses) pre-marks candidates.
 
     Regression test for issue #134 (skill QA audit finding #86):
     ``flexible_clauses`` is described as "binds nothing" in Step 7a's
     question-ordering table, but a Q5 answer auto-marks matching REVERSAL
     candidates ``decision: rejected`` in floor.candidates.json (issue #105,
-    ``floor_candidates._Q5_REJECTION_COMMENT``), and ``playbook.review.html``
-    renders those as "Recommended reject" (``viewer.py``) with no explanation
-    from the interview walkthrough itself. Step 7b must tell the reader this
-    happens so a reviewer isn't surprised by pre-rejected rows attributed to
-    their own answer.
+    ``floor_candidates._Q5_REJECTION_COMMENT``). Step 7a must tell the reader
+    this happens so a reviewer isn't surprised by pre-rejected rows attributed
+    to their own answer.
     """
     _, body = _parse_frontmatter(SKILL_MD)
-    assert "recommended reject" in body.lower(), (
-        "SKILL.md must mention the 'Recommended reject' rendering that Q5 "
-        "(flexible_clauses) triggers on matching Floor candidates (issue #134)"
+    flat = " ".join(body.split())
+    assert '"decision": "rejected"' in flat and "flexible_clauses" in flat, (
+        "SKILL.md must mention the pre-rejection that Q5 (flexible_clauses) "
+        "writes onto matching Floor candidates (issue #134)"
     )
-
-
-def test_feedback_reentry_block_regenerates_view_artifacts() -> None:
-    """Feedback re-entry must end by regenerating review HTML, bundle, digest.
-
-    Regression test for issue #124 (audit finding #99): the Feedback
-    re-entry command block used to end at ``report``, so after a reviewer's
-    correction round the promoted floor invariants landed in
-    playbook.opf.json (via ``view apply`` + a preserving ``project``, issue
-    #123) but ``playbook.review.html``, ``playbook.opf.html``, and the
-    digest sidecar were never rebuilt — they kept showing the
-    pre-correction state. Extracts just the "## Feedback re-entry" section
-    (up to the next "## " heading) so this doesn't pass merely because
-    Step 10 elsewhere in the doc happens to mention these commands.
-    """
-    _, body = _parse_frontmatter(SKILL_MD)
-    match = re.search(r"^## Feedback re-entry\n(.*?)^## ", body, re.DOTALL | re.MULTILINE)
-    assert match is not None, "SKILL.md must have a '## Feedback re-entry' section"
-    section = match.group(1)
-
-    assert "view render" in section, (
-        "Feedback re-entry block must re-run 'view render' after the correction "
-        "recompile, or playbook.review.html stays stale (issue #124)"
-    )
-    assert "view bundle" in section, (
-        "Feedback re-entry block must re-run 'view bundle' after the correction "
-        "recompile, or playbook.opf.html stays stale (issue #124)"
-    )
-    assert re.search(r"""ARGS=["']digest\b""", section) or "playbook digest" in section, (
-        "Feedback re-entry block must re-run 'digest' after the correction "
-        "recompile, or the digest sidecar stays stale (issue #124)"
-    )
+    assert "playbook floor sign" in flat
 
 
 def test_skill_body_documents_full_drain_invariant() -> None:
@@ -484,6 +441,17 @@ def test_subcommand_present_in_playbook_help(subcmd: str) -> None:
     """Each subcommand referenced by the skill must appear in ``playbook --help``."""
     help_text = _playbook_help()
     assert subcmd in help_text, f"Subcommand '{subcmd}' not found in `playbook --help` output"
+
+
+@pytest.mark.parametrize("subcmd", RETIRED_SUBCOMMANDS)
+def test_retired_subcommand_is_absent_from_playbook_help(subcmd: str) -> None:
+    """Issue #239: each retired command is gone from `playbook --help`."""
+    names = {
+        line.split()[0]
+        for line in _playbook_help().split("Commands:", 1)[1].splitlines()
+        if line.strip()
+    }
+    assert subcmd not in names, f"`playbook {subcmd}` should have been retired"
 
 
 @pytest.mark.parametrize("subcmd", REQUIRED_SUBCOMMANDS)
@@ -637,19 +605,19 @@ def test_reference_md_done_criteria_mentions_empty_pending() -> None:
     assert "pending.jsonl" in content and "empty" in content.lower()
 
 
-def test_reference_md_done_criterion_3_checks_bundle_and_digest() -> None:
-    """Criterion 3's file-existence check must include the bundle and digest.
+def test_reference_md_done_criterion_3_checks_the_bundle() -> None:
+    """Criterion 3's file-existence check must name the bundle.
 
-    SKILL.md Step 9 declares `playbook.opf.html` "THE shareable/uploadable
-    playbook" and `playbook.digest.json` a required sidecar — a run that
-    stops after report.md/report.json/playbook.review.html is not actually
-    done. Regression for issue #176: assert the criterion-3 code block's own
-    `test -f` chain names both artifacts, not just that the strings appear
-    somewhere in the file.
+    SKILL.md Step 9 declares `playbook.opf.html` the packaged
+    internal/stakeholder playbook — a run that stops after `validate` is not
+    actually done. Regression for issue #176: assert the criterion-3 code
+    block's own `test -f` names the artifact, not just that the string appears
+    somewhere in the file. The retired report, review HTML and digest sidecar
+    (issue #239) must not be required.
     """
     content = REFERENCE_MD.read_text(encoding="utf-8")
     match = re.search(
-        r"3\. \*\*Report.*?```bash\n(.*?)\n\s*```",
+        r"3\. \*\*The packaged artifact.*?```bash\n(.*?)\n\s*```",
         content,
         re.DOTALL,
     )
@@ -658,9 +626,8 @@ def test_reference_md_done_criterion_3_checks_bundle_and_digest() -> None:
     assert "playbook.opf.html" in criterion_3_block, (
         "criterion 3's test command must check for playbook.opf.html"
     )
-    assert "playbook.digest.json" in criterion_3_block, (
-        "criterion 3's test command must check for playbook.digest.json"
-    )
+    for retired in ("report.md", "playbook.review.html", "playbook.digest.json"):
+        assert retired not in criterion_3_block, f"criterion 3 still requires {retired}"
 
 
 def test_reference_md_guardrails_flag_unknown_aliases() -> None:
@@ -708,18 +675,16 @@ def test_reference_md_classify_threshold_matches_ambiguity_threshold() -> None:
     )
 
 
-def test_reference_md_flags_deviation_threshold_as_advisory() -> None:
-    """REFERENCE.md must not let the deviation confidence threshold read as
-    enforced when no engine constant backs it (issue #163).
-
-    Unlike classify (AMBIGUITY_THRESHOLD) and provenance (also
-    AMBIGUITY_THRESHOLD, applied at mine time), deviation confidence is
-    never persisted to observations and nothing downstream gates on it —
-    so the doc must say so explicitly rather than implying parity with the
-    two thresholds that are real engine behavior.
-    """
+def test_reference_md_has_no_deviation_judge_prompt() -> None:
+    """There is no deviation judge (issue #239): REFERENCE.md carries no
+    deviation prompt, verdict format, threshold or relocation-triage rule."""
     content = REFERENCE_MD.read_text(encoding="utf-8")
-    assert "Confidence < 0.65: set `needs_review: true`. **This is advisory only" in content
+    assert "kind: deviation`)" not in content
+    assert "Confidence < 0.65" not in content
+    assert "Relocation triage" not in content
+    assert "risk_delta" not in content
+    assert "--with-deviation-judge" not in content
+    assert "after-action" not in content.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -39,16 +39,12 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
         - REVERSAL detection: inserted-then-removed-before-signing = proposed_then_reversed
           (only in a deal with a detected signed copy — with none, the last
           draft is not a signed terminal and no refused ask is recorded)
-        - DEFAULT (the consumer path): no deviation judge. Each observation carries
-          two deterministic facts — `standard` (its normalized text equals, or
-          token-Jaccard near-equals at the documented threshold, the template
+        - NO deviation judge. Each observation carries two deterministic
+          facts — `standard` (its normalized text EXACTLY equals the template
           clause for its taxonomy_id; party names neutralized) and `outcome` —
           and `deviation` is derived from `standard` ("none" / "substantive",
-          basis "deterministic", neutral placeholder risk_delta). Nothing is
-          queued; the consumer (a review model) does the judging
-        - OPT-IN (`--with-deviation-judge`): an advisory judged layer for
-          posture/floor work — the judge assigns deviation + risk_delta vs
-          our_standard on the changed hunks
+          basis "deterministic", constant neutral placeholder risk_delta).
+          Nothing is queued; the consumer (a review model) does the judging
         - ONE terminal observation per (deal, taxonomy_id): the signed version's nodes
           for that clause, joined in document order, cited to the first node
         - text removed before signing is never "signed": a clause with no signed

@@ -1,8 +1,8 @@
 """Human-readable inspection report for trail/ and observations.jsonl.
 
 Lets a lawyer verify the engine's structural inferences — version ordering,
-signed-copy identification, provenance, and per-clause deviations — before
-trusting the compiled playbook.
+signed-copy identification, provenance, and per-clause outcomes — before
+trusting the compiled playbook (``playbook inspect``).
 
 Usage::
 
@@ -18,7 +18,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from playbook_engine.clause_position_compiler import CoherenceFlag
 from playbook_engine.observation_builder import read_observations_jsonl
 
 _log = logging.getLogger(__name__)
@@ -44,7 +43,7 @@ def render_review_flags(flags: list[dict[str, object]]) -> str:
     lines.append("")
     lines.append(
         "> The following issues were detected during automated review.  "
-        "Resolve before publishing the playbook."
+        "Resolve before relying on the playbook."
     )
     lines.append("")
     lines.append("| Document | Severity | Kind | Suggested action |")
@@ -60,91 +59,7 @@ def render_review_flags(flags: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def render_floor_candidates(candidates: list[dict[str, Any]]) -> str:
-    """Render a Markdown "Floor candidates" section from ``floor.candidates.json``
-    (issue #166).
-
-    These are PROPOSALS only — derived from ``proposed_then_reversed``
-    observations and the Posture interview's Q4 answer, never auto-promoted
-    into the OPF ``floor.invariants``. A legal owner accepts a candidate by
-    editing ``floor.invariants`` directly (or via the curation CLI).
-
-    Args:
-        candidates: The ``candidates`` list from ``floor.candidates.json``.
-                    May be empty.
-
-    Returns:
-        Markdown string (empty when *candidates* is empty).
-    """
-    if not candidates:
-        return ""
-
-    lines: list[str] = []
-    lines.append("## Floor candidates (proposed — not yet accepted)")
-    lines.append("")
-    lines.append(
-        "> Derived from reversed proposals and the Posture interview's Q4 answer "
-        "(OPF §3.7 rule 4). These are proposals for the legal owner, NOT part of "
-        "the signed OPF Floor. Accept a candidate by editing `floor.invariants` "
-        "directly (or via the curation CLI)."
-    )
-    lines.append("")
-    lines.append("| ID | Source | Statement | Rationale | Citations |")
-    lines.append("|----|--------|-----------|-----------|-----------|")
-    for c in candidates:
-        citations = c.get("citations") or []
-        cite_str = (
-            "; ".join(
-                f"{cit.get('document_id')} v{cit.get('version')} §{cit.get('clause_path')}"
-                for cit in citations
-            )
-            if citations
-            else "*(none)*"
-        )
-        lines.append(
-            f"| `{c.get('id', '?')}` | {c.get('source', '?')} | "
-            f"{_md_escape(str(c.get('statement', '')))} | "
-            f"{_md_escape(str(c.get('rationale', '')))} | {cite_str} |"
-        )
-    lines.append("")
-    return "\n".join(lines)
-
-
-def render_coherence_flags(coherence_flags: list[CoherenceFlag]) -> str:
-    """Render a Markdown section for CoherenceFlag entries.
-
-    Args:
-        coherence_flags: The fragment-quarantine warn flags
-                         ``compile_clause_positions`` emits (issue #210).
-                         May be empty.
-
-    Returns:
-        Markdown string (may be empty if there are no flags).
-    """
-    if not coherence_flags:
-        return ""
-
-    lines: list[str] = []
-    lines.append("## Coherence Flags")
-    lines.append("")
-    lines.append(
-        "> The following clause types had sub-sentence fragments quarantined out of "
-        "the playbook.  Review before publishing the playbook."
-    )
-    lines.append("")
-    lines.append("| Clause ID | Severity | Reason |")
-    lines.append("|-----------|----------|--------|")
-    for flag in coherence_flags:
-        severity_marker = "**block**" if flag.severity == "block" else "warn"
-        lines.append(f"| `{flag.clause_id}` | {severity_marker} | {_md_escape(flag.reason)} |")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def build_inspection_report(
-    out_dir: Path,
-    coherence_flags: list[CoherenceFlag] | None = None,
-) -> str:
+def build_inspection_report(out_dir: Path) -> str:
     """Build a Markdown inspection report from a compiled output directory.
 
     Reads ``scope.json``, ``trail/*.json``, and ``observations.jsonl`` and
@@ -155,11 +70,6 @@ def build_inspection_report(
     Args:
         out_dir:          Path to the ``out/`` directory produced by
                           ``playbook mine``.
-        coherence_flags:  Optional list of ``CoherenceFlag`` entries (the
-                          fragment-quarantine warn flags
-                          ``compile_clause_positions`` emits, issue #210).
-                          When provided and non-empty,
-                          a dedicated section is prepended to the report.
 
     Returns:
         Markdown-formatted report string.
@@ -218,20 +128,6 @@ def build_inspection_report(
         if needs_attention:
             lines.append(needs_attention)
 
-    # Coherence flags section (prepended before per-document sections)
-    if coherence_flags:
-        flags_section = render_coherence_flags(coherence_flags)
-        if flags_section:
-            lines.append(flags_section)
-
-    # Floor candidates section (issue #166) — rendered when 'playbook floor
-    # propose' has been run and wrote floor.candidates.json to out_dir.
-    floor_candidates = _load_floor_candidates(out_dir)
-    if floor_candidates:
-        candidates_section = render_floor_candidates(floor_candidates)
-        if candidates_section:
-            lines.append(candidates_section)
-
     for doc_id in all_doc_ids:
         trail = trails.get(doc_id, {})
         doc_scope = scope.get(doc_id, {})
@@ -242,19 +138,14 @@ def build_inspection_report(
     return "\n".join(lines)
 
 
-def write_inspection_report(
-    out_dir: Path,
-    report_path: Path,
-    coherence_flags: list[CoherenceFlag] | None = None,
-) -> None:
+def write_inspection_report(out_dir: Path, report_path: Path) -> None:
     """Build and write the inspection report to a file.
 
     Args:
         out_dir:          Pipeline output directory.
         report_path:      Destination path for the Markdown report.
-        coherence_flags:  Optional list of ``CoherenceFlag`` entries to render.
     """
-    report = build_inspection_report(out_dir, coherence_flags=coherence_flags)
+    report = build_inspection_report(out_dir)
     tmp = report_path.with_suffix(".tmp")
     tmp.write_text(report, encoding="utf-8")
     tmp.replace(report_path)
@@ -279,24 +170,6 @@ def _load_review_flags(out_dir: Path) -> list[dict[str, Any]]:
         return flags if isinstance(flags, list) else []
     except Exception:  # noqa: BLE001
         _log.warning("Could not parse review.json; needs-attention section will be omitted.")
-        return []
-
-
-def _load_floor_candidates(out_dir: Path) -> list[dict[str, Any]]:
-    """Return the ``candidates`` list from ``floor.candidates.json`` (issue #166).
-
-    Returns an empty list when the file is absent (no ``playbook floor
-    propose`` run yet) or unparseable.
-    """
-    candidates_path = out_dir / "floor.candidates.json"
-    if not candidates_path.exists():
-        return []
-    try:
-        data = json.loads(candidates_path.read_text(encoding="utf-8"))
-        candidates = data.get("candidates", [])
-        return candidates if isinstance(candidates, list) else []
-    except Exception:  # noqa: BLE001
-        _log.warning("Could not parse floor.candidates.json; Floor candidates will be omitted.")
         return []
 
 
@@ -542,45 +415,39 @@ def _render_document(
 
     if classified:
         # A4: include Version column for traceability
-        lines.append("| Taxonomy ID | Version | Text | Deviation | Risk | Outcome |")
-        lines.append("|-------------|---------|------|-----------|------|---------|")
+        lines.append("| Taxonomy ID | Version | Text | Standard | Outcome |")
+        lines.append("|-------------|---------|------|----------|---------|")
         for tid, obs_group in sorted(classified, key=lambda x: x[0] or ""):
             for obs in obs_group:
                 version = obs.get("citation", {}).get("version", "?")
                 text = _truncate(obs.get("text_summary", ""), 80)
-                deviation = obs.get("deviation", "?")
-                risk = obs.get("risk_delta", {}) if isinstance(obs.get("risk_delta"), dict) else {}
-                risk_dir = risk.get("direction", "?")
-                risk_mag = risk.get("magnitude", "?")
+                standard = _standard_cell(obs)
                 outcome = obs.get("outcome", "?")
                 lines.append(
-                    f"| `{tid}` | {version} | {_md_escape(text)} | {deviation} "
-                    f"| {risk_dir} / {risk_mag} | {outcome} |"
+                    f"| `{tid}` | {version} | {_md_escape(text)} | {standard} | {outcome} |"
                 )
 
     if unclassified:
         lines.append("")
         lines.append(f"**Unclassified clauses ({len(unclassified)})** — taxonomy_id not matched")
         lines.append("")
-        lines.append("| Version | Text | Deviation | Risk | Outcome |")
-        lines.append("|---------|------|-----------|------|---------|")
+        lines.append("| Version | Text | Standard | Outcome |")
+        lines.append("|---------|------|----------|---------|")
         for obs in unclassified:
             version = obs.get("citation", {}).get("version", "?") if isinstance(obs, dict) else "?"
             text = _truncate(obs.get("text_summary", ""), 80) if isinstance(obs, dict) else ""
-            deviation = obs.get("deviation", "?") if isinstance(obs, dict) else "?"
-            risk = (
-                obs.get("risk_delta", {})
-                if isinstance(obs, dict) and isinstance(obs.get("risk_delta"), dict)
-                else {}
-            )
-            risk_dir = risk.get("direction", "?")
-            risk_mag = risk.get("magnitude", "?")
+            standard = _standard_cell(obs)
             outcome = obs.get("outcome", "?") if isinstance(obs, dict) else "?"
-            lines.append(
-                f"| {version} | {_md_escape(text)} | {deviation} | {risk_dir} / {risk_mag} | {outcome} |"
-            )
+            lines.append(f"| {version} | {_md_escape(text)} | {standard} | {outcome} |")
 
     return lines
+
+
+def _standard_cell(obs: Any) -> str:
+    """``yes``/``no`` for an observation's ``standard`` fact (is its text our
+    standard language), ``?`` when the store did not record it."""
+    standard = obs.get("standard") if isinstance(obs, dict) else None
+    return "?" if standard is None else ("yes" if standard else "no")
 
 
 def _truncate(text: str, max_len: int) -> str:

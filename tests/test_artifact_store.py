@@ -410,9 +410,11 @@ class TestLayeredCachePrimitives:
         assert len(seen) == 2
         key = next(k for k in seen if store.fingerprint(k) is not None)
         before = store.fingerprint(key)
-        # Re-stamping (judge-migrate) moves the fingerprint even though the
-        # verdict itself is unchanged; so does an overwrite (judge-apply).
-        store.restamp(key, RubricStamp(kind="classify", version="v1+abc"))
+        # An overwrite (judge-apply) moves the fingerprint — and so does a
+        # change of the rubric stamp alone, though the verdict is unchanged.
+        store.put(
+            payload, {"taxonomy_id": "x"}, rubric=RubricStamp(kind="classify", version="v1+abc")
+        )
         stamped = store.fingerprint(key)
         assert stamped != before
         store.put(payload, {"taxonomy_id": "y"}, rubric=RubricStamp("classify", "v1+abc"))

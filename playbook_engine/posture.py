@@ -461,8 +461,7 @@ def check_posture_floor_conflict(
 
 
 # ---------------------------------------------------------------------------
-# I/O orchestration — read-modify-write playbook.opf.json (mirrors
-# viewer.apply_feedback's curation-pin write path).
+# I/O orchestration — read-modify-write playbook.opf.json.
 # ---------------------------------------------------------------------------
 
 
@@ -496,11 +495,10 @@ def apply_posture_interview(
     versioned Posture into it — promoting the Q4 ("sacred_clauses") answer
     directly into ``floor.invariants`` along the way — and return the result.
 
-    Mirrors ``viewer.apply_feedback``'s curation-pin write path: reads the
-    existing document, replaces sections, refreshes ``identity`` (since —
-    unlike ``curation`` — both ``posture`` and ``floor`` ARE part of
-    ``content_hash``; see ``canonicalize.py``), and writes back atomically
-    via ``playbook_assembler.write_playbook``. ``posture`` is replaced (its
+    Reads the existing document, replaces sections, refreshes ``identity``
+    (since both ``posture`` and ``floor`` ARE part of ``content_hash``; see
+    ``canonicalize.py``), and writes back atomically via
+    ``playbook_assembler.write_playbook``. ``posture`` is replaced (its
     ``version`` advances) UNLESS this run is a true no-op — see below;
     ``floor`` is only replaced when the Q4 promotion below actually changed
     ``floor.invariants`` — a run that doesn't touch the Floor doesn't
@@ -694,7 +692,7 @@ def apply_posture_interview(
     # document with no Floor section doesn't gain a fabricated
     # `{"invariants": []}` (and a changed identity.content_hash /
     # section_digests) for no reason. OPF-SPEC.md §3.7 rule 3 makes the
-    # section optional; prompt_renderer.py already treats `[]` and absent
+    # section optional; a consumer treats `[]` and absent
     # identically (issue #89 review finding 6).
     if floor_changed:
         floor_section = dict(doc.get("floor") or {})

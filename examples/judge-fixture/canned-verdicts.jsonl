@@ -1,10 +1,6 @@
 {"key": "9908f1a29a5132137d7f0433605b6924ea5c43d0e6616128033ae9db083620a7", "verdict": {"basis": "llm", "confidence": 0.9, "provenance": "counterparty_paper"}}
 {"key": "d723f675b56025c20e22fe6d9b52e68b547bae71e0da3a8a259da23f0fbaa839", "verdict": {"basis": "judge", "confidence": 0.85, "taxonomy_id": "ferpa_student_records"}}
 {"key": "89f091dfaf818d1a88ea5aec9578a99640343fa34ef5f106c88a397a60ee2396", "verdict": {"basis": "judge", "confidence": 0.85, "taxonomy_id": "ferpa_student_records"}}
-{"key": "4a626ca3bd284e52ad98da6c56066fd981e68804de691c49abea44062896f66a", "verdict": {"basis": "judge", "confidence": 0.9, "deviation": "substantive", "rationale": "Canned fixture verdict - no real judgment.", "risk_delta": {"direction": "worse", "magnitude": "minor"}}}
-{"key": "b435d36473bd5cb2ba894729596d16f4331cde3b25d48a6766d51148deac5986", "verdict": {"basis": "judge", "confidence": 0.9, "deviation": "substantive", "rationale": "Canned fixture verdict - no real judgment.", "risk_delta": {"direction": "worse", "magnitude": "minor"}}}
-{"key": "8e1633c2dd47615393106eb46b15fcb3b8a862215e5dfbef31b132a445737d52", "verdict": {"basis": "judge", "confidence": 0.9, "deviation": "substantive", "rationale": "Canned fixture verdict - no real judgment.", "risk_delta": {"direction": "worse", "magnitude": "minor"}}}
-{"key": "442f568b615e44a7c7613135b52a52a21c9769160e26e92b7f6708bc16a94540", "verdict": {"basis": "judge", "confidence": 0.9, "deviation": "substantive", "rationale": "Canned fixture verdict - no real judgment.", "risk_delta": {"direction": "worse", "magnitude": "minor"}}}
 {"key": "c91b032954a66752c8421d5bac792b1979f2efb649b98a8e3b7600100bb5a1ea", "verdict": {"basis": "llm", "confidence": 0.9, "provenance": "counterparty_paper"}}
 {"key": "650ef501756e9e41029a23ca0402d0611f24e35f2e42d1895ada8752dd363bbd", "verdict": {"basis": "judge", "confidence": 0.85, "taxonomy_id": "data_privacy_security"}}
 {"key": "c297ae480bf8aebc6cd82154c9c4f03b4efcff9c7183a84332dd445a16c74b15", "verdict": {"in_scope": true, "scope_confidence": 0.9, "scope_rationale": "Canned fixture verdict - matches fixture-affiliation clause profile."}}

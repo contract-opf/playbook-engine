@@ -158,11 +158,8 @@ def test_examples_carry_no_absolute_filesystem_path(path: Path) -> None:
     (issue #9 fix round 1 finding 2): a committed `playbook.opf.json` is a
     public artifact, and fields like `baseline.template_ref.source` are
     populated at derivation time with whatever path the deriving machine
-    happened to resolve the template against. `publisher.py` treats this
-    exact leak as load-bearing enough to strip unconditionally before
-    publication (see its `_strip_source_paths` step) — a shipped example
-    must ship already scrubbed, not rely on a downstream `publish` call
-    that never runs on it.
+    happened to resolve the template against. A shipped example must ship
+    already scrubbed: there is no downstream step that scrubs it.
     """
     text = path.read_text(encoding="utf-8")
     # The Windows-drive branch requires the drive letter not be preceded by

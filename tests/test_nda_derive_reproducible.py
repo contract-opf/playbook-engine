@@ -94,8 +94,7 @@ def _strip_volatile(doc: dict[str, Any]) -> dict[str, Any]:
     # filesystem path to standard-form.rtf -- it differs by checkout root
     # (contributor clone, CI runner, Docker image) even when every other
     # field reproduces exactly. The committed artifact ships with this key
-    # scrubbed entirely (issue #9 fix round 1 findings 1/2 -- same
-    # treatment `publisher.py` applies before publication); a freshly
+    # scrubbed entirely (issue #9 fix round 1 findings 1/2); a freshly
     # derived doc still carries the deriving machine's own path, so drop it
     # here too rather than asserting path equality.
     doc.get("baseline", {}).get("template_ref", {}).pop("source", None)

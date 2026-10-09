@@ -45,13 +45,7 @@ from playbook_engine.clause_differ import ClauseDiff, diff_aligned
 from playbook_engine.clause_position_compiler import compile_clause_positions
 from playbook_engine.clause_tree import ClauseTree
 from playbook_engine.config import EngineConfig
-from playbook_engine.deviation_classifier import (
-    DeviationJudge,
-    DeviationResult,
-    RiskDelta,
-    assess_deviations,
-    assess_deviations_deterministic,
-)
+from playbook_engine.deviation_classifier import assess_deviations_deterministic
 from playbook_engine.docx_ingester import TextUnit, TrackedChanges, ingest_docx
 from playbook_engine.entity_registry import (
     DEFAULT_REGISTRY_PATH,
@@ -76,7 +70,6 @@ from playbook_engine.extraction import (
 )
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
-    BatchedDeviationJudge,
     BatchedScopeJudge,
     JudgmentCache,
 )
@@ -130,7 +123,6 @@ from playbook_engine.provenance_detector import (
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
 from playbook_engine.rubric import RubricPolicy, current_versions
-from playbook_engine.run_manifest import record_deviation_mode
 from playbook_engine.scope_gate import (
     ScopeDecision,
     ScopeJudge,
@@ -292,7 +284,12 @@ _MEDIA_TYPES: dict[str, str] = {
 # even when its cited node is classified ("aligned" now only means
 # "classified via the aligned row"). A warm v15 cache would otherwise replay
 # those observations as "aligned".
-_DEVIATION_VS_TEMPLATE_VERSION = 16
+#
+# v17 (issue #239): the judged deviation path is gone. Observation output is
+# unchanged on the deterministic path, but the judge identity folded into the
+# stage-cache key lost its "deviation" component, and observations from a
+# judged run (the removed opt-in layer) must never be replayed as current.
+_DEVIATION_VS_TEMPLATE_VERSION = 17
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -442,52 +439,6 @@ class _NullClassificationJudge:
         return [
             ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified")
             for _ in nodes
-        ]
-
-
-_NEUTRAL_RISK = RiskDelta(direction="neutral", magnitude="none")
-
-
-# Judge identity recorded (issue #102) when no deviation judge is wired — the
-# consumer path's deterministic standard check (issue #220). Versioned so a
-# change to the check's normalization/threshold can bust the verdict cache
-# the same way a changed judge model_id does.
-_DETERMINISTIC_DEVIATION_IDENTITY = (
-    "deterministic-standard-check:v3"  # v3: exact match, no Jaccard, no prefix strip
-)
-
-
-class _NullDeviationJudge:
-    """Records every changed clause as unjudged (no LLM available to assess it).
-
-    No longer the default (issue #220): with no deviation judge configured,
-    ``mine_corpus`` runs the deterministic standard check instead. This stub
-    remains for callers that opt in to the judged layer without a real judge
-    (and for the tests that pin that contract).
-
-    This is a stub used when no real ``DeviationJudge`` is injected. It must NOT
-    claim ``basis="judge"`` — that masquerades a fabricated default as a real
-    judge verdict, and (worse) the position compiler treats a neutral-risk
-    judged deviation as an "acceptable variant", so every stub-mode clause would
-    manufacture a confident ``acceptable_variants_exist`` position from a clause
-    nothing actually judged. It emits an honest ``basis="needs_review"`` instead,
-    which the position compiler excludes from acceptable-variant / position
-    logic (see ``_UNJUDGED_BASES``). ``deviation`` stays ``"substantive"`` — the
-    clause genuinely changed (unchanged/near-identical clauses never reach the
-    judge) and the OPF observed-position schema only permits
-    none/reworded_equivalent/substantive — but the neutral ``risk_delta`` is a
-    placeholder, not a real risk assessment, which ``needs_review`` signals.
-    """
-
-    def assess_batch(self, items: list[dict[str, str]], our_standard: str) -> list[DeviationResult]:
-        return [
-            DeviationResult(
-                deviation="substantive",
-                risk_delta=_NEUTRAL_RISK,
-                basis="needs_review",
-                rationale="No deviation judge configured; clause flagged for review (stub mode).",
-            )
-            for _ in items
         ]
 
 
@@ -981,18 +932,11 @@ and no per-clause confidence signal in its structured output — a single Opus
 pass over counterparty text is not grounds for the certainty a real judge
 verdict would carry (a document instructing the model to mislabel a clause
 would pass every structural QA gate untouched). This constant is deliberately
-below both review thresholds this codebase checks against a classification's
+below the review threshold this codebase checks against a classification's
 confidence: ``clause_classifier.AMBIGUITY_THRESHOLD`` (0.70 — trips
-``ClauseClassification.is_ambiguous``) and the hardcoded 0.5 cutoff in
-``aar._build_needs_attention`` (trips the after-action report's "needs
-attention" low-confidence flag). Because this sentinel is stamped on every
-LLM-segmented, taxonomy-assigned clause, ``aar._build_needs_attention``
-treats it as a special case (issue #181): rather than surfacing each such
-clause as its own individual row — which would drown real problems in
-hundreds or thousands of by-design flags on a fully agent-segmented corpus —
-it rolls the whole cohort into one aggregate row for a human to spot-check,
-while still giving an observation its own row when it also carries another
-flaggable reason (e.g. ``needs_review``, ``judge_error``). There is no real
+``ClauseClassification.is_ambiguous``). Because this sentinel is stamped on
+every LLM-segmented, taxonomy-assigned clause, a reader should treat the
+whole cohort as one spot-check, not as hundreds of by-design flags. There is no real
 signal yet to distinguish a confident LLM call from a shaky one; see this
 constant's docstring for the two follow-up options (per-clause LLM
 confidence, cross-version ``normalize_trail`` disagreement) that could
@@ -1018,8 +962,7 @@ def _classified_from_taxonomy_by_path(
     Asserting certainty here would let a single unverified LLM pass over
     untrusted counterparty text masquerade as a verified judge verdict, and
     downstream confidence-based review gating (``classification_confidences``
-    feeding ``build_observations`` below, and ``aar._build_needs_attention``)
-    would then never flag a misclassified LLM-segmented clause (issue #86).
+    feeding ``build_observations`` below) would then never flag a misclassified LLM-segmented clause (issue #86).
     ``basis="unclassified"`` (confidence 0.0) is unchanged for ``tid is None``
     — that is the LLM's explicit null for non-clause noise, not a low-
     confidence taxonomy assignment.
@@ -1154,7 +1097,6 @@ def _observations_from_single_version(
     classified: list[ClassifiedClause],
     has_signed_copy: bool,
     template_std_by_tid: dict[str, str],
-    deviation_judge: DeviationJudge | None,
     our_party_aliases: list[str] | None = None,
     our_authors: list[str] | None = None,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
@@ -1162,25 +1104,18 @@ def _observations_from_single_version(
 ) -> list[Observation]:
     """Create observations from a single-version document, diffed against the template.
 
-    ``deviation_judge=None`` is the consumer path (issue #220): every clause
-    gets the deterministic standard check instead of a judge verdict — see
+    Every clause gets the deterministic standard check (issue #220) — see
     ``_assess_deviations_with_standards``.
 
-    Previously every clause of a single-version document was hardcoded
-    ``deviation="none"``/``basis="deterministic"`` — a document with no
-    negotiation trail was never actually checked against the canonical
-    template at all (issue #103). This now builds a synthetic "unchanged"
-    ``ClauseDiff`` per clause (see ``_single_version_clause_diffs``) and runs
-    it through the same ``_assess_deviations_with_standards`` /
-    ``assess_deviations`` template-comparison path the multi-version
-    "unchanged across the negotiation trail" case uses: a clause whose
-    taxonomy_id has a template clause that it actually differs from is routed
-    to *deviation_judge*, not silently recorded as matching. A clause with no
-    corresponding template text (``template_std_by_tid`` has no entry for its
-    taxonomy_id, or no template is configured at all — an empty string either
-    way) still gets ``deviation="none"``/``basis="deterministic"``: there is
-    nothing to compare it against, the same honest "no assessment possible"
-    contract as before, not a fabricated match.
+    A single-version document has no negotiation trail, but it is still
+    checked against the canonical template (issue #103): this builds a
+    synthetic "unchanged" ``ClauseDiff`` per clause (see
+    ``_single_version_clause_diffs``) and runs it through the same
+    ``_assess_deviations_with_standards`` path the multi-version "unchanged
+    across the negotiation trail" case uses. A clause with no corresponding
+    template text (``template_std_by_tid`` has no entry for its taxonomy_id,
+    or no template is configured at all — an empty string either way) is not
+    standard: there is nothing to be standard against.
 
     ``has_signed_copy`` mirrors ``build_observations``'s same-named parameter:
     it reflects whether ``detect_signed``/``order_versions`` actually
@@ -1198,8 +1133,6 @@ def _observations_from_single_version(
     deviation_results = _assess_deviations_with_standards(
         diffs,
         template_std_by_tid,
-        deviation_judge,
-        document_id=doc_id,
         template_std_nodes_by_tid=template_std_nodes_by_tid,
         party_names=party_names,
     )
@@ -1227,13 +1160,12 @@ def _observations_from_single_version(
         terminal_clauses=classified,
         terminal_version_id=version_id,
         # Issue #220: the reference every observation's `standard` fact is
-        # computed against; on the consumer path it also decides deviation.
+        # computed against; it also decides deviation.
         standard_text_by_tid=(
             template_std_nodes_by_tid
             if template_std_nodes_by_tid is not None
             else template_std_by_tid
         ),
-        deterministic_deviations=deviation_judge is None,
         party_names=party_names,
     )
 
@@ -1327,35 +1259,21 @@ def _standard_party_names(config: EngineConfig) -> list[str]:
 def _assess_deviations_with_standards(
     net_diffs: list[Any],
     template_std_by_tid: dict[str, str],
-    deviation_judge: DeviationJudge | None,
-    document_id: str | None = None,
-    counterpart_clause_texts: tuple[frozenset[str], frozenset[str]] | None = None,
     *,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
     party_names: Sequence[str] = (),
 ) -> list[Any]:
-    """Call assess_deviations per taxonomy_id so each group gets the correct our_standard.
+    """Run the deterministic standard check per taxonomy_id (issue #220).
 
     Preserves the original diff order in the returned list.
 
-    ``deviation_judge=None`` is the consumer path (issue #220, the default):
-    no judge is consulted and nothing is ever queued. Each row gets the
-    deterministic standard check instead
+    No judge is consulted and nothing is ever queued. Each row gets the
+    deterministic standard check
     (``deviation_classifier.assess_deviations_deterministic``) — "none" for
-    our standard text, "substantive" otherwise, ``basis="deterministic"``,
-    neutral/none ``risk_delta`` — against every template node for its
-    taxonomy_id (*template_std_nodes_by_tid*, falling back to the first-node
-    *template_std_by_tid*), with *party_names* neutralized. Never
-    ``needs_review``.
-
-    ``document_id`` (issue #109) is passed straight through to
-    ``assess_deviations`` so every judge batch item carries the owning
-    document's id for traceability — see that function's docstring.
-
-    ``counterpart_clause_texts`` (issue #167) is threaded through unchanged
-    to every per-taxonomy_id ``assess_deviations`` call — it is document-wide
-    (the full before/after version clause trees), not taxonomy-scoped, so it
-    does not need to be filtered per group like ``diffs``/``our_std`` below.
+    our standard text, "substantive" otherwise, ``basis="deterministic"`` —
+    against every template node for its taxonomy_id
+    (*template_std_nodes_by_tid*, falling back to the first-node
+    *template_std_by_tid*), with *party_names* neutralized.
     """
     from itertools import groupby
 
@@ -1374,20 +1292,10 @@ def _assess_deviations_with_standards(
         group_items = list(group_iter)
         indices = [i for i, _ in group_items]
         diffs = [d for _, d in group_items]
-        our_std = template_std_by_tid.get(tid or "", "")
-        if deviation_judge is None:
-            nodes: str | list[str] = (
-                template_std_nodes_by_tid.get(tid or "", []) if template_std_nodes_by_tid else []
-            ) or our_std
-            assessed = assess_deviations_deterministic(diffs, nodes, party_names)
-        else:
-            assessed = assess_deviations(
-                diffs,
-                our_std,
-                deviation_judge,
-                document_id=document_id,
-                counterpart_clause_texts=counterpart_clause_texts,
-            )
+        nodes: str | list[str] = (
+            template_std_nodes_by_tid.get(tid or "", []) if template_std_nodes_by_tid else []
+        ) or template_std_by_tid.get(tid or "", "")
+        assessed = assess_deviations_deterministic(diffs, nodes, party_names)
         for orig_idx, pair in zip(indices, assessed, strict=True):
             result[orig_idx] = pair
 
@@ -1482,9 +1390,8 @@ def _classification_confidence_for_diff(
     (``None``) or, worse, collides with an unrelated signed clause that
     happens to occupy the same path number after renumbering, silently
     attaching that clause's confidence to the removed clause's observation.
-    That collision can suppress (or spuriously add) ``aar.py``'s
-    low-confidence review flag for a genuinely uncertain removed-clause
-    observation.
+    That collision can suppress (or spuriously add) a low-confidence review
+    flag for a genuinely uncertain removed-clause observation.
 
     Selects the side (after, else before) the same way
     ``observation_builder.build_observations`` already selects
@@ -1522,9 +1429,8 @@ def _build_version_alias_map(version_ingest: Any) -> dict[str, str]:
 
     ``version_ingest`` is one entry per version FILE FOUND, in discovery
     order (see ``_build_version_ingest_list``'s docstring), so entry *i*'s
-    stem is given the stable label ``f"v{i + 1}"`` — the same convention
-    ``publisher._strip_source_paths`` already uses for the published
-    artifact's ``version_ingest[].version``.
+    stem is given the stable label ``f"v{i + 1}"``, which is how the playbook's
+    ``version_ingest[].version`` names it.
 
     Unlike the whole-word ``known_entities`` substring match
     ``_alias_version_field`` otherwise falls back to, this doesn't depend on
@@ -1775,8 +1681,8 @@ def _pseudonymize_clause_tree(
 
     Mirrors ``_pseudonymize_trail`` (issue #139): ``document_id`` is aliased
     the same way trail/corpus_manifest entries are — so the aliased id this
-    returns matches ``viewer.py``'s ``out_dir / "normalized" / cdoc`` lookup,
-    which already joins on the aliased document_id from the compiled
+    returns matches the ``out_dir / "normalized" / <document_id>`` lookup
+    a reader joins on the aliased document_id from the compiled
     playbook — and every node's ``heading``/``text`` (headings AND clause
     bodies) is aliased too, so no raw counterparty name survives in
     normalized/ the way it doesn't in observations.jsonl or trail/.
@@ -2512,9 +2418,9 @@ def _collect_l1(
                 # version_ingest[].error is schema-sanctioned straight into the
                 # PUBLISHED playbook.opf.json (_VERSION_INGEST_SCHEMA_KEYS,
                 # playbook_assembler.py), and is echoed verbatim by
-                # inspection_report.py's _version_ingest_review_flags and
-                # aar.py's needs-attention section — one unsafe write here
-                # leaks through all three persisted artifacts at once.
+                # inspection_report.py's _version_ingest_review_flags — one
+                # unsafe write here leaks through both persisted artifacts at
+                # once.
                 "error": type(exc).__name__,
                 "extractor": extractor,
                 "reason": (
@@ -2562,7 +2468,6 @@ def _compute_doc_result(
     template_std_by_tid: dict[str, str],
     _scope_judge: ScopeJudge,
     _cls_judge: ClassificationJudge,
-    _dev_judge: DeviationJudge | None,
     alignment_judge: AlignmentJudge | None,
     trail_judge: TrailJudge | None,
     progress: Callable[[str], None],
@@ -2587,8 +2492,7 @@ def _compute_doc_result(
     removed before signing. When ``None`` (legacy callers), the first-node
     *template_std_by_tid* stands in.
 
-    *_dev_judge* ``None`` is the consumer path (issue #220, the default):
-    deviations come from the deterministic standard check, never a judge.
+    Deviations come from the deterministic standard check, never a judge.
 
     Returns a dict with keys:
       - ``corpus_doc``:    corpus_documents entry (JSON-serialisable). Includes
@@ -2719,7 +2623,6 @@ def _compute_doc_result(
         template_std_by_tid,
         _scope_judge,
         _cls_judge,
-        _dev_judge,
         alignment_judge,
         trail_judge,
         progress,
@@ -2743,7 +2646,6 @@ def _compute_doc_from_l1(
     template_std_by_tid: dict[str, str],
     _scope_judge: ScopeJudge,
     _cls_judge: ClassificationJudge,
-    _dev_judge: DeviationJudge | None,
     alignment_judge: AlignmentJudge | None,
     trail_judge: TrailJudge | None,
     progress: Callable[[str], None],
@@ -2968,7 +2870,7 @@ def _compute_doc_from_l1(
         # Populated below (multi-version documents only) from detect_reversals();
         # a single-version document has no negotiation trail to reverse, so it
         # keeps this default empty list (issue #106 — previously this key was
-        # never written at all, so aar.py's backbone reversal count was
+        # never written at all, so any reversal count read from the trail was
         # permanently 0 regardless of what detect_reversals actually found).
         "reversals": [],
         **version_order.to_dict(),
@@ -3025,7 +2927,6 @@ def _compute_doc_from_l1(
             classified_by_version[signed_vid],
             has_signed_copy=has_signed_copy,
             template_std_by_tid=template_std_by_tid,
-            deviation_judge=_dev_judge,
             our_party_aliases=config.provenance.our_party_aliases,
             our_authors=config.provenance.our_authors,
             template_std_nodes_by_tid=template_std_nodes_by_tid,
@@ -3053,32 +2954,16 @@ def _compute_doc_from_l1(
             our_party_aliases=config.provenance.our_party_aliases,
             our_authors=config.provenance.our_authors,
         )
-        # Issue #106: record detected reversals on the trail itself — this is
-        # what aar.py's backbone health section counts (previously read
-        # trail["reversals"] via a default-empty .get() that this key never
-        # populated, so the AAR always reported zero reversals even when
-        # detect_reversals found some).
+        # Issue #106: record detected reversals on the trail itself, so a
+        # reader of the trail sees them (previously a default-empty .get()
+        # on a key that was never populated reported zero reversals even
+        # when detect_reversals found some).
         trail["reversals"] = [r.to_dict() for r in reversals]
 
         net_diffs = list(doc_diff.net.diffs)
-        # Issue #167: the full clause text of the net diff's two endpoint
-        # versions (first and last of ordered_ids — same pair diff_aligned
-        # used for doc_diff.net above), so assess_deviations can deterministically
-        # recognize an added/removed clause whose text also occurs in the
-        # counterpart version's clause tree as an alignment/relocation
-        # artifact instead of spending a judge call on it.
-        net_before_texts = frozenset(
-            (cc.node.text or "") for cc in classified_by_version[ordered_ids[0]]
-        )
-        net_after_texts = frozenset(
-            (cc.node.text or "") for cc in classified_by_version[ordered_ids[-1]]
-        )
         deviation_results = _assess_deviations_with_standards(
             net_diffs,
             template_std_by_tid,
-            _dev_judge,
-            document_id=doc_id,
-            counterpart_clause_texts=(net_before_texts, net_after_texts),
             template_std_nodes_by_tid=template_std_nodes_by_tid,
             party_names=_standard_party_names(config),
         )
@@ -3145,9 +3030,6 @@ def _compute_doc_from_l1(
                 if template_std_nodes_by_tid is not None
                 else template_std_by_tid
             ),
-            # Issue #220: no deviation judge (the default) → deviation is the
-            # deterministic standard fact, never a judged verdict.
-            deterministic_deviations=_dev_judge is None,
             party_names=_standard_party_names(config),
         )
 
@@ -3243,7 +3125,6 @@ def mine_corpus(
     *,
     scope_judge: ScopeJudge | None = None,
     classification_judge: ClassificationJudge | None = None,
-    deviation_judge: DeviationJudge | None = None,
     alignment_judge: AlignmentJudge | None = None,
     trail_judge: TrailJudge | None = None,
     signed_judge: SignedJudge | None = None,
@@ -3286,12 +3167,6 @@ def mine_corpus(
         classification_judge: L3 judge; defaults to stub (Jaccard + all-unclassified).
                               Ignored for documents segmented via
                               ``use_llm_segmentation`` (see below).
-        deviation_judge:      L4 judge; defaults to None — the consumer path (issue
-                              #220): no judge, every deviation is the
-                              deterministic standard check ("none" for our
-                              standard text, "substantive" otherwise,
-                              basis="deterministic"), nothing is queued. Pass
-                              one only to opt in to the advisory judged layer.
         alignment_judge:      L3 alignment judge; defaults to None (deterministic only).
         trail_judge:          Version-ordering judge; defaults to None (deterministic only).
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).
@@ -3447,12 +3322,8 @@ def mine_corpus(
     """
     _scope_judge: ScopeJudge = scope_judge or _AllInScopeJudge()
     _cls_judge: ClassificationJudge = classification_judge or _NullClassificationJudge()
-    # Issue #220: no deviation judge is the DEFAULT, not a stub — the consumer
-    # path runs the deterministic standard check instead (see
-    # _assess_deviations_with_standards). A judge (store-backed, LLM, or the
-    # _NullDeviationJudge stub) is only ever wired when the caller opts in
-    # (`--with-deviation-judge`), as an advisory layer for posture/floor work.
-    _dev_judge: DeviationJudge | None = deviation_judge
+    # There is no deviation judge: every deviation is the deterministic
+    # standard check (see _assess_deviations_with_standards).
 
     # Judge identity — combines each delegate's class name (+ optional model_id
     # attribute) into a single fingerprint fragment (issue #102). Computed from
@@ -3468,11 +3339,6 @@ def mine_corpus(
         {
             "scope": _judge_identity(_scope_judge),
             "classification": _judge_identity(_cls_judge),
-            "deviation": (
-                _judge_identity(_dev_judge)
-                if _dev_judge is not None
-                else _DETERMINISTIC_DEVIATION_IDENTITY
-            ),
         },
         sort_keys=True,
     )
@@ -3493,7 +3359,7 @@ def mine_corpus(
     # whose compute queued anything (PendingQueue.capture_adds — a miss, a
     # stale rubric, a malformed stored verdict) is never cached at all, so a
     # replayed document never hides a pending item from the round's queue.
-    raw_judges: list[Any] = [_scope_judge, _cls_judge, _dev_judge, provenance_judge]
+    raw_judges: list[Any] = [_scope_judge, _cls_judge, provenance_judge]
     verdict_stores: list[VerdictStore] = _distinct(
         getattr(j, "store", None)
         for j in raw_judges
@@ -3525,8 +3391,8 @@ def mine_corpus(
     # means a full recompute — no stale verdict hits from a previous run.
     #
     # Never around a store-backed judge (issue #219): this cache would answer
-    # in its place, so a verdict later overwritten (judge-apply) or re-stamped
-    # (judge-migrate) in the VerdictStore would keep replaying the old answer,
+    # in its place, so a verdict later overwritten (judge-apply) in the
+    # VerdictStore would keep replaying the old answer,
     # a stale-rubric verdict would never be re-queued, and the lookup the
     # stage cache's dependency check rests on would never happen.
     if not no_cache:
@@ -3538,8 +3404,6 @@ def mine_corpus(
             _scope_judge = BatchedScopeJudge(delegate=_scope_judge, cache=verdict_cache)
         if not _store_backed(_cls_judge):
             _cls_judge = BatchedClassificationJudge(delegate=_cls_judge, cache=verdict_cache)
-        if _dev_judge is not None and not _store_backed(_dev_judge):
-            _dev_judge = BatchedDeviationJudge(delegate=_dev_judge, cache=verdict_cache)
 
     # Config fingerprint prep: hash the template file's *content* (not its
     # path) so that changing the file's text under the same path correctly
@@ -3627,11 +3491,9 @@ def mine_corpus(
     # -----------------------------------------------------------------------
     # L1 → L4: per-document, optionally cached
     # -----------------------------------------------------------------------
-    # our_standard fed to every deviation judge (including the agent-as-judge
-    # path — agent_judge.StoreBackedDeviationJudge.assess_batch, whose
-    # docstring already claims "NOT truncated") must be the full clause text,
+    # our_standard fed to the standard check must be the full clause text,
     # not the ≤ 300-char text_summary — a ≤ 300-char fragment of a real
-    # indemnification/insurance clause is not a usable standard to diff
+    # indemnification/insurance clause is not a usable standard to compare
     # against (issue #105).
     template_std_by_tid: dict[str, str] = {}
     # Issue #216: the ORIGIN reference for a clause removed before signing is
@@ -3913,8 +3775,8 @@ def mine_corpus(
 
     def _verdicts_current(result: Any) -> bool:
         """A cached L2-L4 result replays only while every stored verdict it was
-        built from is unchanged — overwritten (judge-apply), re-stamped
-        (judge-migrate) or removed each force a recompute."""
+        built from is unchanged — overwritten (judge-apply) or removed forces a
+        recompute."""
         if result is None:
             return True  # no version ingested: no judge was ever asked
         deps = result.get(_VERDICT_DEPS_KEY) if isinstance(result, dict) else None
@@ -4075,7 +3937,6 @@ def mine_corpus(
                 template_std_by_tid,
                 _scope_judge,
                 _cls_judge,
-                _dev_judge,
                 alignment_judge,
                 trail_judge,
                 progress,
@@ -4427,9 +4288,8 @@ def mine_corpus(
         # A QA-quarantined document can now ALSO carry a partial
         # corpus_documents entry (see _build_quarantine_corpus_doc above),
         # and a consumer that cross-references the two files by document_id
-        # (e.g. aar._build_needs_attention, to avoid double-counting a
-        # quarantined document as if it were also successfully mined) would
-        # otherwise never find a match — quarantine.json used to be written
+        # (to avoid double-counting a quarantined document as if it were also
+        # successfully mined) would otherwise never find a match — quarantine.json used to be written
         # BEFORE this pass ran, so it kept the raw, un-aliased id even when
         # corpus_manifest.json's matching entry was aliased. Aliasing here
         # also removes the raw counterparty name from quarantine.json's
@@ -4452,12 +4312,9 @@ def mine_corpus(
         # HintsError/SegmentationQAError is not optional and this pass alone
         # would not have been enough for either of them.
         #
-        # This reason text is read back by aar._load_quarantine /
-        # _build_needs_attention (playbook_engine/aar.py:576, which embeds
-        # it verbatim into "needs_attention" reasons for the after-action
-        # report) — quarantine.json plus that report are reason's only
-        # consumers. It never reaches corpus_manifest.json or
-        # playbook.opf.json.
+        # This reason text is read by whoever triages quarantine.json (the
+        # skill's checkpoint) — quarantine.json is reason's only consumer.
+        # It never reaches corpus_manifest.json or playbook.opf.json.
         quarantined = [
             {
                 **q,
@@ -4587,12 +4444,6 @@ def mine_corpus(
         observations_jsonl_text(truncate_search_snippets(all_observations)),
         force=force_rewrite,
     )
-    # Issue #230: record the deviation mode this store was mined in, right
-    # beside it, so project_playbook reads it back instead of inferring it
-    # from row contents (an opt-in judged run whose every clause matched the
-    # template carries only basis="deterministic" rows and is otherwise
-    # indistinguishable from the consumer path).
-    record_deviation_mode(out_dir, "deterministic" if _dev_judge is None else "judged")
     # Round moves (issue #177) — written post-pseudonymization like
     # observations.jsonl; project_playbook reads it back for each
     # precedent's rounds/moved (absent file → rounds 0, e.g. a pre-#177 store).
@@ -4682,10 +4533,9 @@ def project_playbook(
     - ``scope.json``                  — written by :func:`mine_corpus` (may be absent; only
                                         feeds the assembler's stub-basis watermark, issue #101).
     - ``playbook.opf.json``           — a PRIOR compile's output, if present, read only for
-                                        its ``curation`` section (attorney-pinned positions,
-                                        issue #147), so pins survive this recompile and any
-                                        conflict with fresh evidence is (re-)flagged. Absent
-                                        on a first compile.
+                                        its ``posture`` and ``floor`` sections, which a
+                                        recompile carries forward verbatim (issue #123).
+                                        Absent on a first compile.
 
     All L5 logic is deterministic given the store — zero LLM calls.
 
@@ -4843,32 +4693,24 @@ def project_playbook(
 
     generated_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
-    # Issue #147: read the PRIOR compile's curation overlay (attorney-pinned
-    # positions), if a playbook already exists in out_dir, so the merge layer
-    # inside assemble_playbook can preserve pins across this recompile.
-    # Absent on a first compile — no prior pins to carry forward.
-    #
-    # Issue #123: the same prior-playbook read also carries forward
-    # `posture` and `floor` VERBATIM. Both are human-authored (`playbook
-    # posture interview` / `playbook floor sign`) and live ONLY inside
-    # playbook.opf.json — a recompile that doesn't preserve them destroys a
+    # Issue #123: read the PRIOR compile's `posture` and `floor`, if a
+    # playbook already exists in out_dir, and carry them forward VERBATIM.
+    # Both are human-authored (`playbook posture interview` / `playbook
+    # floor sign`) and live ONLY inside playbook.opf.json — a recompile that doesn't preserve them destroys a
     # GC's signed Posture/Floor with no other recovery path, contradicting
     # SKILL.md Route C's "the Posture and Floor you already signed should
     # survive" promise. `.get(...)` defaults to None (not {}) so an absent
     # key on the prior document is indistinguishable from "nothing to carry
     # forward" for assemble_playbook's existing_posture/existing_floor.
     out_file = out_dir / "playbook.opf.json"
-    existing_curation: dict[str, Any] | None = None
     existing_posture: dict[str, Any] | None = None
     existing_floor: dict[str, Any] | None = None
     if out_file.exists():
         try:
             prior_playbook = json.loads(out_file.read_text(encoding="utf-8"))
-            existing_curation = prior_playbook.get("curation")
             existing_posture = prior_playbook.get("posture")
             existing_floor = prior_playbook.get("floor")
         except (json.JSONDecodeError, OSError):
-            existing_curation = None
             existing_posture = None
             existing_floor = None
 
@@ -4883,7 +4725,6 @@ def project_playbook(
         scope_bases=scope_bases,
         unclassified_coverage=unclassified_coverage,
         perspective=perspective_dict,
-        existing_curation=existing_curation,
         existing_posture=existing_posture,
         existing_floor=existing_floor,
         round_moves=round_moves,
@@ -4911,7 +4752,6 @@ def compile_corpus(
     *,
     scope_judge: ScopeJudge | None = None,
     classification_judge: ClassificationJudge | None = None,
-    deviation_judge: DeviationJudge | None = None,
     alignment_judge: AlignmentJudge | None = None,
     trail_judge: TrailJudge | None = None,
     signed_judge: SignedJudge | None = None,
@@ -4945,8 +4785,6 @@ def compile_corpus(
         out_dir:              Output directory for intermediates + playbook.opf.json.
         scope_judge:          L1b judge; defaults to stub (all in-scope).
         classification_judge: L3 judge; defaults to stub (Jaccard + all-unclassified).
-        deviation_judge:      L4 judge; defaults to None — the deterministic
-                              standard check (issue #220), see mine_corpus.
         alignment_judge:      L3 alignment judge; defaults to None (deterministic only).
         trail_judge:          Version-ordering judge; defaults to None (deterministic only).
         signed_judge:         L2 signed-copy judge; defaults to None (deterministic only).
@@ -5011,7 +4849,6 @@ def compile_corpus(
         out_dir=out_dir,
         scope_judge=scope_judge,
         classification_judge=classification_judge,
-        deviation_judge=deviation_judge,
         alignment_judge=alignment_judge,
         trail_judge=trail_judge,
         signed_judge=signed_judge,
