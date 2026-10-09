@@ -1,8 +1,6 @@
 """Floor-candidate proposal — derive review candidates from reversals + the
 Posture interview's Q4 answer (issue #166) — and direct Floor promotion of
-that same Q4 answer's human-authored statements (issue #89), plus the
-review-checklist accept/reject path for the OTHER (compiler-derived) kind of
-candidate (issue #90).
+that same Q4 answer's human-authored statements (issue #89).
 
 OPF-SPEC.md §3.7 rule 4: the compiler MAY propose Floor candidates
 ("every ``outcome: proposed_then_reversed`` in the Evidence is a candidate
@@ -12,7 +10,9 @@ candidate must NEVER be auto-promoted into the signed OPF
 ``floor.invariants`` (spec rule 4, "never auto-promote"). Reversal-derived
 candidates are compiler-derived — machine inferences read off the Evidence
 that no human has seen or endorsed — so they stay firmly on the
-propose-then-sign-off path.
+propose-then-sign-off path: the legal owner reads ``floor.candidates.json``
+(or the table ``playbook floor propose`` prints) and records each hard line
+they accept with ``playbook floor sign``.
 
 A Q4 answer is different in kind: it is *human-authored* prose the legal
 owner typed directly into the Posture interview, naming their own hard
@@ -37,13 +37,11 @@ REVERSAL candidate (:func:`derive_reversal_candidates`) whose ``taxonomy_id``
 normalizes equal to a Q5 item is auto-rejected by
 :func:`propose_floor_candidates` — not promoted anywhere, never touching
 ``floor.invariants``, just pre-marked ``"decision": "rejected"`` in
-``floor.candidates.json`` so the reviewer isn't asked to re-litigate a
+``floor.candidates.json`` so the reader isn't asked to re-litigate a
 concession their own interview answer already settled. This is symmetric
 with Q4's direct promotion, not a new exception to spec rule 4: the
 authority for the rejection is the human-authored Q5 answer, not a
-compiler inference, and a candidate a human reviewer previously (or
-subsequently) accepts in ``playbook.review.html`` is never overridden by
-it — see :func:`write_floor_candidates`'s ``prior_decisions`` carry-over.
+compiler inference.
 
 This module implements:
 
@@ -65,12 +63,9 @@ This module implements:
     to the playbook. This file is a sidecar ENGINE OUTPUT artifact, never
     written into the OPF document itself. :func:`write_floor_candidates`
     itself never writes to ``floor.invariants`` — accepting a REVERSAL
-    candidate is always a separate, later, explicit human act (editing
-    ``floor.invariants`` directly, via the curation CLI, or via the
-    review-checklist path below).
-  - :func:`promote_interview_q4_invariants` — one of two exceptions to
-    "never writes to floor.invariants" (the other is
-    :func:`promote_floor_candidate` below): a pure merge function (the
+    candidate is always a separate, later, explicit human act
+    (``playbook floor sign``).
+  - :func:`promote_interview_q4_invariants` — a pure merge function (the
     caller, ``posture.apply_posture_interview``, handles I/O) that promotes
     each Q4-named item directly into a ``floor.invariants`` list,
     idempotently (OPF-SPEC.md §3.13 — a duplicate sibling id is a blocking
@@ -78,28 +73,11 @@ This module implements:
     duplicate) and raises :class:`FloorCandidateError` rather than silently
     overwriting an entry it did not itself promote (issue #89 review
     finding 2).
-  - :func:`candidate_invariant_id` / :func:`promote_floor_candidate` — issue
-    #90's counterpart to the Q4 path, for the review-checklist route into
-    ``floor.invariants``: a reversal (or interview_q4-drafted) candidate a
-    human reviewer explicitly accepted in ``playbook.review.html``'s
-    "Proposed hard lines" checklist. Idempotent by the same §3.13 argument
-    as the Q4 path, keyed on a slug of the candidate's ``statement`` rather
-    than a Q4 item fragment.
-  - :func:`resolve_floor_candidate_decisions` / :func:`apply_floor_review` —
-    issue #90's pure resolver and I/O wrapper (respectively) for a
-    ``feedback.json`` ``"floor"`` block (``{candidate_id: {"decision":
-    "accept"|"reject", "comment": "..."}}``), called from
-    ``viewer.apply_feedback``. ``accept`` calls
-    :func:`promote_floor_candidate`; ``reject`` records a ``"decision":
-    "rejected"`` flag directly on the candidate in ``floor.candidates.json``
-    so a later re-render shows it as rejected instead of re-proposing it —
-    rejections have no ``floor.invariants`` counterpart to promote into.
   - :func:`sign_floor_invariant` / :func:`sign_invariant_id` — issue #103's
-    THIRD route into ``floor.invariants``, for a verbatim, hand-authored
-    statement (``playbook floor sign``) that has no machine-derived draft to
-    accept and no Q4 item to template — the caller's exact wording is
-    written unchanged, e.g. a conditional hard line Q4's semicolon-split
-    templating would otherwise garble.
+    route into ``floor.invariants`` for a verbatim, hand-authored statement
+    (``playbook floor sign``) that has no Q4 item to template — the caller's
+    exact wording is written unchanged, e.g. a conditional hard line Q4's
+    semicolon-split templating would otherwise garble.
 """
 
 from __future__ import annotations
@@ -119,20 +97,13 @@ __all__ = [
     "FloorCandidate",
     "FloorCandidateCitation",
     "FloorCandidateError",
-    "FloorFeedbackResult",
-    "apply_floor_review",
-    "candidate_invariant_id",
-    "candidate_q4_invariant_id",
     "derive_interview_q4_candidates",
     "derive_reversal_candidates",
     "is_q4_item_sentence_shaped",
-    "promote_floor_candidate",
     "promote_interview_q4_invariants",
     "propose_floor_candidates",
     "q4_q5_contradictions",
     "q4_sentence_shaped_items",
-    "read_floor_candidates",
-    "resolve_floor_candidate_decisions",
     "sign_floor_invariant",
     "sign_invariant_id",
     "write_floor_candidates",
@@ -636,9 +607,8 @@ def q4_q5_contradictions(interview_answers: dict[str, str] | None) -> list[str]:
     auto-rejects any matching reversal candidate
     (:func:`propose_floor_candidates`) — this function only surfaces the
     tension so the legal owner notices and resolves it (reword one of the
-    two answers, or simply accept the auto-rejected candidate anyway in
-    ``playbook.review.html`` — the existing accept/reject checklist already
-    lets a human override an auto-rejection either way).
+    two answers, or sign the auto-rejected candidate's hard line anyway with
+    ``playbook floor sign`` — a human can always override an auto-rejection).
 
     Matching is EXACT normalized-slug equality (:func:`_slugify`), never
     fuzzy/substring — the same discipline :func:`propose_floor_candidates`
@@ -744,7 +714,7 @@ def propose_floor_candidates(
 
     Pure derivation, deterministic given its inputs — no I/O, no LLM. Never
     writes/reads ``floor.invariants``; the caller (:func:`write_floor_candidates`)
-    handles I/O, and only a human (or the curation CLI) ever promotes a
+    handles I/O, and only a human (``playbook floor sign``) ever promotes a
     candidate into the signed OPF Floor.
 
     A freshly-derived REVERSAL candidate (never an interview_q4 one — those
@@ -757,15 +727,9 @@ def propose_floor_candidates(
     label (e.g. "renewal" vs. "auto-renewal option") must never match. Spec
     note (OPF-SPEC.md §3.7 rule 4): this is not the promotion rule 4 bars —
     nothing is written to ``floor.invariants`` here, and the candidate stays
-    listed and flippable in the review HTML (``viewer._classify_floor_candidates``
-    recognizes the attributing comment and keeps the row's live accept/
-    reject controls instead of the inert "rejected" badge); the
-    auto-rejection's authority is the human-authored Q5 answer, symmetric
-    with Q4's direct-promotion authority (see this module's top docstring).
-    A candidate a human
-    reviewer already decided on a PRIOR run is not this function's concern
-    — see :func:`write_floor_candidates`'s ``prior_decisions`` carry-over,
-    which always overrides whatever this function marks.
+    listed with its attributing comment; the auto-rejection's authority is
+    the human-authored Q5 answer, symmetric with Q4's direct-promotion
+    authority (see this module's top docstring).
 
     Args:
         observations:      Raw observation dicts (see
@@ -964,8 +928,8 @@ def promote_interview_q4_invariants(
     left exactly as they are: this is an upsert, never a delete, so a legal
     owner's hand edits (or an earlier run's promotions) are never silently
     discarded. Non-dict entries (a hand-authored playbook MAY carry a bare
-    ``floor.invariants[]`` string — ``prompt_renderer.py`` and
-    ``document_renderer.py`` both tolerate that shape) are likewise left
+    ``floor.invariants[]`` string — ``document_renderer.py``
+    tolerates that shape) are likewise left
     untouched; they simply never match a Q4-derived id (``index_by_id``
     only ever indexes dict entries with a string ``id``).
 
@@ -1048,315 +1012,11 @@ def promote_interview_q4_invariants(
 
 
 # ---------------------------------------------------------------------------
-# Review-checklist candidate promotion (issue #90) — the OTHER route into
-# floor.invariants: a reversal (or interview_q4-drafted) candidate a human
-# reviewer explicitly accepted in playbook.review.html's "Proposed hard
-# lines" checklist, via feedback.json's "floor" key.
-# ---------------------------------------------------------------------------
-
-
-def candidate_invariant_id(candidate: dict[str, Any]) -> str:
-    """The stable ``floor.invariants[].id`` a Floor candidate gets if accepted.
-
-    A kebab-case slug of the candidate's ``statement`` — the "same
-    statement -> same id, every run" contract :func:`promote_floor_candidate`
-    needs to be idempotent (OPF-SPEC.md §3.13: a duplicate sibling id in
-    ``floor.invariants`` is a blocking validator error), mirroring
-    :func:`_slugify_statement_item`'s role for the Q4 path except keyed on
-    the candidate's full statement rather than a Q4 item fragment — a
-    reversal candidate has no separate "item" text distinct from its
-    statement.
-
-    One of the ground-truth signals ``viewer.render_review_html`` uses to
-    detect whether a candidate is ALREADY present in ``floor.invariants``
-    — the id an acceptance would produce is looked up directly in the
-    playbook's current invariant ids, so the "already signed" state is
-    always read off the playbook itself, never a possibly-stale flag. For
-    a ``source: interview_q4`` candidate specifically, this id ALONE is not
-    enough — see :func:`candidate_q4_invariant_id` (issue #90 review
-    finding 1). Nor is it enough for a candidate whose ``taxonomy_id``
-    matches a hand-authored (or otherwise differently-worded) invariant's
-    ``x_taxonomy_id`` with zero slug overlap — see the ``candidate.get(
-    "taxonomy_id")`` check alongside this id's use, both in
-    ``viewer._classify_floor_candidates`` and in
-    :func:`promote_floor_candidate` (issue #102).
-    """
-    candidate_id = candidate.get("id") or "candidate"
-    return _slugify(str(candidate.get("statement", "")), fallback=f"floor-{candidate_id}")
-
-
-# The exact inverse of `_q4_statement`'s wording. These two MUST change
-# together: `candidate_q4_invariant_id` reconstructs the Q4 item by matching
-# this pattern, and a mismatch makes it return None for every real candidate,
-# silently disabling `promote_floor_candidate`'s already-signed duplicate
-# guard. `test_candidate_q4_invariant_id_round_trips_the_real_producer` builds
-# its candidate from the real producer so that decoupling cannot land green.
-_Q4_CANDIDATE_STATEMENT_RE = re.compile(r"^Do not concede on (?P<item>.+)\.$")
-
-
-def candidate_q4_invariant_id(candidate: dict[str, Any]) -> str | None:
-    """For a ``source: interview_q4`` candidate, the ``floor.invariants[].id``
-    its underlying Posture-interview item ALREADY carries if promoted
-    directly via :func:`promote_interview_q4_invariants` (issue #89) — the
-    OTHER, independently-derived id the exact same Q4 answer item can be
-    signed under (issue #90 review finding 1).
-
-    :func:`candidate_invariant_id` slugs THIS candidate's own draft
-    ``statement`` (:func:`_q4_statement`'s "Do not concede on {item}."
-    wording);
-    :func:`promote_interview_q4_invariants` instead slugs the bare *item*
-    text via :func:`_slugify_statement_item` and writes
-    :func:`_q4_promoted_statement`'s "Do not concede on {item}." wording.
-    Same underlying Q4 item, two unrelated ids and two unrelated statement
-    strings — so ``candidate_invariant_id(candidate) in invariant_ids``
-    alone can never detect that this candidate's item was already signed
-    via the OTHER (interview-authored) route: a caller that checks only
-    :func:`candidate_invariant_id` would let an already-decided item
-    through as a live control, and accepting it would append a SECOND,
-    opposite-polarity invariant for the same item instead of recognising
-    it as already settled. This function reconstructs *item* from the
-    candidate's own statement (the exact inverse of :func:`_q4_statement`)
-    and re-derives the id :func:`promote_interview_q4_invariants` would use
-    for it, so callers can check both ids.
-
-    Returns ``None`` for a ``source: reversal`` candidate (no Q4 item to
-    derive from — reversal candidates never take the Q4 promotion path at
-    all), or when *candidate*'s ``statement`` doesn't match
-    :func:`_q4_statement`'s exact "Do not concede on {item}." shape
-    (defensive;
-    every real ``interview_q4`` candidate does, by construction of
-    :func:`derive_interview_q4_candidates`).
-    """
-    if candidate.get("source") != "interview_q4":
-        return None
-    match = _Q4_CANDIDATE_STATEMENT_RE.match(str(candidate.get("statement", "")))
-    if not match:
-        return None
-    return _slugify_statement_item(match.group("item"))
-
-
-_CANDIDATE_ATTRIBUTION_RE = re.compile(
-    r"Accepted via review feedback \(floor candidate (?P<cand_id>[^)]+)\)\.$"
-)
-
-
-def _is_own_candidate_promotion(entry: dict[str, Any], candidate_id: str) -> bool:
-    """Whether *entry* carries THIS function's own attribution marker for
-    *candidate_id* — the :func:`promote_floor_candidate` analogue of
-    :func:`_is_own_q4_promotion` (issue #89 review finding 2's foreign-
-    collision guard, applied here to the candidate-acceptance path).
-    Distinguishes "an invariant a previous acceptance of THIS candidate
-    itself wrote" (safe to update in place) from "an existing invariant
-    whose id merely happens to collide with this candidate's slug" — a
-    hand-authored entry, a Q4 promotion, or an acceptance of a DIFFERENT
-    candidate that happened to slugify the same (never safe to overwrite).
-    """
-    rationale = entry.get("rationale")
-    if not isinstance(rationale, str):
-        return False
-    match = _CANDIDATE_ATTRIBUTION_RE.search(rationale)
-    return match is not None and match.group("cand_id") == candidate_id
-
-
-def _promoted_candidate_rationale(candidate: dict[str, Any]) -> str:
-    """The ``floor.invariants[].rationale`` text an ACCEPTED candidate gets.
-
-    Its own proposal rationale (already source-aware — see
-    :func:`derive_reversal_candidates`/:func:`derive_interview_q4_candidates`),
-    plus its evidence citation(s) when present (reversal-sourced candidates
-    only; interview_q4 candidates carry none), plus the "Accepted via review
-    feedback" attribution :func:`_is_own_candidate_promotion` matches back
-    against on a later idempotent re-apply.
-    """
-    base = str(candidate.get("rationale", "")).rstrip()
-    citations = candidate.get("citations") or []
-    evidence = ""
-    if citations:
-        cite_strs = [
-            f"{c.get('document_id')} v{c.get('version')} §{c.get('clause_path')}"
-            for c in citations
-            if isinstance(c, dict)
-        ]
-        if cite_strs:
-            evidence = f" Evidence: {'; '.join(cite_strs)}."
-    candidate_id = candidate.get("id")
-    return f"{base}{evidence} Accepted via review feedback (floor candidate {candidate_id})."
-
-
-def _floor_invariant_entry(
-    inv_id: str, statement: str, rationale: str, taxonomy_id: Any
-) -> dict[str, Any]:
-    """One ``floor.invariants[]`` entry, with *taxonomy_id* (if it's a
-    non-blank string) stamped in as ``x_taxonomy_id`` (issue #102) —
-    ``promote_floor_candidate``'s two entry-construction sites (update in
-    place / append) share this so they can never drift on the key name or
-    the "only when present" rule. NOT a bare ``taxonomy_id`` key: see the
-    module comment above :func:`sign_floor_invariant` for why
-    ``spec/playbook.schema-0.4.json``'s frozen, ``additionalProperties:
-    false`` invariant-entry shape forces the ``x_`` prefix.
-    """
-    entry: dict[str, Any] = {"id": inv_id, "statement": statement, "rationale": rationale}
-    if isinstance(taxonomy_id, str) and taxonomy_id.strip():
-        entry["x_taxonomy_id"] = taxonomy_id
-    return entry
-
-
-def promote_floor_candidate(
-    candidate: dict[str, Any],
-    *,
-    existing_invariants: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    """Promote ONE explicitly-ACCEPTED Floor candidate into ``floor.invariants``
-    (issue #90) — the review-checklist counterpart to
-    :func:`promote_interview_q4_invariants`.
-
-    This is not the auto-promotion OPF-SPEC.md §3.7 rule 4 forbids: rule 4
-    bars promoting a *compiler-derived* candidate WITHOUT an explicit accept
-    decision. This function is only ever called after exactly that decision
-    — a reviewer's ``"decision": "accept"`` on a ``feedback.json`` ``"floor"``
-    entry (see :func:`resolve_floor_candidate_decisions`, called from
-    ``viewer.apply_feedback``). A candidate this function is not explicitly
-    told to promote is never written here, or anywhere else in this module.
-
-    Idempotent per candidate (OPF-SPEC.md §3.13 — a duplicate sibling id is
-    a blocking validator error, so accepting the same candidate twice, or
-    re-applying the same ``feedback.json``, must never append a duplicate):
-    the derived id (:func:`candidate_invariant_id`) is stable for a given
-    ``statement``, and an existing entry at that id carrying THIS function's
-    own attribution marker (:func:`_is_own_candidate_promotion`) is updated
-    in place — or, when the statement is unchanged, left byte-for-byte
-    untouched (a true no-op) — rather than duplicated. An existing entry at
-    that id NOT carrying the marker — hand-authored, written by a Q4
-    promotion, or an earlier acceptance of a DIFFERENT candidate that
-    happened to slugify the same — is never silently overwritten: promotion
-    raises :class:`FloorCandidateError` instead (mirrors issue #89 review
-    finding 2).
-
-    A ``source: interview_q4`` candidate gets one MORE guard, on top of the
-    above (issue #90 review finding 1): its underlying Posture-interview
-    item may ALREADY be signed into ``floor.invariants`` via the OTHER,
-    independent promotion route (:func:`promote_interview_q4_invariants`,
-    issue #89), under a DIFFERENT id — see :func:`candidate_q4_invariant_id`.
-    That id never collides with :func:`candidate_invariant_id`'s (the two
-    functions slug different text), so it is checked separately; a
-    collision there is refused the same way, rather than appending a
-    second, opposite-polarity invariant for an item that is already
-    settled.
-
-    A candidate carrying a ``taxonomy_id`` (issue #102 — ``source: reversal``
-    candidates only; see :class:`FloorCandidate`) gets a THIRD, independent
-    guard: an existing ``floor.invariants`` entry whose ``x_taxonomy_id``
-    (see :func:`sign_floor_invariant`) equals this candidate's ``taxonomy_id``
-    is the SAME clause taxonomy already settled under a DIFFERENT statement
-    — e.g. a hand-authored invariant that covers the same ground in the
-    legal owner's own wording, which :func:`candidate_invariant_id`'s exact
-    slug match can never recognise. Refused the same way as the other two
-    guards, never silently appended as a second, possibly-conflicting
-    invariant for a taxonomy that is already covered.
-
-    Args:
-        candidate:            One candidate dict from ``floor.candidates.json``
-                              (``id``/``statement``/``rationale``/``source``/
-                              ``citations`` — see :class:`FloorCandidate`).
-        existing_invariants:  The playbook's current ``floor.invariants``
-                              list, or ``None``/``[]`` for a first-ever
-                              promotion.
-
-    Returns:
-        The full, merged ``floor.invariants`` list. Equal to
-        *existing_invariants* (same order, same content) when this exact
-        candidate was already promoted with an unchanged statement.
-
-    Raises:
-        FloorCandidateError: the derived id collides with an
-            *existing_invariants* entry this function did not itself
-            promote for THIS candidate — never overwritten; or (issue #90
-            review finding 1) a ``source: interview_q4`` candidate's item is
-            already signed via :func:`promote_interview_q4_invariants` under
-            its own, differently-derived id; or (issue #102) the candidate's
-            ``taxonomy_id`` matches an existing entry's ``x_taxonomy_id``
-            under yet another, differently-worded statement.
-    """
-    candidate_id = str(candidate.get("id", ""))
-    inv_id = candidate_invariant_id(candidate)
-    q4_inv_id = candidate_q4_invariant_id(candidate)
-    taxonomy_id = candidate.get("taxonomy_id")
-    statement = str(candidate.get("statement", ""))
-    rationale = _promoted_candidate_rationale(candidate)
-
-    merged: list[dict[str, Any]] = list(existing_invariants or [])
-    index_by_id: dict[str, int] = {
-        inv["id"]: i
-        for i, inv in enumerate(merged)
-        if isinstance(inv, dict) and isinstance(inv.get("id"), str)
-    }
-
-    existing_index = index_by_id.get(inv_id)
-    if existing_index is not None:
-        existing_entry = merged[existing_index]
-        if not _is_own_candidate_promotion(existing_entry, candidate_id):
-            raise FloorCandidateError(
-                f"floor.invariants already has an entry with id {inv_id!r} "
-                f"(statement={existing_entry.get('statement')!r}, rationale="
-                f"{existing_entry.get('rationale')!r}) that accepting floor "
-                f"candidate {candidate_id!r} did not itself author — refusing "
-                "to silently overwrite it. Rename or remove the conflicting "
-                "invariant, or edit the candidate's statement so it "
-                "slugifies to a different id."
-            )
-        if existing_entry.get("statement") == statement:
-            return merged  # true no-op: same id, same statement, nothing changed
-        merged[existing_index] = _floor_invariant_entry(inv_id, statement, rationale, taxonomy_id)
-        return merged
-
-    # issue #90 review finding 1: this candidate's own id (inv_id, above)
-    # doesn't collide with anything, but a source: interview_q4 candidate's
-    # underlying item may STILL already be signed — under the OTHER id
-    # promote_interview_q4_invariants (issue #89) would have used for the
-    # exact same item. Appending here regardless would add a SECOND,
-    # invariant for an item that is already settled (the candidate draft
-    # and the promoted statement now share wording but still slugify to two
-    # different ids — statement-slug vs item-slug) —
-    # refuse instead, the same never-silently-duplicate-or-conflict
-    # principle as the foreign-collision guard above.
-    if q4_inv_id is not None and q4_inv_id in index_by_id:
-        q4_entry = merged[index_by_id[q4_inv_id]]
-        raise FloorCandidateError(
-            f"floor.invariants already has an entry with id {q4_inv_id!r} "
-            f"(statement={q4_entry.get('statement')!r}) for the same Posture "
-            f"interview Q4 item as floor candidate {candidate_id!r} — already "
-            "signed; refusing to add a duplicate, opposite-polarity invariant "
-            "for the same item."
-        )
-
-    # issue #102: neither id-based check above caught anything, but this
-    # candidate's taxonomy_id (source: reversal only — see FloorCandidate)
-    # may STILL already be settled, under a hand-authored (or otherwise
-    # differently-worded) invariant whose statement does not slugify to
-    # either of this candidate's ids at all. Same never-silently-duplicate
-    # principle: refuse rather than append a second, possibly-conflicting
-    # invariant for a taxonomy that is already covered.
-    if isinstance(taxonomy_id, str) and taxonomy_id.strip():
-        for inv in merged:
-            if isinstance(inv, dict) and inv.get("x_taxonomy_id") == taxonomy_id:
-                raise FloorCandidateError(
-                    f"floor.invariants already has an entry with x_taxonomy_id "
-                    f"{taxonomy_id!r} (id={inv.get('id')!r}, statement="
-                    f"{inv.get('statement')!r}) for floor candidate "
-                    f"{candidate_id!r} — already signed for this clause "
-                    "taxonomy; refusing to add a duplicate, possibly-"
-                    "conflicting invariant."
-                )
-
-    merged.append(_floor_invariant_entry(inv_id, statement, rationale, taxonomy_id))
-    return merged
-
-
-# ---------------------------------------------------------------------------
-# Hand-authored verbatim signing (issue #103) — a THIRD route into
-# floor.invariants, alongside promote_interview_q4_invariants (Q4 templating)
-# and promote_floor_candidate (accepted candidate). Unlike either of those,
-# nothing here is derived or templated: the caller supplies the exact
+# Hand-authored verbatim signing (issue #103) — the route into
+# floor.invariants for a hard line the legal owner words themselves
+# (including an accepted floor candidate), alongside
+# promote_interview_q4_invariants (Q4 templating). Nothing here is derived or
+# templated: the caller supplies the exact
 # statement text, and it is written unchanged. This is the path for a
 # conditional hard line ("limitation of liability, if present, must not be
 # unilateral in the counterparty's favor") that Q4's semicolon-split
@@ -1372,7 +1032,7 @@ def promote_floor_candidate(
 # that FROZEN schema in place. The schema already ships an escape hatch for exactly this
 # situation (`patternProperties: {"^x_": true}`), the same one
 # pipeline.py's
-# `x_quarantined`, and publisher.py's `x_publication` already use — so the
+# `x_quarantined` already uses — so the
 # clause taxonomy id this function records goes in under that prefix,
 # `x_taxonomy_id`, never a bare `taxonomy_id`. A schema-version bump (or a
 # genuine widening of a NOT-yet-frozen version) to promote this to a first-
@@ -1384,8 +1044,7 @@ def sign_invariant_id(statement: str, invariant_id: str | None = None) -> str:
     """The ``floor.invariants[].id`` :func:`sign_floor_invariant` will use for
     *statement*, given an optional caller-supplied *invariant_id* override.
 
-    Exposed separately (mirrors :func:`candidate_invariant_id`'s role for the
-    review-checklist path) so a caller — the CLI — can report the id it just
+    Exposed separately so a caller — the CLI — can report the id it just
     signed without re-deriving the slug logic itself.
 
     Args:
@@ -1531,8 +1190,8 @@ def sign_floor_invariant(
     # issue #209 (2026-08-24 skill QA audit, finding #92): --signed-by is the
     # ONE structural home for sign-off attribution — rationale is legal
     # justification only. rationale ships verbatim into every consumer's
-    # model-facing review prompt (see prompt_renderer.py's Floor section,
-    # which renders it as "{statement} ({rationale})"), while x_signed_by/
+    # model-facing review prompt (a consumer renders each invariant as
+    # "{statement} ({rationale})"), while x_signed_by/
     # x_signed_at are never sent to a model. A rationale that repeats the
     # signer's name (e.g. "Hand-authored and signed by the legal owner
     # (Jane Doe, GC), 2026-08-21.") duplicates that attribution into the
@@ -1569,7 +1228,7 @@ def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
     """WHO structurally attributes *entry* (one ``floor.invariants[]``
     item) — or ``None`` if nothing does (issue #127).
 
-    Three producers write into ``floor.invariants``, each leaving a
+    Two producers write into ``floor.invariants``, each leaving a
     distinct, mechanically-checkable trace:
 
       - ``playbook floor sign`` (:func:`sign_floor_invariant`) stamps
@@ -1578,19 +1237,15 @@ def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
       - the Posture interview's Q4 answer
         (:func:`promote_interview_q4_invariants`) stamps a ``rationale``
         matching :data:`_Q4_ATTRIBUTION_RE` — returns ``"posture_interview"``.
-      - an accepted ``floor.candidates.json`` proposal
-        (:func:`promote_floor_candidate`, via a human's reviewed
-        ``feedback.json``) stamps a ``rationale`` matching
-        :data:`_CANDIDATE_ATTRIBUTION_RE` — returns ``"review_feedback"``.
 
-    Returns ``None`` when none of the three markers is present — an
+    Returns ``None`` when neither marker is present — an
     invariant that never travelled through any of this engine's own
     attribution paths, which ``validate`` (:mod:`playbook_engine.validator`)
     surfaces as a non-blocking warning so a human review can look at it.
 
-    Deliberately NOT a security boundary on its own for the interview/
-    candidate cases: those two ``rationale`` markers are lexical, and text
-    that merely resembles one could in principle be typed by hand. The path
+    Deliberately NOT a security boundary on its own for the interview case:
+    that ``rationale`` marker is lexical, and text that merely resembles it
+    could in principle be typed by hand. The path
     this genuinely closes is ``floor sign``, which no longer accepts a
     human sign-off as free-form ``rationale`` text — it now REQUIRES the
     structural ``x_signed_by`` field, refusing to run without it (see
@@ -1606,212 +1261,7 @@ def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
         return None
     if _Q4_ATTRIBUTION_RE.match(rationale):
         return "posture_interview"
-    if _CANDIDATE_ATTRIBUTION_RE.search(rationale):
-        return "review_feedback"
     return None
-
-
-# ---------------------------------------------------------------------------
-# feedback.json "floor" block resolution (issue #90)
-# ---------------------------------------------------------------------------
-
-# Keys recognised inside one feedback.json floor[candidate_id] entry. Mirrors
-# viewer.py's _RECOGNIZED_FEEDBACK_KEYS convention: anything else is reported
-# as not-applied rather than silently dropped (issue #138).
-_FLOOR_ENTRY_KEYS = frozenset({"decision", "comment"})
-
-
-@dataclass
-class FloorFeedbackResult:
-    """Result of resolving a ``feedback.json`` ``"floor"`` block (issue #90).
-
-    Attributes:
-        invariants:          The (possibly updated) ``floor.invariants``
-                             list. The caller writes this into
-                             ``doc["floor"]["invariants"]`` iff
-                             ``invariants_changed``.
-        invariants_changed:  Whether ``invariants`` differs from the
-                             *existing_invariants* it was resolved against.
-        candidates:           The (possibly updated) ``floor.candidates.json``
-                             ``candidates`` list — each accepted/rejected
-                             entry now carries a ``"decision"`` field. The
-                             caller writes this back iff
-                             ``candidates_changed``.
-        candidates_changed:   Whether any candidate's ``"decision"`` changed.
-        promoted:             Candidate ids successfully accepted (promoted)
-                             this run — including a true no-op re-accept, so
-                             re-applying identical feedback reports the same
-                             counts both times.
-        rejected:             Candidate ids marked rejected this run
-                             (including a no-op re-reject).
-        skipped:              ``candidate_id`` (or the bare ``"floor"`` key
-                             for a malformed top-level block) -> human-
-                             readable "not applied" messages — the same
-                             convention as ``viewer.ApplyResult.skipped``
-                             (issue #138).
-        comments:             ``(candidate_id, statement, comment)`` triples
-                             for the caller to fold into ``viewer_notes.md``,
-                             the same free-text sink every other comment
-                             uses.
-    """
-
-    invariants: list[dict[str, Any]]
-    invariants_changed: bool = False
-    candidates: list[dict[str, Any]] = field(default_factory=list)
-    candidates_changed: bool = False
-    promoted: list[str] = field(default_factory=list)
-    rejected: list[str] = field(default_factory=list)
-    skipped: dict[str, list[str]] = field(default_factory=dict)
-    comments: list[tuple[str, str, str]] = field(default_factory=list)
-
-
-def resolve_floor_candidate_decisions(
-    floor_feedback: Any,
-    candidates: list[dict[str, Any]],
-    existing_invariants: list[dict[str, Any]] | None = None,
-) -> FloorFeedbackResult:
-    """Pure resolution of a ``feedback.json`` ``"floor"`` block (issue #90).
-
-    Resolves *floor_feedback* (the ``feedback["floor"]`` value:
-    ``{candidate_id: {"decision": "accept"|"reject", "comment": "..."}}``)
-    against *candidates* (``floor.candidates.json``'s ``candidates`` list)
-    and *existing_invariants* (the playbook's current ``floor.invariants``).
-
-    No I/O — :func:`apply_floor_review` is the file-reading/-writing wrapper
-    ``viewer.apply_feedback`` actually calls. Kept separate and pure so it is
-    directly unit-testable with plain dicts, matching every other function
-    in this module.
-
-    Per issue #138, nothing is ever silently dropped — anything this
-    function cannot honor lands in the result's ``skipped``:
-
-      - *floor_feedback* itself is not an object -> ``skipped["floor"]``.
-      - one entry is not an object, names a key other than
-        ``decision``/``comment``, or names a ``decision`` other than
-        ``"accept"``/``"reject"`` -> ``skipped[f"floor:{candidate_id}"]``.
-      - one entry names a ``candidate_id`` absent from *candidates* ->
-        ``skipped[f"floor:{candidate_id}"]``.
-      - an ``accept`` whose derived id collides with an
-        *existing_invariants* entry :func:`promote_floor_candidate` did not
-        itself author -> ``skipped[f"floor:{candidate_id}"]`` (the
-        :class:`FloorCandidateError` message).
-      - an ``accept`` whose ``taxonomy_id`` matches an existing invariant's
-        ``x_taxonomy_id`` under a different statement ->
-        ``skipped[f"floor:{candidate_id}"]`` (issue #102).
-
-    A ``comment`` is captured into the result's ``comments`` (issue #90
-    review finding 3) whenever the named ``candidate_id`` is known,
-    REGARDLESS of whether ``decision`` is present/valid — a comment-only
-    entry (no ``decision`` key at all) still lands there, even though it is
-    ALSO reported via ``skipped`` for the missing decision; the two are
-    independent outcomes of the same entry.
-
-    ``accept`` promotes the candidate into the returned ``invariants`` (via
-    :func:`promote_floor_candidate`) and marks the candidate's own
-    ``"decision": "accepted"`` in the returned ``candidates``. ``reject``
-    marks ``"decision": "rejected"`` and never touches ``invariants`` —
-    Floor rejections have no ``floor.invariants`` counterpart; the candidate's
-    own ``"decision"`` field is the only record of a rejection, and is what
-    lets a later re-render show it as rejected instead of re-proposing it.
-
-    Returns:
-        :class:`FloorFeedbackResult`.
-    """
-    result = FloorFeedbackResult(
-        invariants=list(existing_invariants or []),
-        candidates=list(candidates),
-    )
-
-    if not isinstance(floor_feedback, dict):
-        result.skipped.setdefault("floor", []).append(
-            "'floor' feedback must be an object of "
-            '{candidate_id: {"decision": "accept"|"reject", "comment": "..."}}'
-        )
-        return result
-
-    candidates_by_id: dict[str, dict[str, Any]] = {
-        c["id"]: c
-        for c in result.candidates
-        if isinstance(c, dict) and isinstance(c.get("id"), str)
-    }
-
-    for candidate_id, entry in floor_feedback.items():
-        if not isinstance(entry, dict):
-            result.skipped.setdefault(f"floor:{candidate_id}", []).append(
-                "malformed floor feedback entry: expected an object with a 'decision' key"
-            )
-            continue
-
-        for key in entry:
-            if key not in _FLOOR_ENTRY_KEYS:
-                result.skipped.setdefault(f"floor:{candidate_id}", []).append(
-                    f"{key!r} not yet supported"
-                )
-
-        candidate = candidates_by_id.get(candidate_id)
-        if candidate is None:
-            result.skipped.setdefault(f"floor:{candidate_id}", []).append(
-                f"unknown floor candidate id {candidate_id!r} (not present in floor.candidates.json)"
-            )
-            continue
-
-        # Captured before the decision guard below (issue #90 review
-        # finding 3): the page's own Export JS can produce a floor entry
-        # with a comment but NO "decision" key at all — a reviewer types a
-        # note and leaves the radio on Undecided (viewer.py's
-        # collectFeedback skips 'undecided' radios but unconditionally
-        # attaches .floor-comment-input text). That comment must still
-        # reach viewer_notes.md, the same free-text sink every other
-        # comment uses, independent of whether a decision was also given.
-        comment = entry.get("comment")
-        if comment and str(comment).strip():
-            result.comments.append(
-                (candidate_id, str(candidate.get("statement", "")), str(comment).strip())
-            )
-
-        decision = entry.get("decision")
-        if decision not in ("accept", "reject"):
-            result.skipped.setdefault(f"floor:{candidate_id}", []).append(
-                f"unknown or missing decision {decision!r} (expected 'accept' or 'reject')"
-            )
-            continue
-
-        if decision == "accept":
-            try:
-                result.invariants = promote_floor_candidate(
-                    candidate, existing_invariants=result.invariants
-                )
-            except FloorCandidateError as exc:
-                result.skipped.setdefault(f"floor:{candidate_id}", []).append(str(exc))
-                continue
-            result.promoted.append(candidate_id)
-            if candidate.get("decision") != "accepted":
-                candidate["decision"] = "accepted"
-                result.candidates_changed = True
-        else:  # "reject"
-            result.rejected.append(candidate_id)
-            if candidate.get("decision") != "rejected":
-                candidate["decision"] = "rejected"
-                result.candidates_changed = True
-
-        # A candidate the Q5 ("flexible_clauses") auto-rejection already
-        # marked "rejected" (attributed via _Q5_REJECTION_COMMENT) can reach
-        # either branch above with its "decision" unchanged — an explicit
-        # human accept OR reject, agreeing or disagreeing with the
-        # recommendation. Either way that comment must be cleared: an
-        # explicit human decision is never attributed to the Q5 comment (see
-        # this function's docstring and write_floor_candidates), and without
-        # clearing it here candidates_changed would stay False when the
-        # decision value didn't change, so the file is never rewritten and
-        # an accepted/re-rejected candidate keeps rendering "Recommended
-        # reject" forever, with the reviewer never able to confirm it away
-        # (issue #105 review round 2 finding 3, generalized to accept).
-        if candidate.get("comment") == _Q5_REJECTION_COMMENT:
-            candidate.pop("comment", None)
-            result.candidates_changed = True
-
-    result.invariants_changed = result.invariants != list(existing_invariants or [])
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1847,41 +1297,6 @@ def write_floor_candidates(
     This is the ``playbook floor propose`` CLI command's I/O layer. The
     playbook's ``floor.invariants`` is never read for input nor written —
     proposals never appear there automatically (spec rule 4).
-
-    Each freshly-derived candidate's ``decision`` (issue #90's accept/reject
-    review-checklist field — the ONLY record of a REJECTION, since an
-    accepted candidate is separately protected by its presence in
-    ``floor.invariants``) is carried over from any prior
-    ``floor.candidates.json`` already in *out_dir*, matched by
-    ``(statement, source)``: ids are reassigned positionally in derivation
-    order on every call (see :func:`propose_floor_candidates`), so a newly
-    added or removed candidate can shift every later id, but the statement
-    text is the stable identity a re-derived candidate is "the same"
-    proposal by (:func:`candidate_invariant_id` treats it exactly the same
-    way). ``source`` is part of the match key, not just ``statement``,
-    because an ``interview_q4`` candidate and a ``reversal`` candidate can
-    independently derive the identical statement text (both name the same
-    clause type) — matching on ``statement`` alone would let a Q5
-    auto-rejection recorded against the reversal candidate leak onto the
-    unrelated Q4 one on the next run (issue #105 review round 2 finding 1).
-    Without the carry-over at all, re-running ``playbook floor propose``
-    would silently resurrect every previously-rejected (or
-    previously-accepted) candidate as a fresh, undecided proposal (issue
-    #90 review finding 4). A candidate whose ``(statement, source)`` no
-    longer recurs (e.g. its reversal evidence disappeared) simply drops its
-    stale decision along with itself — there is nothing left to carry it
-    to.
-
-    A prior ``comment`` carries over the same way, alongside ``decision``
-    (issue #105) — this is how a PRIOR run's Q5 ("flexible_clauses")
-    auto-rejection attribution (:data:`_Q5_REJECTION_COMMENT`) survives a
-    re-run whose Q5 answer no longer names that taxonomy (so this run's
-    fresh derivation sets no ``comment`` of its own), and, symmetrically,
-    how a stale Q5 comment is DROPPED the moment a prior HUMAN decision
-    (which never carries a ``comment`` of its own — see
-    :func:`resolve_floor_candidate_decisions`) overrides ``decision`` away
-    from ``"rejected"``: a candidate a reviewer accepted must never keep
-    displaying "named as a willing concession".
 
     Args:
         out_dir:        Output directory produced by ``playbook mine``/``project``.
@@ -1926,135 +1341,9 @@ def write_floor_candidates(
         observations, min_deals=min_deals, structural_ids=structural_ids
     )
 
-    prior_by_statement: dict[tuple[str, str], dict[str, Any]] = {
-        (c["statement"], c["source"]): c
-        for c in read_floor_candidates(out_dir)
-        if isinstance(c, dict)
-        and isinstance(c.get("statement"), str)
-        and isinstance(c.get("source"), str)
-        and isinstance(c.get("decision"), str)
-    }
-    if prior_by_statement:
-        for candidate in result["candidates"]:
-            prior = prior_by_statement.get((candidate["statement"], candidate.get("source")))
-            if prior is None:
-                continue
-            candidate["decision"] = prior["decision"]
-            prior_comment = prior.get("comment")
-            # A carried-over comment is only ever the Q5 auto-rejection
-            # attribution (a HUMAN decision never carries one — see
-            # resolve_floor_candidate_decisions), so it must never survive
-            # onto a prior decision other than "rejected": a candidate a
-            # reviewer accepted must not keep displaying "named as a
-            # willing concession" (issue #105 review round 2 finding 2).
-            if (
-                prior["decision"] == "rejected"
-                and isinstance(prior_comment, str)
-                and prior_comment.strip()
-            ):
-                candidate["comment"] = prior_comment
-            else:
-                candidate.pop("comment", None)
-
     out_path = out_dir / "floor.candidates.json"
     tmp = out_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, out_path)
 
     return out_path
-
-
-def _read_floor_candidates_raw(out_dir: Path) -> dict[str, Any]:
-    """Return the raw top-level dict from ``out_dir/floor.candidates.json``.
-
-    ``{}`` when the file is absent, unparseable/unreadable, or not a JSON
-    object — the same tolerant degradation :func:`read_floor_candidates`
-    layers ``"candidates"`` extraction on top of (see its docstring for why).
-    Shared here so :func:`apply_floor_review` can preserve sibling keys
-    (e.g. ``unclassified_reversals_omitted``) without duplicating the
-    parsing/tolerance logic.
-    """
-    candidates_path = out_dir / "floor.candidates.json"
-    if not candidates_path.exists():
-        return {}
-    try:
-        raw = json.loads(candidates_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-        return {}
-    return raw if isinstance(raw, dict) else {}
-
-
-def read_floor_candidates(out_dir: Path) -> list[dict[str, Any]]:
-    """Return the ``candidates`` list from ``out_dir/floor.candidates.json``.
-
-    Empty when the file is absent (no ``playbook floor propose`` run yet) or
-    its top-level shape is not the locked ``{"candidates": [...]}`` — an
-    unparseable/malformed file is treated as "no candidates" rather than
-    raised, so a caller like ``viewer.render_review_html`` degrades to
-    rendering no "Proposed hard lines" section instead of crashing the whole
-    page render over a corrupt sidecar. That degradation covers a
-    non-UTF-8 or otherwise unreadable file too (``UnicodeDecodeError`` /
-    ``OSError``), not just invalid JSON — issue #90 review finding 6: before
-    the fix, a non-UTF-8 sidecar raised past this function entirely, and the
-    CLI's generic ``ValueError`` handler (``UnicodeDecodeError`` IS-A
-    ``ValueError``) then misattributed the failure to ``playbook.opf.json``.
-    """
-    candidates = _read_floor_candidates_raw(out_dir).get("candidates")
-    return candidates if isinstance(candidates, list) else []
-
-
-def apply_floor_review(
-    out_dir: Path,
-    floor_feedback: Any,
-    existing_invariants: list[dict[str, Any]] | None = None,
-) -> FloorFeedbackResult:
-    """I/O wrapper around :func:`resolve_floor_candidate_decisions` (issue #90).
-
-    Reads ``out_dir/floor.candidates.json`` (via :func:`read_floor_candidates`),
-    resolves *floor_feedback* against it, and writes ``floor.candidates.json``
-    back — atomic tmp+replace, mirroring :func:`write_floor_candidates` —
-    iff any candidate's ``decision`` changed.
-
-    Deliberately does NOT write ``playbook.opf.json``: the caller
-    (``viewer.apply_feedback``) owns that write, shared with curation-pin
-    handling, so ``identity`` is refreshed and the file is written at most
-    once per ``apply_feedback`` call regardless of how many sections
-    changed this run.
-
-    Args:
-        out_dir:              Directory that may contain
-                              ``floor.candidates.json``. Absent -> resolved
-                              against an empty candidate list, so every
-                              ``"floor"`` feedback entry reports "unknown
-                              candidate id" rather than crashing (issue
-                              #138).
-        floor_feedback:       ``feedback["floor"]`` — see
-                              :func:`resolve_floor_candidate_decisions`.
-        existing_invariants:  The playbook's current ``floor.invariants``
-                              list.
-
-    Returns:
-        :class:`FloorFeedbackResult`.
-    """
-    candidates_path = out_dir / "floor.candidates.json"
-    candidates = read_floor_candidates(out_dir)
-
-    result = resolve_floor_candidate_decisions(floor_feedback, candidates, existing_invariants)
-
-    if result.candidates_changed:
-        # Preserve any sibling key already in the file (e.g.
-        # `unclassified_reversals_omitted`, or any future addition) —
-        # generic by construction, not a special-case for one known key.
-        # Issue #101: this rewrite previously replaced the whole document
-        # with `{"candidates": [...]}`, silently destroying siblings the
-        # first time a reviewer applied a decision.
-        raw = _read_floor_candidates_raw(out_dir)
-        raw["candidates"] = result.candidates
-        tmp = candidates_path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(tmp, candidates_path)
-
-    return result

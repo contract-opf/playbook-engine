@@ -2,8 +2,9 @@
 
 The evidence shapes of OPF 0.1-0.3 described categories the engine could no
 longer honestly fill once judged deviation verdicts left the consumer path
-(issue #220) and the deal became the unit of precedent (issue #216); they
-were retired (issue #238 — git history has them). OPF 0.4's evidence is two
+(issue #220, and the judge itself was retired in issue #239) and the deal
+became the unit of precedent (issue #216); they were retired (issue #238 —
+git history has them). OPF 0.4's evidence is two
 lists:
 
 ``evidence.clauses[]``
@@ -20,10 +21,7 @@ lists:
     side is carried as honest metadata (``paper``) and never partitions,
     gates or weights anything (owner decision 2026-09-13 (b)).
 
-Nothing here is judged. Judged deviation verdicts, when an opt-in
-``--with-deviation-judge`` run produced them, travel under the vendor
-namespace ``x_judgments`` keyed by precedent id (see
-:func:`build_x_judgments`) and never enter ``evidence.precedent``.
+Nothing here is judged.
 
 The builders are pure functions of the L4 store (observations, round moves,
 the corpus manifest) plus the compiled clause positions (which carry each
@@ -49,12 +47,6 @@ from playbook_engine.observation_builder import (
     Observation,
     RoundMove,
 )
-from playbook_engine.opf_accessors import (
-    PRECEDENT_SIDECAR,
-    SIDECARS_KEY,
-    perspective_party,
-    precedent_sidecar_manifest,
-)
 
 __all__ = [
     "PAPER_OURS",
@@ -62,12 +54,10 @@ __all__ = [
     "PAPER_UNKNOWN",
     "PRECEDENT_ID_PREFIX",
     "build_precedent_evidence",
-    "build_x_judgments",
     "clause_counts",
     "normalize_variant_text",
     "paper_of_corpus_document",
     "precedent_id",
-    "refresh_derived",
     "restamp_evidence",
 ]
 
@@ -90,7 +80,6 @@ _PAPER_BASIS_AMBIGUOUS = "ambiguous_detection"
 _PAPER_BASIS_NOT_RECORDED = "not_recorded"
 
 _TERMINAL_OUTCOMES = frozenset({"signed", "unsigned"})
-_JUDGED_BASIS = "judge"
 _REFUSED_OUTCOME = "proposed_then_reversed"
 
 
@@ -428,7 +417,7 @@ def build_precedent_evidence(
 
 def restamp_evidence(
     evidence: dict[str, Any], agreement_type_id: str, *, party: str | None
-) -> dict[str, str]:
+) -> None:
     """(Re)compute every derived value of an OPF 0.4 ``evidence`` in place.
 
     Each precedent's ``id`` (:func:`precedent_id`) and each clause's
@@ -439,13 +428,8 @@ def restamp_evidence(
     document after building it, so it calls this again afterwards — the ids
     and counts a validator recomputes over the shipped text must be the ones
     the document carries.
-
-    Returns the ``{old_id: new_id}`` map of every id that changed, so a
-    caller can re-key anything that references precedent ids
-    (``x_judgments``).
     """
     precedent = evidence["precedent"]
-    renamed: dict[str, str] = {}
     for record in precedent:
         signed_text = record.get("signed_text")
         new_id = precedent_id(
@@ -454,55 +438,9 @@ def restamp_evidence(
             record["taxonomy_id"],
             signed_text["text"] if isinstance(signed_text, dict) else None,
         )
-        old_id = record.get("id")
-        if isinstance(old_id, str) and old_id and old_id != new_id:
-            renamed[old_id] = new_id
         record["id"] = new_id
     for clause in evidence["clauses"]:
         clause.update(clause_counts(clause["taxonomy_id"], precedent, party=party))
-    return renamed
-
-
-def refresh_derived(doc: dict[str, Any]) -> None:
-    """Re-derive everything an OPF 0.4 document computes from its own text.
-
-    For a transform that rewrites evidence text after assembly (``playbook
-    publish``'s scrub/redaction, ``export_profile``'s residue rewrites): the
-    precedent ids and clause counts (:func:`restamp_evidence`), every
-    ``x_judgments[].precedent_id`` that referenced a renamed id, and the
-    digest (rebuilt with ``digest.build_digest`` so it carries the
-    transformed text — never a stale copy of the pre-transform text — and
-    the transformed ``perspective``; the counts and the digest group texts
-    with the transformed ``perspective.party``), and the ``precedent.jsonl``
-    sha256 under ``x_sidecars`` when the document records one (issue #224).
-    ``identity`` is left to the
-    caller, which re-stamps it last. A no-op on a document without a
-    precedent record.
-    """
-    evidence = doc.get("evidence")
-    agreement_type = doc.get("agreement_type")
-    if (
-        not isinstance(evidence, dict)
-        or not isinstance(evidence.get("precedent"), list)
-        or not isinstance(evidence.get("clauses"), list)
-        or not isinstance(agreement_type, dict)
-    ):
-        return
-    renamed = restamp_evidence(
-        evidence, str(agreement_type.get("id")), party=perspective_party(doc)
-    )
-    judgments = doc.get("x_judgments")
-    if renamed and isinstance(judgments, list):
-        for judgment in judgments:
-            if isinstance(judgment, dict) and judgment.get("precedent_id") in renamed:
-                judgment["precedent_id"] = renamed[judgment["precedent_id"]]
-    if "digest" in doc:
-        from playbook_engine.digest import build_digest  # noqa: PLC0415
-
-        doc["digest"] = build_digest(doc)
-    sidecars = doc.get(SIDECARS_KEY)
-    if isinstance(sidecars, dict) and PRECEDENT_SIDECAR in sidecars:
-        sidecars.update(precedent_sidecar_manifest(doc))
 
 
 def clause_counts(
@@ -555,40 +493,3 @@ def _entry_key(entry: Any, party: str | None) -> str:
         return ""
     text = entry.get("text")
     return normalize_variant_text(text, party=party) if isinstance(text, str) else ""
-
-
-def build_x_judgments(
-    observations: list[Observation],
-    precedent: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Judged deviation verdicts for an opt-in judged run, keyed by precedent.
-
-    Only rows a real judge assessed (``basis == "judge"``) — an opt-in
-    ``--with-deviation-judge`` run (issue #220); a consumer-path store yields
-    ``[]``. Each entry is ``{precedent_id, deviation, risk_delta, basis}`` for the
-    precedent's terminal row. These are vendor-namespace data
-    (``x_judgments``) — never part of ``evidence.precedent`` and never read
-    by the digest.
-    """
-    by_key = {(p["document_id"], p["taxonomy_id"]): p["id"] for p in precedent}
-    out: list[dict[str, Any]] = []
-    for obs in observations:
-        if obs.outcome not in _TERMINAL_OUTCOMES or obs.taxonomy_id is None:
-            continue
-        if obs.basis != _JUDGED_BASIS:
-            # Only a real judge verdict is a judgment; deterministic, stub
-            # and judge-fallback rows assert nothing judged.
-            continue
-        pid = by_key.get((obs.citation.document_id, obs.taxonomy_id))
-        if pid is None:
-            continue
-        out.append(
-            {
-                "precedent_id": pid,
-                "deviation": obs.deviation,
-                "risk_delta": dict(obs.risk_delta),
-                "basis": obs.basis,
-            }
-        )
-    out.sort(key=lambda j: j["precedent_id"])
-    return out

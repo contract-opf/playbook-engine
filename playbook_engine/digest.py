@@ -17,9 +17,9 @@ projection designed for exactly that use: every variant and ask carries a
 playbook for on-demand drill-down (the digest itself never contains
 ``full_text``).
 
-Emitted by ``assemble_playbook`` as the top-level ``digest`` section, and
-extractable standalone via ``playbook digest``. The digest is a pure
-function of the document, so it participates in ``identity.content_hash``
+Emitted by ``assemble_playbook`` as the top-level ``digest`` section — the
+one place the digest lives (there is no standalone sidecar). The digest is a
+pure function of the document, so it participates in ``identity.content_hash``
 like any other content section.
 
 Size discipline: the budget is ~40K tokens (chars/4 rule of thumb — this
@@ -65,9 +65,8 @@ _DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 def _signed_at_key(value: Any) -> tuple[int, int, int] | None:
     """Sortable key for a ``signed_at`` (``YYYY-MM-DD`` or ``YYYY-Qn``).
 
-    A quarter sorts at its first day, so a published (quarter-coarsened)
-    document orders the same way its exact-date source did at quarter
-    granularity. Anything else is ``None`` (unknown — sorts last).
+    A quarter sorts at its first day, so a quarter-coarsened document
+    orders the same way its exact-date source did at quarter granularity. Anything else is ``None`` (unknown — sorts last).
     """
     if not isinstance(value, str):
         return None

@@ -24,25 +24,26 @@ Components:
   the item was queued.
 
 - ``StoreBackedClassificationJudge`` — implements ``ClassificationJudge``.
-- ``StoreBackedDeviationJudge``      — implements ``DeviationJudge``.
 - ``StoreBackedProvenanceJudge``     — implements ``ProvenanceJudge``.
 - ``StoreBackedScopeJudge``          — implements ``ScopeJudge``.
 
 These are drop-in replacements for the judge parameters of
-``mine_corpus(scope_judge=…, classification_judge=…, deviation_judge=…,
-provenance_judge=…)``.
+``mine_corpus(scope_judge=…, classification_judge=…, provenance_judge=…)``.
+There is no deviation judge: every deviation is the deterministic standard
+check, so no deviation item is ever queued.
 
-``StoreBackedDeviationJudge`` is opt-in (issue #220): the CLI wires it only
-under ``--with-deviation-judge``, as an advisory layer for posture/floor
-tooling. By default ``mine_corpus`` gets no deviation judge at all and every
-deviation is the deterministic standard check, so no deviation item is ever
-queued and no stored deviation verdict reaches the consumer path.
+Adding a judge kind (the seam the ``equivalence`` kind plugs into): write the
+store-backed judge beside the three above, register its verdict shape with
+:func:`register_verdict_kind` (apply-time validation and kind inference for
+``playbook judge-apply``) and its rubric with
+:func:`playbook_engine.rubric.register_judge_kind`. Everything generic —
+``VerdictStore``, ``PendingQueue``, the rubric stamp, ``judge`` /
+``judge-apply`` and the plan output — already works per kind.
 
 Rubric versioning (see :mod:`playbook_engine.rubric`): because the store key
 is purely content-derived, a change to the *judging criteria* — the taxonomy,
-the deviation vocabulary, the prose rubric in the ``playbook-from-corpus``
-skill — would otherwise replay every banked verdict forever, since the clause
-text never moved.  Each store hit is therefore checked against the rubric
+the prose rubric in the ``playbook-from-corpus`` skill — would otherwise
+replay every banked verdict forever, since the clause text never moved.  Each store hit is therefore checked against the rubric
 currently in force: ``current`` replays, ``stale`` re-queues, and ``legacy``
 (unstamped) replays but is counted and reported.  ``RubricPolicy`` carries
 both the policy knobs and the run tally the CLI reports from.
@@ -66,7 +67,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,7 +76,6 @@ from typing import Any
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.provenance_detector import (
     _PROVENANCE_VALUES,
     PROVENANCE_UNKNOWN,
@@ -90,13 +90,6 @@ from playbook_engine.rubric import (
 from playbook_engine.scope_gate import ScopeDecision
 
 _log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Module-level sentinels
-# ---------------------------------------------------------------------------
-
-_NEUTRAL_ZERO = RiskDelta(direction="neutral", magnitude="none")
-
 
 # ---------------------------------------------------------------------------
 # Key construction — full payload, no truncation
@@ -165,9 +158,9 @@ class VerdictStore:
 
     Load-on-init: reads the JSONL file into memory on construction.
     Corrupt lines are silently skipped (same contract as ``JudgmentCache``).
-    Later lines for the same key win, which is what makes ``restamp`` an
-    append rather than a rewrite: the original record stays on disk as an
-    audit trail of what the verdict was banked under.
+    Later lines for the same key win, so a re-applied verdict is an append
+    rather than a rewrite: the original record stays on disk as an audit
+    trail of what the verdict was banked under.
     """
 
     def __init__(self, store_path: Path) -> None:
@@ -211,8 +204,8 @@ class VerdictStore:
         """Opaque digest of what *key* currently holds — ``None`` when absent.
 
         Covers the verdict AND its rubric stamp: a ``judge-apply`` that
-        overwrites a verdict, or a ``judge-migrate`` that re-stamps it, both
-        move it, so a cached result built on the old record is not replayed.
+        overwrites a verdict moves it, so a cached result built on the old
+        record is not replayed.
         """
         record = self._store.get(key)
         if record is None:
@@ -260,27 +253,10 @@ class VerdictStore:
             verdict: JSON-serialisable verdict dict.
             rubric:  Rubric the verdict was produced under. ``None`` records
                      the verdict unstamped (legacy) — reported on every
-                     subsequent judge run until migrated.
+                     subsequent judge run.
         """
         self._store[key] = StoredVerdict(verdict=verdict, rubric=rubric)
         self._append(key, verdict, rubric)
-
-    def restamp(self, key: str, rubric: RubricStamp) -> bool:
-        """Re-stamp an existing verdict with *rubric*, keeping the verdict.
-
-        The migration primitive behind ``playbook judge-migrate``: it banks
-        an operator's explicit decision that a stored judgment still stands
-        under the named rubric. Implemented as an append (last line wins on
-        load), so the prior stamp — or its absence — remains on disk.
-
-        Returns:
-            ``True`` if the key existed and was re-stamped, ``False`` otherwise.
-        """
-        record = self._store.get(key)
-        if record is None:
-            return False
-        self.put_by_key(key, record.verdict, rubric=rubric)
-        return True
 
     def records(self) -> list[tuple[str, StoredVerdict]]:
         """Return ``(key, record)`` for every stored verdict, key-sorted."""
@@ -337,8 +313,8 @@ class VerdictStore:
 class PendingQueue:
     """Append-only queue of pending payloads awaiting external verdict.
 
-    Each record: ``{"key": "<sha256>", "kind": "classify"|"deviation"|"provenance",
-    "payload": {…}}``.
+    Each record: ``{"key": "<sha256>", "kind": "classify"|"provenance"|"scope"|
+    "segment", "payload": {…}}`` (plus the registered kinds).
 
     Deduplication: payloads with the same key are recorded at most once,
     even across multiple ``add()`` calls on the same instance.  This is the
@@ -376,8 +352,9 @@ class PendingQueue:
 
         Args:
             key:            Content hash from ``_payload_key(payload)``.
-            kind:           One of ``"classify"``, ``"deviation"``,
-                            ``"provenance"``, ``"scope"``, ``"segment"``.
+            kind:           One of ``"classify"``, ``"provenance"``,
+                            ``"scope"``, ``"segment"`` (or a kind
+                            registered through :func:`register_verdict_kind`).
             payload:        The full, untruncated judge payload dict.
             rubric_version: Rubric in force when this item was queued. Written
                             to the record so ``playbook judge-apply`` can stamp
@@ -419,17 +396,6 @@ def _classification_needs_review() -> ClauseClassification:
     return ClauseClassification(taxonomy_id=None, confidence=0.0, basis="needs_review")
 
 
-def _deviation_needs_review() -> DeviationResult:
-    """Sentinel returned when no stored verdict is available for a deviation payload."""
-    return DeviationResult(
-        deviation="needs_review",
-        risk_delta=_NEUTRAL_ZERO,
-        basis="needs_review",
-        rationale="No stored verdict — clause queued for human review.",
-        confidence=None,
-    )
-
-
 def _provenance_needs_review() -> ProvenanceResult:
     """Sentinel returned when no stored verdict is available for a provenance payload.
 
@@ -469,14 +435,6 @@ def _require_provenance_side(provenance: Any) -> None:
 #: pending queue looks drained. The store-backed judges set these themselves.
 _UNRESOLVED_VERDICT_BASES = frozenset({"needs_review", "judge_error", "stub"})
 
-#: The only basis values a *producer-supplied* deviation verdict may carry.
-#: Mirrors the whitelist ``deviation_classifier.assess_deviations`` enforces on
-#: replay (``"judge"``, ``"judge_error"``, ``"needs_review"``), minus the two
-#: engine-internal bases already rejected above — so a plausible-but-nonstandard
-#: value like "reworded_equivalent" or "deterministic" (both valid
-#: ``_BASIS_VALUES``) is caught here instead of aborting the next mine run.
-_DEVIATION_REPLAYABLE_BASES = frozenset({"judge"})
-
 #: The only basis values a *producer-supplied* classify verdict may carry.
 #: Mirrors the whitelist ``clause_classifier.classify_tree`` enforces on
 #: replay (``"judge"``, ``"judge_error"``, ``"needs_review"``, ``"unclassified"``),
@@ -509,8 +467,7 @@ def _validate_confidence_field(
         verdict:    The verdict dict from the producer's JSONL line.
         field:      Field name to check (e.g. ``"confidence"``,
                     ``"scope_confidence"``).
-        allow_none: Whether an explicit ``null`` is acceptable (deviation
-                    verdicts use ``None`` for deterministic paths).
+        allow_none: Whether an explicit ``null`` is acceptable.
     """
     if field not in verdict:
         return
@@ -525,6 +482,87 @@ def _validate_confidence_field(
         raise ValueError(f"'{field}' must be in [0, 1], got {value!r}")
 
 
+def _validate_classify(verdict: dict[str, Any]) -> None:
+    classify_basis = verdict.get("basis", "judge")
+    if classify_basis not in _CLASSIFY_REPLAYABLE_BASES:
+        raise ValueError(
+            f"basis {classify_basis!r} is not replayable for a classify verdict; "
+            f"a supplied verdict must carry basis in "
+            f"{sorted(_CLASSIFY_REPLAYABLE_BASES)!r} (clause_classifier.classify_tree "
+            "rejects anything else on replay)"
+        )
+    _validate_confidence_field(verdict, "confidence")
+    ClauseClassification(
+        taxonomy_id=verdict.get("taxonomy_id"),
+        confidence=verdict.get("confidence", 0.0),
+        basis=classify_basis,
+    )
+
+
+def _validate_provenance(verdict: dict[str, Any]) -> None:
+    if "provenance" not in verdict:
+        raise ValueError("missing 'provenance' field")
+    provenance_basis = verdict.get("basis", "llm")
+    if provenance_basis not in _PROVENANCE_REPLAYABLE_BASES:
+        raise ValueError(
+            f"basis {provenance_basis!r} is not replayable for a provenance verdict; "
+            f"a supplied verdict must carry basis in "
+            f"{sorted(_PROVENANCE_REPLAYABLE_BASES)!r} (a producer verdict file only "
+            "ever represents LLM judgment; deterministic bases are set by the engine "
+            "itself, not by you)"
+        )
+    _require_provenance_side(verdict["provenance"])
+    _validate_confidence_field(verdict, "confidence")
+    ProvenanceResult(
+        provenance=verdict["provenance"],
+        confidence=verdict.get("confidence", 0.0),
+        basis=provenance_basis,
+    )
+
+
+def _validate_scope(verdict: dict[str, Any]) -> None:
+    if not isinstance(verdict.get("in_scope"), bool):
+        raise ValueError("'in_scope' must be a JSON boolean")
+    _validate_confidence_field(verdict, "scope_confidence")
+    ScopeDecision(
+        in_scope=verdict["in_scope"],
+        scope_rationale=verdict.get("scope_rationale") or "Replayed from stored verdict.",
+        scope_confidence=verdict.get("scope_confidence", 0.0),
+        basis="judge",
+    )
+
+
+#: ``kind -> (validate, matches)`` for every pending-item kind ``judge-apply``
+#: accepts. ``validate(verdict)`` raises ``ValueError`` on a verdict the
+#: kind's store-backed judge could not replay; ``matches(verdict)`` says
+#: whether a verdict's field shape belongs to the kind (used when the key is
+#: not in ``pending.jsonl``). Extend with :func:`register_verdict_kind`.
+_VERDICT_KINDS: dict[
+    str, tuple[Callable[[dict[str, Any]], None], Callable[[dict[str, Any]], bool]]
+] = {
+    "provenance": (_validate_provenance, lambda v: "provenance" in v),
+    "scope": (_validate_scope, lambda v: "in_scope" in v),
+    "classify": (_validate_classify, lambda v: "taxonomy_id" in v),
+}
+
+
+def register_verdict_kind(
+    kind: str,
+    validate: Callable[[dict[str, Any]], None],
+    matches: Callable[[dict[str, Any]], bool],
+) -> None:
+    """Teach ``judge-apply`` a new pending-item *kind*.
+
+    *validate* must reconstruct what the kind's store-backed judge builds on
+    replay and raise ``ValueError`` with an actionable message otherwise, so a
+    verdict accepted here always replays. *matches* is the kind's field-shape
+    test for :func:`infer_verdict_kind`; field names must be mutually
+    exclusive with every other registered kind. Register the kind's rubric
+    with :func:`playbook_engine.rubric.register_judge_kind` too.
+    """
+    _VERDICT_KINDS[kind] = (validate, matches)
+
+
 def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     """Validate a producer-supplied *verdict* for *kind* at apply time.
 
@@ -537,8 +575,8 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
     ``ValueError`` with an actionable message on the first problem.
 
     Args:
-        kind:    Pending-item kind: ``classify`` / ``deviation`` /
-                 ``provenance`` / ``scope``.
+        kind:    Pending-item kind: ``classify`` / ``provenance`` / ``scope``
+                 (or a kind added with :func:`register_verdict_kind`).
         verdict: The verdict dict from the producer's JSONL line.
     """
     basis = verdict.get("basis")
@@ -548,101 +586,21 @@ def validate_verdict(kind: str, verdict: dict[str, Any]) -> None:
             "supplied verdict must carry a real basis — use 'judge' "
             "('llm' for provenance)"
         )
-    if kind == "classify":
-        classify_basis = verdict.get("basis", "judge")
-        if classify_basis not in _CLASSIFY_REPLAYABLE_BASES:
-            raise ValueError(
-                f"basis {classify_basis!r} is not replayable for a classify verdict; "
-                f"a supplied verdict must carry basis in "
-                f"{sorted(_CLASSIFY_REPLAYABLE_BASES)!r} (clause_classifier.classify_tree "
-                "rejects anything else on replay)"
-            )
-        _validate_confidence_field(verdict, "confidence")
-        ClauseClassification(
-            taxonomy_id=verdict.get("taxonomy_id"),
-            confidence=verdict.get("confidence", 0.0),
-            basis=classify_basis,
-        )
-    elif kind == "deviation":
-        if verdict.get("deviation") == "needs_review":
-            raise ValueError(
-                "deviation 'needs_review' is engine-internal; judge the hunk "
-                "as none / reworded_equivalent / substantive (flag doubts via "
-                "'needs_review': true, keeping a real deviation value)"
-            )
-        if "risk_delta" not in verdict or not isinstance(verdict["risk_delta"], dict):
-            raise ValueError(
-                "missing 'risk_delta' object — always required; use "
-                '{"direction": "neutral", "magnitude": "none"} for '
-                "none/reworded_equivalent deviations"
-            )
-        deviation_basis = verdict.get("basis", "judge")
-        if deviation_basis not in _DEVIATION_REPLAYABLE_BASES:
-            raise ValueError(
-                f"basis {deviation_basis!r} is not replayable for a deviation verdict; "
-                f"a supplied verdict must carry basis in "
-                f"{sorted(_DEVIATION_REPLAYABLE_BASES)!r} "
-                "(deviation_classifier.assess_deviations rejects anything else on replay)"
-            )
-        _validate_confidence_field(verdict, "confidence", allow_none=True)
-        risk_raw = verdict["risk_delta"]
-        DeviationResult(
-            deviation=verdict.get("deviation", ""),
-            risk_delta=RiskDelta(
-                direction=risk_raw.get("direction", ""),
-                magnitude=risk_raw.get("magnitude", ""),
-            ),
-            basis=deviation_basis,
-            rationale=verdict.get("rationale", ""),
-            confidence=verdict.get("confidence"),
-        )
-    elif kind == "provenance":
-        if "provenance" not in verdict:
-            raise ValueError("missing 'provenance' field")
-        provenance_basis = verdict.get("basis", "llm")
-        if provenance_basis not in _PROVENANCE_REPLAYABLE_BASES:
-            raise ValueError(
-                f"basis {provenance_basis!r} is not replayable for a provenance verdict; "
-                f"a supplied verdict must carry basis in "
-                f"{sorted(_PROVENANCE_REPLAYABLE_BASES)!r} (a producer verdict file only "
-                "ever represents LLM judgment; deterministic bases are set by the engine "
-                "itself, not by you)"
-            )
-        _require_provenance_side(verdict["provenance"])
-        _validate_confidence_field(verdict, "confidence")
-        ProvenanceResult(
-            provenance=verdict["provenance"],
-            confidence=verdict.get("confidence", 0.0),
-            basis=provenance_basis,
-        )
-    elif kind == "scope":
-        if not isinstance(verdict.get("in_scope"), bool):
-            raise ValueError("'in_scope' must be a JSON boolean")
-        _validate_confidence_field(verdict, "scope_confidence")
-        ScopeDecision(
-            in_scope=verdict["in_scope"],
-            scope_rationale=verdict.get("scope_rationale") or "Replayed from stored verdict.",
-            scope_confidence=verdict.get("scope_confidence", 0.0),
-            basis="judge",
-        )
-    else:
+    registered = _VERDICT_KINDS.get(kind)
+    if registered is None:
         raise ValueError(f"unknown pending-item kind {kind!r}")
+    registered[0](verdict)
 
 
 def infer_verdict_kind(verdict: dict[str, Any]) -> str | None:
     """Best-effort kind inference for a verdict whose key is not in pending.
 
-    Field names are mutually exclusive across the four verdict shapes, so
-    this is unambiguous when it returns at all; ``None`` means undecidable.
+    Field names are mutually exclusive across the verdict shapes, so this is
+    unambiguous when it returns at all; ``None`` means undecidable.
     """
-    if "deviation" in verdict or "risk_delta" in verdict:
-        return "deviation"
-    if "provenance" in verdict:
-        return "provenance"
-    if "in_scope" in verdict:
-        return "scope"
-    if "taxonomy_id" in verdict:
-        return "classify"
+    for kind, (_validate, matches) in _VERDICT_KINDS.items():
+        if matches(verdict):
+            return kind
     return None
 
 
@@ -744,8 +702,7 @@ class StoreBackedClassificationJudge:
                     # Isolate one malformed stored verdict (issue #182): must
                     # not raise out of classify_batch and get the whole
                     # taxonomy batch quarantined as basis='judge_error' by the
-                    # caller's blanket except (see StoreBackedDeviationJudge
-                    # for the same pattern).
+                    # caller's blanket except.
                     _log.warning(
                         "StoreBackedClassificationJudge: malformed stored "
                         "verdict for key %s (%s); re-queuing for review",
@@ -758,175 +715,6 @@ class StoreBackedClassificationJudge:
                 # Queue for external verdict (deduplicated by key).
                 self.pending.add(key, "classify", payload, current_rubric)
                 results.append(_classification_needs_review())
-
-        return results
-
-
-# ---------------------------------------------------------------------------
-# StoreBackedDeviationJudge
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class StoreBackedDeviationJudge:
-    """``DeviationJudge`` that replays stored verdicts or queues new payloads.
-
-    Implements ``DeviationJudge.assess_batch`` and is a drop-in replacement for
-    the ``deviation_judge`` parameter of ``mine_corpus``. Opt-in only (issue
-    #220, ``--with-deviation-judge``) — see the module docstring.
-
-    On a store hit: returns ``DeviationResult(basis="judge")`` reconstructed
-    from the stored verdict dict.
-
-    On a store miss: appends the full deviation payload (hunk + our_standard
-    plus traceability context — taxonomy_id, clause_path, document_id,
-    version_from, version_to when present) to the pending queue and returns
-    ``DeviationResult(basis="needs_review")``.
-
-    Duplicate payloads within a single ``assess_batch`` call produce exactly one
-    pending-queue entry.
-
-    Content-hash key vs. stored context (issue #109): the cache/dedup key is
-    derived from ``stage`` + ``hunk`` + ``our_standard`` only. Traceability
-    context (``taxonomy_id``, ``clause_path``, ``document_id``, and — since
-    issue #166 — ``version_from``/``version_to``) is recorded in the pending
-    payload for human/tooling review but deliberately excluded from the
-    hash — those fields are per-clause/per-document metadata, not judgment
-    content, and folding them in would defeat cross-document dedup of an
-    identical hunk/standard pair (e.g. the same boilerplate clause appearing
-    verbatim in two different agreements would otherwise queue as two
-    distinct pending items and never share a verdict).
-
-    ``version_from``/``version_to`` (issue #166) are the normalized-tree
-    version ids (``ClauseDiff.clause_version_before``/``clause_version_after``)
-    a relocation-triage reviewer needs to open the right
-    ``$OUT/normalized/<document_id>/*.clauses.json`` files when checking
-    whether a clause that disappeared in one hunk reappears, unchanged, in an
-    adjacent version — see REFERENCE.md's relocation-triage bullet.
-    """
-
-    store: VerdictStore
-    pending: PendingQueue
-    #: See ``StoreBackedClassificationJudge.rubric``.
-    rubric: RubricPolicy = field(default_factory=RubricPolicy)
-
-    def assess_batch(
-        self,
-        items: list[dict[str, str]],
-        our_standard: str,
-    ) -> list[DeviationResult]:
-        """Assess deviation for *items* from the store or queue for external review.
-
-        Args:
-            items:        Hunk payload dicts (each must have at minimum a
-                         ``"hunk"`` key; ``"taxonomy_id"``, ``"clause_path"``,
-                         ``"document_id"``, ``"version_from"``, and
-                         ``"version_to"`` are optional traceability
-                         context — see class docstring).
-            our_standard: Canonical text from the playbook standard for this clause type.
-
-        Returns:
-            One ``DeviationResult`` per item in the same order.
-        """
-        current_rubric = rubric_version("deviation")
-        results: list[DeviationResult] = []
-        for item in items:
-            # Full hunk + full our_standard — NOT truncated (contrast with
-            # judgment.py). This is the content-hash payload only: it must NOT
-            # include taxonomy_id/clause_path/document_id/version_from/
-            # version_to (see class docstring).
-            hash_payload = {
-                "stage": "deviation",
-                "hunk": item.get("hunk", ""),
-                "our_standard": our_standard,
-            }
-            key = _payload_key(hash_payload)
-
-            record = self.store.get_record(hash_payload)
-            if (
-                record is not None
-                and not self.rubric.evaluate(
-                    "deviation", record.rubric_version, current_rubric
-                ).replay
-            ):
-                # Rubric moved under this verdict — re-queue with the same
-                # traceability context the miss path records.
-                self.pending.add(
-                    key,
-                    "deviation",
-                    {
-                        **hash_payload,
-                        "taxonomy_id": item.get("taxonomy_id", ""),
-                        "clause_path": item.get("clause_path", ""),
-                        "document_id": item.get("document_id", ""),
-                        "version_from": item.get("version_from", ""),
-                        "version_to": item.get("version_to", ""),
-                    },
-                    current_rubric,
-                )
-                results.append(_deviation_needs_review())
-                continue
-            cached = record.verdict if record is not None else None
-            if cached is not None:
-                # Reconstruct per-item defensively (issue #182): a single
-                # malformed stored verdict (e.g. a RiskDelta invariant
-                # violation like direction='neutral'+magnitude='minor', or a
-                # missing key) must not raise out of assess_batch and get the
-                # WHOLE taxonomy batch quarantined as basis='judge_error' by
-                # the caller's blanket except. Isolate the bad verdict: treat
-                # it as a miss (re-queue for review) so only that clause is
-                # affected, and the rest of the batch replays normally.
-                try:
-                    risk_raw = cached["risk_delta"]
-                    results.append(
-                        DeviationResult(
-                            deviation=cached["deviation"],
-                            risk_delta=RiskDelta(
-                                direction=risk_raw["direction"],
-                                magnitude=risk_raw["magnitude"],
-                            ),
-                            basis=cached.get("basis", "judge"),
-                            rationale=cached.get("rationale", ""),
-                            confidence=cached.get("confidence"),
-                        )
-                    )
-                except (KeyError, TypeError, ValueError) as exc:
-                    _log.warning(
-                        "StoreBackedDeviationJudge: malformed stored verdict "
-                        "for key %s (%s); re-queuing for review",
-                        key,
-                        exc,
-                    )
-                    # Re-queue with the same traceability context the miss
-                    # path records, so a re-queued item is reviewable too.
-                    self.pending.add(
-                        key,
-                        "deviation",
-                        {
-                            **hash_payload,
-                            "taxonomy_id": item.get("taxonomy_id", ""),
-                            "clause_path": item.get("clause_path", ""),
-                            "document_id": item.get("document_id", ""),
-                            "version_from": item.get("version_from", ""),
-                            "version_to": item.get("version_to", ""),
-                        },
-                        current_rubric,
-                    )
-                    results.append(_deviation_needs_review())
-            else:
-                # Full payload recorded to the pending queue carries the
-                # traceability context alongside the hashed content — the key
-                # above stays content-only so cross-document dedup holds.
-                full_payload = {
-                    **hash_payload,
-                    "taxonomy_id": item.get("taxonomy_id", ""),
-                    "clause_path": item.get("clause_path", ""),
-                    "document_id": item.get("document_id", ""),
-                    "version_from": item.get("version_from", ""),
-                    "version_to": item.get("version_to", ""),
-                }
-                self.pending.add(key, "deviation", full_payload, current_rubric)
-                results.append(_deviation_needs_review())
 
         return results
 
@@ -1010,7 +798,7 @@ class StoreBackedProvenanceJudge:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 # Isolate one malformed stored verdict (issue #182) — same
-                # pattern as StoreBackedDeviationJudge/ClassificationJudge.
+                # pattern as StoreBackedClassificationJudge.
                 _log.warning(
                     "StoreBackedProvenanceJudge: malformed stored verdict "
                     "for key %s (%s); re-queuing for review",
@@ -1034,8 +822,8 @@ class ScopeNeedsReviewError(Exception):
     ``ScopeJudge.judge()`` is contractually restricted to returning
     ``ScopeDecision(basis="judge")`` — ``scope_gate()`` raises ``ValueError``
     on any other basis returned from a successful call — so "no verdict yet"
-    cannot be expressed as a sentinel return value the way the classify/
-    deviation/provenance store-backed judges use ``basis="needs_review"``.
+    cannot be expressed as a sentinel return value the way the classify and
+    provenance store-backed judges use ``basis="needs_review"``.
 
     Raising instead lets ``scope_gate()``'s existing exception handling do
     the right thing: it converts this into ``ScopeDecision(basis=
@@ -1124,7 +912,7 @@ class StoreBackedScopeJudge:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 # Isolate one malformed stored verdict (issue #182) — same
-                # pattern as the other three store-backed judges. Scope has
+                # pattern as the other store-backed judges. Scope has
                 # no needs_review sentinel to return (see class docstring),
                 # so re-queue and raise exactly as the miss path below does.
                 _log.warning(

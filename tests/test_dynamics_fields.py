@@ -22,7 +22,7 @@ from docx import Document
 from lxml import etree
 
 from playbook_engine.clause_differ import ClauseDiff, DocumentDiff, TextHunk, VersionDiff
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
+from playbook_engine.deviation_classifier import DeviationResult
 from playbook_engine.docx_ingester import TrackedChange, TrackedChanges, ingest_docx
 from playbook_engine.observation_builder import (
     build_observations,
@@ -97,7 +97,7 @@ def test_proposed_by_from_tracked_changes(tmp_path: Path) -> None:
         "deal-1",
         2,
         "our_paper",
-        [(diff, DeviationResult("substantive", RiskDelta("worse", "minor"), basis="judge"))],
+        [(diff, DeviationResult("substantive"))],
         reversals=[],
         attributions=[enrichment],
         our_party_aliases=["Alpha Corp"],
@@ -134,10 +134,7 @@ def test_proposed_by_us_when_author_matches_alias(tmp_path: Path) -> None:
         2,
         "our_paper",
         [
-            (
-                diff,
-                DeviationResult("reworded_equivalent", RiskDelta("neutral", "none"), basis="judge"),
-            )
+            (diff, DeviationResult("substantive")),
         ],
         reversals=[],
         attributions=[
@@ -173,7 +170,7 @@ def test_proposed_by_unknown_on_pdf_only() -> None:
         "pdf-deal",
         2,
         "our_paper",
-        [(diff, DeviationResult("substantive", RiskDelta("worse", "minor"), basis="judge"))],
+        [(diff, DeviationResult("substantive"))],
         reversals=[],
         attributions=None,
         our_party_aliases=["Alpha Corp"],
@@ -203,9 +200,11 @@ def test_unchanged_clause_carries_no_proposed_by() -> None:
         "deal-1",
         2,
         "our_paper",
-        [(diff, DeviationResult("none", RiskDelta("neutral", "none"), basis="deterministic"))],
+        [(diff, DeviationResult("none"))],
         reversals=[],
         our_party_aliases=["Alpha Corp"],
+        # The text IS our standard, so the row's deviation is "none".
+        standard_text_by_tid={"indemnification": "Same text."},
     )
     assert observations[0].proposed_by is None
     assert "proposed_by" not in observations[0].to_dict()
@@ -482,7 +481,7 @@ def test_search_snippets_truncate_after_pseudonymization_boundary() -> None:
         "deal-1",
         2,
         "our_paper",
-        [(diff, DeviationResult("substantive", RiskDelta("worse", "minor"), basis="judge"))],
+        [(diff, DeviationResult("substantive"))],
         reversals=[],
     )
     assert long_name in observations[0].search_snippet  # untruncated: survives to the aliasing pass

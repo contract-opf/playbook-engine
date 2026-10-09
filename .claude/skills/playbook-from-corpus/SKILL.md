@@ -13,7 +13,7 @@ description: >-
   this is a full derivation or an update to an existing out-dir, then walks only
   the steps that route needs — stage, lint-corpus, mine, checkpoint/inspect,
   judge (plan/subset/drain loop), judge-apply, project, posture interview, floor
-  propose/sign, validate, report, view.
+  propose/sign, validate, view bundle.
 ---
 
 # playbook-from-corpus
@@ -85,9 +85,9 @@ print(f\"OPF {d.get('opf_version')} | evidence: {len(ev)} clauses | \"
 
 | Route | Steps to run |
 |---|---|
-| **A** — full derivation | 1 → 11 (everything below, in order) |
-| **B** — author Posture/Floor | **7a → 7b → 8 → 9 → 10** only |
-| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 9 → 10. Curation pins and signed Floor invariants survive a recompile by design; say so, and flag any conflict the recompile raises rather than resolving it silently. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
+| **A** — full derivation | 1 → 9 (everything below, in order) |
+| **B** — author Posture/Floor | **7a → 7b → 8 → 9** only |
+| **C** — re-derive, keep authored | 1 → 7, then **re-run 7a/7b only if the interview answers changed**, then 8 → 9. The authored Posture and signed Floor invariants survive a recompile by design (`project` carries them forward verbatim); say so. **Step 1 does not survive this recompile** — re-staging wipes `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` from the staging directory (see the warning under Step 1); back those up before repeating Step 1, or skip straight to Step 2 if the staged directory doesn't need to change. |
 
 Route B needs no corpus — every command in Steps 7a/7b reads and writes the
 single out-dir; do not ask the user to produce a corpus they do not need. A
@@ -104,15 +104,6 @@ will hit a mount error. On Route B either use the venv form directly —
 `playbook posture interview $OUT ...` — or pass the out-dir as a harmless
 placeholder: `make docker-run CORPUS=$OUT OUT=$OUT ARGS="..."`.
 
-**First time back at this `$OUT` after an engine upgrade:** the Evidence
-you're about to author Posture/Floor against was produced by an earlier
-`judge` run, and its verdict store may predate the engine's rubric-versioning
-support — those verdicts carry no rubric stamp at all. Run `playbook
-judge-migrate $OUT --config $CORPUS/playbook.config.yaml --dry-run`; if it
-reports only legacy items and the rubric hasn't changed since they were
-banked, adopt them with `judge-migrate` (drop `--dry-run`) before trusting
-Evidence — never re-judge a legacy bank. See REFERENCE.md § "Rubric versions".
-
 ## Interactive setup (Route A and C only — skip for Route B)
 
 Before starting, ask the human only what you cannot derive yourself:
@@ -122,8 +113,8 @@ Before starting, ask the human only what you cannot derive yourself:
 > 2. Do you have your own standard form/template for this agreement type? If yes I'll measure every deal against it; if not, I'll build the playbook from what your negotiated history shows (a weaker but still valid baseline)."
 
 Do **not** ask "which party is us" or "who are your counterparties" — derive
-those yourself in the next step. Record the two answers; they drive the report
-header and deviation mode.
+those yourself in the next step. Record the two answers; they decide whether
+the run is template mode or emergent mode.
 
 ## Derive party names automatically (do this before `mine`)
 
@@ -178,8 +169,7 @@ populate the config yourself:**
 per-entry if a configured `known_entities` name matches **no** document text
 (issue #136) — that name will not be pseudonymized anywhere; fix the spelling
 (or remove the entry) before trusting the pseudonymized output. These lists
-drive provenance judgment (step 7), born-safe pseudonymization, and the
-report.
+drive provenance judgment (step 7) and born-safe pseudonymization.
 
 ---
 
@@ -199,7 +189,7 @@ Set these once, pointing at your corpus and output directories on the host:
 ```bash
 export CORPUS=/path/to/corpus   # host corpus dir (or Step 1's staged output)
 export OUT=/path/to/out         # host output dir — engine writes here, and
-                                 # you write verdicts.jsonl / feedback.json here too
+                                 # you write verdicts.jsonl here too
 ```
 
 Build the image once (`make docker-build`), then every step below is:
@@ -231,8 +221,7 @@ What this changes about the steps below:
    `$CORPUS/playbook.config.yaml` and reference it as
    `/work/corpus/playbook.config.yaml`.
 2. **Any file the agent writes for the container to read on the next call**
-   (a verdicts JSONL for `judge-apply`, an exported `feedback.json` for
-   `view apply`) must be written under `$OUT` — the read-write mount. A file
+   (a verdicts JSONL for `judge-apply` or `segment-apply`) must be written under `$OUT` — the read-write mount. A file
    written anywhere else is invisible inside the container. `hints.yaml`
    edits are the one exception: those are written directly onto the host
    corpus tree with the agent's own file tools between runs, never through
@@ -245,11 +234,9 @@ What this changes about the steps below:
    segmentation/classification. On the agent/LLM segmentation path the
    template is segmented through the same store-backed path as the corpus
    documents (a blank form that also appears as a corpus version is a cache
-   hit). Also expect, only if you opted in to judged deviations
-   (`--with-deviation-judge`): flipping a corpus from emergent to template
-   mode re-keys every deviation verdict (payloads embed `our_standard`), so a
-   full re-judging pass is normal, not a bug. On the default path there are
-   no deviation verdicts to re-key — the standard check simply re-runs.
+   hit). Flipping a corpus from emergent to template mode needs no
+   re-judging: there are no deviation verdicts to re-key — the standard check
+   simply re-runs.
 4. **Keep config + template inside the corpus.** The baseline template and
    `playbook.config.yaml` must live **inside** the corpus dir — a relative
    `../../..` template path escapes `/work/corpus` and won't resolve. Put the
@@ -318,8 +305,7 @@ pdfplumber, so it runs on the host venv in seconds and needs no Docker:
 It classifies every version (born-digital PDF / scanned PDF / DOCX), prints a
 wall-clock **extraction ETA range**, a rough extracted-token size, the `$0`
 API-cost note (key-free), and the approximate judgment load (scope,
-classification and provenance items — deviation items only when you pass
-`--with-deviation-judge`, the same opt-in `mine`/`judge` take). Show that summary
+classification and provenance items; there are no deviation items). Show that summary
 to the human verbatim, then ask: proceed as-is, exclude the scanned agreements
 to finish faster, or OCR the scans separately? Only start extraction once they
 confirm. (Time constants are calibrated from a real 44-agreement / 161-version
@@ -524,7 +510,7 @@ as the LLM, arbitrates the low-confidence parts.
 
 Hard rules for this stage:
 - **Never drop a file silently.** A file still unassigned after arbitration
-  is not deleted — list it in the run report and route it to a quarantine
+  is not deleted — list it in your round summary and route it to a quarantine
   folder so a human can look at it later.
 - **Never trust filenames over content.** An editor-initials filename
   ("...-Redline-MBM-...") or an email-forward folder name is never evidence
@@ -611,16 +597,14 @@ required; scripting the SEGMENTATION JUDGMENT is fabrication.
 
 **Benefits:** semantic (not heuristic) clause grouping, and first-pass
 classification for free (the judge loop then has **no `classify` items** left —
-only provenance/scope; deviation items appear only under the opt-in
-`--with-deviation-judge`).
+only provenance/scope).
 
 **Trade-off:** that first-pass classification carries no dedicated judge
 verdict, so the engine stamps every one of it at a flat, deliberately-low
 confidence (`pipeline._LLM_SEGMENTER_CONFIDENCE`, 0.45 — issue #86) rather
-than asserting an unverified certainty. `report.md`'s Needs Attention section
-knows this: it rolls that whole flat-confidence cohort into a single
-spot-check line instead of one row per clause (issue #181), so it stays
-readable — but it also means agent-segmented classifications are, by design,
+than asserting an unverified certainty. That is by design: it marks the
+whole flat-confidence cohort as one sample to spot-check, not as hundreds of
+individual doubts — which also means agent-segmented classifications are
 unreviewed unless you spot-check that sample yourself.
 
 **Honest ceiling:** the agent segments at **block boundaries** — it groups the
@@ -715,20 +699,15 @@ only if you deliberately want the machine-global `~/.cache` default. Runs L1–L
 (ingest, scope gate, classification skeleton, alignment, and the deterministic
 standard check — each observation records whether its text is our template
 clause, `standard: true|false`, and its `deviation` is derived from that; no
-deviation judge runs and nothing is queued for deviation).
+judge runs and nothing is queued for it).
 Writes `scope.json`, `trail/`, `observations.jsonl`, `corpus_manifest.json`,
 `normalized/`. If `provenance.our_party_aliases` matched no document text, `mine`
 prints a WARNING — treat it as a signal that "us" is misconfigured (see "Derive
 party names").
 
-`normalized/<document_id>/v<N>.clauses.json` is more than a mine
-by-product — under the opt-in `--with-deviation-judge` it is the
-relocation-triage resource at Step 6's judge stage (a default derivation
-queues no deviation items, so there is nothing to triage): each file holds one document version's full clause tree (`clause_path`,
-`heading`, `text` per node), which is where a relocation's *unchanged*
-counterpart clause lives when it generates no `pending.jsonl` hunk of its
-own (see REFERENCE.md's "Relocation triage FIRST" bullet under
-`deviation`).
+`normalized/<document_id>/v<N>.clauses.json` holds one document version's
+full clause tree (`clause_path`, `heading`, `text` per node) — the resource to
+open when you need to see exactly how a version was segmented.
 
 By default this uses the **deterministic** segmenter/classifier skeleton — no
 LLM calls, no token spend. For a real corpus run, opt in to **LLM-first
@@ -786,10 +765,8 @@ survive a re-run of Step 1 (see the warning there) — keep a copy outside the
 staged tree before re-staging.
 
 This is also the point to note where `normalized/<document_id>/v<N>.clauses.json`
-landed — at Step 6's judge stage, relocation triage reads those per-version
-clause trees directly (a relocation's unchanged counterpart clause never
-shows up in `pending.jsonl`); see REFERENCE.md's "Relocation triage FIRST"
-bullet under `deviation`.
+landed: those per-version clause trees are what you read to check how a
+version was segmented.
 
 ### Step 5 — Estimate and trial
 
@@ -827,9 +804,8 @@ make docker-run CORPUS=./corpus OUT=./out \
         --entity-registry /work/out/entity_registry.json --plan-only"
 ```
 
-Review the deduped counts by kind (classification, provenance, scope — the
-plan also prints `deviation: 0 pending (deviation judge off ...)`: by default
-deviations are never judged, see "Judging each item" below) and the judgment
+Review the deduped counts by kind (classification, provenance, scope —
+deviation is never judged, see "Judging each item" below) and the judgment
 token estimate (scaled from the real pending payload sizes,
 not a flat guess) — this part is a genuine forecast, made before any
 judgment spend. The `Segmentation: N version(s) not yet cached` line next to
@@ -852,15 +828,6 @@ the format is correct, then proceed to the full drain.
 
 ### Step 6 — Unattended judge-drain loop
 
-**First run against this `$OUT` after an engine upgrade:** before starting the
-loop below, run `playbook judge-migrate $OUT --config
-$CORPUS/playbook.config.yaml --dry-run`. If it reports only legacy items (no
-stamp — banked before rubric-versioning shipped) and the rubric hasn't
-changed since they were banked, adopt them with `judge-migrate` (drop
-`--dry-run`) before draining — never re-judge a legacy bank from scratch. See
-REFERENCE.md § "Rubric versions" for what "legacy" vs. "stale" means and when
-adoption is and isn't safe.
-
 **Loop invariant:** repeat until `out/judge/pending.jsonl` is empty. This
 drains judged clauses only — a document that was **quarantined** during
 `mine` (SegmentationQAError, HintsError, all-versions-failed-ingest) never
@@ -868,10 +835,9 @@ queues any pending items for it, so the loop above converging tells you
 nothing about quarantined documents. Before moving to Step 7, also check
 `out/quarantine.json` (rewritten fresh every `mine` run) and triage every
 entry — re-segment and re-run `mine`, or explicitly accept the exclusion by
-name in your round summary to the human running this skill (the report's
-Needs Attention section is tool-generated and cannot itself record a human
-decision). See REFERENCE.md's done-criterion 4 for the exact check and
-REFERENCE.md's `_load_quarantine` note for how the report surfaces it.
+name in your round summary to the human running this skill (`quarantine.json`
+is tool-generated and cannot itself record a human decision). See
+REFERENCE.md's done-criterion 4 for the exact check.
 
 ```bash
 # Round N:
@@ -904,37 +870,27 @@ make docker-run CORPUS=./corpus OUT=./out \
 - **Classification:** assign the best-fit `taxonomy_id` from the taxonomy, or
   `null` if the clause does not fit any entry. Low-confidence items: mark
   `needs_review: true` in the verdict, do not guess — see REFERENCE.md
-  Guardrail 2, this is a store audit-trail flag, not a report channel.
-- **Deviation: not judged by default — there are no deviation items to
-  drain.** The consumer (the review model reading the playbook) does the
-  judging; the playbook supplies precedent. Every clause's deviation is the
-  deterministic standard check (its text matches our template clause →
-  `none`, otherwise `substantive`), `judge`/`--plan-only` report
-  `deviation: 0 pending`, and `project` reads no stance, tolerance or
-  fallback out of it. `project` emits OPF 0.4 (issue #223), the one format
-  the engine reads and writes (issue #238 retired the older ones; there is
-  no version flag): no stance at all — `evidence.precedent` holds one
+  Guardrail 2, this is a store audit-trail flag, not a reporting channel.
+- **Deviation: not judged — there are no deviation items to drain.** The
+  consumer (the review model reading the playbook) does the judging; the
+  playbook supplies precedent. Every clause's deviation is the deterministic
+  standard check (its text matches our template clause → `none`, otherwise
+  `substantive`), and `project` reads no stance, tolerance or fallback out of
+  it. `project` emits OPF 0.4, the one format the engine reads and writes (no
+  version flag): no stance at all — `evidence.precedent` holds one
   verdict-free record per (deal, clause) (what the deal signed, whether that
   is our standard, whether the clause moved, the asks refused before
   signing), and each clause carries distinct-deal counts (`n_deals`,
   `n_signed_standard`, `n_variants`, `n_refused`). Do not route the human
-  through deviation judging. **Opt-in only**, as an advisory layer for
-  Posture/Floor work: pass `--with-deviation-judge` to BOTH `playbook judge`
-  and `playbook mine` on this `$OUT`; then classify each deviation item as
-  `none` / `reworded_equivalent` / `substantive` against the baseline
-  template hunk and assess `risk_delta` direction and magnitude (see
-  REFERENCE.md).
+  through deviation judging; the engine has no deviation judge.
 - **Provenance:** read the document's recital/header text to determine
   `our_paper` vs `counterparty_paper`. Unknown entity aliases: record for
   human review; do not silently guess.
 
 **Low-confidence verdicts:** mark `needs_review: true` in the verdict as your
-audit trail. **It is not read by the after-action report or any gate today**
-(see REFERENCE.md Guardrail 2) — the report's Needs Attention section only
-ever surfaces a clause's *classification* confidence dropping below 0.5;
-deviation and provenance confidence never reach it. If a doubtful call needs
-a human's eyes this round, say so in your round summary to the human running
-this skill.
+audit trail. **It is not read by any gate today** (see REFERENCE.md
+Guardrail 2). If a doubtful call needs a human's eyes this round, say so in
+your round summary to the human running this skill.
 
 `needs_review` is **not** a valid OPF observation enum value — do not let
 un-applied `needs_review` verdicts reach `project`. The drain loop must finish.
@@ -946,8 +902,8 @@ un-applied `needs_review` verdicts reach `project`. The drain loop must finish.
 If it fails to shrink for 2 consecutive rounds, STOP and diagnose — do not
 keep re-emitting the same verdicts. `playbook judge` now prints a WARNING
 when pending items are re-queues of stored verdicts that failed replay
-validation (bad enum value, wrong `basis`, missing `risk_delta` — see
-REFERENCE.md for the exact enums); `judge-apply` also rejects those verdicts
+validation (bad enum value, wrong `basis` — see REFERENCE.md for the
+exact enums); `judge-apply` also rejects those verdicts
 up front with a line number. A queue that will not drain is a malformed-
 verdict bug, never something to wait out.
 
@@ -955,10 +911,9 @@ verdict bug, never something to wait out.
 rubric no longer matches the one in force ("N stored verdicts were made under
 an older rubric") and stored verdicts carrying no rubric version at all. The
 first group is re-queued and must be re-judged; the second is the
-pre-versioning bank — replayed, but its validity is unknown until adopted
-with `playbook judge-migrate`. Neither is a malformed-verdict loop, and both
-are expected to grow the queue on the round after a taxonomy or rubric edit.
-See REFERENCE.md § "Rubric versions".
+pre-versioning bank, replayed but of unknown validity. Neither is a
+malformed-verdict loop, and both are expected to grow the queue on the round
+after a taxonomy or rubric edit. See REFERENCE.md § "Rubric versions".
 
 ### Step 7 — Project the playbook
 
@@ -1064,9 +1019,9 @@ questions 1–6, but only one of them creates hard-binding content. Lead with it
 | 6 | `audience` | Style of the rationale, not the substance of the judgment. |
 
 `flexible_clauses` "binds nothing" in `floor.invariants`, but it is not inert:
-candidates whose clause type you name here arrive in `playbook.review.html`
-already marked **Recommended reject**, attributed back to this answer — you
-can still accept them; an explicit decision clears the recommendation.
+floor candidates whose clause type you name here are written to
+`floor.candidates.json` already marked `"decision": "rejected"`, attributed
+back to this answer — you can still sign one with `playbook floor sign`.
 
 Batch them as **two `AskUserQuestion` rounds** (the tool takes at most 4
 questions and 2–4 options each): rounds 1–4 first, then 5–6. Do not send six
@@ -1181,10 +1136,10 @@ Rules that are easy to get wrong:
   moves forward.
 
 **If the human is not available**, stop here. Do not fabricate a Posture. Leave
-`posture: {}`, note it as pending human input in the Step 10 report, and say
+`posture: {}`, note it as pending human input in your round summary, and say
 plainly that the playbook is a complete evidence-only document (Rung 0) that can
-ship as-is — `render-prompt` will mark it **ADVISORY ONLY — NOTHING BELOW IS
-BINDING** rather than shipping unmarked guidance.
+ship as-is — evidence is advisory by contract (OPF-SPEC.md §5), and a consumer
+that wants binding guidance asks for a Posture and a Floor.
 
 **What a consuming review application sees at Rung 0:** stopping here is a
 legitimate endpoint, but it is not free for the consumer. In
@@ -1214,35 +1169,26 @@ playbook floor propose $OUT --config $CORPUS/playbook.config.yaml
 ```
 
 `floor propose` is a **review artifact only**. It never writes to the OPF `floor`
-section and never promotes a candidate. Accepting is a human act, and it
-round-trips through the review HTML — do **not** hand-edit `floor.invariants`:
+section and never promotes a candidate. Accepting is a human act, and it goes
+through `floor sign` — do **not** hand-edit `floor.invariants`. Read the
+printed table (or `$OUT/floor.candidates.json`, where each candidate carries
+its evidence citations) with the human, one candidate at a time, and for each
+one they want as a hard line, sign it (below) using the candidate's
+`statement` or their own wording. A candidate nobody signs simply reappears
+the next time you propose — **nothing expires unreviewed** — so they can stop
+halfway without losing anything or leaving a landmine.
 
-```bash
-playbook view render $OUT        # candidates appear as a "Proposed hard lines"
-                                 # checklist above the clause sections of
-                                 # $OUT/playbook.review.html
-# Human: accept / reject / undecided on each, then click "Export feedback"
-# Save the export to $OUT/feedback.json, then:
-playbook view apply $OUT $OUT/feedback.json
-```
-
-`accept` signs the candidate into `floor.invariants` with attribution; `reject`
-records that a human looked and declined, so it is not re-proposed. **Undecided
-is the default and nothing expires unreviewed** — an undecided candidate simply
-reappears next time. Tell the user that: it means they can stop halfway without
-losing anything or leaving a landmine.
-
-**A conditional hard line needs `floor sign`, not a candidate.** Both paths
-above only ever produce "Do not concede on {clause type}." — fine for an
-unconditional rule, but a real hard line is often conditional ("limitation of
-liability, *if present*, must not be unilateral in the counterparty's favor"),
-and neither template can express that; forcing it through either one just
-garbles the sentence. When the human dictates a hard line like that, show them
-the EXACT statement you are about to sign and get an explicit in-chat
-"yes, sign it" before running the command — `floor sign` writes it into the
-Floor immediately, no separate review round-trip like the checklist above, so
-this confirmation is the only human-in-the-loop check before it takes effect.
-Then write it down **verbatim**, with `--signed-by` naming the human who just
+**A conditional hard line needs `floor sign`'s own wording, not a template.**
+The Posture interview's Q4 and a derived candidate only ever produce "Do not
+concede on {clause type}." — fine for an unconditional rule, but a real hard
+line is often conditional ("limitation of liability, *if present*, must not be
+unilateral in the counterparty's favor"), and a template can't express that;
+forcing it through one just garbles the sentence. Whenever the human settles on
+a hard line — a candidate they accept or one they dictate — show them the
+EXACT statement you are about to sign and get an explicit in-chat "yes, sign
+it" before running the command: `floor sign` writes it into the Floor
+immediately, so this confirmation is the only human-in-the-loop check before it
+takes effect. Then write it down **verbatim**, with `--signed-by` naming the human who just
 confirmed it (required — the command refuses to run without it):
 
 ```bash
@@ -1253,7 +1199,7 @@ playbook floor sign $OUT --statement "Limitation of liability, if present, must 
 
 `--signed-by` is recorded as a structural `x_signed_by` field, not folded into
 `--rationale` — `playbook validate` warns on any `floor.invariants` entry that
-carries neither this nor a Posture-interview/candidate-acceptance attribution
+carries neither this nor a Posture-interview attribution
 marker, so never type a placeholder name; use the human's own. `--rationale` is
 legal justification ONLY, never the signer's name or a sign-off date: it ships
 verbatim into every consumer's model-facing review prompt, while `x_signed_by`/
@@ -1263,8 +1209,8 @@ verbatim into every consumer's model-facing review prompt, while `x_signed_by`/
 Re-running with the identical `--statement` under the same id is a no-op;
 re-running with a different `--statement` under an id that already carries one
 is refused, never silently overwritten. This is the ONLY sanctioned way to put
-a hand-authored statement into `floor.invariants` outside of Q4/the
-accept-checklist above — never hand-edit `floor.invariants` directly, even for
+a hand-authored statement into `floor.invariants` outside of Q4 —
+never hand-edit `floor.invariants` directly, even for
 a one-word fix.
 
 Keep the Floor small. §3.7.1's admission test is the standard — a Floor
@@ -1279,37 +1225,9 @@ not a defect, but tell the user plainly: an empty Floor is not merely
 advisory, it is *absent* enforcement, and they should know that before
 deciding to stop here.
 
-### Step 7c — Curation (Rung 3): pin a position, note a clause
-
-An attorney can also override a single clause's asserted position, or leave
-a free-text note, without a full recompile. There are exactly two sanctioned
-ways to do this — never hand-edit `curation.pins` or `viewer_notes.md`'s
-source data directly:
-
-```bash
-playbook curate $OUT --command "pin governing_law to usually_conceded: keep as filed" --by "<attorney name>"
-# or note a clause instead of pinning it:
-playbook curate $OUT --command "note indemnification: check again once the MSA renews"
-# batch form: --file commands.txt, one instruction per line ('#' starts a comment line)
-```
-
-`--by` stamps attribution onto `curation.pins[].pinned_by`. Every `curate`
-run also refreshes conflict status on every already-embedded pin — so a pin
-that fresh evidence now contradicts (via a recompile, a hand edit, or any
-other path) is flagged the next time `curate` runs, not silently stale.
-
-The other sanctioned path is the review HTML round-trip: an `override`
-correction inside `feedback.json` (exported from `playbook.review.html`),
-applied with `playbook view apply $OUT $OUT/feedback.json` (see "Feedback
-re-entry" below), embeds the same kind of pin.
-
-Pins created either way are embedded directly in `curation.pins` and survive
-a later recompile by design — this is what Route C's table above means by
-"Curation pins ... survive a recompile."
-
 ### Step 8 — Validate (must exit 0)
 
-None of Steps 8-10 read `/work/corpus` — `CORPUS=./out` below is the harmless
+None of Steps 8-9 read `/work/corpus` — `CORPUS=./out` below is the harmless
 Route B placeholder from the mechanical caveat under Step 0 (`make docker-run`
 always mounts `CORPUS`, so a Route B user with no corpus directory needs a
 real path to point it at; `./out` already exists). Route A/C users may
@@ -1326,55 +1244,42 @@ A non-zero exit here means the pipeline is not done. Common causes:
 
 Do not paper over validation failures. Fix the root cause.
 
-### Step 9 — View (render + bundle) and digest
+### Step 9 — View the bundle and run the residue check
 
 ```bash
-make docker-run CORPUS=./out OUT=./out ARGS="view render /work/out"
 make docker-run CORPUS=./out OUT=./out ARGS="view bundle /work/out"
-make docker-run CORPUS=./out OUT=./out ARGS="digest /work/out"
 ```
 
-Writes exactly **two** HTML artifacts, both self-contained (open from the
-host — the container has no browser), plus the digest sidecar:
+Writes exactly **one** human-readable artifact, self-contained (open it from
+the host — the container has no browser):
 
-- `$OUT/playbook.review.html` — the **internal annotation surface**: numbered
-  items, comment boxes, Export-feedback button. Share with reviewers doing the
-  correction pass. This is the only view that accepts `--alias-map`.
-- `$OUT/playbook.opf.html` — the **packaged internal/stakeholder playbook**
-  (OPF 0.4 by default). One file containing: the full readable document
-  (per clause, the deals that signed our standard, then the signed variants
-  and refused asks, each with its distinct-deal count; empty Posture/Floor
-  labelled pending), a digest summary, and the
-  CANONICAL OPF JSON plus digest embedded verbatim in
+- `$OUT/playbook.opf.html` — the **packaged internal/stakeholder playbook**.
+  One file containing the full readable document (per clause, the deals that
+  signed our standard, then the signed variants and refused asks, each with
+  its distinct-deal count; empty Posture/Floor labelled pending), a digest
+  summary, and the CANONICAL OPF JSON plus digest embedded verbatim in
   `<script type="application/json">` blocks (ids `opf-canonical`/`opf-digest`).
-  Takes no `--alias-map` by design — it embeds the canonical JSON, so
+  It takes no alias map by design — it embeds the canonical JSON, so
   resolving real names would break hash verification. **This is NOT a
   guarantee of pseudonymization.** `known_entities` matching is best-effort
   (whole-word, contiguous-sequence — see the verbatim-spelling requirement
   above); a misconfigured or incomplete `known_entities` list leaves real
   counterparty names in this file (skill-QA finding #57, 2026-08-24: hundreds
   of real-name occurrences reached `playbook.opf.json`/`.html` this way). Run
-  the **mandatory residue check** below before calling this file shareable —
-  it is not the "hand it to anyone" artifact that description used to claim;
-  for a genuinely external release, born-safe pseudonymization is not enough
-  on its own — use Step 11 (`publish`), which adds a hard, list-independent
-  backstop.
-- `$OUT/playbook.digest.json` — the **model-facing digest** standalone
-  (`playbook digest`): for a 0.4 playbook (`digest_version` 3), per clause
-  our standard, the signed variants and refused asks grouped by exact
-  normalization with distinct-deal counts and citations, and no stance or
-  verdict. Target ~40K tokens; the command warns if it exceeds that.
+  the **mandatory residue check** below before calling this file shareable.
+  The engine has no command that anonymizes a playbook for public release;
+  treat anything leaving the org as needing its own review.
+
+The digest — the model-facing projection — is the `digest` section inside
+`playbook.opf.json` (for a 0.4 playbook, `digest_version` 3: per clause our
+standard, the signed variants and refused asks grouped by exact normalization
+with distinct-deal counts and citations, no stance or verdict; target ~40K
+tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
 disk** — the bundle contains it, never replaces it. A consumer extracts the
 `opf-canonical` block, JSON-parses it, and verifies `identity.content_hash`
 against `playbook_engine.canonicalize.content_hash`.
-
-`view bundle` writes `playbook.opf.html`; `playbook.document.html` is no
-longer emitted as a separate artifact. `view bundle` takes no `--alias-map`
-— only `view render --alias-map /work/out/alias_map.json` resolves real
-names, for an internal-eyes-only copy; without it every rendering stays
-alias-only.
 
 **Mandatory residue check (issue #136) — run before calling anything from
 this step shareable.** `$OUT/alias_map.json` (written by `mine
@@ -1404,7 +1309,7 @@ from playbook_engine.entity_registry import find_residue
 alias_map = json.loads(pathlib.Path('$OUT/alias_map.json').read_text())
 texts = {
     p: pathlib.Path(p).read_text()
-    for p in ('$OUT/playbook.opf.json', '$OUT/playbook.opf.html', '$OUT/playbook.digest.json')
+    for p in ('$OUT/playbook.opf.json', '$OUT/playbook.opf.html')
 }
 hits = find_residue(alias_map, texts)
 if hits:
@@ -1423,161 +1328,38 @@ limits, not overclaimed: (1) a hit can be a coincidental match of a
 short/common word that slipped the stopword filter — read the flagged token
 in context before assuming a leak; (2) an empty result confirms only that no
 distinctive token of a name `known_entities` was told about survived — it is
-not exhaustive over every name-shaped string the way Step 11's LLM residue
-sweep is, and a name with no token distinctive enough to survive the filter
-(e.g. registered only as `"State University"`) cannot be checked this way at
-all. For a genuinely external release, this check is not a substitute for
-Step 11 (`publish`)'s independent, list-independent backstop.
+not exhaustive over every name-shaped string, and a name with no token
+distinctive enough to survive the filter (e.g. registered only as `"State
+University"`) cannot be checked this way at all.
 
-### Step 10 — Report and inspect
+**Before you hand the result over, say what is and is not in it.** If
+`posture`/`floor` are still empty, say so explicitly and offer Step 7a rather
+than filing it as a defect: evidence-only is Rung 0, a legitimate endpoint,
+not an unfinished state. Remind the user what that means downstream too: a
+consuming review application will either refuse until an operator opts in
+(empty Posture) or run with no hard-line enforcement at all (empty Floor) —
+see the consumer notes under Step 7a/7b. A playbook in a retired format
+(OPF 0.1–0.3) is rejected by `playbook validate`; re-project it from its
+out-dir (`playbook project`). List anything still unresolved — quarantined
+documents you accepted, unknown aliases, a thin `floor.candidates.json` — by
+name in your round summary.
 
-```bash
-make docker-run CORPUS=./out OUT=./out ARGS="report /work/out --out /work/out/report.md"
-make docker-run CORPUS=./out OUT=./out ARGS="inspect /work/out --out /work/out/inspection.md"
-```
+### Correcting a result after you have read it
 
-Runs last, after Step 9, on purpose: `report`'s Artifacts section inventories
-`playbook.digest.json`/`playbook.review.html`/`playbook.opf.html` by checking
-disk presence at report time, and nothing re-runs the report afterward — so
-if it ran before Step 9 rendered those files, the checklist would read as
-missing artifacts that are actually just not-yet-rendered, and stay wrong
-for good. Running it last means the checklist reflects the finished
-directory.
+There is no review-and-feedback surface: corrections go in at the input, and
+you re-run the affected stages.
 
-Review both outputs. The report surfaces:
+- A **document-level fact** (provenance, which version is the signed one,
+  version order): set it by hand in the deal's own
+  `$CORPUS/<deal-folder>/hints.yaml` with the agent's own file tools (see
+  "Running commands" above).
+- A **verdict** you now disagree with (a clause's classification, a
+  provenance call, a scope decision): write a corrected verdict for the same
+  `key` and `judge-apply` it — the store keeps the last record per key, and the
+  stage cache refuses to replay a document built on the overwritten one. For a
+  segmentation, re-issue the document's verdict and `segment-apply` it.
 
-- Corpus coverage (how many agreements contributed)
-- Backbone health (trail quality, provenance distribution)
-- Judgment economics (items judged, low-confidence count)
-- Semantic coverage (classified vs unclassified clauses)
-- Needs-attention items (unknown aliases, low-confidence provenance, and
-  Posture/Floor fields that require the GC interview — listed, never invented).
-  If `posture`/`floor` are still empty here, say so explicitly and offer Step 7a
-  rather than filing it as a defect: evidence-only is Rung 0, a legitimate
-  endpoint, not an unfinished state. Remind the user what that means
-  downstream too: a consuming review application will either refuse until an
-  operator opts in (empty Posture) or run with no hard-line enforcement at
-  all (empty Floor) — see the consumer notes under Step 7a/7b. A playbook
-  in a retired format (OPF 0.1–0.3) is rejected by `playbook validate`;
-  re-project it from its out-dir (`playbook project`).
-- Honesty section (what remains stubbed or unresolved)
-- Artifacts (which of `playbook.opf.json`/`playbook.digest.json`/
-  `playbook.review.html`/`playbook.opf.html` are present in `OUT_DIR` as of
-  this report run)
-
----
-
-## Step 11 — Publish party-anonymous (only when RELEASING publicly)
-
-Skip this unless the playbook is going to be shared outside the org. It
-produces a public artifact with the party's own name role-labelled, dates
-coarsened, source paths stripped, and a **residue report** for sign-off.
-
-```bash
-make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="publish /work/out/playbook.opf.json --out /work/out/playbook.public.opf.json \
-        --entity-registry /work/out/entity_registry.json \
-        --config /work/corpus/playbook.config.yaml"
-```
-
-`--entity-registry` here MUST point at the run's own sidecar
-(`/work/out/entity_registry.json`, the same file `mine` wrote in Step 3 —
-see "Running commands" above). Without it, `publish` falls back to the
-machine-global `~/.cache/playbook-engine/entity_registry.json`, which is
-empty inside the container, and the command hard-fails rather than silently
-skip the check. **Never reach for `--allow-empty-registry` to make that
-failure go away** — for a corpus-derived playbook it does not relax the
-check, it disables the entire hard backstop (safe only for a no-corpus /
-template-mode playbook with no real entities to catch in the first place).
-
-Pass `--config $CORPUS/playbook.config.yaml` whenever the playbook was mined
-from a domain-flavored corpus (e.g. an affiliation agreement corpus like
-`examples/affiliation-config/`) — same as every other step that took
-`--config`. Without it, both the step-5.5 institution-identity gate and the
-advisory proper-noun sweep fall back to the engine's agreement-type-neutral
-defaults, which is stricter than what the corpus was actually mined with and
-tends to over-flag benign institutional boilerplate (role words, generic
-qualifiers) as residue. `--config`'s `scan_role_words_extra` merges into the
-step-5.5 gate and `scan_stopwords_extra` into the proper-noun sweep, on top
-of those defaults, to restore the corpus's own scan leniency — note step-5.5
-is itself a deterministic, fail-closed gate like the step-4 hard backstop
-(no flag suppresses either one; a real survivor is still blocked, just
-correctly *not* flagged when it's benign domain boilerplate the config
-declares safe).
-
-Two safety layers run automatically:
-
-1. **Hard backstop** — if any *known* entity name (from the run's entity
-   registry) survives, publish fails loud and writes nothing. Non-negotiable.
-   This guarantee holds only for the artifact the *current* run of `publish`
-   just wrote — it says nothing about a `playbook.public.opf.json` already
-   sitting in an out-dir from an earlier run. A backstop fix, an entity-list
-   fix, or a registry re-mine landing in this engine does **not** retroactively
-   re-scan files it produced before the fix. Never hand an on-disk public
-   artifact to a reviewer/GC on the strength of a prior "publish succeeded" —
-   **re-run `publish`** (or at minimum re-run
-   `publisher._entity_backstop_scan` against the file with the run's current
-   `entity_registry.json`) any time the engine version, the entity registry,
-   or `redact_terms.txt` has changed since that artifact was produced.
-2. **`residue_report.json`** (written beside the output) — the
-   list-independent sweep: every proper-noun-like string still present in the
-   published text, needing no name list. This is the reviewer's checkable
-   artifact.
-
-**Then YOU (the agent) classify the residue report before any human sign-off.**
-Read `$OUT/residue_report.json` and bucket every entry:
-
-- **OUR-PARTY** — the publishing org's own names/aliases (expected).
-- **PLACE** — governing-law states/cities (e.g. "State of New York") — benign.
-- **GENERIC** — capitalized boilerplate that isn't a name ("Workers'
-  Compensation", "Effective Date") — benign.
-- **UNKNOWN** — anything that could be a counterparty (an institution or
-  company name you cannot account for).
-
-Hand the reviewer/GC a short grouped summary — **not** the raw JSON — with the
-UNKNOWN bucket first. Then:
-
-- **Any UNKNOWN** → do **not** publish (and do not sign off on a
-  `playbook.public.opf.json` already sitting in the out-dir — it is exactly
-  as UNKNOWN-contaminated as the report you're reading). Every UNKNOWN token
-  MUST land in `redact_terms.txt` in the out-dir (one term per line, `#`
-  comments allowed) before the next publish attempt — this both fixes the
-  immediate artifact and joins the hard no-survival backstop for it, per
-  `--redact-terms` in `playbook publish --help`. Also fix the root cause
-  (re-read recitals + signature/notice blocks for that deal, extend
-  `known_entities`, re-mine) so the *next* run's registry catches it without
-  relying on the redact list. Re-run publish with
-  `--redact-terms $OUT/redact_terms.txt` until UNKNOWN is empty.
-- **UNKNOWN empty (only OUR-PARTY / PLACE / GENERIC remain)** → the artifact
-  is name-clean; the residue report is what the GC signs off against. Confirm
-  this is the report for the file being signed off, not a stale one sitting
-  next to a since-replaced artifact.
-
-The confidence comes from the sweep being **exhaustive over name-shaped
-strings**, so "no counterparty names" is a checkable claim, not a promise that
-a hand-built list was complete.
-
----
-
-## Feedback re-entry
-
-After a reviewer has annotated the HTML surface and exported `feedback.json`:
-
-```bash
-# feedback.json must be placed at $OUT/feedback.json (the writable mount) —
-# see "Running commands" above.
-make docker-run CORPUS=./corpus OUT=./out \
-  ARGS="view apply /work/out /work/out/feedback.json"
-```
-
-This writes VerdictStore entries, `viewer_notes.md` notes, `curation` pins,
-and `floor.invariants` promotions — all under the writable `$OUT` mount, so
-they land for real. **`provenance`, `signed_version` and `order`
-corrections are not applied.** Each names one document, and a clause item
-cites none, so `view apply` reports each as "not applied" in its output and
-writes nothing for it. Set the value by hand in the deal's own
-`$CORPUS/<deal-folder>/hints.yaml` with the agent's own file tools (see
-"Running commands" above). Then re-judge and re-project:
+Then re-judge, re-mine and re-project:
 
 ```bash
 make docker-run CORPUS=./corpus OUT=./out \
@@ -1591,21 +1373,13 @@ make docker-run CORPUS=./corpus OUT=./out \
 make docker-run CORPUS=./corpus OUT=./out \
   ARGS="project /work/out --config /work/corpus/playbook.config.yaml"
 make docker-run CORPUS=./corpus OUT=./out ARGS="validate /work/out/playbook.opf.json"
-make docker-run CORPUS=./corpus OUT=./out ARGS="report /work/out --out /work/out/report.md"
+make docker-run CORPUS=./corpus OUT=./out ARGS="view bundle /work/out"
 ```
 
 `project` carries the prior `playbook.opf.json`'s `posture`/`floor` forward
-**verbatim** (issue #123), so the floor invariants `view apply` just promoted
-above survive this recompile — nothing here re-wipes them. But
-`playbook.review.html`, `playbook.opf.html`, and the digest sidecar are still
-whatever Step 9 last wrote, which is now stale: re-run it so every artifact
-reflects the correction round, not the pre-correction state.
-
-```bash
-make docker-run CORPUS=./corpus OUT=./out ARGS="view render /work/out"
-make docker-run CORPUS=./corpus OUT=./out ARGS="view bundle /work/out"
-make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
-```
+**verbatim** (issue #123), so a signed Floor survives this recompile — nothing
+here re-wipes it. `view bundle` is the last line on purpose: the bundle is
+whatever Step 9 last wrote, which is stale after a correction round.
 
 ---
 
@@ -1626,22 +1400,17 @@ make docker-run CORPUS=./corpus OUT=./out ARGS="digest /work/out"
   judgment token cost — but note it is not a dry run for LLM segmentation,
   which it performs and bills for real on a cache miss; no tool in this repo
   forecasts that cost before spend, so see Step 5's "Plan" section for how to
-  budget for it instead. Under `--with-deviation-judge` only (a default
-  derivation queues no deviation items), do relocation triage (REFERENCE.md's
-  "Relocation triage FIRST" bullet under `deviation`) before judging
-  deviation items one by one — a relocation's unchanged counterpart never appears in `pending.jsonl`, so
-  finding it means reading the per-version clause trees at
-  `$OUT/normalized/<document_id>/v<N>.clauses.json`, not pair-scanning the
-  pending set.
+  budget for it instead.
 - **Posture and Floor are never derived, and never invented.** They are
   forward-looking intent; no corpus contains them. When the human is available,
   run Step 7a/7b and let them author it. When the human is not available, leave
-  `posture: {}` / `floor: {}` and list them as pending human input in the
-  report — an evidence-only playbook is a complete OPF document, not a broken
+  `posture: {}` / `floor: {}` and list them as pending human input in your
+  round summary — an evidence-only playbook is a complete OPF document, not a broken
   one. The only content that may enter `floor.invariants` without an explicit
-  per-candidate accept is the interview's own Q4 answer and a `floor sign`
+  per-candidate sign-off is the interview's own Q4 answer and a `floor sign`
   statement, because a human wrote them (OPF-SPEC.md §3.7 rule 4). A
-  compiler-derived candidate NEVER auto-promotes.
+  compiler-derived candidate NEVER auto-promotes; it becomes a hard line only
+  when a human signs it with `playbook floor sign`.
 
 ---
 

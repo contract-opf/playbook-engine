@@ -11,17 +11,9 @@ Acceptance criteria verified here (mirrors the issue's Required verification):
     the OPF ``floor.invariants`` (spec rule 4).
   - No reversals + no Q4 answer -> ``{"candidates": []}``, exit 0.
 
-Also covers issue #90's review-checklist candidate promotion (the OTHER
-route into ``floor.invariants``, gated on an explicit human accept decision
-— never auto-promotion):
-
-  - :func:`candidate_invariant_id` / :func:`promote_floor_candidate` — a
-    single accepted candidate is promoted idempotently, never overwriting a
-    foreign (non-self-authored) colliding id.
-  - :func:`resolve_floor_candidate_decisions` — pure resolution of a
-    ``feedback.json`` ``"floor"`` block: accept/reject/malformed/unknown.
-  - :func:`apply_floor_review` — the I/O wrapper that reads and rewrites
-    ``floor.candidates.json``.
+The review-checklist accept/reject path (``view apply``'s ``"floor"`` block,
+issue #90) was retired with the review HTML (issue #239): a candidate is
+accepted by recording its hard line with ``playbook floor sign``.
 
 SECURITY NOTE: All fixtures are synthetic, minimal dicts — no real legal text,
 no real parties.
@@ -42,21 +34,15 @@ from playbook_engine.cli import cli
 from playbook_engine.floor_candidates import (
     _Q5_REJECTION_COMMENT,
     FloorCandidateError,
-    apply_floor_review,
-    candidate_invariant_id,
-    candidate_q4_invariant_id,
     count_below_min_deals_reversals,
     count_structural_reversals_omitted,
     derive_interview_q4_candidates,
     derive_reversal_candidates,
     is_q4_item_sentence_shaped,
-    promote_floor_candidate,
     promote_interview_q4_invariants,
     propose_floor_candidates,
     q4_q5_contradictions,
     q4_sentence_shaped_items,
-    read_floor_candidates,
-    resolve_floor_candidate_decisions,
     sign_floor_invariant,
     sign_invariant_id,
     write_floor_candidates,
@@ -410,30 +396,6 @@ def test_write_floor_candidates_below_min_deals_sibling(tmp_path: Path) -> None:
     assert written["structural_reversals_omitted"] == 0
 
 
-def test_apply_floor_review_preserves_106_sibling_keys(tmp_path: Path) -> None:
-    """Issue #106's two new always-present siblings survive
-    apply_floor_review's rewrite exactly like `unclassified_reversals_omitted`
-    already does (issue #101's generic, not-a-special-case preservation)."""
-    candidates_path = tmp_path / "floor.candidates.json"
-    candidates_path.write_text(
-        json.dumps(
-            {
-                "candidates": [_floor_candidate()],
-                "unclassified_reversals_omitted": 0,
-                "structural_reversals_omitted": 5,
-                "below_min_deals_omitted": 7,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    apply_floor_review(tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[])
-
-    on_disk = json.loads(candidates_path.read_text(encoding="utf-8"))
-    assert on_disk["structural_reversals_omitted"] == 5
-    assert on_disk["below_min_deals_omitted"] == 7
-
-
 def test_cli_floor_propose_min_deals_default_drops_single_document(tmp_path: Path) -> None:
     """The CLI's own default (--min-deals 2) drops a single-document
     reversal, even though the underlying write_floor_candidates() function's
@@ -728,7 +690,7 @@ def test_promote_q4_rerun_dropped_item_is_not_deleted() -> None:
 
 def test_promote_q4_tolerates_bare_string_invariants() -> None:
     # A hand-edited playbook MAY carry a bare-string floor invariant
-    # (document_renderer.py/prompt_renderer.py both tolerate this shape) —
+    # (document_renderer.py tolerates this shape) —
     # the merge must pass it through untouched, not crash on .get().
     existing: list[Any] = ["No indemnity cap below $1M"]
     answers = {"sacred_clauses": "IP assignment"}
@@ -933,8 +895,7 @@ def test_propose_floor_candidates_interview_q4_has_no_taxonomy_id_key() -> None:
 
 
 def test_write_floor_candidates_round_trips_taxonomy_id(tmp_path: Path) -> None:
-    """write_floor_candidates persists taxonomy_id; read_floor_candidates
-    returns it unchanged."""
+    """write_floor_candidates persists taxonomy_id into floor.candidates.json."""
     obs_path = tmp_path / "observations.jsonl"
     obs_path.write_text(
         json.dumps(_reversal_observation(taxonomy_id="limitation_of_liability")) + "\n",
@@ -942,24 +903,12 @@ def test_write_floor_candidates_round_trips_taxonomy_id(tmp_path: Path) -> None:
     )
 
     write_floor_candidates(tmp_path)
-    candidates = read_floor_candidates(tmp_path)
+    candidates = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))[
+        "candidates"
+    ]
 
     assert len(candidates) == 1
     assert candidates[0]["taxonomy_id"] == "limitation_of_liability"
-
-
-def test_read_floor_candidates_file_without_taxonomy_id_loads_unchanged(tmp_path: Path) -> None:
-    """A floor.candidates.json written before issue #102 (no taxonomy_id key
-    anywhere) must keep loading exactly as before -- the field is additive."""
-    old_style = _floor_candidate()
-    assert "taxonomy_id" not in old_style
-    (tmp_path / "floor.candidates.json").write_text(
-        json.dumps({"candidates": [old_style]}), encoding="utf-8"
-    )
-
-    candidates = read_floor_candidates(tmp_path)
-
-    assert candidates == [old_style]
 
 
 # ---------------------------------------------------------------------------
@@ -1062,152 +1011,52 @@ def test_q5_rejection_never_touches_floor_invariants() -> None:
     assert "invariants" not in result
 
 
-class TestWriteFloorCandidatesPriorHumanDecisionWinsOverQ5:
-    """issue #105 Fix: 'the existing prior_decisions carry-over in
-    write_floor_candidates means any prior HUMAN decision always wins over
-    the Q5 auto-rejection.'"""
-
-    def test_prior_human_accept_survives_a_rerun_that_would_otherwise_q5_reject(
-        self, tmp_path: Path
-    ) -> None:
-        doc = {
-            "posture": {
-                "generation": {
-                    "interview": [
-                        {"q": "flexible_clauses", "answer": "renewal notice"},
-                    ]
-                }
+def test_q5_rejection_is_rederived_every_run_and_stays_on_the_reversal_candidate(
+    tmp_path: Path,
+) -> None:
+    """The Q5 auto-rejection is derived from the interview answer on every
+    run — nothing is carried over from a prior floor.candidates.json. A
+    contradictory interview (the same clause type named in BOTH Q4 and Q5)
+    makes the reversal candidate and the interview_q4 candidate derive the
+    IDENTICAL statement; only the reversal candidate is ever auto-rejected."""
+    (tmp_path / "observations.jsonl").write_text(
+        json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
+        encoding="utf-8",
+    )
+    doc = {
+        "posture": {
+            "generation": {
+                "interview": [
+                    {"q": "sacred_clauses", "answer": "renewal notice"},
+                    {"q": "flexible_clauses", "answer": "renewal notice"},
+                ]
             }
         }
+    }
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+    candidates_path = tmp_path / "floor.candidates.json"
 
-        # Control: prove the identical observations + Q5 answer WOULD
-        # auto-reject on their own, with no prior human decision in the
-        # way -- otherwise the "survives" assertion below is vacuous (it
-        # would pass even with the Q5 auto-rejection removed entirely).
-        control_dir = tmp_path / "control"
-        control_dir.mkdir()
-        (control_dir / "observations.jsonl").write_text(
-            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
-            encoding="utf-8",
-        )
-        (control_dir / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-        write_floor_candidates(control_dir)
-        control_result = read_floor_candidates(control_dir)
-        assert control_result[0]["decision"] == "rejected"
-
-        obs_path = tmp_path / "observations.jsonl"
-        obs_path.write_text(
-            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
-            encoding="utf-8",
-        )
-        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-        # First run: the Q5 answer is already in force -- the candidate is
-        # auto-rejected WITH the attributing comment attached (issue #105
-        # review round 2 finding 2: reaching this state via write_floor_
-        # candidates + apply_floor_review, rather than a hand-built prior
-        # file that never had a comment in the first place, is the point --
-        # a hand-built prior with no comment can't exercise the "comment
-        # must be dropped" path at all).
+    for _ in range(2):
         write_floor_candidates(tmp_path)
-        first = read_floor_candidates(tmp_path)
-        assert first[0]["decision"] == "rejected"
-        assert first[0]["comment"] == _Q5_REJECTION_COMMENT
-        cand_id = first[0]["id"]
-
-        # Human overrides the recommendation and accepts anyway.
-        apply_floor_review(tmp_path, {cand_id: {"decision": "accept"}})
-
-        # Second run: the SAME Q5 answer is still in force -- without the
-        # fix this would re-derive decision=rejected+comment and clobber
-        # the human's accept.
-        write_floor_candidates(tmp_path)
-
-        result = read_floor_candidates(tmp_path)
-        assert result[0]["decision"] == "accepted"
-        assert "comment" not in result[0]
-
-    def test_q5_rejection_comment_survives_a_rerun_that_no_longer_names_it(
-        self, tmp_path: Path
-    ) -> None:
-        """The reverse: a PRIOR run's Q5 auto-rejection (decision +
-        attributing comment) survives a re-run whose Q5 answer no longer
-        names that taxonomy at all (this run derives no fresh comment of its
-        own for that candidate)."""
-        obs_path = tmp_path / "observations.jsonl"
-        obs_path.write_text(
-            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
-            encoding="utf-8",
-        )
-        doc = {
-            "posture": {
-                "generation": {
-                    "interview": [
-                        {"q": "flexible_clauses", "answer": "renewal notice"},
-                    ]
-                }
-            }
+        by_source = {
+            c["source"]: c
+            for c in json.loads(candidates_path.read_text(encoding="utf-8"))["candidates"]
         }
-        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-        write_floor_candidates(tmp_path)
-        first = read_floor_candidates(tmp_path)
-        assert first[0]["decision"] == "rejected"
-        assert first[0]["comment"]
-
-        # Rerun with Q5 answer changed to no longer name renewal_notice.
-        doc["posture"]["generation"]["interview"][0]["answer"] = "IP assignment"
-        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-        write_floor_candidates(tmp_path)
-
-        second = read_floor_candidates(tmp_path)
-        assert second[0]["decision"] == "rejected"
-        assert second[0]["comment"] == first[0]["comment"]
-
-    def test_q5_rejection_never_leaks_onto_a_same_statement_q4_candidate_on_second_run(
-        self, tmp_path: Path
-    ) -> None:
-        """issue #105 review round 2 finding 1 regression: the prior-decision
-        carry-over must be keyed by (statement, source), not statement alone.
-        A contradictory interview (the same clause type named in BOTH Q4
-        "sacred_clauses" and Q5 "flexible_clauses") makes the reversal
-        candidate and the interview_q4 candidate derive the IDENTICAL
-        statement text -- "Do not concede on renewal notice." A second
-        `write_floor_candidates` run must never carry the reversal
-        candidate's Q5 auto-rejection (decision + attributing comment) onto
-        the unrelated, human-authored interview_q4 candidate just because
-        they share a statement."""
-        obs_path = tmp_path / "observations.jsonl"
-        obs_path.write_text(
-            json.dumps(_reversal_observation(taxonomy_id="renewal_notice")) + "\n",
-            encoding="utf-8",
-        )
-        doc = {
-            "posture": {
-                "generation": {
-                    "interview": [
-                        {"q": "sacred_clauses", "answer": "renewal notice"},
-                        {"q": "flexible_clauses", "answer": "renewal notice"},
-                    ]
-                }
-            }
-        }
-        (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-        # First run: derives both candidates, confirms they share a statement.
-        write_floor_candidates(tmp_path)
-        first = read_floor_candidates(tmp_path)
-        by_source = {c["source"]: c for c in first}
         assert by_source["reversal"]["statement"] == by_source["interview_q4"]["statement"]
         assert by_source["reversal"]["decision"] == "rejected"
+        assert by_source["reversal"]["comment"] == _Q5_REJECTION_COMMENT
         assert "decision" not in by_source["interview_q4"]
+        assert "comment" not in by_source["interview_q4"]
 
-        # Second run: the carry-over must not cross the source boundary.
-        write_floor_candidates(tmp_path)
-        second = read_floor_candidates(tmp_path)
-        by_source2 = {c["source"]: c for c in second}
-        assert by_source2["reversal"]["decision"] == "rejected"
-        assert "decision" not in by_source2["interview_q4"]
-        assert "comment" not in by_source2["interview_q4"]
+    # Change the Q5 answer: the rejection is gone with it — it was never
+    # stored anywhere but derived.
+    doc["posture"]["generation"]["interview"][1]["answer"] = "IP assignment"
+    opf_path.write_text(json.dumps(doc), encoding="utf-8")
+    write_floor_candidates(tmp_path)
+    after = json.loads(candidates_path.read_text(encoding="utf-8"))["candidates"]
+    reversal = next(c for c in after if c["source"] == "reversal")
+    assert "decision" not in reversal and "comment" not in reversal
 
 
 # ---------------------------------------------------------------------------
@@ -1339,58 +1188,6 @@ def test_write_floor_candidates_no_playbook_no_observations(tmp_path: Path) -> N
     }
 
 
-def test_write_floor_candidates_preserves_decision_across_repropose(tmp_path: Path) -> None:
-    """Issue #90 review finding 4 regression: floor.candidates.json is the
-    ONLY record of a rejection (an accepted candidate is separately
-    protected by its presence in floor.invariants) -- re-deriving candidates
-    with UNCHANGED inputs must not silently reset a previously-recorded
-    decision back to undecided."""
-    obs_path = tmp_path / "observations.jsonl"
-    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_doc()
-    (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-    write_floor_candidates(tmp_path)
-    first = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert len(first["candidates"]) == 1
-    cand_id = first["candidates"][0]["id"]
-    statement = first["candidates"][0]["statement"]
-
-    apply_floor_review(tmp_path, {cand_id: {"decision": "reject"}})
-    rejected = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert rejected["candidates"][0]["decision"] == "rejected"
-
-    write_floor_candidates(tmp_path)
-    second = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-
-    assert len(second["candidates"]) == 1
-    assert second["candidates"][0]["statement"] == statement
-    assert second["candidates"][0]["decision"] == "rejected"
-
-
-def test_write_floor_candidates_drops_decision_when_statement_no_longer_recurs(
-    tmp_path: Path,
-) -> None:
-    """A rejected candidate whose underlying evidence disappears on
-    re-derivation has nothing to carry its decision to -- it simply drops,
-    same as the candidate itself; this is not a resurrection bug."""
-    obs_path = tmp_path / "observations.jsonl"
-    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_doc()
-    (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-    write_floor_candidates(tmp_path)
-    first = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    cand_id = first["candidates"][0]["id"]
-    apply_floor_review(tmp_path, {cand_id: {"decision": "reject"}})
-
-    # Evidence disappears entirely.
-    obs_path.write_text("", encoding="utf-8")
-    write_floor_candidates(tmp_path)
-    second = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert second["candidates"] == []
-
-
 # ---------------------------------------------------------------------------
 # CLI — playbook floor propose
 # ---------------------------------------------------------------------------
@@ -1439,35 +1236,6 @@ def test_cli_floor_propose_missing_out_dir_fails() -> None:
     assert exit_code != 0
 
 
-def test_cli_floor_propose_rejected_candidate_stays_rejected_on_second_run(
-    tmp_path: Path,
-) -> None:
-    """Issue #90 review finding 4 regression, via the actual CLI command: a
-    rejected candidate must not be resurrected as a fresh, undecided
-    proposal by a second `playbook floor propose` run."""
-    obs_path = tmp_path / "observations.jsonl"
-    obs_path.write_text(json.dumps(_reversal_observation()) + "\n", encoding="utf-8")
-    doc = _minimal_doc()
-    (tmp_path / "playbook.opf.json").write_text(json.dumps(doc), encoding="utf-8")
-
-    # --min-deals 1: this fixture is a single-document reversal, unrelated
-    # to issue #106's threshold feature exercised elsewhere -- the CLI's
-    # own default (2) would drop it before it ever reaches the decision-
-    # persistence behavior this test actually covers.
-    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--min-deals", "1")
-    assert exit_code == 0, output
-    first = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    cand_id = first["candidates"][0]["id"]
-
-    apply_floor_review(tmp_path, {cand_id: {"decision": "reject"}})
-
-    exit_code, output = _invoke("floor", "propose", str(tmp_path), "--min-deals", "1")
-    assert exit_code == 0, output
-    second = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
-    assert len(second["candidates"]) == 1
-    assert second["candidates"][0]["decision"] == "rejected"
-
-
 def test_cli_floor_propose_prints_q4_q5_contradiction_warning(tmp_path: Path) -> None:
     """issue #105 review round 2 finding 4: the Reviewer gate's chosen
     behavior for a contradictory interview (same clause type named in both
@@ -1499,730 +1267,6 @@ def test_cli_floor_propose_prints_q4_q5_contradiction_warning(tmp_path: Path) ->
     written = json.loads((tmp_path / "floor.candidates.json").read_text(encoding="utf-8"))
     assert written["warnings"]
     assert "renewal notice" in written["warnings"][0]
-
-
-# ---------------------------------------------------------------------------
-# candidate_invariant_id / promote_floor_candidate — issue #90
-# ---------------------------------------------------------------------------
-
-
-def _floor_candidate(
-    *,
-    id: str = "cand-001",  # noqa: A002
-    statement: str = "Never accept uncapped liability.",
-    rationale: str = "Proposed then reversed before signing in 2 deals.",
-    source: str = "reversal",
-    citations: list[dict[str, Any]] | None = None,
-    taxonomy_id: str | None = None,
-) -> dict[str, Any]:
-    if citations is None:
-        citations = [{"document_id": "doc-a", "version": 2, "clause_path": "8.1"}]
-    candidate: dict[str, Any] = {
-        "id": id,
-        "statement": statement,
-        "rationale": rationale,
-        "source": source,
-        "citations": citations,
-    }
-    if taxonomy_id is not None:
-        candidate["taxonomy_id"] = taxonomy_id
-    return candidate
-
-
-def test_candidate_invariant_id_is_a_slug_of_the_statement() -> None:
-    candidate = _floor_candidate(statement="Never accept uncapped liability.")
-    assert candidate_invariant_id(candidate) == "never-accept-uncapped-liability"
-
-
-def test_candidate_invariant_id_stable_across_calls() -> None:
-    candidate = _floor_candidate()
-    assert candidate_invariant_id(candidate) == candidate_invariant_id(candidate)
-
-
-def test_promote_floor_candidate_appends_new_invariant() -> None:
-    candidate = _floor_candidate()
-
-    result = promote_floor_candidate(candidate, existing_invariants=[])
-
-    assert len(result) == 1
-    inv = result[0]
-    assert inv["id"] == "never-accept-uncapped-liability"
-    assert inv["statement"] == "Never accept uncapped liability."
-    assert "Proposed then reversed before signing in 2 deals." in inv["rationale"]
-    assert "doc-a v2 §8.1" in inv["rationale"]
-    assert "Accepted via review feedback" in inv["rationale"]
-    assert "cand-001" in inv["rationale"]
-
-
-def test_promote_floor_candidate_interview_q4_source_has_no_evidence_line() -> None:
-    """An interview_q4-sourced candidate carries no citations (see
-    derive_interview_q4_candidates) — the promoted rationale must not
-    fabricate an 'Evidence:' clause for it."""
-    candidate = _floor_candidate(
-        id="cand-002",
-        statement="Never accept IP assignment.",
-        rationale='Named as non-negotiable in the Posture interview (Q4 "sacred_clauses").',
-        source="interview_q4",
-        citations=[],
-    )
-
-    result = promote_floor_candidate(candidate, existing_invariants=[])
-
-    assert "Evidence:" not in result[0]["rationale"]
-    assert "Accepted via review feedback" in result[0]["rationale"]
-
-
-def test_promote_floor_candidate_rerun_same_statement_is_true_noop() -> None:
-    candidate = _floor_candidate()
-
-    first = promote_floor_candidate(candidate, existing_invariants=[])
-    second = promote_floor_candidate(candidate, existing_invariants=first)
-
-    assert second == first
-    assert len(second) == 1
-    ids = [inv["id"] for inv in second]
-    assert len(ids) == len(set(ids))  # OPF-SPEC.md §3.13: no duplicate sibling ids
-
-
-def test_promote_floor_candidate_rerun_with_changed_statement_updates_in_place() -> None:
-    candidate = _floor_candidate(statement="Never accept uncapped liability.")
-    first = promote_floor_candidate(candidate, existing_invariants=[])
-    assert len(first) == 1
-
-    changed = dict(candidate)
-    changed["statement"] = "Never accept uncapped liability of any kind."
-    second = promote_floor_candidate(changed, existing_invariants=first)
-
-    # Different statement -> different slug -> a SECOND entry, not an
-    # in-place update: candidate_invariant_id is keyed on the statement
-    # itself, so an edited statement is, by construction, a different id.
-    # The in-place-update branch is exercised by a candidate whose
-    # statement is unchanged on rerun (the true-no-op test above) plus the
-    # multi-accept-in-one-call case below.
-    assert len(second) == 2
-
-
-def test_promote_floor_candidate_two_accepts_in_sequence_both_present() -> None:
-    liability = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
-    ip = _floor_candidate(
-        id="cand-002",
-        statement="Never accept IP assignment.",
-        citations=[{"document_id": "doc-b", "version": 1, "clause_path": "3"}],
-    )
-
-    merged = promote_floor_candidate(liability, existing_invariants=[])
-    merged = promote_floor_candidate(ip, existing_invariants=merged)
-
-    assert len(merged) == 2
-    ids = {inv["id"] for inv in merged}
-    assert ids == {"never-accept-uncapped-liability", "never-accept-ip-assignment"}
-
-
-def test_promote_floor_candidate_refuses_to_overwrite_colliding_hand_authored_id() -> None:
-    """Issue #89 review finding 2's foreign-collision guard, applied to the
-    candidate-acceptance path: an existing invariant whose id happens to
-    equal this candidate's derived slug, but which was NOT written by an
-    earlier acceptance of this SAME candidate, must never be silently
-    overwritten."""
-    hand_authored = {
-        "id": "never-accept-uncapped-liability",
-        "statement": "Never accept uncapped liability under any circumstances.",
-        "rationale": "Signed off by the GC 2026-03-01 after board review.",
-    }
-    candidate = _floor_candidate(statement="Never accept uncapped liability.")
-
-    with pytest.raises(FloorCandidateError, match="never-accept-uncapped-liability"):
-        promote_floor_candidate(candidate, existing_invariants=[hand_authored])
-
-    # Never mutated in place.
-    assert hand_authored == {
-        "id": "never-accept-uncapped-liability",
-        "statement": "Never accept uncapped liability under any circumstances.",
-        "rationale": "Signed off by the GC 2026-03-01 after board review.",
-    }
-
-
-def test_promote_floor_candidate_result_is_schema_shaped() -> None:
-    """Only id/statement/rationale — additionalProperties: false in
-    spec/playbook.schema-0.4.json's floor.invariants[] item."""
-    candidate = _floor_candidate()
-    result = promote_floor_candidate(candidate, existing_invariants=[])
-    assert set(result[0]) == {"id", "statement", "rationale"}
-
-
-# ---------------------------------------------------------------------------
-# candidate_q4_invariant_id — the Q4 path's OTHER id derivation for the
-# same candidate (issue #90 review finding 1)
-# ---------------------------------------------------------------------------
-
-
-def test_candidate_q4_invariant_id_round_trips_the_real_producer() -> None:
-    """The parser must track the PRODUCER, not a hardcoded string.
-
-    `candidate_q4_invariant_id` reconstructs the Q4 item by regex-matching
-    the candidate's statement, and that regex is the exact inverse of
-    `_q4_statement`'s wording. Every test in this section used to hand-write
-    "Never accept X.", so when that wording changed, producer and parser
-    decoupled silently: every test still passed while
-    `candidate_q4_invariant_id` returned None in production, disabling the
-    already-signed duplicate guard in `promote_floor_candidate` entirely.
-    Building the candidate from the real producer makes that class of
-    regression impossible to land green.
-    """
-    candidate = _floor_candidate(
-        statement=derive_interview_q4_candidates({"sacred_clauses": "liability caps"})[0].statement,
-        source="interview_q4",
-        citations=[],
-    )
-    assert candidate_q4_invariant_id(candidate) == "liability-caps"
-
-
-def test_candidate_q4_invariant_id_matches_promote_interview_q4_invariants_id() -> None:
-    """The whole point: this id must equal the id
-    promote_interview_q4_invariants (issue #89) would derive for the SAME
-    item, even though candidate_invariant_id (slugging this candidate's own
-    statement) never would."""
-    item = "Liability caps and student-data protection"
-    candidate = _floor_candidate(
-        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
-        source="interview_q4",
-        citations=[],
-    )
-    promoted = promote_interview_q4_invariants(
-        {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
-    )
-
-    assert candidate_q4_invariant_id(candidate) == promoted[0]["id"]
-    assert candidate_invariant_id(candidate) != promoted[0]["id"]  # the OTHER id disagrees
-
-
-def test_candidate_q4_invariant_id_none_for_reversal_source() -> None:
-    candidate = _floor_candidate(statement="Never accept uncapped liability.", source="reversal")
-    assert candidate_q4_invariant_id(candidate) is None
-
-
-def test_candidate_q4_invariant_id_none_when_statement_does_not_match_q4_shape() -> None:
-    candidate = _floor_candidate(
-        statement="This does not follow the draft shape", source="interview_q4", citations=[]
-    )
-    assert candidate_q4_invariant_id(candidate) is None
-
-
-# ---------------------------------------------------------------------------
-# promote_floor_candidate refuses a Q4 item already signed under its OTHER
-# id (issue #90 review finding 1)
-# ---------------------------------------------------------------------------
-
-
-def test_promote_floor_candidate_refuses_when_q4_item_already_signed_under_other_id() -> None:
-    """An interview_q4-sourced candidate's underlying item may already be
-    present in floor.invariants under promote_interview_q4_invariants's OWN,
-    differently-derived id (_slugify_statement_item, not
-    candidate_invariant_id) and differently-worded statement ("Do not
-    concede on X." vs this candidate's draft "Never accept X."). Accepting
-    the candidate must never append a second, opposite-polarity invariant
-    for the same item -- it must be refused, the same as any other foreign
-    id collision."""
-    item = "liability caps"
-    existing = promote_interview_q4_invariants(
-        {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
-    )
-    candidate = _floor_candidate(
-        id="cand-001",
-        statement=derive_interview_q4_candidates({"sacred_clauses": item})[0].statement,
-        source="interview_q4",
-        citations=[],
-    )
-
-    with pytest.raises(FloorCandidateError, match="liability-caps"):
-        promote_floor_candidate(candidate, existing_invariants=existing)
-
-    # Never mutated: still exactly the one Q4-promoted entry, byte-identical.
-    assert existing == promote_interview_q4_invariants(
-        {"sacred_clauses": item}, posture_version=1, existing_invariants=[]
-    )
-    assert len(existing) == 1
-
-
-def test_promote_floor_candidate_reversal_source_unaffected_by_q4_guard() -> None:
-    """The new Q4 cross-id guard must never fire for a source: reversal
-    candidate -- candidate_q4_invariant_id is None for those, so an
-    unrelated Q4-promoted invariant sharing no id with it must not block a
-    perfectly normal reversal-candidate acceptance."""
-    q4_invariants = promote_interview_q4_invariants(
-        {"sacred_clauses": "liability caps"}, posture_version=1, existing_invariants=[]
-    )
-    candidate = _floor_candidate(statement="Never accept uncapped liability.", source="reversal")
-
-    result = promote_floor_candidate(candidate, existing_invariants=q4_invariants)
-
-    assert len(result) == 2
-    ids = {inv["id"] for inv in result}
-    assert "liability-caps" in ids
-    assert "never-accept-uncapped-liability" in ids
-
-
-# ---------------------------------------------------------------------------
-# promote_floor_candidate refuses when taxonomy_id already signed under a
-# DIFFERENT, non-slug-matching statement (issue #102)
-# ---------------------------------------------------------------------------
-
-
-def test_promote_floor_candidate_refuses_when_taxonomy_already_signed() -> None:
-    """The real failure from the issue: a hand-authored invariant
-    ("limitation-of-liability-not-unilateral") shares ZERO slug overlap with
-    a reversal candidate's draft statement ("Do not concede on limitation of
-    liability.") -- but both are about the same clause taxonomy. Accepting
-    the candidate must be refused, not appended as a second, conflicting
-    invariant."""
-    hand_authored = {
-        "id": "limitation-of-liability-not-unilateral",
-        "statement": "Limitation of liability, if present, must not be unilateral.",
-        "rationale": "Hand-authored via `playbook floor sign`.",
-        "x_taxonomy_id": "limitation_of_liability",
-    }
-    candidate = _floor_candidate(
-        statement="Do not concede on limitation of liability.",
-        taxonomy_id="limitation_of_liability",
-    )
-    # Confirm the premise: no slug overlap between the two ids at all.
-    assert candidate_invariant_id(candidate) != hand_authored["id"]
-
-    with pytest.raises(FloorCandidateError, match="limitation_of_liability"):
-        promote_floor_candidate(candidate, existing_invariants=[hand_authored])
-
-    # Never mutated in place.
-    assert hand_authored == {
-        "id": "limitation-of-liability-not-unilateral",
-        "statement": "Limitation of liability, if present, must not be unilateral.",
-        "rationale": "Hand-authored via `playbook floor sign`.",
-        "x_taxonomy_id": "limitation_of_liability",
-    }
-
-
-def test_promote_floor_candidate_taxonomy_none_unaffected_by_taxonomy_guard() -> None:
-    """A candidate with no taxonomy_id (every interview_q4 candidate, and
-    any reversal candidate proposed before issue #102) behaves byte-
-    identically to before: appending never even looks at x_taxonomy_id."""
-    existing = [
-        {
-            "id": "some-other-invariant",
-            "statement": "Some other hand-authored line.",
-            "rationale": "r",
-            "x_taxonomy_id": "unrelated_taxonomy",
-        }
-    ]
-    candidate = _floor_candidate(statement="Never accept uncapped liability.")
-    assert "taxonomy_id" not in candidate
-
-    result = promote_floor_candidate(candidate, existing_invariants=existing)
-
-    assert len(result) == 2
-    new_entry = result[1]
-    assert new_entry["id"] == "never-accept-uncapped-liability"
-    assert "x_taxonomy_id" not in new_entry
-
-
-def test_promote_floor_candidate_stamps_x_taxonomy_id_on_new_entry() -> None:
-    """Promotion stamps taxonomy_id into the invariant entry it creates
-    (as x_taxonomy_id -- spec/playbook.schema-0.4.json's frozen
-    additionalProperties: false forbids a bare taxonomy_id key). This is
-    what lets promote_floor_candidate's own taxonomy guard, and the
-    viewer's classify_floor_candidates, suppress a later CANDIDATE for the
-    same taxonomy against THIS promoted entry. It does NOT protect the
-    reverse direction: sign_floor_invariant (the hand-author path,
-    `playbook floor sign`) has no taxonomy guard at all -- only an
-    id-collision guard -- so a hand-authored invariant for the same
-    taxonomy_id can still be signed alongside this entry, producing two
-    x_taxonomy_id-tagged invariants for the same taxonomy. Out of scope
-    for this ticket (issue #102)."""
-    candidate = _floor_candidate(
-        statement="Do not concede on uncapped liability.",
-        taxonomy_id="uncapped_liability",
-    )
-
-    result = promote_floor_candidate(candidate, existing_invariants=[])
-
-    assert result[0]["x_taxonomy_id"] == "uncapped_liability"
-    assert "taxonomy_id" not in result[0]  # never a bare key
-
-
-def test_promote_floor_candidate_different_taxonomy_not_suppressed() -> None:
-    """A candidate whose taxonomy_id does NOT match any existing invariant's
-    x_taxonomy_id is promoted normally -- the guard is a match, not a mere
-    presence, check."""
-    existing = [
-        {
-            "id": "unrelated-invariant",
-            "statement": "Unrelated hard line.",
-            "rationale": "r",
-            "x_taxonomy_id": "ip_assignment",
-        }
-    ]
-    candidate = _floor_candidate(
-        statement="Do not concede on uncapped liability.",
-        taxonomy_id="uncapped_liability",
-    )
-
-    result = promote_floor_candidate(candidate, existing_invariants=existing)
-
-    assert len(result) == 2
-
-
-def test_promote_floor_candidate_id_collision_takes_priority_over_taxonomy_match() -> None:
-    """Interplay with the issue-#90 FloorCandidateError collision guards
-    (review finding): when BOTH a foreign id collision and a taxonomy match
-    apply to the same candidate, the id-collision guard must fire first --
-    it is checked before the taxonomy guard in promote_floor_candidate, so
-    its message ("refusing to silently overwrite it") is the one raised,
-    not the taxonomy guard's. Locks the documented ordering (the taxonomy
-    guard sits last, after the foreign-id and Q4-id guards) with a test
-    instead of only a docstring."""
-    candidate = _floor_candidate(
-        statement="Do not concede on limitation of liability.",
-        taxonomy_id="limitation_of_liability",
-    )
-    foreign_id_collision = {
-        "id": candidate_invariant_id(candidate),
-        "statement": "An unrelated hand-authored statement with the same slug.",
-        "rationale": "Hand-authored, unrelated to this candidate.",
-    }
-    taxonomy_collision = {
-        "id": "limitation-of-liability-not-unilateral",
-        "statement": "Limitation of liability, if present, must not be unilateral.",
-        "rationale": "Hand-authored via `playbook floor sign`.",
-        "x_taxonomy_id": "limitation_of_liability",
-    }
-
-    with pytest.raises(FloorCandidateError, match="refusing to silently overwrite it"):
-        promote_floor_candidate(
-            candidate, existing_invariants=[foreign_id_collision, taxonomy_collision]
-        )
-
-
-# ---------------------------------------------------------------------------
-# resolve_floor_candidate_decisions — pure feedback.json "floor" resolution
-# (issue #90)
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_floor_decisions_accept_promotes_and_marks_candidate() -> None:
-    candidate = _floor_candidate()
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}}, [candidate], existing_invariants=[]
-    )
-
-    assert result.promoted == ["cand-001"]
-    assert result.rejected == []
-    assert result.skipped == {}
-    assert result.invariants_changed is True
-    assert result.invariants[0]["id"] == "never-accept-uncapped-liability"
-    assert result.candidates_changed is True
-    assert result.candidates[0]["decision"] == "accepted"
-
-
-def test_resolve_floor_decisions_reject_marks_candidate_never_touches_invariants() -> None:
-    candidate = _floor_candidate()
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "reject"}}, [candidate], existing_invariants=[]
-    )
-
-    assert result.rejected == ["cand-001"]
-    assert result.promoted == []
-    assert result.invariants == []
-    assert result.invariants_changed is False
-    assert result.candidates_changed is True
-    assert result.candidates[0]["decision"] == "rejected"
-
-
-def test_resolve_floor_decisions_malformed_top_level_block_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        ["not", "an", "object"], [_floor_candidate()], existing_invariants=[]
-    )
-
-    assert "floor" in result.skipped
-    assert result.promoted == []
-    assert result.rejected == []
-    assert result.invariants_changed is False
-    assert result.candidates_changed is False
-
-
-def test_resolve_floor_decisions_malformed_entry_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": "accept"},  # not an object
-        [_floor_candidate()],
-        existing_invariants=[],
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert result.promoted == []
-
-
-def test_resolve_floor_decisions_unknown_decision_value_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "maybe"}}, [_floor_candidate()], existing_invariants=[]
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert result.promoted == []
-    assert result.rejected == []
-
-
-def test_resolve_floor_decisions_missing_decision_key_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"comment": "no decision given"}}, [_floor_candidate()], existing_invariants=[]
-    )
-
-    assert "floor:cand-001" in result.skipped
-    # Issue #90 review finding 3 regression: a comment-only entry (no
-    # "decision" key at all -- exactly the shape the page's Export JS
-    # produces when a reviewer types a note and leaves the radio on
-    # Undecided -- must still be captured, independent of the
-    # missing-decision skip message above.
-    assert result.comments == [
-        ("cand-001", "Never accept uncapped liability.", "no decision given")
-    ]
-    assert result.promoted == []
-    assert result.rejected == []
-    assert result.candidates_changed is False
-
-
-def test_resolve_floor_decisions_unknown_candidate_id_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-999": {"decision": "accept"}}, [_floor_candidate()], existing_invariants=[]
-    )
-
-    assert "floor:cand-999" in result.skipped
-    assert result.promoted == []
-
-
-def test_resolve_floor_decisions_unsupported_key_inside_entry_skipped() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept", "bogus_key": "x"}},
-        [_floor_candidate()],
-        existing_invariants=[],
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert any("bogus_key" in msg for msg in result.skipped["floor:cand-001"])
-    # The recognised "decision" key is still honored alongside the report.
-    assert result.promoted == ["cand-001"]
-
-
-def test_resolve_floor_decisions_comment_captured_for_notes() -> None:
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "reject", "comment": "too broad as worded"}},
-        [_floor_candidate()],
-        existing_invariants=[],
-    )
-
-    assert result.comments == [
-        ("cand-001", "Never accept uncapped liability.", "too broad as worded")
-    ]
-
-
-def test_resolve_floor_decisions_foreign_collision_skipped_not_raised() -> None:
-    """A collision with a hand-authored (non-self) invariant is reported via
-    skipped, not raised — one bad floor entry must not abort resolution of
-    the rest of a feedback.json (issue #138 discipline)."""
-    hand_authored = {
-        "id": "never-accept-uncapped-liability",
-        "statement": "Never accept uncapped liability, ever.",
-        "rationale": "Signed off by the GC.",
-    }
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}},
-        [_floor_candidate()],
-        existing_invariants=[hand_authored],
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert result.promoted == []
-    assert result.invariants == [hand_authored]
-    assert result.invariants_changed is False
-    # The candidate's own decision is never marked "accepted" when the
-    # promotion itself failed — a reviewer sees an accurate, unresolved state.
-    assert result.candidates_changed is False
-
-
-def test_resolve_floor_decisions_taxonomy_collision_skipped_not_raised() -> None:
-    """Issue #102: same reviewer-gate discipline as the id-collision guard
-    above, applied to the taxonomy_id guard -- resolving a feedback.json
-    against a candidate whose clause taxonomy is already signed under a
-    non-slug-matching statement reports it via skipped (not a raised
-    exception that would abort the rest of the batch), and never marks the
-    candidate's own decision as accepted."""
-    hand_authored = {
-        "id": "limitation-of-liability-not-unilateral",
-        "statement": "Limitation of liability, if present, must not be unilateral.",
-        "rationale": "Hand-authored via `playbook floor sign`.",
-        "x_taxonomy_id": "limitation_of_liability",
-    }
-    candidate = _floor_candidate(
-        statement="Do not concede on limitation of liability.",
-        taxonomy_id="limitation_of_liability",
-    )
-
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}},
-        [candidate],
-        existing_invariants=[hand_authored],
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert result.promoted == []
-    assert result.invariants == [hand_authored]
-    assert result.invariants_changed is False
-    assert result.candidates_changed is False
-
-
-def test_resolve_floor_decisions_reapply_same_decision_is_idempotent() -> None:
-    candidate = _floor_candidate()
-    first = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}}, [candidate], existing_invariants=[]
-    )
-
-    # Second call starts from the first call's own outputs — the same shape
-    # apply_floor_review's caller would thread through on a second apply.
-    second = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}},
-        first.candidates,
-        existing_invariants=first.invariants,
-    )
-
-    assert second.promoted == ["cand-001"]  # still reported, even though...
-    assert second.invariants_changed is False  # ...nothing actually changed
-    assert second.candidates_changed is False  # decision was already "accepted"
-    assert second.invariants == first.invariants
-
-
-def test_resolve_floor_decisions_accept_one_reject_another() -> None:
-    liability = _floor_candidate(id="cand-001", statement="Never accept uncapped liability.")
-    ip = _floor_candidate(id="cand-002", statement="Never accept IP assignment.", citations=[])
-
-    result = resolve_floor_candidate_decisions(
-        {"cand-001": {"decision": "accept"}, "cand-002": {"decision": "reject"}},
-        [liability, ip],
-        existing_invariants=[],
-    )
-
-    assert result.promoted == ["cand-001"]
-    assert result.rejected == ["cand-002"]
-    assert len(result.invariants) == 1
-    by_id = {c["id"]: c for c in result.candidates}
-    assert by_id["cand-001"]["decision"] == "accepted"
-    assert by_id["cand-002"]["decision"] == "rejected"
-
-
-# ---------------------------------------------------------------------------
-# apply_floor_review — I/O wrapper (issue #90)
-# ---------------------------------------------------------------------------
-
-
-def test_apply_floor_review_reads_and_rewrites_candidates_json(tmp_path: Path) -> None:
-    candidates_path = tmp_path / "floor.candidates.json"
-    candidates_path.write_text(json.dumps({"candidates": [_floor_candidate()]}), encoding="utf-8")
-
-    result = apply_floor_review(
-        tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[]
-    )
-
-    assert result.promoted == ["cand-001"]
-    on_disk = json.loads(candidates_path.read_text(encoding="utf-8"))
-    assert on_disk["candidates"][0]["decision"] == "accepted"
-
-
-def test_apply_floor_review_no_op_when_nothing_changed(tmp_path: Path) -> None:
-    """Second identical apply doesn't even rewrite the file (byte-identical
-    mtime-preserving no-op), proving the idempotency the ticket requires."""
-    candidates_path = tmp_path / "floor.candidates.json"
-    candidates_path.write_text(json.dumps({"candidates": [_floor_candidate()]}), encoding="utf-8")
-
-    first = apply_floor_review(
-        tmp_path, {"cand-001": {"decision": "reject"}}, existing_invariants=[]
-    )
-    assert first.candidates_changed is True
-    bytes_after_first = candidates_path.read_bytes()
-
-    second = apply_floor_review(
-        tmp_path, {"cand-001": {"decision": "reject"}}, existing_invariants=[]
-    )
-    assert second.candidates_changed is False
-    assert candidates_path.read_bytes() == bytes_after_first
-
-
-def test_apply_floor_review_never_writes_playbook_opf_json(tmp_path: Path) -> None:
-    """apply_floor_review only ever touches floor.candidates.json — writing
-    playbook.opf.json (with the identity refresh curation pins also need)
-    is exclusively viewer.apply_feedback's job."""
-    candidates_path = tmp_path / "floor.candidates.json"
-    candidates_path.write_text(json.dumps({"candidates": [_floor_candidate()]}), encoding="utf-8")
-
-    apply_floor_review(tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[])
-
-    assert not (tmp_path / "playbook.opf.json").exists()
-
-
-def test_apply_floor_review_preserves_sibling_keys_on_rewrite(tmp_path: Path) -> None:
-    """Issue #101: apply_floor_review's rewrite must not clobber sibling
-    keys already in floor.candidates.json (the always-present
-    `unclassified_reversals_omitted` honesty count, and — generically, not
-    as a special case — any other unknown future key)."""
-    candidates_path = tmp_path / "floor.candidates.json"
-    candidates_path.write_text(
-        json.dumps(
-            {
-                "candidates": [_floor_candidate()],
-                "unclassified_reversals_omitted": 3,
-                "x_future": 1,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    result = apply_floor_review(
-        tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[]
-    )
-
-    assert result.promoted == ["cand-001"]
-    on_disk = json.loads(candidates_path.read_text(encoding="utf-8"))
-    assert on_disk["candidates"][0]["decision"] == "accepted"
-    assert on_disk["unclassified_reversals_omitted"] == 3
-    assert on_disk["x_future"] == 1
-
-
-def test_apply_floor_review_missing_candidates_file_reports_unknown(tmp_path: Path) -> None:
-    result = apply_floor_review(
-        tmp_path, {"cand-001": {"decision": "accept"}}, existing_invariants=[]
-    )
-
-    assert "floor:cand-001" in result.skipped
-    assert result.candidates_changed is False
-
-
-def test_read_floor_candidates_missing_file_returns_empty(tmp_path: Path) -> None:
-    assert read_floor_candidates(tmp_path) == []
-
-
-def test_read_floor_candidates_malformed_json_returns_empty(tmp_path: Path) -> None:
-    (tmp_path / "floor.candidates.json").write_text("not json", encoding="utf-8")
-    assert read_floor_candidates(tmp_path) == []
-
-
-def test_read_floor_candidates_non_utf8_file_returns_empty(tmp_path: Path) -> None:
-    """Issue #90 review finding 6 regression: a non-UTF-8 sidecar must
-    degrade to 'no candidates' the same as malformed JSON, not raise
-    UnicodeDecodeError past this function and abort the whole page render."""
-    (tmp_path / "floor.candidates.json").write_bytes(b"\xff\xfe\x00\x01garbage")
-    assert read_floor_candidates(tmp_path) == []
-
-
-def test_read_floor_candidates_returns_candidates_list(tmp_path: Path) -> None:
-    candidate = _floor_candidate()
-    (tmp_path / "floor.candidates.json").write_text(
-        json.dumps({"candidates": [candidate]}), encoding="utf-8"
-    )
-    assert read_floor_candidates(tmp_path) == [candidate]
 
 
 # ---------------------------------------------------------------------------
@@ -2467,8 +1511,8 @@ def test_sign_floor_invariant_never_overwrites_a_foreign_entry() -> None:
     """Colliding with a hand-authored entry from an entirely different
     producer (e.g. Q4 promotion) must refuse exactly the same way — this
     function draws no distinction between 'foreign' and 'self-authored'
-    collisions (unlike promote_interview_q4_invariants/
-    promote_floor_candidate's attribution-marker guards): ANY id collision
+    collisions (unlike promote_interview_q4_invariants'
+    attribution-marker guard): ANY id collision
     with a different statement is refused."""
     hand_authored = {
         "id": "no-uncapped-liability",
@@ -2803,10 +1847,12 @@ def test_cli_floor_sign_missing_playbook_fails(tmp_path: Path) -> None:
     assert "playbook.opf.json" in output
 
 
-def test_cli_floor_propose_docstring_no_longer_claims_curation_cli() -> None:
-    """Issue #103: the docstring used to say a candidate could be accepted
-    'via the curation CLI' — false; chat_curate.py has zero occurrences of
-    'floor'."""
+def test_cli_floor_propose_help_points_at_floor_sign_not_a_retired_surface() -> None:
+    """Issue #103/#239: the docstring must name ``floor sign`` as the way to
+    accept a candidate — not the (never real) curation CLI, nor the retired
+    review page and ``view apply``."""
     exit_code, output = _invoke("floor", "propose", "--help")
     assert exit_code == 0
-    assert "curation CLI" not in output
+    assert "playbook floor sign" in " ".join(output.split())
+    for retired in ("curation CLI", "review.html", "view apply", "export feedback"):
+        assert retired not in output

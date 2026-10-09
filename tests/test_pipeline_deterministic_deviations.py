@@ -1,12 +1,10 @@
-"""The consumer path through the real pipeline (issue #220).
+"""The standard check through the real pipeline (issues #220, #239).
 
-With no deviation judge configured — ``mine_corpus``'s default — every
-deviation is the deterministic standard check: each observation carries a
-``standard`` fact (does its text match our template clause?) and a deviation
-derived from it, never a judged or stub verdict, and ``project_playbook``
-carries it into the precedent record — no stance is ever read out of the
-placeholder risk_delta. A deviation judge is opt-in (the advisory layer):
-its verdicts never enter ``evidence``.
+There is no deviation judge: every deviation is the deterministic standard
+check. Each observation carries a ``standard`` fact (does its text match our
+template clause?) and a deviation derived from it, never a judged or stub
+verdict, and ``project_playbook`` carries it into the precedent record — no
+stance is ever read out of the placeholder risk_delta.
 
 Driven end-to-end through the real producers (``mine_corpus`` ->
 ``project_playbook``) over the wholly synthetic ``examples/nda`` corpus with
@@ -34,14 +32,10 @@ from playbook_engine.observation_builder import (
 )
 from playbook_engine.pipeline import (
     _assess_deviations_with_standards,
-    _NullDeviationJudge,
     mine_corpus,
     project_playbook,
 )
-from playbook_engine.run_manifest import (
-    read_deviation_mode,
-    read_run_manifest,
-)
+from playbook_engine.run_manifest import read_run_manifest
 from playbook_engine.taxonomy import load_taxonomy
 from playbook_engine.tracked_changes_overlay import HunkEnrichment
 from playbook_engine.validator import validate_document
@@ -147,24 +141,7 @@ def test_default_project_is_the_verdict_free_precedent(consumer_run: tuple) -> N
     assert "x_judgments" not in playbook
 
 
-def test_opt_in_deviation_judge_never_enters_evidence(tmp_path: Path) -> None:
-    """Wiring a deviation judge (here the stub) is the advisory layer: its
-    verdicts replace the standard check's deviation in the store, the
-    standard fact is still recorded, and the playbook watermarks the
-    unjudged rows — but evidence.precedent still carries only the standard
-    fact, and a stub verdict is not a judgment (no x_judgments)."""
-    observations, playbook = _mine_and_project(tmp_path, deviation_judge=_NullDeviationJudge())
-    bases = {obs["basis"] for obs in observations}
-    assert "needs_review" in bases
-    assert all(isinstance(obs.get("standard"), bool) for obs in observations)
-    assert validate_document(playbook).ok
-    assert playbook["compiler"]["stub_basis_present"] is True
-    assert "x_judgments" not in playbook
-    for judged in ("risk_delta", "deviation", "historical_stance"):
-        assert f'"{judged}"' not in json.dumps(playbook["evidence"]), judged
-
-
-# -- the deviation mode is recorded at mine time, not inferred (issue #230) --
+# -- mine -> project through the CLI ------------------------------------------
 
 
 def _all_template_corpus(root: Path) -> Path:
@@ -173,9 +150,7 @@ def _all_template_corpus(root: Path) -> Path:
     Each deal is a copy of the NDA example's own ``standard-form.rtf`` with a
     ``hints.yaml`` naming it the executed copy (the production hint
     ``version_orderer.Hints`` reads), so every clause takes the unchanged
-    fast path: on the opt-in judged run too, every row carries
-    ``basis="deterministic"`` and a computed ``standard`` fact — the store
-    shape that used to be indistinguishable from the consumer path.
+    fast path.
     """
     corpus = root / "corpus"
     for deal in ("deal-one", "deal-two"):
@@ -185,38 +160,10 @@ def _all_template_corpus(root: Path) -> Path:
     return corpus
 
 
-def _mine_all_template(out_dir: Path, corpus: Path, **judges: Any) -> dict[str, Any]:
-    cfg = load_config(_SMOKE_CONFIG)
-    taxonomy = load_taxonomy(cfg.taxonomy_path)
-    mine_corpus(corpus, cfg, taxonomy, out_dir, no_cache=True, **judges)
-    return {"cfg": cfg, "taxonomy": taxonomy}
-
-
-def test_mine_records_the_deviation_mode_whatever_the_rows_look_like(tmp_path: Path) -> None:
-    """The #220 review's failure scenario: a judge was configured but every
-    clause was unchanged from the template, so the store's rows look exactly
-    like the consumer path's. The mode is recorded when they are written
-    (issue #230), not inferred from them."""
-    corpus = _all_template_corpus(tmp_path)
-
-    judged_out = tmp_path / "judged"
-    _mine_all_template(judged_out, corpus, deviation_judge=_NullDeviationJudge())
-    rows = read_observations_jsonl(judged_out / "observations.jsonl")
-    assert rows
-    assert {o["outcome"] for o in rows} == {"signed"}
-    assert all(o["basis"] == "deterministic" for o in rows)
-    assert read_deviation_mode(judged_out) == "judged"
-
-    consumer_out = tmp_path / "consumer"
-    _mine_all_template(consumer_out, corpus)
-    assert read_deviation_mode(consumer_out) == "deterministic"
-
-
-def test_cli_mine_records_the_mode_and_project_succeeds(tmp_path: Path) -> None:
-    """Through the CLI: ``mine --with-deviation-judge`` stamps the run
-    manifest with its environment AND keeps the recorded mode (the end-of-run
-    environment stamp must not erase it), and ``project`` (which has no
-    ``--opf-version``: one format, issue #238) emits OPF 0.4."""
+def test_cli_mine_stamps_the_manifest_and_project_succeeds(tmp_path: Path) -> None:
+    """Through the CLI: ``mine`` stamps the run manifest with its environment
+    (and no deviation mode — there is none to record), and ``project`` (which
+    has no ``--opf-version``: one format, issue #238) emits OPF 0.4."""
     corpus = _all_template_corpus(tmp_path)
     out_dir = tmp_path / "out"
     runner = CliRunner()
@@ -229,13 +176,12 @@ def test_cli_mine_records_the_mode_and_project_succeeds(tmp_path: Path) -> None:
             str(_SMOKE_CONFIG),
             "--out",
             str(out_dir),
-            "--with-deviation-judge",
         ],
     )
     assert result.exit_code == 0, result.output
     manifest = read_run_manifest(out_dir)
     assert manifest is not None and manifest.written_by == "mine"
-    assert manifest.deviation_mode == "judged"
+    assert "deviation_mode" not in json.loads((out_dir / "run_manifest.json").read_text())
 
     result = runner.invoke(cli, ["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
     assert result.exit_code == 0, result.output
@@ -276,13 +222,12 @@ def _rows(texts: list[str]) -> list[ClauseDiff]:
 def _consumer_observations(
     texts: list[str], std_nodes: list[str]
 ) -> tuple[list[Any], list[Observation]]:
-    """The consumer path's own producers: the per-row deterministic check
-    (``_assess_deviations_with_standards`` with no judge), then
+    """The pipeline's own producers: the per-row deterministic check
+    (``_assess_deviations_with_standards``), then
     ``build_observations`` merging the deal's nodes into one observation."""
     assessed = _assess_deviations_with_standards(
         _rows(texts),
         {_TID: std_nodes[0]},
-        None,
         template_std_nodes_by_tid={_TID: std_nodes},
     )
     observations = build_observations(
@@ -294,7 +239,6 @@ def _consumer_observations(
         attributions=[_AUTHOR] * len(texts),
         our_party_aliases=["Our Company"],
         standard_text_by_tid={_TID: std_nodes},
-        deterministic_deviations=True,
     )
     return assessed, observations
 

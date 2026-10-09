@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,11 +25,11 @@ from lxml import etree
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import load_config
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.floor_candidates import sign_floor_invariant
 from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.posture import apply_posture_interview
 from playbook_engine.taxonomy import load_taxonomy
+from playbook_engine.validator import validate_document
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -113,29 +114,6 @@ def _make_corpus_with_template(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
 
     out_dir = tmp_path / "out"
     return corpus_dir, config_path, out_dir, template_path
-
-
-class _FakeDeviationJudge:
-    """Deterministic fake ``DeviationJudge`` — always returns a fixed
-    substantive/worse/material verdict and records every batch it is asked
-    to assess, so a test can assert it was actually invoked (as opposed to
-    a clause being silently hardcoded deviation="none" without ever reaching
-    the judge — issue #103)."""
-
-    def __init__(self) -> None:
-        self.received_items: list[dict[str, str]] = []
-
-    def assess_batch(self, items: list[dict[str, str]], our_standard: str) -> list[DeviationResult]:
-        self.received_items.extend(items)
-        return [
-            DeviationResult(
-                deviation="substantive",
-                risk_delta=RiskDelta(direction="worse", magnitude="material"),
-                basis="judge",
-                rationale="Fake judge: clause differs materially from the template.",
-            )
-            for _ in items
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -273,28 +251,22 @@ def test_default_stub_judges_compile_watermarks_playbook(tmp_path: Path) -> None
     """End-to-end regression guard for issue #101.
 
     A real ``playbook mine`` + ``playbook project`` run with NO judges
-    configured (the CLI default) uses ``_AllInScopeJudge`` (scope) and
-    ``_NullDeviationJudge`` (deviation)
-    — both stubs, neither backed by an LLM. Neither stub ever emits an
-    Observation with basis="stub" literally: ``_AllInScopeJudge``'s
-    basis="stub" lands on the ``ScopeDecision`` (scope.json), not an
-    Observation, and ``_NullDeviationJudge`` emits basis="needs_review" (a
-    judge protocol IS wired for deviation, it's just the stub default).
-    Before the fix, neither signal reached ``assemble_playbook``, so a
-    default compile's ``compiler.stub_basis_present`` was always False — the
-    exact liability scenario issue #101 exists to catch (a stub-derived
-    playbook a consumer cannot tell apart from a real one). This test
-    drives the actual ``mine_corpus`` -> ``project_playbook`` path with no
-    judges passed at all and asserts the watermark now fires.
+    configured (the CLI default) uses ``_AllInScopeJudge`` (scope), a stub
+    not backed by an LLM. Its basis="stub" lands on the ``ScopeDecision``
+    (scope.json), never on an Observation (whose deviation is the
+    deterministic standard check). Before the fix, the signal never reached
+    ``assemble_playbook``, so a default compile's
+    ``compiler.stub_basis_present`` was always False — the exact liability
+    scenario issue #101 exists to catch (a stub-derived playbook a consumer
+    cannot tell apart from a real one). This test drives the actual
+    ``mine_corpus`` -> ``project_playbook`` path with no judges passed at all
+    and asserts the watermark now fires.
     """
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
     # Two versions with a real clause-text change (governing law: California
-    # -> Delaware) so the deviation classifier actually dispatches to
-    # _NullDeviationJudge for a changed clause — a single-version document
-    # never calls the deviation judge at all (see
-    # _observations_from_single_version), so this must be multi-version.
+    # -> Delaware), so the multi-version path is the one exercised.
     _write_rtf(deal_dir / "v1.rtf", _CORPUS_BODY)
     _write_rtf(deal_dir / "v2.rtf", _CORPUS_BODY_V2)
 
@@ -314,8 +286,8 @@ def test_default_stub_judges_compile_watermarks_playbook(tmp_path: Path) -> None
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
     config = load_config(config_path)
 
-    # No scope_judge / deviation_judge passed -> the pipeline's zero-LLM
-    # defaults apply (_AllInScopeJudge, _NullDeviationJudge).
+    # No scope_judge passed -> the pipeline's zero-LLM default applies
+    # (_AllInScopeJudge).
     mine_corpus(
         corpus_dir=corpus_dir,
         config=config,
@@ -329,9 +301,8 @@ def test_default_stub_judges_compile_watermarks_playbook(tmp_path: Path) -> None
     assert scope["documents"][0]["basis"] == "stub"
     obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
     observations = [json.loads(line) for line in obs_lines if line.strip()]
-    assert all(obs.get("basis") != "stub" for obs in observations), (
-        "no Observation should ever carry basis='stub' literally — the stub "
-        "signal from _NullDeviationJudge is basis='needs_review'"
+    assert all(obs.get("basis") == "deterministic" for obs in observations), (
+        "no Observation carries a stub basis — its deviation is the deterministic standard check"
     )
 
     playbook = project_playbook(
@@ -518,19 +489,14 @@ def test_failed_version_ingest_recorded_in_manifest_and_needs_attention(
     assert ingest_by_version["v1"]["extractor"] == "rtf"
     assert ingest_by_version["v2"]["status"] == "ok"
 
-    # The failure must surface in the after-action report's Needs Attention
-    # section, not just as a console WARNING.
-    from playbook_engine.aar import build_after_action_data
+    # The failure must surface in the inspection report's Needs attention
+    # section (the skill's checkpoint), not just as a console WARNING.
+    from playbook_engine.inspection_report import build_inspection_report
 
-    aar_data = build_after_action_data(out_dir)
-    needs_attention = aar_data["needs_attention"]
-    matches = [
-        item
-        for item in needs_attention
-        if item["document_id"] == "deal-001" and item["version"] == "v1"
-    ]
-    assert matches, f"expected a Needs-Attention item for deal-001/v1; got {needs_attention}"
-    assert any("version ingest failed" in r for r in matches[0]["reasons"])
+    report = build_inspection_report(out_dir)
+    assert "## Needs attention" in report
+    assert "`version_ingest_failed`" in report
+    assert "Version 'v1' failed to ingest and was never mined" in report
 
 
 # ---------------------------------------------------------------------------
@@ -544,8 +510,7 @@ def test_failed_version_ingest_recorded_in_manifest_and_needs_attention(
 
 def test_all_versions_failed_document_is_quarantined(tmp_path: Path) -> None:
     """A document with no successfully ingested version lands in
-    quarantine.json (and hence the AAR's Needs Attention section), not in
-    the void."""
+    quarantine.json, not in the void."""
     corpus_dir = tmp_path / "corpus"
 
     # deal-001: its ONLY version is a well-formed RTF with no body text ->
@@ -600,16 +565,6 @@ def test_all_versions_failed_document_is_quarantined(tmp_path: Path) -> None:
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
     assert "deal-001" not in {d["document_id"] for d in manifest}
     assert "deal-002" in {d["document_id"] for d in manifest}
-
-    # And the after-action report surfaces it as a Needs-Attention item.
-    from playbook_engine.aar import build_after_action_data
-
-    aar_data = build_after_action_data(out_dir)
-    matches = [i for i in aar_data["needs_attention"] if i["document_id"] == "deal-001"]
-    assert matches, (
-        f"expected a Needs-Attention item for deal-001; got {aar_data['needs_attention']}"
-    )
-    assert any("quarantined" in r for r in matches[0]["reasons"])
 
 
 # ---------------------------------------------------------------------------
@@ -681,13 +636,6 @@ def test_quarantine_json_cleared_on_clean_rerun(tmp_path: Path) -> None:
     assert second_run == [], (
         f"expected an empty quarantine.json after a clean re-run, got {second_run}"
     )
-
-    # The AAR must not keep reporting deal-001 as needing attention.
-    from playbook_engine.aar import build_after_action_data
-
-    aar_data = build_after_action_data(out_dir)
-    matches = [i for i in aar_data["needs_attention"] if i["document_id"] == "deal-001"]
-    assert not matches, f"deal-001 should no longer be flagged, got {matches}"
 
 
 # ---------------------------------------------------------------------------
@@ -1121,174 +1069,71 @@ def test_net_diff_attribution_does_not_leak_earlier_round_author_into_signed_rou
 # ---------------------------------------------------------------------------
 
 
-def test_single_version_clause_diffed_against_template(tmp_path: Path) -> None:
-    """A single-version document with a signed clause that differs from the
-    canonical template must route that clause through the deviation judge,
-    not hardcode deviation="none"/basis="deterministic".
+def test_single_version_clause_is_checked_against_the_template(tmp_path: Path) -> None:
+    """A single-version document's clauses get the standard check against the
+    canonical template (issue #103) — never a hardcoded deviation="none".
 
-    Regression guard for issue #103: previously
-    ``_observations_from_single_version`` recorded EVERY clause of a
-    single-version document as deviation="none" unconditionally — a document
-    with no negotiation trail was never actually checked against the
-    template at all. ``_make_corpus_with_template`` gives a single-version
-    document (``deal-001/v1.rtf``) whose clause texts (``_CORPUS_BODY``)
-    differ materially from the configured template's (``_TEMPLATE_BODY`` —
-    different party names, different governing-law state, different term
-    language), so every classified clause should be routed to the injected
-    fake judge.
+    ``_make_corpus_with_template`` gives a single-version document
+    (``deal-001/v1.rtf``) whose clause texts (``_CORPUS_BODY``) differ from
+    the configured template's (``_TEMPLATE_BODY``): none is our standard.
+    Pointing the template at the document's own text flips the same
+    clauses to standard, so the answer really comes from the comparison.
     """
-    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
 
+    def _deal_observations(root: Path, *, template_body: str | None) -> list[dict[str, Any]]:
+        corpus_dir, config_path, out_dir, template_path = _make_corpus_with_template(root)
+        if template_body is not None:
+            _write_rtf(template_path, template_body)
+        cfg = load_config(config_path)
+        mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+        lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+        rows = [json.loads(line) for line in lines if line.strip()]
+        deal = [o for o in rows if o["citation"]["document_id"] == "deal-001" and o["taxonomy_id"]]
+        assert deal, "deal-001 must have classified observations"
+        return deal
+
+    differing = _deal_observations(tmp_path / "differing", template_body=None)
+    assert all(o["standard"] is False and o["deviation"] == "substantive" for o in differing), (
+        "a clause that differs from the template must not be recorded as matching it"
+    )
+
+    matching = _deal_observations(tmp_path / "matching", template_body=_CORPUS_BODY)
+    assert all(o["standard"] is True and o["deviation"] == "none" for o in matching), (
+        "a clause identical to the template clause is our standard"
+    )
+    assert all(o["basis"] == "deterministic" for o in differing + matching)
+
+
+def test_a_prior_curation_section_is_not_carried_forward(tmp_path: Path) -> None:
+    """The curation overlay is retired (issue #239): a recompile reads only
+    the prior playbook's posture and floor, so a hand-added `curation` key is
+    dropped rather than merged and re-emitted."""
+    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
     cfg = load_config(config_path)
+    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
+    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
 
-    fake_judge = _FakeDeviationJudge()
-
-    mine_corpus(
-        corpus_dir=corpus_dir,
-        config=cfg,
-        taxonomy=taxonomy,
-        out_dir=out_dir,
-        deviation_judge=fake_judge,
-    )
-
-    assert fake_judge.received_items, (
-        "the deviation judge must be invoked for a single-version document "
-        "whose clauses differ from the canonical template — it was never "
-        "reached at all before issue #103"
-    )
-
-    obs_lines = (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
-    observations = [json.loads(line) for line in obs_lines if line.strip()]
-    deal_obs = [o for o in observations if o["citation"]["document_id"] == "deal-001"]
-    assert deal_obs, "deal-001 must have observations"
-
-    judged = [o for o in deal_obs if o["basis"] == "judge"]
-    assert judged, (
-        f"expected at least one observation routed through the injected "
-        f"deviation judge (basis='judge'); got bases={[o['basis'] for o in deal_obs]}"
-    )
-    assert all(o["deviation"] == "substantive" for o in judged), (
-        "the injected fake judge's verdict must reach the observation, not a "
-        "hardcoded deviation='none'"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Issue #147: embedded attorney-pinned positions (curation overlay) survive a
-# recompile and are conflict-flagged when fresh evidence contradicts them.
-# ---------------------------------------------------------------------------
-
-
-def _inject_pin(out_dir: Path, clause_id: str, position: str, baseline_stance: str) -> None:
-    """Simulate an attorney pin having been embedded in a PRIOR compile.
-
-    Writes ``curation.pins`` directly into ``playbook.opf.json`` — mirroring
-    what ``viewer.apply_feedback``'s ``override`` handling does — so the next
-    ``project_playbook`` call has a prior curation section to merge against.
-    """
     opf_path = out_dir / "playbook.opf.json"
     doc = json.loads(opf_path.read_text(encoding="utf-8"))
-    doc["curation"] = {
-        "pins": [
-            {
-                "clause_id": clause_id,
-                "item_id": "C1",
-                "position": position,
-                "baseline_stance": baseline_stance,
-                "pinned_at": "2026-01-01T00:00:00Z",
-            }
-        ]
-    }
+    doc["curation"] = {"pins": [{"clause_id": "x", "position": "p"}]}
     opf_path.write_text(json.dumps(doc), encoding="utf-8")
 
-
-def test_curation_pin_survives_recompile_with_unchanged_evidence(tmp_path: Path) -> None:
-    """A pinned position survives a recompile when evidence is unchanged:
-    the pin is preserved verbatim and no conflict is raised.
-    """
-    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
-    taxonomy = load_taxonomy(_TAXONOMY_PATH)
-    cfg = load_config(config_path)
-
-    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-
-    clause = next(
-        c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
-    )
-    _inject_pin(
-        out_dir,
-        clause_id=clause["id"],
-        position="consistently_held",
-        baseline_stance="unknown",  # curation.NO_STANCE — the document carries none
-    )
-
-    # Recompile with NO change to the observation store.
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-
-    pins = playbook_v2["curation"]["pins"]
-    assert len(pins) == 1
-    pin = pins[0]
-    assert pin["clause_id"] == clause["id"]
-    assert pin["position"] == "consistently_held", "the pinned position must be preserved verbatim"
-    assert pin.get("conflict") is None, "no conflict when the pin's baseline is the document's"
-
-    clause_v2 = next(
-        c for c in playbook_v2["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
-    )
-    assert clause_v2 == clause, "the pin never rewrites the evidence it is pinned to"
-
-
-def test_curation_pin_on_opf_04_survives_recompile_and_a_stance_pin_is_flagged(
-    tmp_path: Path,
-) -> None:
-    """Issue #223: curation is unchanged in OPF 0.4, which carries no stance.
-    A pin made by the real producer (``playbook curate``) records
-    ``baseline_stance`` "unknown" — the value the recompile compares
-    against — so it survives a recompile with no conflict. A pin whose
-    baseline is a real stance (stamped against a retired 0.3 document) is
-    flagged on the next compile: that stance is no longer computed."""
-    from playbook_engine.chat_curate import apply_curate_commands
-    from playbook_engine.validator import validate_document
-
-    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
-    taxonomy = load_taxonomy(_TAXONOMY_PATH)
-    cfg = load_config(config_path)
-    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-
-    project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-    apply_curate_commands(
-        out_dir, ["pin governing_law to usually_held"], now="2026-01-01T00:00:00Z"
-    )
-    pinned = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    (pin,) = pinned["curation"]["pins"]
-    assert pin["baseline_stance"] == "unknown"
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-    (pin_v2,) = playbook_v2["curation"]["pins"]
-    assert pin_v2["position"] == "usually_held"
-    assert pin_v2.get("conflict") is None
-
-    # A pin with a real-stance baseline (as a retired 0.3 document stamped).
-    _inject_pin(
-        out_dir, clause_id=pin["clause_id"], position="usually_held", baseline_stance="no_signal"
-    )
-    playbook_v3 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-    conflict = playbook_v3["curation"]["pins"][0]["conflict"]
-    assert conflict["recomputed_historical_stance"] == "unknown"
-    assert validate_document(playbook_v3).ok
+    recompiled = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
+    assert "curation" not in recompiled
+    assert validate_document(recompiled).ok
 
 
 def test_posture_and_floor_survive_recompile(tmp_path: Path) -> None:
     """Issue #123 regression: a re-run of `project_playbook` (Route C's
     "re-derive Evidence from a changed corpus") must carry forward the
-    prior playbook's authored Posture and signed Floor VERBATIM, exactly
-    like curation pins — not reset them to `{}`.
+    prior playbook's authored Posture and signed Floor VERBATIM — not reset
+    them to `{}`.
 
     Before the fix, `assemble_playbook` unconditionally wrote
     `playbook["posture"] = {}` / `playbook["floor"] = {}` on every compile,
-    and `project_playbook` only ever read the prior playbook's `curation`
-    key forward — so a GC's `playbook posture interview` + `playbook floor
+    and `project_playbook` read nothing of the prior playbook forward — so a GC's `playbook posture interview` + `playbook floor
     sign` work was silently destroyed by the next `project`, contradicting
     SKILL.md Route C's "the Posture and Floor you already signed should
     survive" promise.
@@ -1341,45 +1186,8 @@ def test_posture_and_floor_survive_recompile(tmp_path: Path) -> None:
         "signed Floor invariants must survive a recompile verbatim — Route C's promise"
     )
     # And the carried-forward content is reflected in the recomputed identity
-    # hashes (posture/floor ARE part of content_hash, unlike curation).
+    # hashes (posture/floor ARE part of content_hash).
     assert playbook_v2["identity"]["content_hash"] == content_hash(playbook_v2)
-    assert playbook_v2["identity"]["section_digests"] == compute_section_digests(playbook_v2)
-
-
-def test_curation_pin_excluded_from_content_hash_but_digested_separately(tmp_path: Path) -> None:
-    """Adding/updating a curation pin must not perturb identity.content_hash
-    (curation is excluded — issue #147), but identity.section_digests.curation
-    must change to track the pin content.
-    """
-    corpus_dir, config_path, out_dir, _template_path = _make_corpus_with_template(tmp_path)
-    taxonomy = load_taxonomy(_TAXONOMY_PATH)
-    cfg = load_config(config_path)
-
-    mine_corpus(corpus_dir=corpus_dir, config=cfg, taxonomy=taxonomy, out_dir=out_dir)
-    playbook_v1 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-    hash_v1 = content_hash(playbook_v1)
-    assert hash_v1 == playbook_v1["identity"]["content_hash"]
-    curation_digest_v1 = playbook_v1["identity"]["section_digests"]["curation"]
-
-    clause = next(
-        c for c in playbook_v1["evidence"]["clauses"] if c["taxonomy_id"] == "governing_law"
-    )
-    _inject_pin(
-        out_dir,
-        clause_id=clause["id"],
-        position="consistently_held",
-        baseline_stance="unknown",
-    )
-
-    playbook_v2 = project_playbook(out_dir=out_dir, config=cfg, taxonomy=taxonomy)
-
-    assert playbook_v2["identity"]["content_hash"] == hash_v1, (
-        "a curation-only change (no evidence change) must not perturb content_hash"
-    )
-    assert playbook_v2["identity"]["section_digests"]["curation"] != curation_digest_v1, (
-        "the curation section digest must change once a pin is present"
-    )
-    # Sanity: the digest really is computed the same way canonicalize.py defines it.
     assert playbook_v2["identity"]["section_digests"] == compute_section_digests(playbook_v2)
 
 

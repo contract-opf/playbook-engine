@@ -52,7 +52,7 @@ _OUT_PLACEHOLDER = "out/quickstart-demo"
 # text (timestamps/paths vary; these substrings do not).
 _EXPECTED_MARKERS = [
     "no errors, 2 warning(s)",  # lint-corpus
-    "loaded 11 verdict(s)",  # judge-apply
+    "loaded 7 verdict(s)",  # judge-apply
     "L1-L4 complete: 7 observations, 2 docs",  # mine
     "Playbook written:",  # project
 ]
@@ -175,17 +175,16 @@ def test_quickstart_commands_run(quickstart_run: _QuickstartRun) -> None:
         f"the whole fixture); found {len(still_needs_review)}"
     )
 
-    # Schema-valid is NOT enough: the walkthrough's payoff (viewer HTML,
-    # render-prompt) is only real if the playbook actually compiled clause
+    # Schema-valid is NOT enough: the walkthrough's payoff (the bundle) is only real if the playbook actually compiled clause
     # positions. This exact gap shipped once — the fixture had no detectable
     # signed copy, every observation landed outcome="unsigned", the position
     # compiler withheld all of them, and the "validating" playbook rendered a
-    # blank viewer page (issue #200). The fixture's per-deal hints.yaml
+    # blank bundle (issue #200). The fixture's per-deal hints.yaml
     # (signed_version) is what keeps this populated.
     clauses = doc.get("evidence", {}).get("clauses", [])
     assert clauses, (
         "quickstart-produced playbook has zero evidence.clauses — schema-valid "
-        "but semantically empty (viewer renders a blank page; see issue #200)"
+        "but semantically empty (the bundle renders a blank page; see issue #200)"
     )
 
     # issue #93: the quickstart now walks the first control-ladder rung — a
@@ -203,24 +202,22 @@ def test_quickstart_commands_run(quickstart_run: _QuickstartRun) -> None:
         f"posture interview (issue #93): {invariants}"
     )
 
-    # The rendered prompt is the walkthrough's final payoff — assert against
-    # the artifact `render-prompt --out` wrote, NOT stdout (its stdout is only
-    # `wrote ...`; examples/README.md's render-prompt step has always used
-    # --out, so stdout was never the artifact — issue #93).
-    prompt_path = quickstart_run.out_dir / "review-prompt.md"
-    assert prompt_path.exists(), f"quickstart did not produce {prompt_path}"
-    prompt_text = prompt_path.read_text(encoding="utf-8")
-    assert "## HARD LINES (Floor)" in prompt_text
-    assert "no hard lines defined" not in prompt_text, (
-        "rendered prompt's HARD LINES section should be populated by the "
-        "interview step, not the empty-Floor marker (issue #93)"
-    )
-    assert "no posture yet" not in prompt_text, (
-        "rendered prompt's POSTURE section should be populated by the interview step (issue #93)"
-    )
-    assert "ADVISORY ONLY" not in prompt_text, (
-        "rendered prompt should no longer show the advisory-only banner now "
-        "that the Floor and Posture are populated (issue #93)"
+    # The bundle is the walkthrough's final payoff — the one human-readable
+    # artifact. Assert against the file `view bundle` wrote: it must carry the
+    # Floor and Posture the interview step authored (not the empty-section
+    # markers) and embed the canonical OPF JSON verbatim (issue #93).
+    bundle_path = quickstart_run.out_dir / "playbook.opf.html"
+    assert bundle_path.exists(), f"quickstart did not produce {bundle_path}"
+    bundle_text = bundle_path.read_text(encoding="utf-8")
+    assert 'id="opf-canonical"' in bundle_text
+    for inv in invariants:
+        assert inv["statement"] in bundle_text, (
+            f"the bundle should render the interview-authored hard line {inv['id']!r}"
+        )
+    assert "<strong>Posture:</strong> pending" not in bundle_text
+    assert "<strong>Floor:</strong> pending" not in bundle_text, (
+        "the bundle's Posture and Floor sections should be populated by the "
+        "interview step, not the pending note (issue #93)"
     )
 
 

@@ -12,7 +12,6 @@ import click
 import yaml
 
 from playbook_engine import __version__
-from playbook_engine.aar import build_after_action_report, write_after_action_report
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.config import ConfigError, load_config
 from playbook_engine.corpus_linter import lint_corpus
@@ -55,7 +54,7 @@ def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
     """Exit 1 when *doc* does not claim a supported opf_version (issue #238).
 
     The engine reads exactly one format. A command that reads a playbook
-    (digest, view bundle, render-prompt) must refuse a retired 0.1-0.3
+    (view bundle) must refuse a retired 0.1-0.3
     document loudly rather than render it as an empty or stale artifact —
     the same silent empty render opf_accessors exists to prevent (#154).
     The message mirrors the validator's "unsupported opf_version" error.
@@ -363,8 +362,7 @@ def _echo_rubric_report(policy: Any, echo: Callable[[str], None]) -> None:
     banked rubric no longer matches the one in force. ``stale`` items have
     already been re-queued by the judges (unless ``--accept-stale``);
     ``legacy`` items replayed but carry no stamp at all, so nobody can say
-    whether they are still valid — that is a standing reminder, printed every
-    run until ``playbook judge-migrate`` resolves it.
+    whether they are still valid.
     """
     from playbook_engine.rubric import STATE_LEGACY, STATE_STALE  # noqa: PLC0415
 
@@ -372,11 +370,9 @@ def _echo_rubric_report(policy: Any, echo: Callable[[str], None]) -> None:
     legacy = policy.total(STATE_LEGACY)
     if stale:
         tail = (
-            "replayed anyway (--accept-stale) — this run only; make it durable with "
-            "`playbook judge-migrate --accept-stale`"
+            "replayed anyway (--accept-stale) — this run only"
             if policy.accept_stale
-            else "re-queued for re-judgement. If you have decided the rubric change does "
-            "not affect them, bank that with `playbook judge-migrate --accept-stale`"
+            else "re-queued for re-judgement"
         )
         click.secho(
             f"WARNING: {stale} stored verdict(s) were made under an older rubric "
@@ -388,30 +384,24 @@ def _echo_rubric_report(policy: Any, echo: Callable[[str], None]) -> None:
         verb = "re-queued (--strict-rubric)" if policy.strict_legacy else "replayed"
         click.secho(
             f"NOTE: {legacy} stored verdict(s) carry no rubric version "
-            f"({policy.format_breakdown(STATE_LEGACY)}) — banked before rubric "
-            f"versioning existed, so their validity under the current rubric is "
-            f"unknown; {verb}. Stamp them with `playbook judge-migrate`.",
+            f"({policy.format_breakdown(STATE_LEGACY)}) — their validity under the "
+            f"current rubric is unknown; {verb}.",
             fg="yellow",
             err=True,
         )
 
 
-def _verdict_store_kwargs(
-    out_dir: Path, echo: Callable[[str], None], *, with_deviation_judge: bool = False
-) -> dict[str, Any]:
+def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[str, Any]:
     """Wire store-backed judges when a verdict store exists at ``out_dir/judge/verdicts.jsonl``.
-
-    The deviation judge is wired only when *with_deviation_judge* (issue
-    #220): by default deviations are the deterministic standard check, so a
-    stored deviation verdict is never replayed onto the consumer path and no
-    deviation item is ever queued. Scope, classification and provenance
-    judges are wired exactly as before.
 
     Used by ``mine`` (issue #102) — before this, ``mine`` never checked for
     a verdict store at all, so it always ran the stub judges even over an
     ``out_dir`` where a ``playbook judge`` / ``judge-apply`` round had
     already populated real verdicts, silently overwriting the judged
     ``observations.jsonl`` with stub-mode sentinels.
+
+    Every deviation is the deterministic standard check, so no judge is
+    wired for it: only scope, classification and provenance are judged.
 
     The L1-L4 stage cache stays ON (issue #219 — this used to force
     ``no_cache=True``, re-mining every document on every round). The
@@ -423,29 +413,15 @@ def _verdict_store_kwargs(
     sentinel can be replayed across rounds.
 
     Returns an empty dict when no verdict store exists (the stub judges
-    remain the default, same as before) — except under
-    *with_deviation_judge*, where the opt-in is still honoured: the
-    ``_NullDeviationJudge`` stub is wired (every changed clause
-    ``basis="needs_review"``, watermarked) and a warning says no verdicts
-    exist yet, so the flag is never silently ignored on a fresh out-dir.
+    remain the default, same as before).
     """
     verdicts_path = out_dir / "judge" / "verdicts.jsonl"
     if not verdicts_path.exists():
-        if not with_deviation_judge:
-            return {}
-        from playbook_engine.pipeline import _NullDeviationJudge  # noqa: PLC0415
-
-        echo(
-            f"WARNING: --with-deviation-judge but no verdict store at {verdicts_path} — "
-            "every changed clause is recorded needs_review (stub deviation judge) until "
-            "`playbook judge --with-deviation-judge` + `playbook judge-apply` bank verdicts"
-        )
-        return {"deviation_judge": _NullDeviationJudge()}
+        return {}
 
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
         StoreBackedClassificationJudge,
-        StoreBackedDeviationJudge,
         StoreBackedProvenanceJudge,
         StoreBackedScopeJudge,
         VerdictStore,
@@ -454,11 +430,11 @@ def _verdict_store_kwargs(
 
     store = VerdictStore(verdicts_path)
     pending = PendingQueue(out_dir / "judge" / "pending.jsonl")
-    # One policy instance shared by all four judges so the caller can report a
+    # One policy instance shared by every judge so the caller can report a
     # single coherent rubric tally afterwards (``_echo_rubric_report``).
     policy = RubricPolicy()
     echo(f"  judge store: {verdicts_path} (store-backed judges active)")
-    kwargs: dict[str, Any] = {
+    return {
         "scope_judge": StoreBackedScopeJudge(store=store, pending=pending, rubric=policy),
         "classification_judge": StoreBackedClassificationJudge(
             store=store, pending=pending, rubric=policy
@@ -466,52 +442,6 @@ def _verdict_store_kwargs(
         "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending, rubric=policy),
         "_rubric_policy": policy,
     }
-    if with_deviation_judge:
-        kwargs["deviation_judge"] = StoreBackedDeviationJudge(
-            store=store, pending=pending, rubric=policy
-        )
-    else:
-        echo("  deviation: deterministic standard check (no deviation judge; issue #220)")
-        n_banked = _count_stored_deviation_verdicts(verdicts_path)
-        if n_banked:
-            # An out-dir derived before #220 can carry hundreds of banked
-            # deviation verdicts. Re-mining without the flag ignores them by
-            # design, which drops every judged stance, acceptable_if and
-            # fallback from the result; say so loudly rather than leave a
-            # one-line status as the only trace.
-            echo(
-                f"WARNING: {n_banked} stored deviation verdict(s) in {verdicts_path} are NOT "
-                "applied — the consumer path uses the deterministic standard check. Pass "
-                "--with-deviation-judge to replay them (opt-in advisory layer)."
-            )
-    return kwargs
-
-
-def _count_stored_deviation_verdicts(verdicts_path: Path) -> int:
-    """Count deviation-kind verdicts banked in a verdict store (issue #220).
-
-    Reads the JSONL directly and classifies each record with
-    ``agent_judge.infer_verdict_kind``; unreadable lines are skipped, the same
-    tolerance ``VerdictStore`` itself applies on load.
-    """
-    import json  # noqa: PLC0415
-
-    from playbook_engine.agent_judge import infer_verdict_kind  # noqa: PLC0415
-
-    n = 0
-    try:
-        lines = verdicts_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return 0
-    for line in lines:
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        verdict = record.get("verdict") if isinstance(record, dict) else None
-        if isinstance(verdict, dict) and infer_verdict_kind(verdict) == "deviation":
-            n += 1
-    return n
 
 
 #: version_ingest[].reason values that represent a real extraction
@@ -701,57 +631,6 @@ def validate(file: Path) -> None:
         n_blocking = sum(1 for e in result.errors if e.blocking)
         click.secho(f"FAIL {file}: {n_blocking} error(s)", fg="red", err=True)
         raise SystemExit(1)
-
-
-@cli.command(name="render-prompt")
-@click.argument("playbook_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--out",
-    "out_file",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Write the rendered prompt to this file (default: stdout).",
-)
-def render_prompt_cmd(playbook_file: Path, out_file: Path | None) -> None:
-    """Compose Evidence+Posture+Floor into a review-ready system prompt.
-
-    Pure Markdown a user pastes into any chat LLM alongside a contract to
-    review. No API calls, no redline generation — the determinism boundary
-    (§5) rendered as instructions.
-    """
-    from playbook_engine.prompt_renderer import is_advisory_only, render_prompt
-
-    try:
-        doc = load_opf_file(playbook_file)
-    except Exception as exc:  # noqa: BLE001
-        click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-    _refuse_unsupported_opf_version(doc, playbook_file)
-
-    rendered = render_prompt(doc)
-
-    # Advisory-only (no Floor invariants, no Posture) means nothing in the
-    # rendered prompt is binding — render_prompt() already says so loudly in
-    # the artifact itself (the banner), but a WARN on stderr surfaces it to
-    # whoever ran the command even when the artifact only ever lands in a
-    # file or a pipe. Never stdout — stdout is the artifact (issue #92; see
-    # the stderr-routing convention in commit f8abbaa/85c1a13).
-    if is_advisory_only(doc):
-        click.secho(
-            f"WARN {playbook_file.name}: advisory-only playbook (no hard lines, no "
-            "posture) — nothing in the rendered prompt is binding",
-            fg="yellow",
-            err=True,
-        )
-
-    if out_file is not None:
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out_file.with_suffix(out_file.suffix + ".tmp")
-        tmp.write_text(rendered, encoding="utf-8")
-        tmp.replace(out_file)
-        click.secho(f"wrote {out_file}", fg="green")
-    else:
-        click.echo(rendered)
 
 
 @cli.command(name="resolve-citation")
@@ -1013,294 +892,6 @@ def precedent_cmd(
         click.echo("(no results)", err=True)
 
 
-@cli.command(name="publish")
-@click.argument("playbook_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--out",
-    "out_file",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Write the party-anonymous public playbook to this path.",
-)
-@click.option(
-    "--party-label",
-    default="the company",
-    show_default=True,
-    help="Replaces perspective.party.",
-)
-@click.option(
-    "--counterparty-label",
-    default="the counterparty",
-    show_default=True,
-    help="Replaces every GENERIC free-text '(the) counterparty' mention. "
-    "Per-deal numbered aliases (e.g. Counterparty-7) are never touched.",
-)
-@click.option(
-    "--keep-dates",
-    is_flag=True,
-    default=False,
-    help="Skip coarsening observed_at to YYYY-Qn.",
-)
-@click.option(
-    "--accept-residue-risk",
-    is_flag=True,
-    default=False,
-    help="Publish even if the independent verify pass flags residual semantic residue.",
-)
-@click.option(
-    "--redact-terms",
-    "redact_terms_file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "File of additional terms to redact, one per line ('#' comments and "
-        "blank lines ignored) — the GC's residue-review output (signatory "
-        "names, institution name fragments) that the entity registry did not "
-        "know. Terms are replaced with '[redacted]' doc-wide and join the "
-        "hard no-survival backstop. Keep this file OUT of version control."
-    ),
-)
-@click.option(
-    "--entity-registry",
-    "entity_registry_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "Path to the run's entity_registry.json (the born-safe real-name "
-        "sidecar 'playbook mine --entity-registry' wrote). Defaults to the "
-        "machine-global ~/.cache/playbook-engine/entity_registry.json — which "
-        "inside a container is EMPTY, disabling the step-4 backstop (see "
-        "--allow-empty-registry). Always pass the run's sidecar here."
-    ),
-)
-@click.option(
-    "--allow-empty-registry",
-    is_flag=True,
-    default=False,
-    help=(
-        "Explicitly allow publishing when the entity registry resolves empty "
-        "(step-4 no-known-entity backstop disabled for this run). Without "
-        "this flag an empty registry hard-fails publish. Use only for "
-        "no-corpus / template-mode workflows with no real counterparty names "
-        "for the backstop to guard."
-    ),
-)
-@click.option(
-    "--config",
-    "config_path",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help=(
-        "Path to this corpus's engine config YAML. Its "
-        "scan_role_words_extra / scan_stopwords_extra lists are merged into "
-        "the step-5.5 institution gate and the proper-noun sweep on top "
-        "of the engine's agreement-type-neutral defaults — pass the config "
-        "an affiliation (or other domain-flavored) corpus was mined with to "
-        "restore its prior scan leniency. Without this flag, publish uses "
-        "the neutral defaults only."
-    ),
-)
-def publish_cmd(
-    playbook_file: Path,
-    out_file: Path,
-    party_label: str,
-    counterparty_label: str,
-    keep_dates: bool,
-    accept_residue_risk: bool,
-    redact_terms_file: Path | None,
-    entity_registry_path: Path | None,
-    allow_empty_registry: bool,
-    config_path: Path | None,
-) -> None:
-    """Produce a party-anonymous public playbook.
-
-    Runs the six-step publication transform: party/counterparty role-label
-    normalization, DMS-path stripping, date coarsening, a deterministic
-    no-known-entity backstop (scans the entity registry's real names against
-    every string in the output — a hit fails loud, unconditionally), the
-    full-surface semantic-residue judgment + independent verify pass, and an
-    identity recompute (the public doc is a different artifact; its
-    identity.supersedes names the private doc's content_hash).
-
-    No LLM is wired here — this defaults to stub judges (basis="stub"),
-    same as every other zero-configuration path in this engine. Wiring a
-    real judge is a separate concern (see playbook_engine/export_profile.py).
-
-    Pass --config for a domain-flavored corpus: the engine's step-5.5
-    institution gate and proper-noun sweep default to a neutral vocabulary,
-    and --config's scan_role_words_extra / scan_stopwords_extra restore
-    whatever leniency that corpus's config
-    (e.g. examples/affiliation-config/playbook.config.yaml) declares.
-    """
-    import datetime  # noqa: PLC0415
-    from collections.abc import Sequence  # noqa: PLC0415
-
-    from playbook_engine.entity_registry import DEFAULT_REGISTRY_PATH, EntityRegistry
-    from playbook_engine.export_profile import RedactionFinding, TextSample, VerifyFinding
-    from playbook_engine.playbook_assembler import write_playbook
-    from playbook_engine.publisher import PublishError, publish_playbook
-
-    try:
-        doc = load_opf_file(playbook_file)
-    except Exception as exc:  # noqa: BLE001
-        click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    # Issue #107: scan_role_words_extra / scan_stopwords_extra come from the
-    # corpus's own engine config, not a bare vocabulary list — reusing
-    # load_config keeps this the single validated path for those keys (list
-    # of strings; ConfigError on anything else) instead of a second,
-    # divergent parser living here in the CLI.
-    scan_role_words_extra: list[str] = []
-    scan_stopwords_extra: list[str] = []
-    if config_path is not None:
-        try:
-            engine_cfg = load_config(config_path)
-        except ConfigError as exc:
-            click.secho(f"ERROR: could not load config {config_path}: {exc}", fg="red", err=True)
-            raise SystemExit(1) from exc
-        scan_role_words_extra = engine_cfg.scan_role_words_extra
-        scan_stopwords_extra = engine_cfg.scan_stopwords_extra
-
-    # Real names for the deterministic backstop (step 4): the entity
-    # registry's alias -> canonical-name map IS the held-out real-name list
-    # (write_holdout_map persists this same data to a sidecar) — an absent
-    # registry (no corpus ever mined on this machine) yields an empty list,
-    # making the backstop a no-op rather than a crash. That is exactly what
-    # happens inside a container using the ephemeral default path, so it
-    # hard-fails unless the caller explicitly opts in via
-    # --allow-empty-registry (mirrors --accept-residue-risk): publish identity
-    # gates are fail-closed by design, and a scrolling stderr warning is not a
-    # sufficient control (issue #32).
-    registry = EntityRegistry.load(
-        entity_registry_path.resolve() if entity_registry_path else DEFAULT_REGISTRY_PATH
-    )
-    known_entity_names = list(registry.alias_map().values())
-    if not known_entity_names:
-        if not allow_empty_registry:
-            click.secho(
-                "ERROR: entity registry is EMPTY — the step-4 no-known-entity "
-                "backstop is a NO-OP for this publish. Pass --entity-registry "
-                "<out>/entity_registry.json (the sidecar 'playbook mine "
-                "--entity-registry' wrote) for a real guarantee, or pass "
-                "--allow-empty-registry to publish anyway (no-corpus / "
-                "template-mode only).",
-                fg="red",
-                err=True,
-            )
-            raise SystemExit(1)
-        click.secho(
-            "WARNING: entity registry is EMPTY — the step-4 no-known-entity "
-            "backstop is a NO-OP for this publish (--allow-empty-registry).",
-            fg="yellow",
-            err=True,
-        )
-    else:
-        click.echo(f"  backstop: {len(known_entity_names)} known entity name(s) from registry")
-
-    class _StubRedactionJudge:
-        """No LLM configured — an honest basis='stub' no-residue verdict."""
-
-        def evaluate_batch(self, samples: Sequence[TextSample]) -> list[RedactionFinding]:
-            return [
-                RedactionFinding(
-                    path=s.path,
-                    has_residue=False,
-                    rationale="No LLM configured (stub mode).",
-                    basis="stub",
-                )
-                for s in samples
-            ]
-
-    class _StubVerifyJudge:
-        """No LLM configured — an honest basis='stub' no-leak verdict."""
-
-        def evaluate_batch(self, samples: Sequence[TextSample]) -> list[VerifyFinding]:
-            return [
-                VerifyFinding(
-                    path=s.path,
-                    leaked=False,
-                    rationale="No LLM configured (stub mode).",
-                    basis="stub",
-                )
-                for s in samples
-            ]
-
-    redact_terms: list[str] = []
-    if redact_terms_file is not None:
-        for line in redact_terms_file.read_text(encoding="utf-8").splitlines():
-            term = line.strip()
-            if term and not term.startswith("#"):
-                redact_terms.append(term)
-        click.echo(f"  redact list: {len(redact_terms)} term(s) from {redact_terms_file}")
-
-    try:
-        report = publish_playbook(
-            doc,
-            redaction_judge=_StubRedactionJudge(),
-            verify_judge=_StubVerifyJudge(),
-            known_entity_names=known_entity_names,
-            published_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
-            party_label=party_label,
-            counterparty_label=counterparty_label,
-            keep_dates=keep_dates,
-            accept_residue_risk=accept_residue_risk,
-            redact_terms=redact_terms,
-            scan_role_words_extra=scan_role_words_extra,
-            scan_stopwords_extra=scan_stopwords_extra,
-        )
-    except PublishError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    write_playbook(report.doc, out_file)
-    click.secho(f"wrote {out_file}", fg="green")
-    if report.leaked:
-        click.secho(
-            f"WARNING: {len(report.leaked)} residue finding(s) published anyway "
-            "(--accept-residue-risk):",
-            fg="yellow",
-            err=True,
-        )
-        for finding in report.leaked:
-            click.echo(f"  {finding.path}: {finding.rationale}", err=True)
-
-    # Proper-noun residue report (issue #211): the reviewer's checkable list of
-    # every name-shaped string surviving in the output. Advisory — written
-    # beside the playbook for human/GC classification before publication.
-    import json  # noqa: PLC0415
-
-    residue_path = out_file.parent / "residue_report.json"
-    residue_tmp = residue_path.with_suffix(residue_path.suffix + ".tmp")
-    residue_tmp.write_text(
-        json.dumps(
-            {"proper_noun_findings": [f.to_dict() for f in report.proper_noun_findings]},
-            indent=2,
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    residue_tmp.replace(residue_path)
-    n = len(report.proper_noun_findings)
-    if n:
-        click.secho(
-            f"residue report: {n} proper-noun-like string(s) remain — review "
-            f"{residue_path} before publishing (confirm none is a counterparty).",
-            fg="yellow",
-            err=True,
-        )
-        for pn in report.proper_noun_findings[:10]:
-            click.echo(f"  {pn.text}  (×{pn.count})", err=True)
-        if n > 10:
-            click.echo(f"  … and {n - 10} more in {residue_path.name}", err=True)
-    else:
-        click.secho(
-            f"residue report: no proper-noun-like strings remain (see {residue_path}).",
-            fg="green",
-        )
-
-
 @cli.group(name="taxonomy")
 def taxonomy_group() -> None:
     """Manage clause taxonomies."""
@@ -1420,32 +1011,6 @@ _SKIP_PREFLIGHT_HELP = (
     "and decided they do not apply."
 )
 
-_WITH_DEVIATION_JUDGE_HELP = (
-    "Opt in to judged deviation/risk verdicts (an advisory layer for "
-    "posture/floor work). Off by default: every deviation is the "
-    "deterministic standard check — does the clause text match our template "
-    "clause? — and no deviation item is ever queued. Pass it to BOTH "
-    "`playbook judge` and `playbook mine` on the same out-dir, or the mine "
-    "round ignores the judged verdicts."
-)
-
-_with_deviation_judge_option = click.option(
-    "--with-deviation-judge",
-    "with_deviation_judge",
-    is_flag=True,
-    default=False,
-    help=_WITH_DEVIATION_JUDGE_HELP,
-)
-
-
-def _echo_deviation_judge_off(echo: Callable[[str], None]) -> None:
-    """The plan/drain loop's deviation line when no deviation judge is wired
-    (issue #220, the default): zero pending, and why."""
-    echo(
-        "  deviation: 0 pending (deviation judge off — deterministic standard check; "
-        "pass --with-deviation-judge to queue judged deviation verdicts)"
-    )
-
 
 def _run_corpus_preflight(
     corpus_dir: Path,
@@ -1563,7 +1128,6 @@ def _run_corpus_preflight(
         "place. Only relevant when provenance.known_entities is set."
     ),
 )
-@_with_deviation_judge_option
 @_accept_environment_change_option
 def mine_cmd(
     corpus_dir: Path,
@@ -1573,13 +1137,12 @@ def mine_cmd(
     force_rewrite: bool,
     skip_preflight: bool,
     entity_registry_path: Path | None,
-    with_deviation_judge: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine CORPUS_DIR and write the observation store (L1–L4).
 
-    Runs ingest, scope gate, classification, alignment, and deviation
-    assessment for every agreement in CORPUS_DIR and writes:
+    Runs ingest, scope gate, classification, alignment, and the
+    standard check for every agreement in CORPUS_DIR and writes:
 
     \b
       observations.jsonl    — per-clause observation store
@@ -1671,9 +1234,7 @@ def mine_cmd(
     # ``refresh_extraction`` is sourced directly from the raw ``no_cache``
     # flag (the operator's literal --no-cache) (issue #78): only an operator
     # who declares the extraction suspect re-extracts/re-OCRs the corpus.
-    verdict_kwargs = _verdict_store_kwargs(
-        out_dir, click.echo, with_deviation_judge=with_deviation_judge
-    )
+    verdict_kwargs = _verdict_store_kwargs(out_dir, click.echo)
     # Not a mine_corpus parameter — the shared RubricPolicy the wired judges
     # tally into, read back for reporting after the run.
     rubric_policy = verdict_kwargs.pop("_rubric_policy", None)
@@ -1915,7 +1476,7 @@ def inspect_cmd(out_dir: Path, report_path: Path | None) -> None:
     OUT_DIR is the output directory produced by ``playbook mine``.
 
     Lets a lawyer verify the engine's structural inferences — version ordering,
-    signed-copy identification, provenance, and per-clause deviations — before
+    signed-copy identification, provenance, and per-clause outcomes — before
     trusting the compiled playbook.  If an inference is wrong, add a
     ``hints.yaml`` to the document folder and re-run ``playbook mine`` (no
     flag needed — the hints file is hashed into that document's cache key).
@@ -2194,7 +1755,6 @@ def stage_cmd(
     default=False,
     help=_SKIP_PREFLIGHT_HELP,
 )
-@_with_deviation_judge_option
 @_accept_environment_change_option
 def judge_cmd(
     corpus_dir: Path,
@@ -2206,15 +1766,12 @@ def judge_cmd(
     strict_rubric: bool,
     entity_registry_path: Path | None,
     skip_preflight: bool,
-    with_deviation_judge: bool,
     accept_environment_change: bool,
 ) -> None:
     """Mine the corpus with store-backed judges and emit the pending review queue.
 
-    Deviation verdicts are opt-in (``--with-deviation-judge``): by default
-    every deviation is the deterministic standard check, so the plan and the
-    drain loop report zero pending deviation items and only scope,
-    classification and provenance items are ever queued.
+    Only scope, classification and provenance items are queued: every
+    deviation is the deterministic standard check, so nothing is judged for it.
 
     Reads the verdict store at <out>/judge/verdicts.jsonl and replays any
     previously supplied verdicts.  For every new clause payload not in the store,
@@ -2239,7 +1796,6 @@ def judge_cmd(
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
         StoreBackedClassificationJudge,
-        StoreBackedDeviationJudge,
         StoreBackedProvenanceJudge,
         StoreBackedScopeJudge,
         VerdictStore,
@@ -2346,11 +1902,6 @@ def judge_cmd(
             cls_judge = StoreBackedClassificationJudge(
                 store=store, pending=plan_pending, rubric=rubric_policy
             )
-            dev_judge = (
-                StoreBackedDeviationJudge(store=store, pending=plan_pending, rubric=rubric_policy)
-                if with_deviation_judge
-                else None
-            )
             prov_judge = StoreBackedProvenanceJudge(
                 store=store, pending=plan_pending, rubric=rubric_policy
             )
@@ -2363,7 +1914,6 @@ def judge_cmd(
                     out_dir=Path(_tmp) / "mine_out",
                     scope_judge=scope_judge,
                     classification_judge=cls_judge,
-                    deviation_judge=dev_judge,
                     provenance_judge=prov_judge,
                     # Issue #219: the plan reads through the REAL out-dir's
                     # stage cache rather than re-mining every document into
@@ -2389,8 +1939,6 @@ def judge_cmd(
             plan_pending_path = Path(_tmp) / "pending.jsonl"
             if not plan_pending_path.exists():
                 click.secho("OK  0 pending items (all verdicts already in store)", fg="green")
-                if not with_deviation_judge:
-                    _echo_deviation_judge_off(click.echo)
                 _echo_segmentation_cost_line(seg_stats, click.echo)
                 _echo_rubric_report(rubric_policy, click.echo)
                 return
@@ -2424,9 +1972,8 @@ def judge_cmd(
             total = sum(counts.values())
             # Token estimate from the real payload sizes (issue #134) — a
             # flat per-item average previously ignored that a provenance
-            # payload (preamble + letterhead) and a deviation payload (a
-            # full diff hunk) can differ from a short classify payload by
-            # an order of magnitude. ``//4`` is the same chars-per-token
+            # payload (preamble + letterhead) can differ from a short
+            # classify payload by an order of magnitude. ``//4`` is the same chars-per-token
             # rule of thumb used elsewhere for rough English-text estimates
             # (there is no tokenizer dependency in this codebase).
             total_chars = sum(
@@ -2438,8 +1985,6 @@ def judge_cmd(
             click.echo(f"Pending items: {total} (token estimate: ~{token_estimate:,})")
             for kind, count in sorted(counts.items()):
                 click.echo(f"  {kind}: {count}")
-            if not with_deviation_judge:
-                _echo_deviation_judge_off(click.echo)
             _echo_segmentation_cost_line(seg_stats, click.echo)
             _echo_rubric_report(rubric_policy, click.echo)
         return
@@ -2456,11 +2001,6 @@ def judge_cmd(
     cls_judge = StoreBackedClassificationJudge(
         store=store, pending=pending_queue, rubric=rubric_policy
     )
-    dev_judge = (
-        StoreBackedDeviationJudge(store=store, pending=pending_queue, rubric=rubric_policy)
-        if with_deviation_judge
-        else None
-    )
     prov_judge = StoreBackedProvenanceJudge(
         store=store, pending=pending_queue, rubric=rubric_policy
     )
@@ -2473,7 +2013,6 @@ def judge_cmd(
             out_dir=out_dir,
             scope_judge=scope_judge,
             classification_judge=cls_judge,
-            deviation_judge=dev_judge,
             provenance_judge=prov_judge,
             # The stage cache stays on (issue #219) — see the --plan-only
             # branch above. extraction_cache must stay warm across judge
@@ -2524,8 +2063,6 @@ def judge_cmd(
         click.echo(f"Pending items: {total_pending}")
         for kind, count in sorted(counts.items()):
             click.echo(f"  {kind}: {count}")
-        if not with_deviation_judge:
-            _echo_deviation_judge_off(click.echo)
 
         # A pending item whose key is ALREADY in the verdict store is a
         # re-queue of a stored verdict that failed replay reconstruction
@@ -2558,8 +2095,6 @@ def judge_cmd(
         _echo_rubric_report(rubric_policy, click.echo)
     else:
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
-        if not with_deviation_judge:
-            _echo_deviation_judge_off(click.echo)
         _echo_rubric_report(rubric_policy, click.echo)
 
     # This round ran mine_corpus to completion (the except PipelineError
@@ -2745,18 +2280,6 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
         loaded += 1
 
     click.secho(f"OK  loaded {loaded} verdict(s) into {verdicts_store_path}", fg="green")
-    n_deviation = sum(1 for _key, _verdict, kind in valid_records if kind == "deviation")
-    if n_deviation:
-        # Issue #220: deviation verdicts are the opt-in advisory layer. They
-        # are stored, but a default `mine`/`judge` round never replays them —
-        # the consumer path uses the deterministic standard check instead.
-        click.secho(
-            f"NOTE: {n_deviation} deviation verdict(s) stored — replayed only by "
-            "`playbook judge`/`playbook mine` run with --with-deviation-judge; the "
-            "default consumer path uses the deterministic standard check instead.",
-            fg="yellow",
-            err=True,
-        )
     if unstamped:
         click.secho(
             f"WARN: {unstamped} verdict(s) loaded without a rubric stamp — their "
@@ -2766,168 +2289,6 @@ def judge_apply_cmd(out_dir: Path, verdicts_path: Path) -> None:
             fg="yellow",
             err=True,
         )
-
-
-@cli.command(name="judge-migrate")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option(
-    "--config", "config_path", type=click.Path(exists=True, path_type=Path), required=True
-)
-@click.option(
-    "--kind",
-    "kinds",
-    multiple=True,
-    type=click.Choice(["classify", "deviation", "provenance", "scope"]),
-    help="Restrict the migration to these judge kinds (repeatable; default: all).",
-)
-@click.option(
-    "--accept-stale",
-    "accept_stale",
-    is_flag=True,
-    default=False,
-    help=(
-        "Also re-stamp verdicts whose rubric version is KNOWN to differ from the "
-        "current one. This is an explicit assertion that the rubric change does not "
-        "affect those judgments — not a default."
-    ),
-)
-@click.option(
-    "--dry-run",
-    "dry_run",
-    is_flag=True,
-    default=False,
-    help="Report what would be re-stamped and exit without writing.",
-)
-def judge_migrate_cmd(
-    out_dir: Path,
-    config_path: Path,
-    kinds: tuple[str, ...],
-    accept_stale: bool,
-    dry_run: bool,
-) -> None:
-    """Report and repair rubric stamps on the verdict store in OUT_DIR.
-
-    Every stored verdict falls into one of three states against the rubric
-    currently in force (see ``playbook_engine/rubric.py``):
-
-    \b
-      current  — stamped with the rubric in force; replays normally.
-      legacy   — carries no stamp at all; banked before rubric versioning
-                 existed, so nothing knows whether it still holds.
-      stale    — stamped with a rubric that has since changed; `playbook
-                 judge` re-queues these for re-judgement.
-
-    With no flags this command **adopts the legacy verdicts**: it re-stamps
-    every unstamped verdict with the current rubric for its kind. That is the
-    upgrade path for an existing store — it preserves the banked human
-    judgment rather than discarding it, while converting an unbounded unknown
-    into an explicit, dated assertion that from here on those verdicts are
-    answers to the current question. Run ``--dry-run`` first, and only adopt
-    once you have satisfied yourself the rubric has not moved under them.
-
-    ``--accept-stale`` additionally re-stamps KNOWN-stale verdicts. Reach for
-    it when a rubric bump provably cannot change a class of answers (e.g. a
-    taxonomy description reworded for clarity), scoped with ``--kind``.
-
-    Re-stamping appends to ``verdicts.jsonl``; the prior record stays on disk
-    as an audit trail of what the verdict was originally banked under.
-    """
-    import json  # noqa: PLC0415
-
-    from playbook_engine.agent_judge import VerdictStore, infer_verdict_kind  # noqa: PLC0415
-    from playbook_engine.rubric import (  # noqa: PLC0415
-        STATE_CURRENT,
-        STATE_LEGACY,
-        STATE_STALE,
-        RubricPolicy,
-        RubricStamp,
-        current_versions,
-    )
-
-    out_dir_resolved = out_dir.resolve()
-    verdicts_path = out_dir_resolved / "judge" / "verdicts.jsonl"
-    if not verdicts_path.is_file():
-        click.secho(f"ERROR: no verdict store at {verdicts_path}", fg="red", err=True)
-        raise SystemExit(1)
-
-    try:
-        cfg = load_config(config_path)
-    except ConfigError as exc:
-        click.secho(f"Config error: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-    try:
-        taxonomy = load_taxonomy(cfg.taxonomy_path)
-    except TaxonomyError as exc:
-        click.secho(f"Taxonomy error: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    versions = current_versions(taxonomy=taxonomy, agreement_type=cfg.agreement_type)
-    selected = set(kinds) if kinds else set(versions)
-
-    # Kind resolution, best available source first: the stamp itself, then the
-    # pending queue, then verdict field shape.
-    pending_kinds: dict[str, str] = {}
-    pending_path = out_dir_resolved / "judge" / "pending.jsonl"
-    if pending_path.is_file():
-        for pline in pending_path.read_text(encoding="utf-8").splitlines():
-            pline = pline.strip()
-            if not pline:
-                continue
-            try:
-                pitem = json.loads(pline)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(pitem, dict) and "key" in pitem and "kind" in pitem:
-                pending_kinds[pitem["key"]] = pitem["kind"]
-
-    store = VerdictStore(verdicts_path)
-    policy = RubricPolicy()  # neutral: classification only, no run semantics
-
-    click.echo(f"store  : {verdicts_path}  ({len(store)} verdict(s))")
-    click.echo("rubric : " + "  ".join(f"{k}={v}" for k, v in sorted(versions.items())))
-
-    tally: dict[tuple[str, str], int] = {}
-    to_restamp: list[tuple[str, str]] = []  # (key, kind)
-    unknown_kind = 0
-    for key, record in store.records():
-        kind = record.rubric_kind or pending_kinds.get(key) or infer_verdict_kind(record.verdict)
-        if kind is None or kind not in versions:
-            unknown_kind += 1
-            continue
-        state, _replay = policy.classify(record.rubric_version, versions[kind])
-        tally[(kind, state)] = tally.get((kind, state), 0) + 1
-        if kind not in selected:
-            continue
-        if state == STATE_LEGACY or (state == STATE_STALE and accept_stale):
-            to_restamp.append((key, kind))
-
-    for state in (STATE_CURRENT, STATE_LEGACY, STATE_STALE):
-        total = sum(n for (_k, s), n in tally.items() if s == state)
-        breakdown = ", ".join(
-            f"{k}: {n}" for (k, s), n in sorted(tally.items()) if s == state and n
-        )
-        click.echo(f"  {state:<8}: {total}" + (f"  ({breakdown})" if breakdown else ""))
-    if unknown_kind:
-        click.secho(
-            f"  {'unknown':<8}: {unknown_kind}  (kind undeterminable — left untouched)",
-            fg="yellow",
-        )
-
-    if not to_restamp:
-        click.secho("OK  nothing to re-stamp", fg="green")
-        return
-
-    if dry_run:
-        click.secho(
-            f"DRY RUN: would re-stamp {len(to_restamp)} verdict(s) "
-            f"(kinds: {', '.join(sorted({k for _key, k in to_restamp}))})",
-            fg="yellow",
-        )
-        return
-
-    for key, kind in to_restamp:
-        store.restamp(key, RubricStamp(kind=kind, version=versions[kind]))
-    click.secho(f"OK  re-stamped {len(to_restamp)} verdict(s) in {verdicts_path}", fg="green")
 
 
 @cli.command(name="segment")
@@ -3422,104 +2783,6 @@ def induce_taxonomy_cmd(
         )
 
 
-@cli.command(name="report")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option(
-    "--out",
-    "report_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help=(
-        "Write the Markdown report to this file (default: print to stdout). "
-        "When supplied, also writes a JSON twin alongside at the same stem "
-        "(e.g. --out report.md writes both report.md and report.json)."
-    ),
-)
-def report_cmd(out_dir: Path, report_path: Path | None) -> None:
-    """Render an after-action report from a compiled OUT_DIR.
-
-    Reads ``scope.json``, ``trail/*.json``, ``observations.jsonl``,
-    ``playbook.opf.json``, and ``judge/`` from OUT_DIR and renders a
-    structured Markdown report with six sections: Corpus Coverage, Backbone
-    Health, Judgment Economics, Semantic Coverage, Needs Attention, and
-    Honesty.
-
-    When ``--out report.md`` is supplied, a JSON twin (``report.json``) is
-    written alongside so downstream tooling can consume the structured data.
-    """
-    try:
-        if report_path:
-            write_after_action_report(out_dir.resolve(), report_path.resolve())
-            click.secho(f"OK  {report_path}", fg="green")
-            json_twin = report_path.with_suffix(".json")
-            click.secho(f"OK  {json_twin}", fg="green")
-        else:
-            click.echo(build_after_action_report(out_dir.resolve()))
-    except (FileNotFoundError, ValueError) as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-
-@cli.command(name="digest")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option(
-    "--out",
-    "digest_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Write the digest JSON to this file (default: <out_dir>/playbook.digest.json).",
-)
-def digest_cmd(out_dir: Path, digest_path: Path | None) -> None:
-    """Emit the compact model-facing digest of OUT_DIR/playbook.opf.json.
-
-    An OPF 0.4 playbook already carries the digest (digest_version 3) as its
-    top-level `digest` section — this command extracts it to a standalone
-    sidecar (and derives it on the fly when the section is absent). The
-    sidecar is what a consuming
-    review application feeds a model as the system-prompt projection; the
-    full playbook stays on disk for example_ref drill-down.
-    """
-    import json as _json  # noqa: PLC0415
-
-    from playbook_engine.canonicalize import canonicalize  # noqa: PLC0415
-    from playbook_engine.digest import build_digest, digest_token_estimate  # noqa: PLC0415
-
-    resolved = out_dir.resolve()
-    opf_path = resolved / "playbook.opf.json"
-    if not opf_path.exists():
-        click.secho(f"ERROR: playbook.opf.json not found in {resolved}", fg="red", err=True)
-        raise SystemExit(1)
-
-    try:
-        doc = _json.loads(opf_path.read_text(encoding="utf-8"))
-    except ValueError as exc:  # includes json.JSONDecodeError
-        click.secho(f"ERROR: could not parse {opf_path}: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-    _refuse_unsupported_opf_version(doc, opf_path)
-    digest = doc.get("digest") or build_digest(doc)
-    dest = digest_path.resolve() if digest_path else resolved / "playbook.digest.json"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
-    # Written in the same canonical form (sorted keys, no insignificant
-    # whitespace) the ~40K-token budget is measured against — a pretty-
-    # printed sidecar would be ~20%+ larger on disk than the estimate a
-    # consumer sees, silently breaking the budget promise (issue #211).
-    tmp.write_text(canonicalize(digest) + "\n", encoding="utf-8")
-    tmp.replace(dest)
-
-    token_est = digest_token_estimate(digest)
-    click.secho(f"OK  {dest}", fg="green")
-    n_clauses = len(digest.get("clauses") or [])
-    click.echo(f"  clauses: {n_clauses}  ~{token_est:,} tokens (chars/4)")
-    if token_est > 40_000:
-        click.secho(
-            "  WARNING: digest exceeds the ~40K-token target — consumers may "
-            "need to trim before prompting",
-            fg="yellow",
-            err=True,
-        )
-
-
 @cli.command(name="scorecard")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
 @click.option(
@@ -3581,64 +2844,7 @@ def scorecard_cmd(out_dir: Path, compare_path: Path | None, scorecard_path: Path
 
 @cli.group(name="view")
 def view_group() -> None:
-    """Render a review HTML surface or apply reviewer feedback."""
-
-
-@view_group.command(name="render")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option(
-    "--out",
-    "out_file",
-    type=click.Path(path_type=Path),
-    default=None,
-    help=(
-        "Write the HTML to this file (default: <out_dir>/playbook.review.html). "
-        "Also prints the path on success."
-    ),
-)
-@click.option(
-    "--alias-map",
-    "alias_map_file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help=(
-        "Path to the held-out alias->entity map (e.g. <out_dir>/alias_map.json, "
-        "written by 'playbook mine'). When given, resolves aliases "
-        "to real names in the rendered HTML for authorized reviewers. "
-        "Possessing read access to this restricted file IS the authorization gate; "
-        "omit this flag to render a still-safe, alias-only view."
-    ),
-)
-def view_render_cmd(out_dir: Path, out_file: Path | None, alias_map_file: Path | None) -> None:
-    """Render OUT_DIR/playbook.opf.json as a self-contained review HTML.
-
-    The HTML file embeds the full playbook JSON, requires no network access,
-    and contains per-clause comment boxes plus an Export feedback button.
-
-    OUT_DIR is the output directory produced by ``playbook mine`` followed
-    by ``playbook project``.
-    """
-    from playbook_engine.viewer import load_alias_map, render_review_html  # noqa: PLC0415
-
-    resolved = out_dir.resolve()
-    dest = out_file.resolve() if out_file else resolved / "playbook.review.html"
-
-    alias_map = load_alias_map(alias_map_file.resolve()) if alias_map_file else None
-
-    try:
-        render_review_html(resolved, out_file=dest, alias_map=alias_map)
-    except FileNotFoundError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-    except ValueError as exc:  # includes json.JSONDecodeError
-        click.secho(
-            f"ERROR: could not parse {resolved / 'playbook.opf.json'}: {exc}", fg="red", err=True
-        )
-        raise SystemExit(1) from exc
-
-    click.secho(f"OK  {dest}", fg="green")
-    if alias_map:
-        click.secho(f"  aliases resolved to real names using {alias_map_file}", fg="cyan")
+    """Render the human-readable OPF bundle."""
 
 
 @view_group.command(name="bundle")
@@ -3661,10 +2867,10 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
     blocks (ids: opf-canonical, opf-digest). The bare playbook.opf.json
     remains the canonical artifact; the bundle contains it, never replaces
     it — a consumer extracts the JSON block and verifies
-    identity.content_hash. Takes no --alias-map by design: the bundle stays
-    alias-only. This is NOT a guarantee of pseudonymization — known_entities
-    matching is best-effort, so run the mandatory residue check (see the
-    playbook-from-corpus skill) before treating the bundle as shareable.
+    identity.content_hash. The bundle stays alias-only. This is NOT a
+    guarantee of pseudonymization — known_entities matching is best-effort,
+    so run the mandatory residue check (see the playbook-from-corpus skill)
+    before treating the bundle as shareable.
     """
     import json as _json  # noqa: PLC0415
 
@@ -3689,101 +2895,6 @@ def view_bundle_cmd(out_dir: Path, out_file: Path | None) -> None:
         raise SystemExit(1) from exc
 
     click.secho(f"OK  {dest}", fg="green")
-
-
-@view_group.command(name="apply")
-@click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.argument("feedback_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help=(
-        "Apply FEEDBACK_FILE even if its _export.content_hash binding does "
-        "not match OUT_DIR/playbook.opf.json's current content_hash — i.e. "
-        "the review page was rendered from a different playbook. Without "
-        "this flag, a detected mismatch is refused with an error. "
-        "Corrections may land on the wrong clauses when forced."
-    ),
-)
-def view_apply_cmd(out_dir: Path, feedback_file: Path, force: bool) -> None:
-    """Apply FEEDBACK_FILE corrections to OUT_DIR.
-
-    Translates classification corrections into verdict-store
-    entries, free-text notes/comments into viewer_notes.md, ``override``
-    (attorney-pinned position) corrections into a ``curation`` pin embedded
-    directly in ``playbook.opf.json`` — it survives a later recompile and is
-    flagged if fresh evidence contradicts it — and the top-level ``"floor"``
-    key's accept/reject decisions: ``accept`` promotes a Floor candidate
-    into ``floor.invariants`` with attribution; ``reject`` records the
-    rejection in ``floor.candidates.json`` so it is not re-proposed. Any key
-    it cannot honor is reported as not applied rather than counted toward a
-    false "OK".
-
-    provenance/signed_version/order corrections are reported as not
-    applied: each names one document, and a clause item cites none. Set
-    them by hand in that deal's hints.yaml, then re-mine.
-
-    FEEDBACK_FILE carries an ``_export`` binding stamped by the viewer's
-    Export button: if it does not match OUT_DIR's current playbook.opf.json
-    content_hash — e.g. the out-dir was re-mined or re-projected since the
-    review page was rendered — this command refuses with an error rather
-    than risk silently landing corrections on the wrong clauses. Pass
-    ``--force`` to apply anyway.
-
-    OUT_DIR is the output directory produced by ``playbook mine`` followed
-    by ``playbook project``.
-    FEEDBACK_FILE is the feedback.json produced by the HTML viewer.
-    """
-    from playbook_engine.viewer import apply_feedback  # noqa: PLC0415
-
-    resolved = out_dir.resolve()
-
-    try:
-        result = apply_feedback(resolved, feedback_file.resolve(), force=force)
-    except (FileNotFoundError, ValueError) as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-
-    if result.verdicts_written:
-        click.secho(
-            f"  {result.verdicts_written} verdict(s) written to judge/verdicts.jsonl", fg="cyan"
-        )
-    if result.notes_written:
-        click.secho(f"  notes appended to {resolved / 'viewer_notes.md'}", fg="cyan")
-    if result.pins_written:
-        for item_num in result.pins_written:
-            click.secho(f"  {item_num}: position pinned in playbook.opf.json", fg="cyan")
-    if result.floor_promoted:
-        click.secho(
-            f"  {len(result.floor_promoted)} floor candidate(s) promoted to "
-            "floor.invariants in playbook.opf.json",
-            fg="cyan",
-        )
-        for candidate_id in result.floor_promoted:
-            click.secho(f"    {candidate_id}: promoted", fg="cyan")
-    if result.floor_rejected:
-        click.secho(
-            f"  {len(result.floor_rejected)} floor candidate(s) rejected in floor.candidates.json",
-            fg="cyan",
-        )
-        for candidate_id in result.floor_rejected:
-            click.secho(f"    {candidate_id}: rejected", fg="cyan")
-    for item_num, messages in result.skipped.items():
-        for message in messages:
-            click.secho(f"  {item_num}: not applied — {message}", fg="yellow")
-
-    applied = bool(
-        result.verdicts_written
-        or result.notes_written
-        or result.pins_written
-        or result.floor_promoted
-        or result.floor_rejected
-    )
-    if applied:
-        click.secho("OK  feedback applied", fg="green")
-    else:
-        click.secho("NOTE  no feedback applied — all keys unsupported or unresolved", fg="yellow")
 
 
 @cli.group(name="posture")
@@ -3942,12 +3053,10 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
 
     This is a REVIEW ARTIFACT for the legal owner — it never writes to the
     OPF ``floor`` section, and never auto-promotes a candidate into
-    ``floor.invariants``. Accepting a candidate is a human act: review
-    OUT_DIR/playbook.review.html, export feedback, then run
-    ``playbook view apply``. For a hard line the legal owner is
-    authoring themselves, verbatim — not one of these derived candidates —
-    use ``playbook floor sign`` instead; do not hand-edit
-    ``floor.invariants``.
+    ``floor.invariants``. Accepting a candidate is a human act: the legal
+    owner reads the table and records each hard line they accept with
+    ``playbook floor sign``, using the candidate's statement or wording of
+    their own. Do not hand-edit ``floor.invariants``.
     """
     import json  # noqa: PLC0415
 
@@ -4160,92 +3269,3 @@ def floor_sign_cmd(
     posture_prompt = ((doc.get("posture") or {}).get("system_prompt")) or ""
     for warning in check_posture_floor_conflict(posture_prompt, invariants):
         click.secho(f"WARN  {warning}", fg="yellow")
-
-
-@cli.command(name="curate")
-@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option(
-    "--command",
-    "commands_inline",
-    multiple=True,
-    help=(
-        "A single curate instruction, e.g. 'pin governing_law to usually_conceded' "
-        "or 'note governing_law: check next cycle'. Repeatable."
-    ),
-)
-@click.option(
-    "--file",
-    "commands_file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Path to a file of curate instructions, one per line ('#' starts a comment line).",
-)
-@click.option(
-    "--by",
-    "pinned_by",
-    default=None,
-    help="Attribution stamped on any pin created this run (curation.pins[].pinned_by).",
-)
-def curate_cmd(
-    out_dir: Path,
-    commands_inline: tuple[str, ...],
-    commands_file: Path | None,
-    pinned_by: str | None,
-) -> None:
-    """Apply chat-style curate instructions to OUT_DIR/playbook.opf.json.
-
-    A minimal deterministic command grammar (not LLM-driven parsing) for the
-    "chat to fine-tune" interaction goal:
-
-    \b
-        pin governing_law to usually_conceded[: optional comment]
-        note governing_law: free-text note
-
-    Pins are embedded directly in ``curation.pins`` (survive a
-    later recompile, and are flagged if fresh evidence contradicts the
-    pinned position); notes are appended to ``viewer_notes.md``. Every run
-    also refreshes conflict status on every already-embedded pin, so
-    evidence that moved via any other path (a recompile, a hand edit) is
-    reported the next time ``curate`` runs.
-
-    Give instructions via repeated ``--command``, a ``--file`` of one
-    instruction per line, or both.
-
-    OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
-    followed by 'playbook project').
-    """
-    from playbook_engine.chat_curate import apply_curate_commands  # noqa: PLC0415
-
-    commands: list[str] = list(commands_inline)
-    if commands_file is not None:
-        commands.extend(commands_file.read_text(encoding="utf-8").splitlines())
-
-    if not commands:
-        click.secho("ERROR: no curate instructions given (--command / --file)", fg="red", err=True)
-        raise SystemExit(1)
-
-    try:
-        result = apply_curate_commands(out_dir.resolve(), commands, pinned_by=pinned_by)
-    except FileNotFoundError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
-    except ValueError as exc:  # includes json.JSONDecodeError
-        click.secho(
-            f"ERROR: could not parse {out_dir.resolve() / 'playbook.opf.json'}: {exc}",
-            fg="red",
-            err=True,
-        )
-        raise SystemExit(1) from exc
-
-    for outcome in result.outcomes:
-        if outcome.action == "conflict":
-            click.secho(f"CONFLICT  {outcome.clause_id}: {outcome.detail}", fg="red")
-        elif outcome.applied:
-            click.secho(f"OK  {outcome.action} {outcome.clause_id}: {outcome.detail}", fg="green")
-        else:
-            click.secho(f"SKIP  {outcome.command!r} — {outcome.detail}", fg="yellow")
-
-    summary = f"applied {result.pins_written} pin(s), {result.notes_written} note(s)"
-    if result.conflicts:
-        summary += f", {len(result.conflicts)} conflict(s) flagged"
-    click.secho(summary, fg="cyan")

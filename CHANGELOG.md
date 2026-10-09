@@ -10,6 +10,52 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Retire everything off the corpus -> playbook -> toaster path (issue
+  #239).** The deal is the unit of precedent and the consumer's model does the
+  judging, so the engine keeps only what turns a corpus into a playbook the
+  toaster reads. Commands removed (no deprecation, no installs to protect):
+  `curate`, `digest`, `judge-migrate`, `publish`, `render-prompt`, `report`,
+  `view render` and `view apply`. `view bundle` stays as the one
+  human-readable artifact; `inspect` stays as the skill's checkpoint, minus
+  its deviation and risk columns (it shows each observation's `standard`
+  fact instead) and its floor-candidates and coherence-flag sections.
+  Modules deleted: `curation.py`, `chat_curate.py`, `viewer.py` (the review
+  HTML, its feedback loop and `--alias-map` page), `aar.py`, `prompt_renderer.py`,
+  `publisher.py` and `export_profile.py`. The `curation` section is no longer
+  emitted or carried forward by `project` (OPF 0.4's schema still allows it, so
+  `section_digests.curation` stays computed; #233's 0.5 schema drops it). The
+  `digest` lives only inside `playbook.opf.json`: there is no
+  `playbook.digest.json` sidecar. Config keys `scan_role_words_extra` and
+  `scan_stopwords_extra`, which only `publish` read, are rejected as unknown
+  keys. Floor candidates are accepted with `playbook floor sign`; the
+  accept/reject plumbing behind `view apply` (`promote_floor_candidate`,
+  `apply_floor_review`, the prior-decision carry-over in `floor propose`)
+  is gone.
+  **No judged deviation or risk.** The per-hunk deviation judge is retired:
+  `--with-deviation-judge` on `mine`/`judge`, `StoreBackedDeviationJudge`,
+  `BatchedDeviationJudge`, `DeviationJudge`/`assess_deviations` and its
+  relocation fast paths, `RiskDelta`, the `deviation` kind of the pending
+  queue, `judge-apply` and the rubric framework, the deviation section of the
+  skill's REFERENCE.md, the `x_judgments` layer (`build_x_judgments`) and the
+  `deviation_mode` run-manifest key. `DeviationResult` now carries only the
+  deterministic `none` / `substantive` standard-check outcome; every
+  observation keeps its `deviation`, `risk_delta` (a constant neutral/none
+  placeholder) and `basis` ("deterministic") fields, so the observation store
+  and the precedent record are byte-identical for the same corpus.
+  `normalize_for_standard` and `is_standard_text` are untouched. `stub_basis_present`
+  now watermarks on a stub scope decision only: no observation carries an
+  unjudged basis any more.
+  **A seam for new judge kinds.** The generic judge machinery stays and is
+  now kind-extensible: `agent_judge.register_verdict_kind(kind, validate,
+  matches)` teaches `judge-apply` a new pending-item kind (apply-time
+  validation and kind inference), and `rubric.register_judge_kind(kind,
+  prompt_version, surface)` adds its rubric version. `VerdictStore`,
+  `PendingQueue`, the rubric stamp, `judge` / `judge-apply` and the plan
+  output already work per kind. Add the kind to `scorecard.PENDING_KINDS` too.
+  The L1-L4 stage cache version (`_DEVIATION_VS_TEMPLATE_VERSION`) moves
+  to 17. The quickstart ends with `view bundle`, and its canned verdicts lose
+  the four deviation lines (7 verdicts load).
+
 - **One format: OPF 0.1–0.3, digest_version 2 and the 0.3 compiler surfaces
   are retired (issue #238).** There are no installed consumers, so nothing
   needs backward compatibility: the engine emits and validates exactly OPF

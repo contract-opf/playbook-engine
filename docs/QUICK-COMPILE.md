@@ -217,8 +217,7 @@ The engine ships with **stub judges** that run without LLM access. They produce 
 - Every document is accepted as in-scope.
 - Clause deviations are not judged: each is the deterministic standard
   check — `none` when the clause text matches your template clause,
-  `substantive` otherwise — with a neutral placeholder risk. Judged
-  deviation/risk verdicts are opt-in (`--with-deviation-judge`).
+  `substantive` otherwise — with a neutral placeholder risk.
 - Clause classification relies on simple word-overlap matching (Jaccard similarity) only.
 
 For real semantic judgment, you don't write code: use the packaged
@@ -228,7 +227,7 @@ For real semantic judgment, you don't write code: use the packaged
 compares the two, stage by stage.
 
 Once judgment is real, how far you take the playbook from there — your
-own intent, signed hard lines, granular curation — is entirely optional:
+own intent and signed hard lines — is entirely optional:
 see the [control ladder](ADOPTING.md#how-much-control-do-you-want) in
 ADOPTING.md.
 

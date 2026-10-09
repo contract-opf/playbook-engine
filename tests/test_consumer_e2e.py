@@ -5,8 +5,8 @@ silently degrade to empty output against a real compiled playbook. This test
 drives the *real* ``mine_corpus`` → ``project_playbook`` path (which runs
 the actual assembler) to produce a genuine ``playbook.opf.json`` — OPF 0.4,
 the one format the engine emits (issue #238) — then feeds that exact file
-into the AAR, the review viewer, the bundle and render-prompt, and asserts
-each surfaces its clauses rather than emitting empty output.
+into the bundle (the one human-readable artifact), and asserts it surfaces
+its clauses rather than emitting empty output.
 
 SECURITY NOTE: All fixtures are programmatically constructed RTF with
 synthetic, fictional content only (e.g. "Alpha Corp", "Beta University"). No
@@ -20,12 +20,11 @@ from pathlib import Path
 
 import yaml
 
-from playbook_engine.aar import build_after_action_data, build_after_action_report
 from playbook_engine.config import load_config
+from playbook_engine.document_renderer import render_bundle_html
 from playbook_engine.opf_accessors import playbook_clauses
 from playbook_engine.pipeline import mine_corpus, project_playbook
 from playbook_engine.taxonomy import load_taxonomy
-from playbook_engine.viewer import render_review_html
 
 _TAXONOMY_PATH = Path(__file__).parent.parent / "spec" / "taxonomy" / "affiliation-agreement.yaml"
 
@@ -118,47 +117,27 @@ def test_real_compile_emits_v04_with_evidence_clauses(tmp_path: Path) -> None:
     assert playbook_clauses(doc), "playbook_clauses must read the evidence shape"
 
 
-def test_report_reads_real_v04_playbook(tmp_path: Path) -> None:
-    """Issue #223: ``playbook report`` on a real OPF 0.4 compile counts its
-    clauses and its digest's clauses, and draws no stance histogram (0.4
-    carries no stance)."""
-    out_dir = _compile_real_playbook(tmp_path)
-    doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
-    n_clauses = len(doc["evidence"]["clauses"])
-
-    data = build_after_action_data(out_dir)
-    assert data["semantic_coverage"]["total_clauses_in_playbook"] == n_clauses
-    assert "rollup_position_histogram" not in data["semantic_coverage"]
-    assert data["artifacts"]["digest_clause_count"] == n_clauses
-    report = build_after_action_report(out_dir)
-    assert "Rollup-position histogram" not in report
-    assert f"{n_clauses} clauses" in report
-
-
-def test_view_render_reads_real_v04_playbook(tmp_path: Path) -> None:
-    """``playbook view render`` against a real compiled playbook emits
-    clause cards with their titles — not an empty review surface."""
+def test_bundle_reads_real_v04_playbook(tmp_path: Path) -> None:
+    """``playbook view bundle`` against a real compiled playbook emits every
+    clause's title — not an empty document — and embeds the canonical OPF
+    JSON and the digest the playbook carries."""
     out_dir = _compile_real_playbook(tmp_path)
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
 
-    html = render_review_html(out_dir)
-    # Every compiled clause title appears in the rendered review.
+    html = render_bundle_html(out_dir)
     titles = [c["title"] for c in doc["evidence"]["clauses"]]
     assert titles, "fixture must compile at least one clause"
     for title in titles:
-        assert title in html, f"clause title {title!r} missing from rendered viewer HTML"
-    # C1 numbering proves at least one clause card was rendered (empty index → no C1).
-    assert "C1" in html
+        assert title in html, f"clause title {title!r} missing from rendered bundle HTML"
+    assert 'id="opf-canonical"' in html and 'id="opf-digest"' in html
+    n_digest_clauses = len(doc["digest"]["clauses"])
+    assert n_digest_clauses == len(doc["evidence"]["clauses"])
 
 
-def test_view_render_and_prompt_read_real_v04_precedent(tmp_path: Path) -> None:
-    """Issue #223: the review viewer, the readable bundle and render-prompt show
-    a real 0.4 compile's signed variants (here the Delaware governing-law
-    text the deal signed instead of our New York standard) — not an empty
-    clause card."""
-    from playbook_engine.document_renderer import render_bundle_html
-    from playbook_engine.prompt_renderer import render_prompt
-
+def test_bundle_shows_real_v04_precedent(tmp_path: Path) -> None:
+    """Issue #223: the readable bundle shows a real 0.4 compile's signed
+    variants (here the Delaware governing-law text the deal signed instead of
+    our New York standard) — not an empty clause card."""
     out_dir = _compile_real_playbook(tmp_path, signed=True)
     doc = json.loads((out_dir / "playbook.opf.json").read_text(encoding="utf-8"))
     signed = [
@@ -169,9 +148,6 @@ def test_view_render_and_prompt_read_real_v04_precedent(tmp_path: Path) -> None:
     assert signed and signed[0]["signed"] is True
     assert "Delaware" in signed[0]["signed_text"]["text"], "premise: the deal signed Delaware"
 
-    assert "Delaware" in render_review_html(out_dir)
-    assert "Delaware" in render_bundle_html(out_dir)
-    prompt = render_prompt(doc)
-    assert "Non-standard language we have signed" in prompt
-    assert "Delaware" in prompt
-    assert "historical stance could not be determined" not in prompt
+    html = render_bundle_html(out_dir)
+    assert "Delaware" in html
+    assert "Signed variants" in html

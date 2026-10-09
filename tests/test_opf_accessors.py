@@ -4,7 +4,7 @@ The cases read the real compiled NDA example
 (``examples/nda/playbook.opf.json``, produced by ``playbook project``). The
 0.1-0.3 accessors were retired with those formats (issue #238). Where a test mutates
 one of those documents (unsigned drafts, flipped paper side), the mutated
-document is re-stamped with ``precedent.refresh_derived`` and asserted to pass
+document is re-stamped with the test-local ``_restamp`` helper and asserted to pass
 ``validator.validate_document`` -- never a shape the engine itself rejects.
 
 The query surface (issue #224) is also exercised on the frozen OPF 0.4
@@ -33,6 +33,7 @@ from playbook_engine.opf_accessors import (
     clause_precedent,
     find_precedent,
     is_precedent_shape,
+    perspective_party,
     playbook_clauses,
     playbook_precedent,
     precedent_by_id,
@@ -40,7 +41,7 @@ from playbook_engine.opf_accessors import (
     precedent_sidecar_manifest,
     verify_precedent_sidecar,
 )
-from playbook_engine.precedent import refresh_derived
+from playbook_engine.precedent import restamp_evidence
 from playbook_engine.validator import validate_document
 
 _ROOT = Path(__file__).parent.parent
@@ -54,6 +55,16 @@ _VECTOR_002 = (
 def _load(path: Path) -> dict[str, Any]:
     doc: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return doc
+
+
+def _restamp(doc: dict[str, Any]) -> None:
+    """Re-derive ids, counts, digest and sidecar hash after a test mutates precedent."""
+    restamp_evidence(
+        doc["evidence"], str(doc["agreement_type"]["id"]), party=perspective_party(doc)
+    )
+    doc["digest"] = build_digest(doc)
+    if isinstance(doc.get(SIDECARS_KEY), dict) and PRECEDENT_SIDECAR in doc[SIDECARS_KEY]:
+        doc[SIDECARS_KEY].update(precedent_sidecar_manifest(doc))
 
 
 def test_precedent_accessors_read_a_compiled_0_4_document() -> None:
@@ -202,7 +213,7 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
         for key in ("paper", "paper_basis", "paper_confidence"):
             draft[key] = deal_f[key]
         precedent.append(draft)
-    refresh_derived(doc)
+    _restamp(doc)
     result = validate_document(doc)
     assert result.ok, result.errors
 
@@ -275,7 +286,7 @@ def test_find_precedent_ignores_paper_side() -> None:
         }.get(d["provenance"], d["provenance"])
     for p in flipped["evidence"]["precedent"]:
         p["paper"] = {"ours": "theirs", "theirs": "ours"}.get(p["paper"], p["paper"])
-    refresh_derived(flipped)
+    _restamp(flipped)
     result = validate_document(flipped)
     assert result.ok, result.errors
     assert [p["document_id"] for p in find_precedent(flipped, "assignment")] == before
@@ -323,21 +334,3 @@ def test_verify_precedent_sidecar_rejects_a_foreign_file(tmp_path: Path) -> None
     assert not verify_precedent_sidecar(doc, tmp_path / "missing.jsonl")
     no_manifest = {k: v for k, v in doc.items() if k != SIDECARS_KEY}
     assert not verify_precedent_sidecar(no_manifest, _NDA_SIDECAR)
-
-
-def test_refresh_derived_restamps_the_sidecar_hash() -> None:
-    """A transform that rewrites precedent text after assembly (publish's
-    scrub, export_profile's residue rewrites) re-derives the sidecar hash
-    along with the ids and digest, so x_sidecars never names stale bytes."""
-    doc = _load(_NDA)
-    before = doc[SIDECARS_KEY][PRECEDENT_SIDECAR]["sha256"]
-    record = find_precedent(doc, "governing_law")[0]
-    record["signed_text"]["text"] = record["signed_text"]["text"] + " Rewritten."
-    refresh_derived(doc)
-    after = doc[SIDECARS_KEY][PRECEDENT_SIDECAR]["sha256"]
-    assert after != before
-    assert doc[SIDECARS_KEY] == precedent_sidecar_manifest(doc)
-    # A document recording no sidecar is not given one.
-    bare = {k: v for k, v in _load(_NDA).items() if k != SIDECARS_KEY}
-    refresh_derived(bare)
-    assert SIDECARS_KEY not in bare

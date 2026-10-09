@@ -25,10 +25,9 @@ import yaml
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.opf_accessors import playbook_clauses
 
-# ``playbook publish`` (issue #188) coarsens dates from an ISO-8601 date to
-# ``YYYY-Qn`` (exact dates can identify a counterparty). A published document
-# must still pass this validator, so the date checks below accept either
-# form — a malformed value in neither shape is still rejected.
+# A date may be coarsened from an ISO-8601 date to ``YYYY-Qn`` (exact dates
+# can identify a counterparty). The date checks below accept either form — a
+# malformed value in neither shape is still rejected.
 _QUARTER_DATE_RE = re.compile(r"^\d{4}-Q[1-4]$")
 
 #: The one OPF version this validator (and the engine) supports.
@@ -335,15 +334,12 @@ def _check_duplicate_ids(doc: dict[str, Any], result: ValidationResult) -> None:
     Nothing else enforces uniqueness here — the JSON Schema cannot express
     "unique across siblings" for these ids, and no other normative check
     catches it. A foreign or producer-bugged OPF doc carrying two clauses
-    (or two floor invariants, or corpus documents) with the same id makes :mod:`playbook_engine.export_profile`'s
-    path-keyed sample/location maps silently collapse: a judge-flagged
-    residue rewrite lands on only the LAST duplicate, shipping the first
-    duplicate's flagged text unmodified (and the corresponding setter
-    rewrites the wrong entry). Engine-generated docs never carry duplicate
-    ids (they derive from unique taxonomy keys), so this only fires on
-    hand-edited/foreign input — but it must fail loud there rather than
-    silently mis-redact. (Precedent id uniqueness is checked with the rest
-    of the precedent record, :func:`_check_precedent`.)
+    (or two floor invariants, or corpus documents) with the same id makes any
+    consumer that keys by id silently collapse them. Engine-generated docs
+    never carry duplicate ids (they derive from unique taxonomy keys), so this
+    only fires on hand-edited/foreign input — but it must fail loud there.
+    (Precedent id uniqueness is checked with the rest of the precedent
+    record, :func:`_check_precedent`.)
     """
     clause_prefix = "evidence.clauses"
 
@@ -418,11 +414,11 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     """Non-blocking SHOULD-warn: name each ``floor.invariants[]`` entry that
     carries no structural attribution marker (issue #127).
 
-    Three producers write into ``floor.invariants``, and each leaves a
+    Two producers write into ``floor.invariants``, and each leaves a
     distinct, mechanically-checkable trace — see
     :func:`playbook_engine.floor_candidates.floor_invariant_attribution` for
-    the three it recognizes (a hand-signed ``x_signed_by``, a Posture-
-    interview Q4 promotion, or an accepted review-feedback candidate).
+    the two it recognizes (a hand-signed ``x_signed_by``, or a Posture-
+    interview Q4 promotion).
     Advisory only, same convention as every other SHOULD finding in this
     validator: the schema and the blocking checks above already accept an
     unattributed entry structurally (``floor.invariants[].id``/``statement``
@@ -453,7 +449,7 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
         result.add(
             f"floor invariant {label}carries no structural attribution — no "
             "x_signed_by, and its rationale doesn't match a Posture-interview "
-            "or review-feedback promotion marker; confirm a human actually "
+            "promotion marker; confirm a human actually "
             "authored/signed this hard line.",
             path=f"floor.invariants[{i}]",
             blocking=False,

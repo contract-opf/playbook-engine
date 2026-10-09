@@ -149,9 +149,8 @@ class EntityRegistry:
 def _fuzzy_name_pattern(name: str) -> re.Pattern[str] | None:
     """Compile a case/whitespace-tolerant whole-word pattern for *name*.
 
-    Mirrors ``publisher._normalize_for_scan``'s normalization (casefold +
-    whitespace collapse, issue #29) so a known name is matched the same way
-    at ingest as it is scanned for at publish time: ``re.IGNORECASE`` handles
+    Casefold + whitespace collapse (issue #29), so a known name is matched
+    tolerantly at ingest: ``re.IGNORECASE`` handles
     casefold (an ALL-CAPS or mixed-case rendering matches, as it already
     did), and joining the name's own space-delimited words with ``\\s+``
     (rather than the literal whitespace ``re.escape`` would produce) makes
@@ -354,8 +353,8 @@ def find_residue(alias_map: dict[str, str], texts: dict[str, str]) -> list[tuple
     :func:`residue_tokens`' filter (e.g. registered only as ``"State
     University"``) produces no tokens and cannot be checked this way at all.
     This is a fast, offline residue check for the born-safe pseudonymization
-    pass — not a substitute for ``publish``'s independent, LLM-verified
-    residue sweep.
+    pass — not a substitute for a semantic residue check over the shipped
+    artifact.
     """
     hits: list[tuple[str, str, str]] = []
     for real_name in alias_map.values():

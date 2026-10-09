@@ -85,42 +85,44 @@ def test_help_tree_walk_reaches_every_known_command() -> None:
     """Sanity-check the walk isn't accidentally shallow — e.g. a subcommand
     whose ``--help`` errors out would otherwise be silently absent from the
     hygiene sweep above instead of failing loud.
+
+    Also pins the command surface itself (issue #239): every command is on the
+    corpus -> playbook -> toaster golden path (stage, lint-corpus, mine,
+    segment/judge and their apply steps, project, posture, floor, validate,
+    the one ``view bundle`` artifact, precedent, scorecard, doctor, inspect,
+    induce-taxonomy / taxonomy merge, resolve-citation). A new command must be
+    added here on purpose.
     """
     texts = _all_help_texts()
     expected = {
         "(root)",
-        "validate",
-        "render-prompt",
-        "resolve-citation",
-        "precedent",
-        "publish",
-        "taxonomy",
-        "taxonomy merge",
-        "mine",
-        "project",
-        "lint-corpus",
-        "inspect",
-        "stage",
-        "judge",
-        "judge-apply",
-        "segment",
-        "segment-apply",
-        "induce-taxonomy",
-        "report",
-        "digest",
-        "view",
-        "view render",
-        "view bundle",
-        "view apply",
-        "posture",
-        "posture questions",
-        "posture interview",
+        "doctor",
         "floor",
         "floor propose",
         "floor sign",
-        "curate",
+        "induce-taxonomy",
+        "inspect",
+        "judge",
+        "judge-apply",
+        "lint-corpus",
+        "mine",
+        "posture",
+        "posture interview",
+        "posture questions",
+        "precedent",
+        "project",
+        "resolve-citation",
+        "scorecard",
+        "segment",
+        "segment-apply",
+        "stage",
+        "taxonomy",
+        "taxonomy merge",
+        "validate",
+        "view",
+        "view bundle",
     }
-    assert expected <= set(texts)
+    assert set(texts) == expected
 
 
 def test_violation_detector_has_teeth() -> None:

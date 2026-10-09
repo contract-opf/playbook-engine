@@ -126,7 +126,7 @@ def test_judge_plan_pending_counts_by_kind(tmp_path: Path) -> None:
         "--plan",
     )
     # At least one kind must be reported.
-    assert any(kind in output for kind in ("classify", "deviation", "provenance")), (
+    assert any(kind in output for kind in ("classify", "scope", "provenance")), (
         f"No kind breakdown found in output:\n{output}"
     )
 
@@ -408,10 +408,8 @@ def test_e2e_full_path_taxonomy_ids_populated(e2e_out: Path) -> None:
         f"still None for: {[o['observation_id'] for o in none_tax]}"
     )
 
-    # Issue #220: with no --with-deviation-judge (the default) the fixture's
-    # stored deviation verdicts are never replayed onto the consumer path —
-    # every observation's deviation is the deterministic standard check, and
-    # carries the `standard` fact it was derived from.
+    # Issue #220: every observation's deviation is the deterministic standard
+    # check, and carries the `standard` fact it was derived from.
     assert all(o["basis"] == "deterministic" for o in obs_list), sorted(
         {o["basis"] for o in obs_list}
     )
@@ -419,53 +417,9 @@ def test_e2e_full_path_taxonomy_ids_populated(e2e_out: Path) -> None:
     assert all(o["deviation"] == ("none" if o["standard"] else "substantive") for o in obs_list)
 
 
-def test_e2e_with_deviation_judge_replays_judged_verdicts(e2e_out: Path) -> None:
-    """Issue #220: judged deviation verdicts are opt-in — the SAME fixture path
-    run with --with-deviation-judge on both judge and mine replays the stored
-    deviation verdicts (basis='judge'), while the default path above never
-    does."""
-    code, output = _invoke(
-        "judge",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(e2e_out),
-        "--with-deviation-judge",
-    )
-    assert code == 0, f"judge failed:\n{output}"
-    pending = [
-        json.loads(line)
-        for line in (e2e_out / "judge" / "pending.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(rec["kind"] == "deviation" for rec in pending), (
-        "--with-deviation-judge must queue deviation items"
-    )
-
-    code, output = _invoke("judge-apply", str(e2e_out), "--verdicts", str(_CANNED_VERDICTS))
-    assert code == 0, f"judge-apply failed:\n{output}"
-    code, output = _invoke(
-        "mine",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(e2e_out),
-        "--with-deviation-judge",
-    )
-    assert code == 0, f"mine failed:\n{output}"
-
-    obs_list = read_observations_jsonl(e2e_out / "observations.jsonl")
-    judge_obs = [o for o in obs_list if o["basis"] == "judge"]
-    assert len(judge_obs) > 0, (
-        "Expected at least one observation with basis='judge' after applying verdicts"
-    )
-
-
-def test_e2e_default_judge_queues_no_deviation_items(e2e_out: Path) -> None:
-    """Issue #220: the default drain loop never queues a deviation item, and
-    both the plan and the normal round report deviation as zero pending."""
+def test_e2e_judge_queues_no_deviation_items(e2e_out: Path) -> None:
+    """Issue #220/#239: the drain loop never queues a deviation item, and
+    neither the plan nor the normal round mentions deviation at all."""
     code, plan_output = _invoke(
         "judge",
         str(_CORPUS_DIR),
@@ -476,13 +430,13 @@ def test_e2e_default_judge_queues_no_deviation_items(e2e_out: Path) -> None:
         "--plan-only",
     )
     assert code == 0, plan_output
-    assert "deviation: 0 pending" in plan_output
+    assert "deviation" not in plan_output
 
     code, output = _invoke(
         "judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(e2e_out)
     )
     assert code == 0, output
-    assert "deviation: 0 pending" in output
+    assert "deviation" not in output
     pending = [
         json.loads(line)
         for line in (e2e_out / "judge" / "pending.jsonl").read_text(encoding="utf-8").splitlines()
@@ -490,81 +444,6 @@ def test_e2e_default_judge_queues_no_deviation_items(e2e_out: Path) -> None:
     ]
     assert pending, "the fixture still has scope/classification items to queue"
     assert not [rec for rec in pending if rec["kind"] == "deviation"]
-
-
-def test_mine_with_deviation_judge_on_fresh_out_dir_is_honoured(tmp_path: Path) -> None:
-    """Issue #220: --with-deviation-judge on an out-dir with no verdict store
-    is never silently ignored — mine warns that no verdicts exist and wires
-    the stub deviation judge, so changed clauses are recorded needs_review
-    rather than the default deterministic standard check."""
-    out_dir = tmp_path / "out"
-    code, output = _invoke(
-        "mine",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(out_dir),
-        "--with-deviation-judge",
-    )
-    assert code == 0, f"mine failed:\n{output}"
-    assert not (out_dir / "judge" / "verdicts.jsonl").exists()
-    assert "WARNING: --with-deviation-judge but no verdict store" in output
-    bases = {o["basis"] for o in read_observations_jsonl(out_dir / "observations.jsonl")}
-    assert "needs_review" in bases, bases
-
-    default_out = tmp_path / "default"
-    code, output = _invoke(
-        "mine", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(default_out)
-    )
-    assert code == 0, f"mine failed:\n{output}"
-    assert "--with-deviation-judge" not in output
-    default_bases = {
-        o["basis"] for o in read_observations_jsonl(default_out / "observations.jsonl")
-    }
-    assert default_bases == {"deterministic"}, default_bases
-
-
-def test_mine_warns_when_banked_deviation_verdicts_are_ignored(tmp_path: Path) -> None:
-    """Issue #220: an out-dir whose verdict store holds deviation verdicts
-    (e.g. one derived before #220) is re-mined on the deterministic consumer
-    path by default. That silently drops every judged stance, so mine must
-    WARN with the count and name the opt-in flag."""
-    out_dir = tmp_path / "out"
-    store = out_dir / "judge" / "verdicts.jsonl"
-    store.parent.mkdir(parents=True)
-    store.write_text(
-        "\n".join(
-            json.dumps({"key": f"k{i}", "verdict": v})
-            for i, v in enumerate(
-                [
-                    {"deviation": "substantive", "risk_delta": {"direction": "worse"}},
-                    {"deviation": "none", "risk_delta": {"direction": "neutral"}},
-                    {"in_scope": True, "scope_confidence": 0.9},
-                ]
-            )
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    code, output = _invoke(
-        "mine", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out_dir)
-    )
-    assert code == 0, f"mine failed:\n{output}"
-    assert "WARNING: 2 stored deviation verdict(s)" in output, output
-    assert "--with-deviation-judge" in output
-
-    code, output = _invoke(
-        "mine",
-        str(_CORPUS_DIR),
-        "--config",
-        str(_CONFIG_PATH),
-        "--out",
-        str(out_dir),
-        "--with-deviation-judge",
-    )
-    assert code == 0, f"mine failed:\n{output}"
-    assert "stored deviation verdict(s)" not in output
 
 
 def test_e2e_validate_exits_zero(e2e_out: Path) -> None:
@@ -1138,39 +1017,6 @@ def test_mine_verdict_store_forced_no_cache_does_not_reextract(
 # ---------------------------------------------------------------------------
 
 
-def test_judge_apply_rejects_invalid_magnitude(tmp_path: Path) -> None:
-    """The documented-then-corrected 'moderate' magnitude fails at apply, not replay."""
-    bad_file = tmp_path / "verdicts.jsonl"
-    bad_file.write_text(
-        json.dumps(
-            {
-                "key": "a" * 64,
-                "verdict": {
-                    "deviation": "substantive",
-                    "risk_delta": {"direction": "worse", "magnitude": "moderate"},
-                    "basis": "judge",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
-    assert code != 0
-    assert "magnitude" in output
-
-
-def test_judge_apply_rejects_missing_risk_delta(tmp_path: Path) -> None:
-    bad_file = tmp_path / "verdicts.jsonl"
-    bad_file.write_text(
-        json.dumps({"key": "a" * 64, "verdict": {"deviation": "none", "basis": "judge"}}) + "\n",
-        encoding="utf-8",
-    )
-    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
-    assert code != 0
-    assert "risk_delta" in output
-
-
 def test_judge_apply_rejects_unresolved_basis(tmp_path: Path) -> None:
     """basis='needs_review' means 'not judged' — a supplied verdict may not carry it."""
     bad_file = tmp_path / "verdicts.jsonl"
@@ -1191,26 +1037,6 @@ def test_judge_apply_rejects_unresolved_basis(tmp_path: Path) -> None:
     code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
     assert code != 0
     assert "basis" in output
-
-
-def test_judge_apply_rejects_neutral_with_nonzero_magnitude(tmp_path: Path) -> None:
-    bad_file = tmp_path / "verdicts.jsonl"
-    bad_file.write_text(
-        json.dumps(
-            {
-                "key": "a" * 64,
-                "verdict": {
-                    "deviation": "substantive",
-                    "risk_delta": {"direction": "neutral", "magnitude": "minor"},
-                    "basis": "judge",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
-    assert code != 0
 
 
 def test_judge_apply_rejects_string_confidence_with_actionable_error(tmp_path: Path) -> None:
@@ -1238,9 +1064,10 @@ def test_judge_apply_rejects_string_confidence_with_actionable_error(tmp_path: P
     assert "Traceback" not in output
 
 
-def test_judge_apply_rejects_deviation_string_confidence(tmp_path: Path) -> None:
-    """Issue #161: deviation verdicts previously skipped confidence validation
-    entirely and banked a malformed value silently."""
+def test_judge_apply_rejects_a_deviation_verdict(tmp_path: Path) -> None:
+    """The deviation kind is retired (issue #239): its verdict shape is no
+    longer recognised, with a line-numbered error rather than a stored row
+    nothing would ever replay."""
     bad_file = tmp_path / "verdicts.jsonl"
     bad_file.write_text(
         json.dumps(
@@ -1250,7 +1077,6 @@ def test_judge_apply_rejects_deviation_string_confidence(tmp_path: Path) -> None
                     "deviation": "substantive",
                     "risk_delta": {"direction": "worse", "magnitude": "minor"},
                     "basis": "judge",
-                    "confidence": "0.7",
                 },
             }
         )
@@ -1259,7 +1085,53 @@ def test_judge_apply_rejects_deviation_string_confidence(tmp_path: Path) -> None
     )
     code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad_file))
     assert code != 0
-    assert "confidence" in output
+    assert "line 1" in output
+    assert "cannot determine verdict kind" in output
+    assert not (tmp_path / "judge" / "verdicts.jsonl").exists()
+
+
+def test_judge_apply_accepts_a_newly_registered_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seam a future judge kind plugs into: once its verdict shape is
+    registered, judge-apply validates and stores it (stamped from the queue)
+    with no change to the command."""
+    from playbook_engine import agent_judge, rubric
+
+    monkeypatch.setattr(agent_judge, "_VERDICT_KINDS", dict(agent_judge._VERDICT_KINDS))
+    monkeypatch.setattr(rubric, "RUBRIC_PROMPT_VERSIONS", dict(rubric.RUBRIC_PROMPT_VERSIONS))
+    monkeypatch.setattr(rubric, "_DERIVED_SURFACES", dict(rubric._DERIVED_SURFACES))
+    monkeypatch.setattr(rubric, "JUDGE_KINDS", rubric.JUDGE_KINDS)
+
+    def validate(verdict: dict[str, object]) -> None:
+        if not isinstance(verdict.get("equivalent"), bool):
+            raise ValueError("'equivalent' must be a JSON boolean")
+
+    agent_judge.register_verdict_kind("widget", validate, lambda v: "equivalent" in v)
+    rubric.register_judge_kind("widget", "v1", lambda *, taxonomy, agreement_type: {"a": [1]})
+
+    judge_dir = tmp_path / "judge"
+    judge_dir.mkdir()
+    version = rubric.rubric_version("widget")
+    (judge_dir / "pending.jsonl").write_text(
+        json.dumps(
+            {"key": "e" * 64, "kind": "widget", "payload": {"left": "a"}, "rubric_version": version}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    good = tmp_path / "good.jsonl"
+    good.write_text(json.dumps({"key": "e" * 64, "verdict": {"equivalent": True}}) + "\n")
+    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(good))
+    assert code == 0, output
+    stored = json.loads((judge_dir / "verdicts.jsonl").read_text().splitlines()[0])
+    assert stored["rubric"] == {"kind": "widget", "version": version}
+
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text(json.dumps({"key": "f" * 64, "verdict": {"equivalent": "yes"}}) + "\n")
+    code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(bad))
+    assert code != 0
+    assert "line 1" in output and "JSON boolean" in output
 
 
 def test_judge_apply_accepts_valid_verdicts_of_each_kind(tmp_path: Path) -> None:
@@ -1270,16 +1142,6 @@ def test_judge_apply_accepts_valid_verdicts_of_each_kind(tmp_path: Path) -> None
             "verdict": {"taxonomy_id": "indemnification", "confidence": 0.9, "basis": "judge"},
         },
         {
-            "key": "b" * 64,
-            "verdict": {
-                "deviation": "substantive",
-                "risk_delta": {"direction": "worse", "magnitude": "material"},
-                "confidence": 0.8,
-                "basis": "judge",
-                "rationale": "Cap removed.",
-            },
-        },
-        {
             "key": "c" * 64,
             "verdict": {"provenance": "our_paper", "confidence": 0.85, "basis": "llm"},
         },
@@ -1288,7 +1150,7 @@ def test_judge_apply_accepts_valid_verdicts_of_each_kind(tmp_path: Path) -> None
     good_file.write_text("\n".join(json.dumps(rec) for rec in lines) + "\n", encoding="utf-8")
     code, output = _invoke("judge-apply", str(tmp_path), "--verdicts", str(good_file))
     assert code == 0, output
-    assert "loaded 4 verdict(s)" in output
+    assert "loaded 3 verdict(s)" in output
 
 
 def test_judge_apply_loads_nothing_when_a_later_line_fails(tmp_path: Path) -> None:

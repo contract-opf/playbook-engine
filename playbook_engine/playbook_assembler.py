@@ -3,10 +3,9 @@
 Assembles the full OPF 0.4 playbook document (issue #223) — the only format
 the engine emits or validates (issue #238): the verdict-free per-deal
 precedent record as ``evidence`` (``playbook_engine/precedent.py``) plus a
-digest_version 3 digest, empty-but-present ``posture``/``floor``, an
-embedded ``curation`` overlay of attorney-pinned positions that survives
-recompile (issue #147), and an ``identity`` block carrying ``content_hash``
-+ per-section digests (issue #143) — and ``write_playbook`` writes
+digest_version 3 digest, empty-but-present ``posture``/``floor``, and an
+``identity`` block carrying ``content_hash`` + per-section digests
+(issue #143) — and ``write_playbook`` writes
 ``playbook.opf.json``.  The assembled document is self-validated via the
 built-in validator before any data is written to disk.
 
@@ -40,7 +39,6 @@ from playbook_engine.clause_position_compiler import (
     ClausePosition,
     UnclassifiedCoverage,
 )
-from playbook_engine.curation import NO_STANCE, merge_curation
 from playbook_engine.digest import build_digest
 from playbook_engine.observation_builder import Observation, RoundMove
 from playbook_engine.opf_accessors import (
@@ -52,7 +50,6 @@ from playbook_engine.opf_accessors import (
 )
 from playbook_engine.precedent import (
     build_precedent_evidence,
-    build_x_judgments,
     restamp_evidence,
 )
 from playbook_engine.validator import validate_document
@@ -197,8 +194,7 @@ def _sanitize_corpus_documents_for_schema(
     - ``x_ingest_reason`` (list, present only when at least one version has a
       non-null reason): ``version_ingest[i].reason`` for every *i*, in the
       same order — index-aligned rather than keyed by version label, so it
-      carries nothing ``publisher.py``'s version-label scrub would have to
-      rewrite. Values are closed enums: the ``ExtractorLabel`` reasons
+      carries no version label that would need pseudonymizing. Values are closed enums: the ``ExtractorLabel`` reasons
       (``"env-missing"``, ``"backend-error"``, ``"ocr-recovered"``,
       ``"declared"``) for a mined
       version, the ``ExtractionError`` reasons (``"timeout"``, ``"no-text"``)
@@ -227,20 +223,6 @@ def _sanitize_corpus_documents_for_schema(
         ]
         sanitized.append(new_doc)
     return sanitized
-
-
-# Observation bases meaning no real judge assessed the clause. "stub" (no judge configured
-# at all) is the strict case; "needs_review"/"judge_error" additionally
-# cover the zero-LLM deviation stub (``_NullDeviationJudge``, pipeline.py)
-# that an opt-in ``--with-deviation-judge`` run wires until verdicts land,
-# which emits basis="needs_review" rather than "stub" for every changed
-# clause since a judge protocol IS wired (just not a real one). Watermarking
-# on all three is what makes such a run (no LLM configured anywhere)
-# actually watermark its output — see issue #101. The default consumer path
-# (issue #220) wires no deviation judge at all: its observations carry
-# basis="deterministic", the standard check, which is not an unjudged
-# placeholder.
-_UNJUDGED_OBSERVATION_BASES = frozenset({"stub", "needs_review", "judge_error"})
 
 
 def _compiler_version() -> str:
@@ -288,7 +270,6 @@ def assemble_playbook(
     playbook_id: str | None = None,
     playbook_version: str | None = None,
     supersedes: str | None = None,
-    existing_curation: dict[str, Any] | None = None,
     existing_posture: dict[str, Any] | None = None,
     existing_floor: dict[str, Any] | None = None,
     round_moves: list[RoundMove] | None = None,
@@ -308,21 +289,16 @@ def assemble_playbook(
         run_id:            Optional run identifier for audit purposes.
         observations:      The full L4 observation list this playbook was
                           compiled from (same list passed to
-                          ``compile_clause_positions()``). Used only to
-                          watermark the ``compiler`` block with
-                          ``stub_basis_present`` when any observation's basis
-                          is in ``_UNJUDGED_OBSERVATION_BASES`` (``"stub"``,
-                          ``"needs_review"``, or ``"judge_error"``) — i.e. no
-                          real judge assessed that clause, so this playbook
-                          must not be trusted as fully LLM-assessed. ``None``
-                          (the default) contributes no watermark signal.
+                          ``compile_clause_positions()``); the source of the
+                          precedent record.
         scope_bases:       The ``ScopeDecision.basis`` value for every
                           document considered at L1b (in-scope or not),
-                          e.g. read from ``scope.json``. Also feeds the
+                          e.g. read from ``scope.json``. Feeds the
                           ``stub_basis_present`` watermark: any entry equal
                           to ``"stub"`` means the scope gate itself ran on
                           the no-LLM default (``_AllInScopeJudge``) for at
-                          least one document. ``None`` (the default)
+                          least one document, so this playbook must not be
+                          trusted as fully judged. ``None`` (the default)
                           contributes no watermark signal.
         unclassified_coverage: Coverage summary (issue #113) for
                           ``taxonomy_id=None`` observations that were
@@ -331,7 +307,7 @@ def assemble_playbook(
                           return value. Recorded in
                           ``corpus.stats.unclassified`` so a consumer can see
                           omitted-content coverage without cross-referencing
-                          the AAR. ``None`` (the default) omits the key
+                          a report. ``None`` (the default) omits the key
                           entirely.
         perspective:      Optional ``{party, counterparty_type}`` (OPF §3 —
                           "whose perspective this playbook is reviewed
@@ -356,16 +332,6 @@ def assemble_playbook(
         supersedes:       Optional identifier of the playbook this one
                           supersedes, recorded in ``identity.supersedes``
                           when supplied.
-        existing_curation: The prior compile's ``playbook["curation"]`` dict
-                          (issue #147), read by the caller from the previous
-                          ``playbook.opf.json`` before it's overwritten. Every
-                          pin is preserved across this recompile; OPF 0.4
-                          carries no stance, so every clause is compared as
-                          ``curation.NO_STANCE`` against the pin's
-                          ``baseline_stance`` (see
-                          ``playbook_engine/curation.py``). ``None`` (the
-                          default) means no prior pins to carry forward — a
-                          first compile, or a store with no curation history.
         existing_posture: The prior compile's ``playbook["posture"]`` dict
                           (issue #123), read by the caller from the previous
                           ``playbook.opf.json`` before it's overwritten.
@@ -421,7 +387,7 @@ def assemble_playbook(
     }
     if unclassified_coverage is not None:
         # Issue #113: surface unclassified (taxonomy_id=None) observation
-        # coverage in the playbook itself, not just the AAR.
+        # coverage in the playbook itself.
         stats["unclassified"] = unclassified_coverage.to_dict()
     if dropped_stats is not None:
         # Issue #216: net-diff rows that produced no observation — text with
@@ -434,17 +400,13 @@ def assemble_playbook(
         stats["dropped_observations"] = dropped_stats
 
     # --- compiler metadata ---
-    # Watermark (issue #101): True when at least one observation feeding this
-    # playbook was never assessed by a real judge (basis in
-    # _UNJUDGED_OBSERVATION_BASES — covers both "no judge configured at all"
-    # and "a judge protocol IS wired but it's the zero-LLM stub default"), OR
-    # when the L1b scope gate itself ran on the no-LLM stub default for at
-    # least one document (a "stub" entry in scope_bases). Either signal means
-    # a consuming review application should refuse to run redlines against
-    # this playbook without human review.
-    stub_basis_present = any(
-        obs.basis in _UNJUDGED_OBSERVATION_BASES for obs in (observations or [])
-    ) or any(b == "stub" for b in (scope_bases or []))
+    # Watermark (issue #101): True when the L1b scope gate itself ran on the
+    # no-LLM stub default for at least one document (a "stub" entry in
+    # scope_bases). A consuming review application should refuse to run
+    # redlines against such a playbook without human review. Observations
+    # carry no unjudged basis: their deviation is the deterministic standard
+    # check.
+    stub_basis_present = any(b == "stub" for b in (scope_bases or []))
     compiler: dict[str, Any] = {
         "name": _COMPILER_NAME,
         "version": _compiler_version(),
@@ -485,11 +447,10 @@ def assemble_playbook(
     # signed a Floor invariant (`playbook floor sign`), those sections live
     # ONLY inside the previously-written playbook.opf.json — nothing else in
     # the out-dir can reconstruct them. A recompile must carry them forward
-    # verbatim, exactly like `existing_curation` above, or Route C's "the
-    # Posture and Floor you already signed should survive" promise
-    # (SKILL.md) is false (issue #123). Unlike curation, there is no
-    # per-clause merge/conflict step here — Posture/Floor are not derived
-    # from clause_stances, so a straight carry-forward is the whole contract.
+    # verbatim, or Route C's "the Posture and Floor you already signed
+    # should survive" promise (SKILL.md) is false (issue #123). There is no
+    # per-clause merge/conflict step: a straight carry-forward is the whole
+    # contract.
     playbook["posture"] = existing_posture if existing_posture is not None else {}
     playbook["floor"] = existing_floor if existing_floor is not None else {}
     playbook["corpus"] = {
@@ -512,21 +473,6 @@ def assemble_playbook(
         }
     playbook["compiler"] = compiler
 
-    # --- curation (issue #147) ---
-    # Carry any prior compile's attorney-pinned positions forward, flagging/
-    # clearing conflict per clause. Computed before `identity` below so
-    # section_digests.curation reflects the merged (not the stale) curation
-    # content. Omitted entirely when there's nothing to carry forward (no
-    # prior pins) — mirrors perspective/de_minimis's "never fabricate, omit
-    # when absent" rule. OPF 0.4 carries no stance (issue #223), so every
-    # clause compares as NO_STANCE — the same value `playbook curate`/`view
-    # apply` stamp as a pin's baseline_stance, so a pin never conflicts with
-    # its own document on recompile.
-    clause_stances = {c["id"]: NO_STANCE for c in playbook["evidence"]["clauses"]}
-    curation = merge_curation(existing_curation, clause_stances, checked_at=generated_at)
-    if curation:
-        playbook["curation"] = curation
-
     # Strip zero-width/bidi-control characters carried in from extraction
     # BEFORE the digest is built, so the digest groups texts by their
     # post-strip form (issue #35) — otherwise an intra-word ZWSP
@@ -536,18 +482,11 @@ def assemble_playbook(
     # evidence section" invariant that content_hash lineage relies on.
     playbook = _strip_invisible(playbook)
 
-    # Judged verdicts from an opt-in judged run (issue #220) are vendor data
-    # under x_judgments, keyed by precedent id — never part of
-    # evidence.precedent, never read by the digest (issue #223). Emitted only
-    # when a real judge assessed at least one precedent's terminal row.
     restamp_evidence(
         playbook["evidence"],
         str(agreement_type.get("id")),
         party=perspective_party(playbook),
     )
-    judgments = build_x_judgments(list(observations or []), playbook["evidence"]["precedent"])
-    if judgments:
-        playbook["x_judgments"] = _strip_invisible(judgments)
     # The precedent.jsonl sidecar's content address (issue #224): a pure
     # function of the final evidence.precedent, recorded before the digest
     # and identity so content_hash covers it. Vendor namespace because

@@ -714,8 +714,7 @@ def test_hints_load_error_never_embeds_document_folder_path(tmp_path: Path) -> N
     embedding the full path would put the raw counterparty name straight
     into ``quarantine.json``'s ``reason`` field (``f"{type(exc).__name__}:
     {exc}"``, persisted verbatim by ``pipeline.mine_corpus``'s quarantine
-    handler, and from there into the after-action report too — see
-    ``aar._build_needs_attention``) even on a corpus with
+    handler) even on a corpus with
     ``provenance.known_entities`` configured. The folder name here is glued
     directly to a trailing suffix with no separator, so it would ALSO
     defeat a whole-word pseudonymization scrub applied downstream — proving

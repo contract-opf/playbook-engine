@@ -3,7 +3,7 @@
 Closes the silent-replay hazard in :mod:`playbook_engine.agent_judge`: the
 verdict store is keyed purely by *content* (clause text, hunk, preamble …),
 so when the **judging criteria** change — the taxonomy a clause is classified
-into, the deviation vocabulary, the prose rubric in the
+into, the prose rubric in the
 ``playbook-from-corpus`` skill — every previously banked verdict keeps
 replaying unchanged. Nothing re-queues, because the clause text did not move.
 A re-derivation observed 1,444 verdicts seeded from an earlier run with only
@@ -62,8 +62,8 @@ What is deliberately *excluded* from the derived half
   a rubric change, and must not churn banked verdicts. Only the values a
   judge is actually allowed to answer with are hashed.
 
-- **Thresholds** (``AUTO_CLASSIFY_THRESHOLD``, ``AMBIGUITY_THRESHOLD``,
-  ``REWORDED_EQUIVALENT_THRESHOLD``). These change *which* clauses reach a
+- **Thresholds** (``AUTO_CLASSIFY_THRESHOLD``, ``AMBIGUITY_THRESHOLD``).
+  These change *which* clauses reach a
   judge and how much a downstream consumer trusts the answer — not what a
   past answer means. A verdict is still a correct answer to the question it
   was asked after a threshold moves.
@@ -84,23 +84,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from playbook_engine.deviation_classifier import (
-    _DEVIATION_VALUES,
-    _DIRECTION_VALUES,
-    _MAGNITUDE_VALUES,
-)
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
 # ---------------------------------------------------------------------------
 # Kinds
 # ---------------------------------------------------------------------------
 
-#: The four pending-item kinds a store-backed judge can produce.
-JUDGE_KINDS: tuple[str, ...] = ("classify", "deviation", "provenance", "scope")
+#: The pending-item kinds a store-backed judge can produce. Grows through
+#: :func:`register_judge_kind`.
+JUDGE_KINDS: tuple[str, ...] = ("classify", "provenance", "scope")
 
 # ---------------------------------------------------------------------------
 # Manual half — bump by hand when the PROSE rubric changes semantically
@@ -114,12 +110,6 @@ JUDGE_KINDS: tuple[str, ...] = ("classify", "deviation", "provenance", "scope")
 #: typo fixes, reworded examples, or added guardrails that only restate
 #: existing rules.
 #:
-#: ``deviation`` starts at ``"v2"``: issues #117/#118/#119 changed extraction
-#: and tracked-change attribution, so the ``[BEFORE]``/``[AFTER]`` hunks the
-#: deviation judge reasons over are no longer assembled the way they were for
-#: the July-2026 verdict bank. Verdicts stamped ``v1`` (or stamped by a
-#: migration as pre-#117) are answers to a materially different question.
-#:
 #: ``classify`` moved to ``"v2"`` for issue #151: the pending payload's
 #: ``taxonomy_ids`` used to list every taxonomy entry, including
 #: ``inactive`` ones, contradicting REFERENCE.md's "flat list of allowed
@@ -132,7 +122,6 @@ JUDGE_KINDS: tuple[str, ...] = ("classify", "deviation", "provenance", "scope")
 #: force a re-queue.
 RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     "classify": "v2",
-    "deviation": "v2",
     "provenance": "v1",
     "scope": "v1",
 }
@@ -162,9 +151,8 @@ def _entry_field(entry: Any, name: str, default: Any = "") -> Any:
 
     The same taxonomy reaches this module two ways: as a
     :class:`~playbook_engine.taxonomy.Taxonomy` (CLI / mining path) and as the
-    ``taxonomy.entries`` list embedded in ``playbook.opf.json`` (viewer
-    feedback path). Both must digest identically or a reviewer correction
-    would land already-stale.
+    ``taxonomy.entries`` list embedded in ``playbook.opf.json``. Both must
+    digest identically.
     """
     if isinstance(entry, Mapping):
         value = entry.get(name, default)
@@ -252,24 +240,41 @@ def _agreement_type_surface(agreement_type: Any) -> Any:
 
 #: Answer vocabularies — the values a judge of each kind is permitted to
 #: emit. Engine-internal sentinels are stripped (see module docstring).
-_DEVIATION_ANSWERS = sorted(_DEVIATION_VALUES - {"needs_review"})
 _PROVENANCE_ANSWERS = sorted(_PROVENANCE_VALUES)
+
+#: ``kind -> surface(taxonomy=…, agreement_type=…)``: the machine-readable
+#: rubric surface digested into the derived half of a kind's version.
+_DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
+    "classify": lambda *, taxonomy, agreement_type: {"taxonomy": taxonomy_digest(taxonomy)},
+    "provenance": lambda *, taxonomy, agreement_type: {"provenance": _PROVENANCE_ANSWERS},
+    "scope": lambda *, taxonomy, agreement_type: {
+        "agreement_type": _agreement_type_surface(agreement_type)
+    },
+}
+
+
+def register_judge_kind(kind: str, prompt_version: str, surface: Callable[..., Any]) -> None:
+    """Add a judge *kind* to the rubric framework.
+
+    *prompt_version* is the kind's hand-maintained manual half (``"v1"``);
+    *surface* is called as ``surface(taxonomy=…, agreement_type=…)`` and returns
+    the JSON-serialisable machine-readable rubric surface (the answer
+    vocabulary and any semantic input the operator edits) whose digest is the
+    derived half. Pair it with
+    :func:`playbook_engine.agent_judge.register_verdict_kind`.
+    """
+    global JUDGE_KINDS
+    RUBRIC_PROMPT_VERSIONS[kind] = prompt_version
+    _DERIVED_SURFACES[kind] = surface
+    if kind not in JUDGE_KINDS:
+        JUDGE_KINDS = (*JUDGE_KINDS, kind)
 
 
 def _derived_surface(kind: str, *, taxonomy: Any, agreement_type: Any) -> Any:
-    if kind == "classify":
-        return {"taxonomy": taxonomy_digest(taxonomy)}
-    if kind == "deviation":
-        return {
-            "deviation": _DEVIATION_ANSWERS,
-            "direction": sorted(_DIRECTION_VALUES),
-            "magnitude": sorted(_MAGNITUDE_VALUES),
-        }
-    if kind == "provenance":
-        return {"provenance": _PROVENANCE_ANSWERS}
-    if kind == "scope":
-        return {"agreement_type": _agreement_type_surface(agreement_type)}
-    raise RubricError(f"unknown judge kind {kind!r}; expected one of {list(JUDGE_KINDS)}")
+    surface = _DERIVED_SURFACES.get(kind)
+    if surface is None:
+        raise RubricError(f"unknown judge kind {kind!r}; expected one of {list(JUDGE_KINDS)}")
+    return surface(taxonomy=taxonomy, agreement_type=agreement_type)
 
 
 def rubric_version(
@@ -305,7 +310,7 @@ def rubric_version(
 
 
 def current_versions(*, taxonomy: Any = None, agreement_type: Any = None) -> dict[str, str]:
-    """Return ``{kind: version}`` for all four kinds (for CLI reporting)."""
+    """Return ``{kind: version}`` for every judge kind (for CLI reporting)."""
     return {
         kind: rubric_version(kind, taxonomy=taxonomy, agreement_type=agreement_type)
         for kind in JUDGE_KINDS
@@ -375,7 +380,7 @@ class RubricDecision:
 
 @dataclass
 class RubricPolicy:
-    """Staleness policy + run-scoped tally, shared by all four judges.
+    """Staleness policy + run-scoped tally, shared by every judge.
 
     One instance is handed to every store-backed judge in a run, so the CLI
     can report a single coherent picture afterwards.
@@ -389,8 +394,7 @@ class RubricPolicy:
     - **legacy ⇒ replay, loudly.** Pre-versioning verdicts are the entire
       existing bank; auto-invalidating them would discard exactly the human
       judgment this design is protecting. They replay, are counted, and are
-      reported on every run until an operator stamps them with
-      ``playbook judge-migrate``. ``strict_legacy=True`` re-queues them
+      reported on every run. ``strict_legacy=True`` re-queues them
       instead, for an operator who wants a clean slate.
     """
 
@@ -447,5 +451,5 @@ class RubricPolicy:
         return {kind: n for (kind, s), n in sorted(self.counts.items()) if s == state and n}
 
     def format_breakdown(self, state: str) -> str:
-        """``"classify: 12, deviation: 3"`` — empty string when nothing in *state*."""
+        """``"classify: 12, scope: 3"`` — empty string when nothing in *state*."""
         return ", ".join(f"{k}: {n}" for k, n in self.breakdown(state).items())

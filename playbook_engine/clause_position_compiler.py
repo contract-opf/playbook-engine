@@ -23,7 +23,7 @@ Design invariants:
     list — but they are never silently dropped (issue #113): every call
     also returns an ``UnclassifiedCoverage`` summary (count, per-document
     breakdown, example citations) so a consumer can see corpus coverage
-    without cross-referencing the AAR.
+    without cross-referencing a report.
 
 OPF 0.1-0.3's derived surfaces (observed positions, the clause library, the
 historical-stance rollup and its tolerances, fallbacks and negotiation
@@ -145,7 +145,7 @@ class UnclassifiedCoverage:
     taxonomy entry — but that exclusion must never be silent. This summary
     is returned alongside the compiled output so a consumer can see corpus
     coverage (counts, per-document breakdown, example citations) without
-    hunting through the AAR.
+    hunting through a report.
     """
 
     count: int

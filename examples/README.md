@@ -27,9 +27,8 @@ verdicts, keyed by clause content hash, standing in for the LLM/attorney
 review round a real corpus needs. Loading it into the verdict store *before*
 the first `mine` means that first pass comes out fully judged (every clause
 classified, every provenance call made) instead of queuing everything as
-`needs_review`. Deviation needs no verdict by default — it is the
-deterministic standard check; the fixture's deviation verdicts replay only
-under the opt-in `--with-deviation-judge`.
+`needs_review`. Deviation needs no verdict — it is the deterministic standard
+check.
 
 Each deal directory also carries a `hints.yaml` naming its executed (signed)
 copy — the minimal synthetic RTFs have no signature blocks for the engine's
@@ -78,12 +77,12 @@ playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canne
 Expected output:
 
 ```text
-OK  loaded 11 verdict(s) into out/quickstart-demo/judge/verdicts.jsonl
+OK  loaded 7 verdict(s) into out/quickstart-demo/judge/verdicts.jsonl
 ```
 
 ### 3. Mine the corpus
 
-Runs ingest, scope-gate, classification, alignment, and deviation assessment
+Runs ingest, scope-gate, classification, alignment, and the standard check
 for every agreement — replaying the verdicts just loaded instead of calling
 an LLM.
 
@@ -156,40 +155,25 @@ OK  out/quickstart-demo/playbook.opf.json
 
 ### 7. View it
 
-Renders a self-contained, no-network review HTML with per-clause comment
-boxes:
+Renders the one human-readable artifact: a self-contained, no-network HTML
+bundle that carries the whole playbook (hard lines, posture, and every
+clause's precedent) plus the canonical OPF JSON and digest as machine-readable
+blocks:
 
 ```sh
-playbook view render out/quickstart-demo
+playbook view bundle out/quickstart-demo
 ```
 
 Expected output:
 
 ```text
-OK  out/quickstart-demo/playbook.review.html
+OK  out/quickstart-demo/playbook.opf.html
 ```
 
-Open `out/quickstart-demo/playbook.review.html` in a browser to see the
-result.
-
-### 8. Render a review prompt (optional)
-
-Composes Evidence + Posture + Floor into a review-ready system prompt — pure
-Markdown, pastable into any chat LLM alongside a contract to review. Step 5's
-interview means the `## HARD LINES (Floor)` and `## NEGOTIATION POSTURE
-(soft)` sections below now carry real, binding content instead of the
-empty-section markers — and, since the playbook is no longer advisory-only,
-`render-prompt` no longer prints its advisory-only WARN:
-
-```sh
-playbook render-prompt out/quickstart-demo/playbook.opf.json --out out/quickstart-demo/review-prompt.md
-```
-
-Expected output (stdout — the artifact):
-
-```text
-wrote out/quickstart-demo/review-prompt.md
-```
+Open `out/quickstart-demo/playbook.opf.html` in a browser to see the result.
+Step 5's interview means its Floor and Posture sections now carry real
+content instead of the empty-section markers. The toaster reads
+`playbook.opf.json` directly; the bundle is for people.
 <!-- quickstart:end -->
 
 `out/quickstart-demo/` (and `out/` generally) is `.gitignore`d — safe to
@@ -203,7 +187,7 @@ until this file is updated to match.
 
 ## Docker variant
 
-Same seven steps, run inside the reproducible Docker image instead of a local
+Same steps, run inside the reproducible Docker image instead of a local
 venv (see the main README for why you'd pick Docker for a real corpus):
 
 ```sh
@@ -240,7 +224,7 @@ docker run --rm -it \
 
 docker run --rm -it \
   -v "$PWD/out/quickstart-demo":/work/out \
-  playbook-engine view render /work/out
+  playbook-engine view bundle /work/out
 ```
 
 No `ANTHROPIC_API_KEY` forwarding needed for this fixture run either — omit

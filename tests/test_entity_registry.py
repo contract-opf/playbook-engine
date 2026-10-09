@@ -245,8 +245,8 @@ def test_pseudonymize_text_matches_name_ending_in_punctuation(tmp_path: Path) ->
 
 # ---------------------------------------------------------------------------
 # Issue #29: born-safe pseudonymization must catch case/spacing variants of
-# a known entity name, not just the exact registry spelling. The publish-side
-# backstop (publisher._normalize_for_scan) already casefolds and collapses
+# a known entity name, not just the exact registry spelling. The independent
+# no-known-entity scan (tests/entity_scan.py) casefolds and collapses
 # whitespace before comparing; pseudonymize_text must normalize the same way
 # BEFORE matching so the variant never reaches the internal artifact in the
 # first place, replacing the matched ORIGINAL span (not a normalized copy).

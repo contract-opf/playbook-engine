@@ -22,12 +22,11 @@ Each observation captures:
     downstream judges/standards, issue #105)
   - Citation: document_id, version, version_id, clause_path, char_span (see
     ObservationCitation for why version alone is not file-resolvable — issue #108)
-  - Deviation assessment: deviation, risk_delta (from the deviation classifier)
   - Standard (issue #220): whether the observed text is OUR standard language
     — a deterministic fact (``deviation_classifier.is_standard_text``), not a
-    judged verdict. On the consumer path (no deviation judge, the default)
-    ``deviation`` is derived from it: "none" when standard, "substantive"
-    otherwise
+    judged verdict. ``deviation`` is derived from it: "none" when standard,
+    "substantive" otherwise (``risk_delta`` is a constant neutral/none
+    placeholder: nothing assesses risk here)
   - Provenance: whose paper the document is on (OPF §2.2)
   - Outcome: "signed", "unsigned", "proposed_then_reversed" (from reversal
     detector, or a non-standard clause removed before signing — a deal with
@@ -262,8 +261,9 @@ class Observation:
                          usable drafting standard or negotiable-alternative
                          text for any real indemnification/insurance clause).
         citation:        Traceability reference to the source version.
-        deviation:       How the clause deviates from our standard.
-        risk_delta:      Direction and magnitude of risk shift.
+        deviation:       ``"none"`` when the text is our standard, ``"substantive"``
+                         otherwise (derived from ``standard``).
+        risk_delta:      Constant neutral/none placeholder — nothing assesses risk.
         provenance:      The deal's paper side: ``"our_paper"``,
                          ``"counterparty_paper"``, or ``"unknown"`` when the
                          detection was ambiguous — never coerced to a side
@@ -280,10 +280,9 @@ class Observation:
                          ``outcome == "signed"`` is signed precedent.
         confidence:      Classification confidence in [0, 1], or ``None`` when
                          the clause is unclassified or confidence is unavailable.
-        basis:           How the deviation assessment was reached (e.g.
-                         ``"deterministic"``, ``"judge"``), or ``None`` for
-                         observations that bypass the deviation classifier
-                         (e.g. template observations).
+        basis:           ``"deterministic"`` (the standard check), or ``None`` for
+                         observations that bypass it (e.g. template
+                         observations).
         attribution:     Word tracked-changes author/date attribution for this
                          clause's hunks (issue #88), or ``None`` when no
                          tracked-changes side-channel matched — PDF/RTF, a
@@ -327,8 +326,9 @@ class Observation:
                          ``deviation_classifier.is_standard_text`` against the
                          template clause, never a judged verdict. ``False``
                          when there is no template clause to be standard
-                         against. ``None`` only for legacy callers/stores that
-                         never computed it (omitted from ``to_dict()`` then).
+                         against. ``None`` only for template observations,
+                         which are the standard (omitted from ``to_dict()``
+                         then).
         paper_basis:     The provenance detection's basis for this deal
                          (``ProvenanceResult.basis`` — e.g.
                          ``"template_similarity"``, ``"needs_review"``), or
@@ -804,25 +804,13 @@ DROPPED_REFUSED_UNSIGNED = "refused_ask_no_signed_copy"
 OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
 
 # Severity ranks used to pick the representative net-diff row when several
-# terminal nodes share one taxonomy_id (issue #216). The representative's
-# deviation + risk_delta pair is carried by the merged observation as one
-# consistent assessment; the worst risk dominates so a concession
-# (direction="worse") is never masked by an unchanged sibling node.
-_DEVIATION_RANK: dict[str, int] = {
-    "none": 0,
-    "reworded_equivalent": 1,
-    "needs_review": 2,
-    "substantive": 3,
-}
-_MAGNITUDE_RANK: dict[str, int] = {"none": 0, "minor": 1, "material": 2}
-_DIRECTION_RANK: dict[str, int] = {"neutral": 0, "better": 1, "worse": 2}
+# terminal nodes share one taxonomy_id (issue #216): the row whose attribution
+# the merged observation carries. A non-standard row outranks a standard one.
+_DEVIATION_RANK: dict[str, int] = {"none": 0, "substantive": 1}
 
-# Bases meaning a row's assessment is weaker than a judge verdict, weakest
-# last. Mirrors clause_position_compiler._UNJUDGED_BASES/_STUB_BASES: if ANY
-# node of a merged taxonomy group carries one, the merged observation carries
-# the weakest of them, so merging never launders an unjudged node into a
-# judged one (the stub cap and the acceptable_if basis filter keep holding).
-_WEAK_BASIS_RANK: dict[str, int] = {"needs_review": 1, "judge_error": 2, "stub": 3}
+#: The ``risk_delta`` every observation carries: nothing assesses risk, so it
+#: is a constant neutral/none placeholder (the observation store's shape).
+_NEUTRAL_RISK: dict[str, str] = {"direction": "neutral", "magnitude": "none"}
 
 
 def _content_tokens(text: str) -> frozenset[str]:
@@ -963,13 +951,8 @@ def _is_standard_language(
     return bool(normalized) and f" {normalized} " in f" {whole} "
 
 
-def _row_severity(dr: DeviationResult) -> tuple[int, int, int]:
-    risk = dr.risk_delta
-    return (
-        _DIRECTION_RANK.get(risk.direction, 0),
-        _MAGNITUDE_RANK.get(risk.magnitude, 0),
-        _DEVIATION_RANK.get(dr.deviation, 0),
-    )
+def _row_severity(dr: DeviationResult) -> int:
+    return _DEVIATION_RANK.get(dr.deviation, 0)
 
 
 @dataclass
@@ -1001,7 +984,6 @@ def build_observations(
     terminal_version_id: str | None = None,
     dropped: dict[str, int] | None = None,
     standard_text_by_tid: Mapping[str, str | Sequence[str]] | None = None,
-    deterministic_deviations: bool = False,
     party_names: Sequence[str] = (),
 ) -> list[Observation]:
     """Assemble ``Observation`` objects for one document (one deal).
@@ -1060,12 +1042,10 @@ def build_observations(
         document_id:               Source document identifier.
         version:                   Source version identifier.
         provenance:                ``"our_paper"``, ``"counterparty_paper"`` or ``"unknown"``.
-        deviation_results:         Output of ``assess_deviations()`` — list of
-                                  ``(ClauseDiff, DeviationResult)`` pairs.  Only
-                                  changed clauses carry meaningful deviation data;
-                                  unchanged clauses are also included (outcome
-                                  defaults to signed/unsigned per
-                                  ``has_signed_copy``, deviation=none).
+        deviation_results:         Output of ``assess_deviations_deterministic()`` —
+                                  list of ``(ClauseDiff, DeviationResult)`` pairs
+                                  (outcome defaults to signed/unsigned per
+                                  ``has_signed_copy``).
         reversals:                 Output of ``detect_reversals()`` for this document.
         classification_confidences: Per-diff classification confidence values in the
                                   same order as ``deviation_results``.  Each entry
@@ -1179,23 +1159,17 @@ def build_observations(
                                   that clause's removed text cannot be
                                   determined. Also the reference every
                                   observation's ``standard`` fact is
-                                  computed against (issue #220); when
-                                  ``None``, ``standard`` stays ``None``
-                                  (legacy callers) unless
-                                  *deterministic_deviations*.
-        deterministic_deviations:   True on the consumer path (issue #220: no
-                                  deviation judge configured — the default).
-                                  Each observation's ``deviation`` is then
-                                  derived from its own ``standard`` fact
-                                  ("none" when standard, "substantive"
-                                  otherwise) with ``basis="deterministic"``
-                                  and the neutral/none ``risk_delta``
-                                  placeholder — never from a judged or
+                                  computed against (issue #220), and from
+                                  which its ``deviation`` is derived ("none"
+                                  when standard, "substantive" otherwise,
+                                  ``basis="deterministic"``, the neutral/none
+                                  ``risk_delta`` placeholder) — never from a
                                   first-to-last-hunk verdict. For a terminal
                                   observation that is the merged text of all
                                   its nodes against the whole template
                                   clause, so a clause the deal split across
-                                  nodes is still standard.
+                                  nodes is still standard. When ``None``,
+                                  nothing is standard.
         party_names:                Known party names (our aliases plus
                                   ``provenance.known_entities``) neutralized
                                   before the standard comparison — see
@@ -1215,28 +1189,17 @@ def build_observations(
             return []
         return _standard_nodes(standard_text_by_tid.get(tid, ""))
 
-    def _standard_fact(text: str, tid: str | None) -> bool | None:
+    def _standard_fact(text: str, tid: str | None) -> bool:
         # Issue #220: whether *text* is our standard for *tid*, compared
         # against the WHOLE template clause (every node, joined) — never a
         # single node, so a deal that kept only part of a multi-node standard
-        # is not standard. None only when no reference was supplied at all
-        # (legacy callers) and no deterministic answer is required.
-        if standard_text_by_tid is None and not deterministic_deviations:
-            return None
+        # is not standard.
         nodes = _standard_for(tid)
         return is_standard_text(text, "\n".join(nodes), party_names) if nodes else False
 
-    def _assessment(
-        standard: bool | None, deviation: str, risk_delta: dict[str, str], basis: str | None
-    ) -> tuple[str, dict[str, str], str | None]:
-        # Consumer path (issue #220): the deviation IS the standard fact.
-        if deterministic_deviations:
-            return (
-                "none" if standard else "substantive",
-                {"direction": "neutral", "magnitude": "none"},
-                "deterministic",
-            )
-        return deviation, risk_delta, basis
+    def _deviation_of(standard: bool) -> str:
+        # The deviation IS the standard fact.
+        return "none" if standard else "substantive"
 
     observations: list[Observation] = []
     obs_counter: dict[str, int] = {}
@@ -1352,7 +1315,7 @@ def build_observations(
     # the whole signed document, and never by word-set membership, where a
     # narrowed or replaced clause's words can all recur in the signed copy.
     survival_nodes = [_survival_node(n.text, n.row[1].kind == "unchanged") for n in nodes]
-    for idx, clause_diff, dr in removed_rows:
+    for idx, clause_diff, _dr in removed_rows:
         # No terminal slot: the cited text is read from the FIRST version, so
         # it is never the default (signed/unsigned) outcome. What its removal
         # means is decided on its own text — never by matching a
@@ -1406,9 +1369,7 @@ def build_observations(
         # Issue #220: the removed row's standard fact is the origin test that
         # just classified it (our standard struck vs their ask struck), so
         # its outcome and its deviation can never disagree.
-        removed_dev, removed_risk, removed_basis = _assessment(
-            removed_standard, dr.deviation, dr.risk_delta.to_dict(), dr.basis
-        )
+        removed_dev = _deviation_of(removed_standard)
         # Dynamics follow the deviation this observation emits, not the
         # per-row one the origin test replaced.
         proposed_by, observed_at = _dynamics(removed_dev, attribution)
@@ -1426,11 +1387,11 @@ def build_observations(
                     version_id=clause_diff.clause_version_before,
                 ),
                 deviation=removed_dev,
-                risk_delta=removed_risk,
+                risk_delta=dict(_NEUTRAL_RISK),
                 provenance=provenance,
                 outcome=removed_outcome,
                 confidence=_confidence(idx),
-                basis=removed_basis,
+                basis="deterministic",
                 attribution=attribution,
                 proposed_by=proposed_by,
                 observed_at=observed_at,
@@ -1455,13 +1416,7 @@ def build_observations(
         first = group[0]
         full_text = "\n".join(n.text for n in group if n.text)
         rows = [n.row for n in group]
-        rep_idx, _rep_cd, rep_dr = max(rows, key=lambda r: _row_severity(r[2]))
-        deviation = rep_dr.deviation
-        risk_delta = rep_dr.risk_delta.to_dict()
-        basis = rep_dr.basis
-        weakest = max(rows, key=lambda r: _WEAK_BASIS_RANK.get(r[2].basis or "", 0))[2].basis
-        if _WEAK_BASIS_RANK.get(weakest or "", 0) > _WEAK_BASIS_RANK.get(basis or "", 0):
-            basis = weakest
+        rep_idx = max(rows, key=lambda r: _row_severity(r[2]))[0]
         confidences = [c for c in (_confidence(r[0]) for r in rows) if c is not None]
         conf: float | None = min(confidences) if confidences else None
         # Issue #222: the weakest binding among the group's rows.
@@ -1479,9 +1434,7 @@ def build_observations(
         # consumer path derives deviation from. Unclassified nodes have no
         # template clause, so they are never standard.
         group_standard = _standard_fact(full_text, first.taxonomy_id)
-        obs_deviation, obs_risk_delta, obs_basis = _assessment(
-            group_standard, deviation, risk_delta, basis
-        )
+        obs_deviation = _deviation_of(group_standard)
         # Dynamics follow the deviation this observation emits, not the
         # per-row one the merged-text standard fact replaced.
         proposed_by, observed_at = _dynamics(obs_deviation, attribution)
@@ -1499,11 +1452,11 @@ def build_observations(
                     version_id=first.version_id,
                 ),
                 deviation=obs_deviation,
-                risk_delta=obs_risk_delta,
+                risk_delta=dict(_NEUTRAL_RISK),
                 provenance=provenance,
                 outcome=default_outcome,
                 confidence=conf,
-                basis=obs_basis,
+                basis="deterministic",
                 attribution=attribution,
                 proposed_by=proposed_by,
                 observed_at=observed_at,
@@ -1565,23 +1518,10 @@ def build_observations(
                     # citation resolves to the wrong file (issue #108).
                     version_id=r.version_inserted,
                 ),
-                # "substantive": the proposed text genuinely differed from the
-                # signed terminal (that is exactly what detect_reversals
-                # verified via its retained-token ratio) — never "none". On
-                # the consumer path (issue #220) deviation is the standard
-                # fact instead, like every other row.
-                deviation=(
-                    ("none" if reversal_standard else "substantive")
-                    if deterministic_deviations
-                    else "substantive"
-                ),
-                # No DeviationJudge ever assessed the proposal (it never
-                # entered deviation_results) — a neutral placeholder, not a
-                # real risk judgment. clause_position_compiler's hold_firm
-                # derivation keys off outcome/provenance for rejected
-                # observations, not risk_delta, so this placeholder does not
-                # distort position derivation.
-                risk_delta={"direction": "neutral", "magnitude": "none"},
+                # Deviation is the standard fact (issue #220), like every
+                # other row.
+                deviation=_deviation_of(reversal_standard),
+                risk_delta=dict(_NEUTRAL_RISK),
                 provenance=provenance,
                 outcome="proposed_then_reversed",
                 # A reversal is by definition a proposed change, but the
@@ -1590,11 +1530,7 @@ def build_observations(
                 proposed_by="unknown" if our_party_aliases is not None else None,
                 confidence=None,
                 # "deterministic": detected by detect_reversals' retained-
-                # token ratio (issue #222), not a judge call — and not an
-                # unjudged placeholder basis ("stub"/"needs_review"/
-                # "judge_error"), since this is a real, fully-verified signal
-                # that must not trip the playbook's stub_basis_present
-                # watermark.
+                # token ratio (issue #222), not a judge call.
                 basis="deterministic",
                 standard=reversal_standard,
                 alignment_confidence=r.alignment_confidence,

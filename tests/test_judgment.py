@@ -25,10 +25,8 @@ from typing import Any
 from playbook_engine.clause_classifier import ClassificationHint, ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
-    BatchedDeviationJudge,
     BatchedScopeJudge,
     JudgmentCache,
     _payload_key,
@@ -110,34 +108,6 @@ class _CountingClassificationJudge:
 
 
 @dataclass
-class _CountingDeviationJudge:
-    """Deviation judge that counts batch calls and records batch sizes."""
-
-    call_count: int = 0
-    batch_sizes: list[int] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.batch_sizes is None:
-            self.batch_sizes = []
-
-    def assess_batch(
-        self,
-        items: list[dict[str, str]],
-        our_standard: str,
-    ) -> list[DeviationResult]:
-        self.call_count += 1
-        self.batch_sizes.append(len(items))
-        return [
-            DeviationResult(
-                deviation="substantive",
-                risk_delta=RiskDelta(direction="worse", magnitude="minor"),
-                basis="judge",
-            )
-            for _ in items
-        ]
-
-
-@dataclass
 class _RaisingClassificationJudge:
     """Classification judge that always raises (for judge_error testing)."""
 
@@ -186,14 +156,6 @@ class _RaisingScopeJudge:
 
 
 @dataclass
-class _RaisingDeviationJudge:
-    """Deviation judge that always raises."""
-
-    def assess_batch(self, items: list[dict[str, str]], our_standard: str) -> list[DeviationResult]:
-        raise RuntimeError("Simulated rate-limit")
-
-
-@dataclass
 class _ScriptedScopeJudge:
     """Scope judge returning one scripted result per call, in order.
 
@@ -232,23 +194,6 @@ class _ScriptedClassificationJudge:
         result = self.results[self.call_count]
         self.call_count += 1
         return [result for _ in nodes]
-
-
-@dataclass
-class _ScriptedDeviationJudge:
-    """Deviation judge returning one scripted batch result per call.
-
-    See :class:`_ScriptedScopeJudge` — same round-1-miss/round-2-hit shape,
-    for deviation.
-    """
-
-    results: list[DeviationResult]
-    call_count: int = 0
-
-    def assess_batch(self, items: list[dict[str, str]], our_standard: str) -> list[DeviationResult]:
-        result = self.results[self.call_count]
-        self.call_count += 1
-        return [result for _ in items]
 
 
 @dataclass
@@ -772,195 +717,6 @@ class TestBatchedClassificationJudge:
         ]
         results = judge.classify_batch(nodes, taxonomy)
         assert len(results) == 5
-
-
-# ---------------------------------------------------------------------------
-# BatchedDeviationJudge tests
-# ---------------------------------------------------------------------------
-
-
-class TestBatchedDeviationJudge:
-    """AC-1, AC-2, AC-3, AC-4, AC-5 for deviation judging."""
-
-    def test_first_call_delegates(self, tmp_path: Path) -> None:
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
-
-        results = judge.assess_batch(items, our_standard="Standard text.")
-        assert len(results) == 1
-        assert delegate.call_count == 1
-
-    def test_second_call_same_items_is_cache_hit(self, tmp_path: Path) -> None:
-        """AC-1 (deviation): repeat call → zero new judge calls."""
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": "[BEFORE]\nold\n[AFTER]\nnew"}]
-
-        judge.assess_batch(items, our_standard="Standard.")
-        judge.assess_batch(items, our_standard="Standard.")
-
-        assert delegate.call_count == 1, "Identical items on second call must be a cache hit"
-
-    def test_cross_doc_dedup(self, tmp_path: Path) -> None:
-        """AC-2 (deviation): same hunk in two docs → judge called once."""
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": "[BEFORE]\nProvide service\n[AFTER]\nProvide extended service"}]
-        standard = "Provide service as agreed."
-
-        judge.assess_batch(items, our_standard=standard)
-        judge.assess_batch(items, our_standard=standard)
-
-        assert delegate.call_count == 1, "Same hunk seen in two documents → one judge call"
-
-    def test_intra_batch_dedup_single_dispatch(self, tmp_path: Path) -> None:
-        """AC-2 (deviation intra-batch): two identical items in ONE assess_batch → one delegate call.
-
-        This exercises the corpus-wide single-dispatch case described in issue #62:
-        duplicate payloads within a single batch must produce exactly one payload
-        to the delegate, not two.
-        """
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        identical_item = {"hunk": "[BEFORE]\nProvide service\n[AFTER]\nExtended service"}
-        standard = "Provide service as agreed."
-
-        results = judge.assess_batch([identical_item, identical_item], our_standard=standard)
-
-        assert len(results) == 2, "Result list must match input length"
-        assert delegate.call_count == 1, (
-            "Two identical items in one batch must produce exactly one delegate call"
-        )
-        assert delegate.batch_sizes[0] == 1, (
-            "Delegate must receive only one (deduplicated) payload, not two"
-        )
-
-    def test_batch_size_greater_than_one(self, tmp_path: Path) -> None:
-        """AC-3 (deviation): multiple uncached items → delegate gets batch_size > 1."""
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": f"[BEFORE]\nold {i}\n[AFTER]\nnew {i}"} for i in range(4)]
-
-        judge.assess_batch(items, our_standard="Standard.")
-
-        assert delegate.batch_sizes[0] > 1
-        assert delegate.batch_sizes[0] == 4
-
-    def test_judge_error_returns_needs_review(self, tmp_path: Path) -> None:
-        """AC-5 (deviation): raising judge → needs_review / judge_error basis."""
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        judge = BatchedDeviationJudge(delegate=_RaisingDeviationJudge(), cache=cache)
-        items = [{"hunk": "[BEFORE]\na\n[AFTER]\nb"}]
-
-        results = judge.assess_batch(items, our_standard="Standard.")
-        assert len(results) == 1
-        assert results[0].deviation == "needs_review"
-        assert results[0].basis == "judge_error"
-
-    def test_needs_review_is_not_cached_and_rechecks_delegate(self, tmp_path: Path) -> None:
-        """A needs_review verdict must NOT be cached (issue #182 "B4") —
-        same convergence requirement as classification/scope: round 1 misses,
-        round 2 (identical hunk/standard, same cache) must reach the
-        delegate again rather than replaying the stale miss forever.
-        """
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
-        standard = "Standard text."
-
-        delegate = _ScriptedDeviationJudge(
-            results=[
-                DeviationResult(
-                    deviation="needs_review",
-                    risk_delta=RiskDelta("neutral", "none"),
-                    basis="needs_review",
-                ),
-                DeviationResult(
-                    deviation="substantive",
-                    risk_delta=RiskDelta("worse", "minor"),
-                    basis="judge",
-                ),
-            ]
-        )
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-
-        round1 = judge.assess_batch(items, our_standard=standard)
-        assert round1[0].basis == "needs_review"
-
-        round2 = judge.assess_batch(items, our_standard=standard)
-        assert round2[0].basis == "judge"
-        assert round2[0].deviation == "substantive"
-        assert delegate.call_count == 2, "needs_review must never be served from cache"
-
-    def test_model_id_change_invalidates_deviation_cache(self, tmp_path: Path) -> None:
-        """AC-4 (deviation): changing model_id → cache miss → fresh judge call."""
-        cache_path = tmp_path / "v.jsonl"
-        items = [{"hunk": "[BEFORE]\nold\n[AFTER]\nnew"}]
-        standard = "Standard."
-
-        delegate1 = _CountingDeviationJudge()
-        j1 = BatchedDeviationJudge(
-            delegate=delegate1, cache=JudgmentCache(cache_path, model_id="m1")
-        )
-        j1.assess_batch(items, our_standard=standard)
-
-        delegate2 = _CountingDeviationJudge()
-        j2 = BatchedDeviationJudge(
-            delegate=delegate2, cache=JudgmentCache(cache_path, model_id="m2")
-        )
-        j2.assess_batch(items, our_standard=standard)
-
-        assert delegate2.call_count == 1, "model_id change must invalidate cached verdicts"
-
-    def test_standard_tail_edit_past_char_500_busts_verdict_cache(self, tmp_path: Path) -> None:
-        """Issue #41: our_standard must NOT be truncated in the verdict cache key.
-
-        Two assess_batch calls with identical items but our_standard values that
-        share their first 500 chars and differ only at char 501 must NOT collide —
-        the second call must be a cache miss (delegate called twice). Template tail
-        edits beyond the old [:500] cutoff must bust the verdict cache; before the
-        fix, both payloads hashed identically and the second call silently replayed
-        the verdict rendered against the OLD standard.
-        """
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
-
-        shared_prefix = "A" * 500
-        standard_v1 = shared_prefix + " ORIGINAL-TAIL"
-        standard_v2 = shared_prefix + " EDITED-TAIL"
-
-        judge.assess_batch(items, our_standard=standard_v1)
-        judge.assess_batch(items, our_standard=standard_v2)
-
-        assert delegate.call_count == 2, (
-            "our_standard values identical in their first 500 chars but differing "
-            "after must produce distinct cache keys — the full standard (not a "
-            "500-char truncation) must be part of the verdict cache payload"
-        )
-
-    def test_verdict_round_trips_correctly(self, tmp_path: Path) -> None:
-        """Cached DeviationResult must survive serialisation round-trip intact."""
-        cache = JudgmentCache(tmp_path / "v.jsonl", model_id="stub-v1")
-        delegate = _CountingDeviationJudge()
-        judge = BatchedDeviationJudge(delegate=delegate, cache=cache)
-        items = [{"hunk": "[BEFORE]\nold text\n[AFTER]\nnew text"}]
-
-        result_first = judge.assess_batch(items, our_standard="Standard text.")
-
-        # Second call hits cache; reconstruct from serialised form.
-        result_second = judge.assess_batch(items, our_standard="Standard text.")
-
-        assert result_first[0].deviation == result_second[0].deviation
-        assert result_first[0].risk_delta.direction == result_second[0].risk_delta.direction
-        assert result_first[0].risk_delta.magnitude == result_second[0].risk_delta.magnitude
-        assert result_first[0].basis == result_second[0].basis
 
 
 # ---------------------------------------------------------------------------

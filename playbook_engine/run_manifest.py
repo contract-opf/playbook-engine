@@ -90,13 +90,6 @@ RUN_MANIFEST_FILENAME = "run_manifest.json"
 #: written by a newer engine never crashes an older one.
 RUN_MANIFEST_SCHEMA_VERSION = "1"
 
-#: The deviation modes a ``mine`` can run in (issue #230), recorded under the
-#: manifest's top-level ``deviation_mode`` key: ``"deterministic"`` is the
-#: consumer path (no deviation judge — every deviation is the deterministic
-#: standard check, issue #220); ``"judged"`` is the opt-in advisory layer
-#: (``--with-deviation-judge``). A closed enum — never a name or a path.
-DEVIATION_MODES: tuple[str, ...] = ("deterministic", "judged")
-
 #: Escape-hatch env var for builds with no ``.git`` (the Docker image, a
 #: wheel install). Set at build time — e.g.
 #: ``ARG GIT_SHA`` / ``ENV PLAYBOOK_ENGINE_GIT_SHA=$GIT_SHA`` — so a stale
@@ -201,12 +194,6 @@ class RunManifest:
     written_by: str  # "mine" | "judge" | "segment"
     environment: RunEnvironment
     counts: dict[str, int] = field(default_factory=dict)
-    # Issue #230: the deviation mode the out-dir's observations.jsonl was
-    # mined in (one of DEVIATION_MODES). Run-level, not environment: a mode
-    # change between runs is a deliberate choice, never a preflight finding,
-    # so it lives beside ``environment`` rather than inside it. ``None`` for
-    # an out-dir mined before the mode was recorded.
-    deviation_mode: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -216,8 +203,6 @@ class RunManifest:
             "environment": self.environment.to_dict(),
             "counts": dict(self.counts),
         }
-        if self.deviation_mode is not None:
-            out["deviation_mode"] = self.deviation_mode
         return out
 
 
@@ -333,8 +318,6 @@ def compute_config_hash(config: EngineConfig) -> str:
             "extractor": config.extraction.extractor,
             "max_fallback": config.extraction.max_fallback,
         },
-        "scan_role_words_extra": sorted(config.scan_role_words_extra),
-        "scan_stopwords_extra": sorted(config.scan_stopwords_extra),
         "taxonomy_sha256": _sha256_file_or_none(config.taxonomy_path),
     }
     return make_config_fingerprint(payload)
@@ -476,13 +459,6 @@ def write_run_manifest(
     it, and a run that crashed halfway produced nothing worth claiming. (A
     crashed run therefore leaves the *previous* manifest in place, which is
     the correct description of the out-dir's contents.)
-
-    The ``deviation_mode`` already recorded in the file (issue #230 — written
-    by ``mine_corpus`` together with ``observations.jsonl``, see
-    :func:`record_deviation_mode`) is carried over unchanged: it describes
-    the observation store, which this environment stamp does not rewrite, so
-    a ``segment`` (which mines nothing) or the ``mine`` that just recorded it
-    must never erase it.
     """
     manifest = RunManifest(
         schema_version=RUN_MANIFEST_SCHEMA_VERSION,
@@ -490,7 +466,6 @@ def write_run_manifest(
         written_by=command,
         environment=environment,
         counts=counts if counts is not None else collect_counts(out_dir),
-        deviation_mode=read_deviation_mode(out_dir),
     )
     return _atomic_write_manifest(out_dir, manifest.to_dict())
 
@@ -516,54 +491,6 @@ def _read_raw_manifest(out_dir: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return raw if isinstance(raw, dict) else None
-
-
-def _valid_deviation_mode(value: Any) -> str | None:
-    return value if isinstance(value, str) and value in DEVIATION_MODES else None
-
-
-def record_deviation_mode(out_dir: Path, mode: str) -> Path:
-    """Record the deviation *mode* the out-dir's observations were mined in.
-
-    Issue #230: written by ``mine_corpus`` right after it writes
-    ``observations.jsonl``, so the mode always describes the store sitting
-    next to it — a mine that fails before writing the store leaves the
-    previous store AND its mode in place. ``project`` reads it back
-    (:func:`read_deviation_mode`) instead of inferring the mode from row
-    contents, which cannot tell an opt-in judged run whose every clause
-    matched the template (all rows ``basis="deterministic"``) from a
-    consumer-path run.
-
-    Merged into an existing manifest (every other key untouched). With no
-    usable manifest yet — a fresh out-dir, or ``mine_corpus`` driven without
-    the CLI — a manifest carrying only ``schema_version`` and the mode is
-    written; it has no ``environment``, so :func:`read_run_manifest` still
-    reads it as "no prior environment" and the next preflight stays silent.
-
-    Raises:
-        ValueError: *mode* is not one of :data:`DEVIATION_MODES`.
-    """
-    if mode not in DEVIATION_MODES:
-        raise ValueError(f"deviation mode must be one of {DEVIATION_MODES}; got {mode!r}")
-    raw = _read_raw_manifest(out_dir)
-    if raw is None or raw.get("schema_version") != RUN_MANIFEST_SCHEMA_VERSION:
-        raw = {"schema_version": RUN_MANIFEST_SCHEMA_VERSION}
-    raw["deviation_mode"] = mode
-    return _atomic_write_manifest(out_dir, raw)
-
-
-def read_deviation_mode(out_dir: Path) -> str | None:
-    """The deviation mode recorded for *out_dir*'s observations, or ``None``.
-
-    ``None`` — never raises — for an out-dir mined before the mode was
-    recorded (issue #230), a missing/corrupt manifest, a manifest schema this
-    engine does not know, or a value outside :data:`DEVIATION_MODES`. The
-    caller then falls back to inferring the mode, and says so.
-    """
-    raw = _read_raw_manifest(out_dir)
-    if raw is None or raw.get("schema_version") != RUN_MANIFEST_SCHEMA_VERSION:
-        return None
-    return _valid_deviation_mode(raw.get("deviation_mode"))
 
 
 def read_run_manifest(out_dir: Path) -> RunManifest | None:
@@ -598,7 +525,6 @@ def read_run_manifest(out_dir: Path) -> RunManifest | None:
         written_by=str(raw.get("written_by", "")),
         environment=environment,
         counts=counts,
-        deviation_mode=_valid_deviation_mode(raw.get("deviation_mode")),
     )
 
 

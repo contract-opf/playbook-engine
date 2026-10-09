@@ -4,7 +4,7 @@ AC-1 (pipeline): two compile runs over the same corpus → the second run makes
 ZERO judge calls (all verdicts served from the persisted verdict cache).
 
 The test installs counting stub judges *before* mine_corpus wraps them in
-BatchedScopeJudge / BatchedClassificationJudge / BatchedDeviationJudge so we
+BatchedScopeJudge / BatchedClassificationJudge so we
 can observe the raw delegate call counts.
 
 Finding 1 isolation strategy
@@ -45,7 +45,6 @@ import yaml
 from playbook_engine.artifact_store import make_config_fingerprint
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.config import load_config
-from playbook_engine.deviation_classifier import DeviationResult, RiskDelta
 from playbook_engine.observation_builder import read_observations_jsonl
 from playbook_engine.pipeline import mine_corpus
 from playbook_engine.scope_gate import ScopeDecision
@@ -87,8 +86,6 @@ def _write_rtf(path: Path, body: str) -> None:
 # ---------------------------------------------------------------------------
 # Counting stub judges — count raw delegate calls, not cache-layer calls
 # ---------------------------------------------------------------------------
-
-_NEUTRAL_RISK = RiskDelta(direction="neutral", magnitude="none")
 
 
 @dataclass
@@ -146,24 +143,6 @@ class _CountingClassificationJudge:
         ]
 
 
-@dataclass
-class _CountingDeviationJudge:
-    call_count: int = 0
-    total_items: int = 0
-
-    def assess_batch(
-        self,
-        items: list[dict[str, str]],
-        our_standard: str,
-    ) -> list[DeviationResult]:
-        self.call_count += 1
-        self.total_items += len(items)
-        return [
-            DeviationResult(deviation="substantive", risk_delta=_NEUTRAL_RISK, basis="judge")
-            for _ in items
-        ]
-
-
 # ---------------------------------------------------------------------------
 # Corpus + config factory
 # ---------------------------------------------------------------------------
@@ -175,7 +154,7 @@ def _make_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
     for doc_name, _body in [("deal-alpha", _CORPUS_BODY), ("deal-beta", _CORPUS_BODY)]:
         doc_dir = corpus_dir / doc_name
         doc_dir.mkdir(parents=True)
-        # Two versions so L4 diff + deviation judge is exercised.
+        # Two versions so the L4 diff is exercised.
         _write_rtf(doc_dir / "v1.rtf", _CORPUS_BODY)
         _write_rtf(
             doc_dir / "v2.rtf",
@@ -249,7 +228,6 @@ def test_second_compile_run_makes_zero_judge_calls(tmp_path: Path) -> None:
     # -----------------------------------------------------------------------
     scope_judge_1 = _CountingScopeJudge()
     cls_judge_1 = _CountingClassificationJudge()
-    dev_judge_1 = _CountingDeviationJudge()
 
     mine_corpus(
         corpus_dir=corpus_dir,
@@ -258,7 +236,6 @@ def test_second_compile_run_makes_zero_judge_calls(tmp_path: Path) -> None:
         out_dir=out_dir,
         scope_judge=scope_judge_1,
         classification_judge=cls_judge_1,
-        deviation_judge=dev_judge_1,
         no_cache=False,
     )
 
@@ -289,7 +266,6 @@ def test_second_compile_run_makes_zero_judge_calls(tmp_path: Path) -> None:
     # -----------------------------------------------------------------------
     scope_judge_2 = _CountingScopeJudge()
     cls_judge_2 = _CountingClassificationJudge()
-    dev_judge_2 = _CountingDeviationJudge()
 
     mine_corpus(
         corpus_dir=corpus_dir,
@@ -298,7 +274,6 @@ def test_second_compile_run_makes_zero_judge_calls(tmp_path: Path) -> None:
         out_dir=out_dir,
         scope_judge=scope_judge_2,
         classification_judge=cls_judge_2,
-        deviation_judge=dev_judge_2,
         no_cache=False,
     )
 
@@ -309,10 +284,6 @@ def test_second_compile_run_makes_zero_judge_calls(tmp_path: Path) -> None:
     assert cls_judge_2.call_count == 0, (
         f"Second run must make zero classification judge calls (verdict cache hit); "
         f"got {cls_judge_2.call_count}"
-    )
-    assert dev_judge_2.call_count == 0, (
-        f"Second run must make zero deviation judge calls (verdict cache hit); "
-        f"got {dev_judge_2.call_count}"
     )
 
 
@@ -350,7 +321,6 @@ def test_no_cache_bypasses_verdict_cache(tmp_path: Path) -> None:
     # Run 2 with no_cache=True: even though verdicts.jsonl exists, judges must be re-called.
     scope_judge_2 = _CountingScopeJudge()
     cls_judge_2 = _CountingClassificationJudge()
-    dev_judge_2 = _CountingDeviationJudge()
 
     mine_corpus(
         corpus_dir=corpus_dir,
@@ -359,7 +329,6 @@ def test_no_cache_bypasses_verdict_cache(tmp_path: Path) -> None:
         out_dir=out_dir,
         scope_judge=scope_judge_2,
         classification_judge=cls_judge_2,
-        deviation_judge=dev_judge_2,
         no_cache=True,
     )
 
@@ -669,9 +638,9 @@ _TEMPLATE_BODY = (
 
 # Indemnification clause text deliberately shares little vocabulary with
 # _TEMPLATE_BODY's (Jaccard similarity well under the 0.92 reworded-equivalent
-# threshold) so it routes to the deviation judge once a template standard
-# exists. Governing Law is identical to the template's — a same-text control
-# clause that must stay deterministic in both runs.
+# threshold) so it is never our standard. Governing Law is identical to the
+# template's — a same-text control clause that is standard exactly when the
+# template is available.
 _DOC_BODY = (
     r"1. Indemnification\par "
     r"Gamma LLC shall provide reasonable indemnification to Delta University limited "
@@ -777,28 +746,26 @@ def test_stage_cache_busts_when_template_becomes_available(tmp_path: Path) -> No
     Run 1: ``use_llm_segmentation=True`` with a segment_fn that raises
     ``SegmentationQAError`` for the template only (the corpus document
     segments fine) — ``mine_corpus`` catches it, warns, and proceeds in
-    emergent mode (``template_std_by_tid == {}``). The document's
-    Indemnification clause has no template standard to compare against, so
-    it is recorded ``deviation="none"``/``basis="deterministic"`` and the
-    per-doc result is cached under ``config_fp``.
+    emergent mode (``template_std_by_tid == {}``). With no template standard
+    to compare against, no clause is standard — including Governing Law,
+    whose text is identical to the template's — and the per-doc result is
+    cached under ``config_fp``.
 
     Run 2: SAME out_dir, NO manual stage-cache busting, a working segment_fn
     that classifies the template too. Before issue #243's fix, ``config_fp``
     only hashed the template file's *content* — unchanged between runs — so
     the #61 stage cache would replay run 1's cached result verbatim: the
-    recording deviation judge would never be called and the clause would
-    stay ``basis="deterministic"`` forever, despite a real template standard
-    now existing to diff it against. This test asserts the judge WAS called
-    and the clause's basis reflects the real comparison, not a stale replay.
+    Governing Law clause would stay ``standard: False`` forever, despite a
+    real template standard now existing to compare it against. This test
+    asserts the clause's standard fact reflects the real comparison, not a
+    stale replay.
     """
     corpus_dir, config_path, out_dir = _make_template_corpus(tmp_path)
     taxonomy = load_taxonomy(_TAXONOMY_PATH)
     cfg = load_config(config_path)
 
-    # -----------------------------------------------------------------------
     # Run 1 — template segmentation pending (SegmentationQAError caught),
     # document segments fine.
-    # -----------------------------------------------------------------------
     mine_corpus(
         corpus_dir=corpus_dir,
         config=cfg,
@@ -806,22 +773,18 @@ def test_stage_cache_busts_when_template_becomes_available(tmp_path: Path) -> No
         out_dir=out_dir,
         use_llm_segmentation=True,
         llm_segment_fn=_template_pending_segment_fn,
-        deviation_judge=_CountingDeviationJudge(),
     )
 
     obs_path = out_dir / "observations.jsonl"
     raw_obs_1 = read_observations_jsonl(obs_path)
-    indem_obs_1 = [o for o in raw_obs_1 if o["taxonomy_id"] == "indemnification"]
-    assert indem_obs_1, "Run 1 must produce an Indemnification observation"
-    assert all(o["basis"] == "deterministic" for o in indem_obs_1), (
-        "Run 1 (template pending) must record the Indemnification clause "
-        f"deterministically — no template standard exists yet: {indem_obs_1}"
+    gov_obs_1 = [o for o in raw_obs_1 if o["taxonomy_id"] == "governing_law"]
+    assert gov_obs_1, "Run 1 must produce a Governing Law observation"
+    assert all(o["standard"] is False and o["basis"] == "deterministic" for o in gov_obs_1), (
+        "Run 1 (template pending) must record the Governing Law clause as "
+        f"non-standard — no template standard exists yet: {gov_obs_1}"
     )
 
-    # -----------------------------------------------------------------------
     # Run 2 — SAME out_dir, no manual cache busting. Template now classifies.
-    # -----------------------------------------------------------------------
-    dev_judge_2 = _CountingDeviationJudge()
     mine_corpus(
         corpus_dir=corpus_dir,
         config=cfg,
@@ -829,20 +792,17 @@ def test_stage_cache_busts_when_template_becomes_available(tmp_path: Path) -> No
         out_dir=out_dir,
         use_llm_segmentation=True,
         llm_segment_fn=_pairing_segment_fn,
-        deviation_judge=dev_judge_2,
-    )
-
-    assert dev_judge_2.call_count > 0, (
-        "Run 2 must call the deviation judge for the Indemnification clause "
-        "now that the template is available — a stale #61 stage-cache hit "
-        f"would skip it entirely; got {dev_judge_2.call_count} calls"
     )
 
     raw_obs_2 = read_observations_jsonl(obs_path)
+    gov_obs_2 = [o for o in raw_obs_2 if o["taxonomy_id"] == "governing_law"]
+    assert gov_obs_2, "Run 2 must produce a Governing Law observation"
+    assert all(o["standard"] is True and o["deviation"] == "none" for o in gov_obs_2), (
+        "Run 2 must compare the Governing Law clause with the now-available "
+        "template (identical text, so standard), not replay run 1's "
+        f"template-less result verbatim: {gov_obs_2}"
+    )
     indem_obs_2 = [o for o in raw_obs_2 if o["taxonomy_id"] == "indemnification"]
-    assert indem_obs_2, "Run 2 must produce an Indemnification observation"
-    assert all(o["basis"] == "judge" for o in indem_obs_2), (
-        "Run 2 must route the Indemnification clause (differs from the now-"
-        "available template) through the judge, not replay run 1's "
-        f"template-less deterministic result verbatim: {indem_obs_2}"
+    assert indem_obs_2 and all(o["standard"] is False for o in indem_obs_2), (
+        "the Indemnification clause differs from the template, so it is never standard"
     )

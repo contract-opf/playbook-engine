@@ -1,7 +1,7 @@
 """Batched, content-addressed judgment runtime — issue #62.
 
-Wraps the existing judge protocols (ScopeJudge, ClassificationJudge,
-DeviationJudge) with:
+Wraps the existing judge protocols (ScopeJudge, ClassificationJudge)
+with:
 
   1. **Payload collection** — callers push payloads into a ``JudgmentRuntime``
      instance before dispatch.  The runtime batches all payloads in a single
@@ -15,8 +15,8 @@ DeviationJudge) with:
   3. **Centralised ``judge_error`` handling** — any exception raised by a
      delegate judge is caught here and converted to the appropriate sentinel
      value (``ScopeDecision(basis="judge_error")``, ``"judge_error"`` basis on
-     classification, ``"needs_review"`` on deviation).  Each judge no longer
-     needs to implement its own error contract.
+     classification).  Each judge no longer needs to implement its own error
+     contract.
 
 Interface:
 
@@ -27,7 +27,7 @@ Interface:
     # ... collect payloads ...
     decision = scope_judge.judge(tree, agreement_type)
 
-The ``judge()`` / ``assess_batch()`` / ``classify_batch()`` signatures on the
+The ``judge()`` / ``classify_batch()`` signatures on the
 wrappers are intentionally identical to the underlying Protocol definitions —
 existing pipeline code works without changes.
 
@@ -47,15 +47,12 @@ from typing import Any
 from playbook_engine.clause_classifier import ClassificationJudge, ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
-from playbook_engine.deviation_classifier import DeviationJudge, DeviationResult, RiskDelta
 from playbook_engine.rubric import classifier_eligible_ids
 from playbook_engine.scope_gate import ScopeDecision, ScopeJudge
 
 # ---------------------------------------------------------------------------
 # Cache key construction
 # ---------------------------------------------------------------------------
-
-_NEUTRAL_ZERO = RiskDelta(direction="neutral", magnitude="none")
 
 # Verdict bases that mean "not actually resolved yet" — a store-backed judge
 # miss (issue #64/#182: ``needs_review``) or a delegate exception
@@ -196,10 +193,6 @@ def _scope_error_decision() -> ScopeDecision:
 
 def _classification_error() -> ClauseClassification:
     return ClauseClassification(taxonomy_id=None, confidence=0.0, basis="judge_error")
-
-
-def _deviation_error() -> DeviationResult:
-    return DeviationResult(deviation="needs_review", risk_delta=_NEUTRAL_ZERO, basis="judge_error")
 
 
 # ---------------------------------------------------------------------------
@@ -386,120 +379,6 @@ class BatchedClassificationJudge:
                             "taxonomy_id": verdict.taxonomy_id,
                             "confidence": verdict.confidence,
                             "basis": verdict.basis,
-                        },
-                    )
-                for ri in key_to_result_indices[key]:
-                    results[ri] = verdict
-
-        return [r for r in results if r is not None]
-
-
-# ---------------------------------------------------------------------------
-# Deviation judge wrapper
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class BatchedDeviationJudge:
-    """Caching, batched wrapper around a ``DeviationJudge`` delegate.
-
-    Implements the ``DeviationJudge`` protocol.
-
-    ``assess_batch()`` deduplicates payloads before calling the delegate and
-    caches each result.
-    """
-
-    delegate: DeviationJudge
-    cache: JudgmentCache
-
-    def assess_batch(
-        self,
-        items: list[dict[str, str]],
-        our_standard: str,
-    ) -> list[DeviationResult]:
-        """Assess deviation for *items*, using the verdict cache.
-
-        Steps:
-        1. Build per-item payloads (hunk + our_standard + stage tag).
-        2. Cache hits are returned directly.
-        3. Uncached items are dispatched as a single batch to the delegate.
-        4. New verdicts are stored in the cache.
-        5. Results are returned in original order.
-        """
-        payloads: list[dict[str, Any]] = []
-        for item in items:
-            payloads.append(
-                {
-                    "stage": "deviation",
-                    "hunk": item.get("hunk", ""),
-                    # Full our_standard — NOT truncated (issue #41). The payload is
-                    # only ever SHA-256 hashed into the cache key (see module
-                    # docstring); only key+verdict are persisted, so there is no
-                    # size cost. A tail edit past the old 500-char cutoff must
-                    # bust the verdict cache, matching StoreBackedDeviationJudge
-                    # (agent_judge.py), which already hashes the full standard.
-                    "our_standard": our_standard,
-                }
-            )
-
-        results: list[DeviationResult | None] = [None] * len(items)
-
-        def _from_cache(cached: dict[str, Any]) -> DeviationResult:
-            risk_raw = cached["risk_delta"]
-            return DeviationResult(
-                deviation=cached["deviation"],
-                risk_delta=RiskDelta(
-                    direction=risk_raw["direction"],
-                    magnitude=risk_raw["magnitude"],
-                ),
-                basis=cached["basis"],
-                rationale=cached.get("rationale", ""),
-                confidence=cached.get("confidence"),
-            )
-
-        # Dedup identical payloads within the batch so that two items with the same
-        # hunk + our_standard produce exactly one delegate call even in a corpus-wide dispatch.
-        unique_key_to_canonical: dict[str, tuple[dict[str, str], dict[str, Any]]] = {}
-        key_to_result_indices: dict[str, list[int]] = {}
-
-        for i, (item, payload) in enumerate(zip(items, payloads, strict=True)):
-            cached = self.cache.get(payload)
-            if cached is not None:
-                results[i] = _from_cache(cached)
-            else:
-                key = _payload_key(payload, self.cache.model_id)
-                if key not in unique_key_to_canonical:
-                    unique_key_to_canonical[key] = (item, payload)
-                    key_to_result_indices[key] = []
-                key_to_result_indices[key].append(i)
-
-        unique_keys = list(unique_key_to_canonical)
-        unique_items = [unique_key_to_canonical[k][0] for k in unique_keys]
-        unique_payloads = [unique_key_to_canonical[k][1] for k in unique_keys]
-
-        if unique_items:
-            try:
-                new_verdicts = self.delegate.assess_batch(unique_items, our_standard)
-            except Exception:  # noqa: BLE001
-                new_verdicts = [_deviation_error() for _ in unique_items]
-
-            for key, verdict, item_payload in zip(
-                unique_keys, new_verdicts, unique_payloads, strict=True
-            ):
-                # Never cache an unresolved verdict (issue #182 "B4") — see
-                # _UNRESOLVED_BASES.
-                if verdict.basis not in _UNRESOLVED_BASES:
-                    self.cache.put(
-                        item_payload,
-                        {
-                            "deviation": verdict.deviation,
-                            "risk_delta": {
-                                "direction": verdict.risk_delta.direction,
-                                "magnitude": verdict.risk_delta.magnitude,
-                            },
-                            "basis": verdict.basis,
-                            "rationale": verdict.rationale,
-                            "confidence": verdict.confidence,
                         },
                     )
                 for ri in key_to_result_indices[key]:

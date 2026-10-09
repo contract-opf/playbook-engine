@@ -336,10 +336,11 @@ cannot express them):
 - Every citation in `evidence` resolves (§4).
 
 No stance, band, risk or deviation verdict appears anywhere in a 0.4
-`evidence` or `digest`. A producer that ran an opt-in judged pass MAY carry
-its verdicts under the root vendor extension `x_judgments` (`[{precedent_id,
+`evidence` or `digest`. A producer that ran a judged pass MAY carry its
+verdicts under the root vendor extension `x_judgments` (`[{precedent_id,
 ...}]`, §10.1) — never inside `evidence.precedent`, whose records are
-closed (`additionalProperties: false`, no `x_*`).
+closed (`additionalProperties: false`, no `x_*`). The reference producer
+(`playbook-engine`) runs no such pass and emits none.
 
 ### 3.6 `posture` (NEW) — negotiation intent as generated prose
 
@@ -435,8 +436,8 @@ Out-of-scope documents MUST be retained here with `in_scope: false` and a `scope
   visible in the producer's ingest record instead.
 - **Publication rule:** hashes of confidential files leak nothing, so
   `version_files` (and `snapshot`) are publication-safe. `source_uri` — a
-  path/URI into someone's DMS — is NOT, and the public export profile
-  strips it.
+  path/URI into someone's DMS — is NOT, so a producer preparing a
+  document for release strips it.
 - `snapshot.manifest_hash` is the OPF-side analogue of a consumer's
   `corpus_snapshot_version`: one value naming the corpus state, stable
   across identical recompiles.
@@ -494,12 +495,18 @@ governed which document and lineage is reconstructible end to end (§8).
 
 ### 3.11 `curation` (NEW, OPTIONAL) — embedded attorney-pinned positions
 
+> **Status.** The reference compiler (`playbook-engine`) neither emits nor
+> preserves a `curation` section any more (issue #239): the review loop that
+> produced pins was retired, and a recompile drops a `curation` key a prior
+> document carried. The section stays valid, and optional, in OPF 0.4; the
+> next format revision omits it.
+
 ```jsonc
 {
   "pins": [
     {
       "clause_id": "clause.governing_law",  // evidence.clauses[].id this pin applies to
-      "item_id": "C3",                      // viewer item number at pin time — informational
+      "item_id": "C3",                      // review item number at pin time — informational
       "position": "consistently_held",      // attorney-asserted position (free-form)
       "baseline_stance": "no_signal",        // historical_stance for this clause AT PIN TIME
       "pinned_at": "2026-07-10T00:00:00Z",
@@ -515,7 +522,7 @@ governed which document and lineage is reconstructible end to end (§8).
 }
 ```
 
-Makes the viewer feedback loop real: an attorney's pinned position is
+Makes a review feedback loop real: an attorney's pinned position is
 EMBEDDED here (not a sidecar file), so it survives a recompile and a
 consumer can treat it as authoritative over the recomputed
 `summary.historical_stance` for that clause.

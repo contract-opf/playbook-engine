@@ -13,11 +13,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from playbook_engine.clause_position_compiler import CoherenceFlag
 from playbook_engine.cli import cli
 from playbook_engine.inspection_report import (
     build_inspection_report,
-    render_coherence_flags,
     render_review_flags,
     write_inspection_report,
 )
@@ -431,97 +429,39 @@ def test_inspect_cmd_missing_out_dir_exits_nonzero(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# render_coherence_flags — acceptance criteria (issue #54)
+# Retired surfaces (issue #239): the inspection report is the skill's
+# checkpoint only — no coherence-flag section, no floor-candidates section.
 # ---------------------------------------------------------------------------
 
 
-def test_render_coherence_flags_empty_returns_empty_string() -> None:
-    """No flags → empty string (no spurious section added)."""
-    result = render_coherence_flags([])
-    assert result == ""
-
-
-def test_render_coherence_flags_shows_header() -> None:
-    """Flags section contains the Coherence Flags header."""
-    flag = CoherenceFlag(
-        clause_id="clause.indemnification",
-        reason="low citation count (n_our_paper=1)",
-        severity="warn",
-    )
-    result = render_coherence_flags([flag])
-    assert "## Coherence Flags" in result
-
-
-def test_render_coherence_flags_shows_clause_id() -> None:
-    """Flags section contains the clause_id."""
-    flag = CoherenceFlag(
-        clause_id="clause.governing_law",
-        reason="contradictory risk directions",
-        severity="warn",
-    )
-    result = render_coherence_flags([flag])
-    assert "clause.governing_law" in result
-
-
-def test_render_coherence_flags_shows_reason() -> None:
-    """Flags section contains the reason string."""
-    flag = CoherenceFlag(
-        clause_id="clause.indemnification",
-        reason="position-vs-fallback tension detected",
-        severity="warn",
-    )
-    result = render_coherence_flags([flag])
-    assert "position-vs-fallback tension detected" in result
-
-
-def test_render_coherence_flags_shows_severity() -> None:
-    """Flags section contains severity for warn and block cases."""
-    flags = [
-        CoherenceFlag(clause_id="clause.a", reason="warn reason", severity="warn"),
-        CoherenceFlag(clause_id="clause.b", reason="block reason", severity="block"),
-    ]
-    result = render_coherence_flags(flags)
-    assert "warn" in result
-    assert "block" in result
-
-
-def test_build_inspection_report_includes_coherence_flags_section(tmp_path: Path) -> None:
-    """Acceptance: build_inspection_report renders CoherenceFlag entries per clause."""
+def test_report_has_no_coherence_or_floor_candidate_sections(tmp_path: Path) -> None:
     out_dir = _make_out_dir(tmp_path)
-    flags = [
-        CoherenceFlag(
-            clause_id="clause.indemnification",
-            reason="low n_our_paper (n=1)",
-            severity="warn",
-        ),
-    ]
-    report = build_inspection_report(out_dir, coherence_flags=flags)
-    assert "## Coherence Flags" in report
-    assert "clause.indemnification" in report
-    assert "low n_our_paper" in report
-
-
-def test_build_inspection_report_no_flags_no_coherence_section(tmp_path: Path) -> None:
-    """No coherence section when no flags provided."""
-    out_dir = _make_out_dir(tmp_path)
-    report = build_inspection_report(out_dir, coherence_flags=None)
+    (out_dir / "floor.candidates.json").write_text(
+        json.dumps({"candidates": [{"id": "cand-001", "statement": "Never X."}]}),
+        encoding="utf-8",
+    )
+    report = build_inspection_report(out_dir)
     assert "## Coherence Flags" not in report
+    assert "Floor candidates" not in report
+    assert "cand-001" not in report
 
 
-def test_render_coherence_flags_multiple_entries(tmp_path: Path) -> None:
-    """Multiple flags all appear in the rendered section."""
-    flags = [
-        CoherenceFlag(clause_id="clause.a", reason="reason A", severity="warn"),
-        CoherenceFlag(clause_id="clause.b", reason="reason B", severity="block"),
-        CoherenceFlag(clause_id="clause.c", reason="reason C", severity="warn"),
-    ]
-    result = render_coherence_flags(flags)
-    assert "clause.a" in result
-    assert "clause.b" in result
-    assert "clause.c" in result
-    assert "reason A" in result
-    assert "reason B" in result
-    assert "reason C" in result
+def test_report_observation_table_shows_the_standard_fact_not_a_risk_verdict(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _write_trail(out_dir, "deal-a", ordered_versions=["v1"], signed_version="v1")
+    _write_scope(out_dir, [{"document_id": "deal-a", "in_scope": True}])
+    standard = _make_obs("deal-a", "v1", "Our standard clause.")
+    standard["standard"] = True
+    other = _make_obs("deal-a", "v1", "Their wording of the clause.")
+    other["standard"] = False
+    _write_observations(out_dir, [standard, other])
+    report = build_inspection_report(out_dir)
+    assert "| Standard | Outcome |" in report
+    assert "| yes |" in report and "| no |" in report
+    assert "Risk" not in report and "Deviation" not in report
 
 
 # ---------------------------------------------------------------------------
