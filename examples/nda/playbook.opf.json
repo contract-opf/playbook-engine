@@ -362,9 +362,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "n_variants": 0,
+        "n_variants": 1,
         "n_refused": 0
       },
       {
@@ -446,9 +446,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 2,
-        "n_variants": 1,
+        "n_variants": 2,
         "n_refused": 0
       },
       {
@@ -467,9 +467,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "n_variants": 0,
+        "n_variants": 1,
         "n_refused": 0
       },
       {
@@ -488,9 +488,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "n_variants": 0,
+        "n_variants": 1,
         "n_refused": 1
       },
       {
@@ -551,9 +551,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "n_variants": 0,
+        "n_variants": 1,
         "n_refused": 0
       },
       {
@@ -802,9 +802,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 3,
-        "n_variants": 1,
+        "n_variants": 2,
         "n_refused": 0
       },
       {
@@ -823,9 +823,9 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "n_variants": 0,
+        "n_variants": 2,
         "n_refused": 0
       },
       {
@@ -3436,6 +3436,32 @@
         "refused_asks": []
       },
       {
+        "id": "prec.5f2a8af137fc29ac",
+        "taxonomy_id": "compelled_disclosure",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": {
+          "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "7",
+            "char_span": [
+              1564,
+              1842
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": true,
+        "refused_asks": []
+      },
+      {
         "id": "prec.2b8c18c025c782ba",
         "taxonomy_id": "counterparts",
         "document_id": "theta-logistics",
@@ -3462,6 +3488,84 @@
         "refused_asks": []
       },
       {
+        "id": "prec.f376c7ceca80794f",
+        "taxonomy_id": "dispute_resolution_venue",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "16",
+            "char_span": [
+              2812,
+              2940
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.95a818416ac6aa22",
+        "taxonomy_id": "entire_agreement_amendment",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "19",
+            "char_span": [
+              3160,
+              3333
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.9c4fe86ad49e975a",
+        "taxonomy_id": "exclusions_from_confidential",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": {
+          "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "3",
+            "char_span": [
+              581,
+              1011
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": true,
+        "refused_asks": []
+      },
+      {
         "id": "prec.95daf3a231f7a092",
         "taxonomy_id": "governing_law",
         "document_id": "theta-logistics",
@@ -3479,6 +3583,32 @@
             "char_span": [
               2727,
               2811
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.6275b15c0ac9cceb",
+        "taxonomy_id": "injunctive_relief",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "13",
+            "char_span": [
+              2452,
+              2610
             ]
           }
         },
@@ -3566,6 +3696,58 @@
         "refused_asks": []
       },
       {
+        "id": "prec.de9ef23c984f2c6f",
+        "taxonomy_id": "standard_of_care",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "5",
+            "char_span": [
+              1161,
+              1359
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.574e5b7400141bcf",
+        "taxonomy_id": "survival_period",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": {
+          "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 2,
+            "clause_path": "9",
+            "char_span": [
+              1944,
+              2063
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": true,
+        "refused_asks": []
+      },
+      {
         "id": "prec.585e1ebcde5236be",
         "taxonomy_id": "term",
         "document_id": "theta-logistics",
@@ -3618,6 +3800,32 @@
         "refused_asks": []
       },
       {
+        "id": "prec.2cbae90493c10f2c",
+        "taxonomy_id": "compelled_disclosure",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": {
+          "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "7",
+            "char_span": [
+              1566,
+              1844
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": true,
+        "refused_asks": []
+      },
+      {
         "id": "prec.f21c55f1331b5dce",
         "taxonomy_id": "counterparts",
         "document_id": "zeta-diagnostics",
@@ -3644,6 +3852,84 @@
         "refused_asks": []
       },
       {
+        "id": "prec.48aa9562d17197c1",
+        "taxonomy_id": "dispute_resolution_venue",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "17",
+            "char_span": [
+              3067,
+              3195
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.71f92977817972f3",
+        "taxonomy_id": "entire_agreement_amendment",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "20",
+            "char_span": [
+              3415,
+              3588
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.500fb6712293bc21",
+        "taxonomy_id": "exclusions_from_confidential",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": {
+          "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "3",
+            "char_span": [
+              583,
+              1013
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": true,
+        "refused_asks": []
+      },
+      {
         "id": "prec.f4efbee84462b782",
         "taxonomy_id": "governing_law",
         "document_id": "zeta-diagnostics",
@@ -3661,6 +3947,32 @@
             "char_span": [
               2982,
               3066
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.2c865b84ebf3c0a3",
+        "taxonomy_id": "injunctive_relief",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "14",
+            "char_span": [
+              2707,
+              2865
             ]
           }
         },
@@ -3803,6 +4115,58 @@
         "refused_asks": []
       },
       {
+        "id": "prec.886f17441be8ec35",
+        "taxonomy_id": "standard_of_care",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "5",
+            "char_span": [
+              1163,
+              1361
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.1c2c87601dffd71b",
+        "taxonomy_id": "survival_period",
+        "document_id": "zeta-diagnostics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 0,
+        "signed_text": {
+          "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 3,
+            "clause_path": "9",
+            "char_span": [
+              1946,
+              2064
+            ]
+          }
+        },
+        "opening_text": null,
+        "standard": false,
+        "moved": false,
+        "refused_asks": []
+      },
+      {
         "id": "prec.19ed7beb1f83508e",
         "taxonomy_id": "term",
         "document_id": "zeta-diagnostics",
@@ -3835,7 +4199,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-06T10:29:36+00:00",
+      "generated_at": "2026-10-09T00:22:51+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -3868,7 +4232,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:1808a71b3806ff38436d47dd84b43b6bd9025d375f901b6838319a5497988ad8"
+      "grounded_in": "evidence@sha256:ab5c9b33f6314acdc134d1ba14081c4e9e85149fddc8512879d646228d88fe7a"
     }
   },
   "floor": {
@@ -3888,7 +4252,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-06T10:29:37+00:00",
+        "x_signed_at": "2026-10-09T00:22:52+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -4190,14 +4554,14 @@
       "documents_in_scope": 6,
       "versions_total": 17,
       "unclassified": {
-        "count": 48,
+        "count": 34,
         "by_document": {
           "beta-industries": 6,
           "delta-ventures": 4,
           "epsilon-systems": 4,
           "gamma-holdings": 4,
-          "theta-logistics": 15,
-          "zeta-diagnostics": 15
+          "theta-logistics": 8,
+          "zeta-diagnostics": 8
         },
         "example_citations": [
           {
@@ -4267,13 +4631,13 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-06T10:29:36+00:00",
+    "generated_at": "2026-10-09T00:22:50+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:55a7d1cfb78bb5f5fdf848dc1b08593e53030965cfdf52122b74c722c7a83db9",
-      "records": 113
+      "sha256": "sha256:4d89168ce79b01497b72b514086f48baf41c3168b8af6def40de94b30397e82b",
+      "records": 127
     }
   },
   "digest": {
@@ -4351,11 +4715,30 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "signed_variants": [],
+        "signed_variants": [
+          {
+            "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "7",
+              "char_span": [
+                1564,
+                1842
+              ]
+            },
+            "precedent_ids": [
+              "prec.2cbae90493c10f2c",
+              "prec.5f2a8af137fc29ac"
+            ]
+          }
+        ],
         "refused_asks": [],
-        "n_variants_total": 0,
+        "n_variants_total": 1,
         "n_refused_total": 0
       },
       {
@@ -4480,9 +4863,27 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 2,
         "signed_variants": [
+          {
+            "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "16",
+              "char_span": [
+                2812,
+                2940
+              ]
+            },
+            "precedent_ids": [
+              "prec.48aa9562d17197c1",
+              "prec.f376c7ceca80794f"
+            ]
+          },
           {
             "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
             "n_deals": 2,
@@ -4503,7 +4904,7 @@
           }
         ],
         "refused_asks": [],
-        "n_variants_total": 1,
+        "n_variants_total": 2,
         "n_refused_total": 0
       },
       {
@@ -4522,11 +4923,30 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "signed_variants": [],
+        "signed_variants": [
+          {
+            "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "19",
+              "char_span": [
+                3160,
+                3333
+              ]
+            },
+            "precedent_ids": [
+              "prec.71f92977817972f3",
+              "prec.95a818416ac6aa22"
+            ]
+          }
+        ],
         "refused_asks": [],
-        "n_variants_total": 0,
+        "n_variants_total": 1,
         "n_refused_total": 0
       },
       {
@@ -4545,9 +4965,28 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "signed_variants": [],
+        "signed_variants": [
+          {
+            "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "3",
+              "char_span": [
+                581,
+                1011
+              ]
+            },
+            "precedent_ids": [
+              "prec.500fb6712293bc21",
+              "prec.9c4fe86ad49e975a"
+            ]
+          }
+        ],
         "refused_asks": [
           {
             "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
@@ -4566,7 +5005,7 @@
             ]
           }
         ],
-        "n_variants_total": 0,
+        "n_variants_total": 1,
         "n_refused_total": 1
       },
       {
@@ -4668,11 +5107,30 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "signed_variants": [],
+        "signed_variants": [
+          {
+            "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "13",
+              "char_span": [
+                2452,
+                2610
+              ]
+            },
+            "precedent_ids": [
+              "prec.2c865b84ebf3c0a3",
+              "prec.6275b15c0ac9cceb"
+            ]
+          }
+        ],
         "refused_asks": [],
-        "n_variants_total": 0,
+        "n_variants_total": 1,
         "n_refused_total": 0
       },
       {
@@ -5125,9 +5583,27 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 3,
         "signed_variants": [
+          {
+            "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
+            "n_deals": 2,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "5",
+              "char_span": [
+                1161,
+                1359
+              ]
+            },
+            "precedent_ids": [
+              "prec.886f17441be8ec35",
+              "prec.de9ef23c984f2c6f"
+            ]
+          },
           {
             "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "n_deals": 1,
@@ -5147,7 +5623,7 @@
           }
         ],
         "refused_asks": [],
-        "n_variants_total": 1,
+        "n_variants_total": 2,
         "n_refused_total": 0
       },
       {
@@ -5166,11 +5642,46 @@
             ]
           }
         },
-        "n_deals": 4,
+        "n_deals": 6,
         "n_signed_standard": 4,
-        "signed_variants": [],
+        "signed_variants": [
+          {
+            "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+            "n_deals": 1,
+            "last_signed": null,
+            "ref": {
+              "document_id": "zeta-diagnostics",
+              "version": 3,
+              "clause_path": "9",
+              "char_span": [
+                1946,
+                2064
+              ]
+            },
+            "precedent_ids": [
+              "prec.1c2c87601dffd71b"
+            ]
+          },
+          {
+            "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
+            "n_deals": 1,
+            "last_signed": null,
+            "ref": {
+              "document_id": "theta-logistics",
+              "version": 2,
+              "clause_path": "9",
+              "char_span": [
+                1944,
+                2063
+              ]
+            },
+            "precedent_ids": [
+              "prec.574e5b7400141bcf"
+            ]
+          }
+        ],
         "refused_asks": [],
-        "n_variants_total": 0,
+        "n_variants_total": 2,
         "n_refused_total": 0
       },
       {
@@ -5218,11 +5729,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:c5bb75a9354c1adb11e6b60741db8e0321d02a2a5c5d8b513dc83c32e6a35c81",
+    "content_hash": "sha256:4777b798c5007a4e6ae091e1ff7012a66554787fee5b18f44facabad530c23b7",
     "section_digests": {
-      "evidence": "sha256:1808a71b3806ff38436d47dd84b43b6bd9025d375f901b6838319a5497988ad8",
-      "posture": "sha256:98b14eb953004676a3e7d09ff1757e634ce343ef384da03bafe749ef245ec49e",
-      "floor": "sha256:b9bb76e45a28cf9c76b1cd864f570f11b8f5c8311efc6f79a86f540999b7f82e",
+      "evidence": "sha256:ab5c9b33f6314acdc134d1ba14081c4e9e85149fddc8512879d646228d88fe7a",
+      "posture": "sha256:080676ead4972053029924cf1dd57e7f5e10f0a12fe543baf3c7edb3b4c51e5a",
+      "floor": "sha256:14609f2ccf0d3ff8f43e2eb2f18cec04b1a1e6423ea39c13007b6b85c9a84d52",
       "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }

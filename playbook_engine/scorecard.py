@@ -100,6 +100,7 @@ CLASSIFICATION_BASES = frozenset(
         "unclassified",
         "llm_segmenter",
         "inherited",
+        "content_similarity",
         "aligned",
         "unrecorded",
     }

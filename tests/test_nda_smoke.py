@@ -45,6 +45,12 @@ _TAXONOMY_PATH = _REPO_ROOT / "spec" / "taxonomy" / "nda.yaml"
 
 _TEMPLATE_STANDARDS_RE = re.compile(r"template standards: (\d+) clause\(s\) classified")
 
+_COVERAGE_RE = re.compile(
+    r"^classification: exact_match \d+, heading_similarity \d+, judge \d+, inherited \d+, "
+    r"content_similarity (\d+), unclassified \d+",
+    re.MULTILINE,
+)
+
 _RTF_PROLOGUE = (
     r"{\rtf1\ansi\deff0"
     r"{\fonttbl{\f0\froman\fcharset0 Times New Roman;}}"
@@ -97,6 +103,14 @@ def test_nda_smoke_full_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         "template mode silently degraded to emergent (0 clauses classified "
         f"against the NDA standard-form template):\n{mine_result.output}"
     )
+
+    # Issue #235: mine prints one line of classification coverage by basis, and
+    # the counterparty-paper deals' content-similarity assignments show in it.
+    coverage = _COVERAGE_RE.search(mine_result.output)
+    assert coverage is not None, (
+        f"'classification: ...' coverage line missing from mine output:\n{mine_result.output}"
+    )
+    assert int(coverage.group(1)) > 0, coverage.group(0)
 
     project_result = _invoke(["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
     assert project_result.exit_code == 0, f"project failed:\n{project_result.output}"

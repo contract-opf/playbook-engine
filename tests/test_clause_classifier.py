@@ -12,13 +12,19 @@ import pytest
 from playbook_engine.clause_classifier import (
     AMBIGUITY_THRESHOLD,
     AUTO_CLASSIFY_THRESHOLD,
+    CONTENT_ASSIGN_THRESHOLD,
+    CONTENT_CONFIDENCE_CAP,
+    CONTENT_MARGIN_RATIO,
     INHERITED_CONFIDENCE_CAP,
     ClassificationHint,
     ClassificationJudge,
+    ClassifiedClause,
     ClauseClassification,
     _build_label_index,
     _build_label_tokens,
+    _content_tokens,
     _fast_classify,
+    assign_by_content,
     classify_tree,
 )
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
@@ -918,3 +924,210 @@ def test_headed_child_with_no_taxonomy_match_does_not_inherit() -> None:
     assert result["7"].basis == "exact_match"
     assert result["7.1"].taxonomy_id is None
     assert result["7.1"].basis == "unclassified"
+
+
+# ---------------------------------------------------------------------------
+# Content-similarity fallback (issue #235)
+# ---------------------------------------------------------------------------
+#
+# Exemplars and node texts below are built from invented single-word tokens
+# (alpha, beta, ...), so each pair's token Jaccard is known exactly:
+#   |A ∩ B| / |A ∪ B| over the non-stop-word tokens.
+
+_EXEMPLARS = {
+    "survival": "alpha beta gamma delta",
+    "venue": "kappa lambda mu nu",
+}
+
+
+def _content_tax() -> Taxonomy:
+    return _taxonomy(
+        _entry("survival", "Survival Period"),
+        _entry("venue", "Dispute Resolution Venue"),
+    )
+
+
+def _classify_unheaded(
+    text: str,
+    exemplars: dict[str, str] | None = _EXEMPLARS,
+    taxonomy: Taxonomy | None = None,
+    heading: str = "Zebra Provisions",
+) -> ClauseClassification:
+    """Classify one top-level node whose heading matches no taxonomy label."""
+    tree = _tree(_node("1", heading, text))
+    result = classify_tree(
+        tree,
+        taxonomy or _content_tax(),
+        _default_judge(),
+        content_exemplars=exemplars,
+    )
+    return result[0].classification
+
+
+def test_content_similarity_constants_are_conservative() -> None:
+    assert CONTENT_ASSIGN_THRESHOLD >= 0.25
+    assert CONTENT_MARGIN_RATIO >= 2.0
+    assert CONTENT_CONFIDENCE_CAP < AMBIGUITY_THRESHOLD
+
+
+def test_content_tokens_drop_boilerplate_and_keep_numerals() -> None:
+    tokens = _content_tokens("Within 30 days, the Party shall notify the Other Party.")
+    assert tokens == frozenset({"within", "30", "days", "notify"})
+
+
+def test_content_similarity_assigns_best_exemplar() -> None:
+    # Jaccard vs survival: 3/5 = 0.6; vs venue: 0.
+    cls = _classify_unheaded("alpha beta gamma epsilon")
+    assert cls.taxonomy_id == "survival"
+    assert cls.basis == "content_similarity"
+    # The 0.6 score is pulled down to the cap.
+    assert cls.confidence == CONTENT_CONFIDENCE_CAP
+
+
+def test_content_similarity_margin_rule_rejects_a_near_tie() -> None:
+    # Both exemplars score 0.6 (3 shared of 5): the best is no better than the
+    # runner-up, so nothing is assigned. A guess between two types plants a
+    # false precedent.
+    exemplars = {"survival": "alpha beta gamma delta", "venue": "alpha beta gamma epsilon"}
+    cls = _classify_unheaded("alpha beta gamma zeta", exemplars)
+    assert cls.taxonomy_id is None
+    assert cls.basis == "unclassified"
+
+
+def test_content_similarity_margin_rule_rejects_a_lead_under_the_ratio() -> None:
+    # survival 4/5 = 0.8 vs venue 3/6 = 0.5 (alpha, beta, gamma shared of six
+    # distinct tokens): best clears the threshold but
+    # leads the runner-up by only 1.6x (< CONTENT_MARGIN_RATIO).
+    exemplars = {"survival": "alpha beta gamma delta", "venue": "alpha beta gamma zeta"}
+    cls = _classify_unheaded("alpha beta gamma delta epsilon", exemplars)
+    assert cls.taxonomy_id is None
+    assert cls.basis == "unclassified"
+    # ...and the same best score IS assigned once the runner-up falls far enough.
+    far = {"survival": "alpha beta gamma delta", "venue": "kappa lambda mu nu"}
+    assert _classify_unheaded("alpha beta gamma delta epsilon", far).taxonomy_id == "survival"
+
+
+def test_content_similarity_threshold_rejects_a_weak_best() -> None:
+    # Jaccard vs survival: 1/10 = 0.1; the runner-up is 0, so the margin rule
+    # passes trivially and only the threshold stands in the way.
+    cls = _classify_unheaded("alpha one two three four five six")
+    assert cls.taxonomy_id is None
+    assert cls.basis == "unclassified"
+
+
+def test_content_similarity_confidence_stays_below_ambiguity_threshold() -> None:
+    # A verbatim copy scores 1.0, which the cap pulls below AMBIGUITY_THRESHOLD
+    # so the assignment never reads as a verified judge verdict.
+    cls = _classify_unheaded("alpha beta gamma delta")
+    assert cls.basis == "content_similarity"
+    assert cls.confidence == CONTENT_CONFIDENCE_CAP
+    assert cls.confidence < AMBIGUITY_THRESHOLD
+    assert cls.is_ambiguous
+
+    # Below the cap the confidence is the score itself, and every score the
+    # threshold admits stays under AMBIGUITY_THRESHOLD.
+    low = _classify_unheaded("alpha beta one two three four", {"survival": "alpha beta gamma"})
+    assert low.basis == "content_similarity"  # 2/7 = 0.2857 >= threshold
+    assert CONTENT_ASSIGN_THRESHOLD <= low.confidence < AMBIGUITY_THRESHOLD
+    assert low.confidence == pytest.approx(2 / 7)
+
+
+def test_content_similarity_is_a_noop_without_exemplars() -> None:
+    for exemplars in (None, {}):
+        cls = _classify_unheaded("alpha beta gamma delta", exemplars)
+        assert cls.taxonomy_id is None
+        assert cls.basis == "unclassified"
+
+
+def test_content_similarity_never_overrides_a_heading_or_judge_classification() -> None:
+    # The heading says venue; the text resembles the survival exemplar. The
+    # heading path wins: content similarity only fills what is left empty.
+    cls = _classify_unheaded("alpha beta gamma delta", heading="Dispute Resolution Venue")
+    assert cls.taxonomy_id == "venue"
+    assert cls.basis == "exact_match"
+
+
+def test_inheritance_wins_over_content_similarity_for_a_heading_less_child() -> None:
+    child = ClauseNode(
+        clause_path="7.a",
+        heading=None,
+        text="alpha beta gamma delta",  # resembles the survival exemplar exactly
+        char_span=(20, 40),
+    )
+    parent = ClauseNode(
+        clause_path="7",
+        heading="Dispute Resolution Venue",
+        text="",
+        char_span=(0, 40),
+        children=[child],
+    )
+    result = {
+        cc.node.clause_path: cc.classification
+        for cc in classify_tree(
+            _tree(parent), _content_tax(), _default_judge(), content_exemplars=_EXEMPLARS
+        )
+    }
+    assert result["7"].taxonomy_id == "venue"
+    assert result["7.a"].taxonomy_id == "venue"
+    assert result["7.a"].basis == "inherited"
+
+
+def test_content_similarity_fills_a_heading_less_child_inheritance_left_empty() -> None:
+    """A child of an UNclassified parent inherits nothing, so content similarity
+    may still place it."""
+    child = ClauseNode(
+        clause_path="7.a", heading=None, text="alpha beta gamma delta", char_span=(20, 40)
+    )
+    parent = ClauseNode(
+        clause_path="7", heading="Zebra Provisions", text="", char_span=(0, 40), children=[child]
+    )
+    result = {
+        cc.node.clause_path: cc.classification
+        for cc in classify_tree(
+            _tree(parent), _content_tax(), _default_judge(), content_exemplars=_EXEMPLARS
+        )
+    }
+    assert result["7"].basis == "unclassified"
+    assert result["7.a"].taxonomy_id == "survival"
+    assert result["7.a"].basis == "content_similarity"
+
+
+def test_content_similarity_skips_nodes_without_body_text() -> None:
+    cls = _classify_unheaded("", heading="alpha beta gamma delta")
+    assert cls.taxonomy_id is None
+    assert cls.basis == "unclassified"
+
+
+def test_content_similarity_ignores_ineligible_taxonomy_entries() -> None:
+    """An exemplar for an inactive entry is never a candidate (OPF §5)."""
+    taxonomy = _taxonomy(
+        _entry("survival", "Survival Period", status="inactive"),
+        _entry("venue", "Dispute Resolution Venue"),
+    )
+    cls = _classify_unheaded("alpha beta gamma delta", taxonomy=taxonomy)
+    assert cls.taxonomy_id is None
+    assert cls.basis == "unclassified"
+
+
+def test_content_similarity_only_touches_unclassified_nodes() -> None:
+    """judge_error / needs_review / judge / llm_segmenter results pass through
+    assign_by_content unchanged, even over a text that matches an exemplar."""
+    text = "alpha beta gamma delta"
+    keep = [
+        ClauseClassification(taxonomy_id=None, confidence=0.0, basis="judge_error"),
+        ClauseClassification(taxonomy_id=None, confidence=0.0, basis="needs_review"),
+        ClauseClassification(taxonomy_id="venue", confidence=0.9, basis="judge"),
+        ClauseClassification(taxonomy_id="venue", confidence=0.6, basis="llm_segmenter"),
+    ]
+    classified = [
+        ClassifiedClause(node=_node(str(i), None, text), classification=cls)
+        for i, cls in enumerate(keep, start=1)
+    ]
+    out = assign_by_content(classified, _EXEMPLARS, eligible_ids={"survival", "venue"})
+    assert [cc.classification for cc in out] == keep
+
+
+def test_content_similarity_basis_is_valid() -> None:
+    cls = ClauseClassification(taxonomy_id="survival", confidence=0.4, basis="content_similarity")
+    assert cls.is_ambiguous
+    assert cls.to_dict()["basis"] == "content_similarity"

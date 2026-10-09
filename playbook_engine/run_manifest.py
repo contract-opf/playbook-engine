@@ -194,6 +194,10 @@ class RunManifest:
     written_by: str  # "mine" | "judge" | "segment"
     environment: RunEnvironment
     counts: dict[str, int] = field(default_factory=dict)
+    #: Observations by how their taxonomy_id was reached (issue #235) — only
+    #: written by ``mine``; empty for a manifest written by another command or
+    #: by an older engine. See :func:`classification_coverage`.
+    classification_coverage: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -203,6 +207,8 @@ class RunManifest:
             "environment": self.environment.to_dict(),
             "counts": dict(self.counts),
         }
+        if self.classification_coverage:
+            out["classification_coverage"] = dict(self.classification_coverage)
         return out
 
 
@@ -441,6 +447,69 @@ def collect_counts(out_dir: Path) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Classification coverage (issue #235)
+# ---------------------------------------------------------------------------
+
+#: The bases the ``mine`` coverage line always names, in this order; any other
+#: basis (``llm_segmenter``, ``aligned``, ...) is named only when non-zero.
+COVERAGE_LINE_BASES: tuple[str, ...] = (
+    "exact_match",
+    "heading_similarity",
+    "judge",
+    "inherited",
+    "content_similarity",
+    "unclassified",
+)
+
+
+def classification_coverage(out_dir: Path) -> dict[str, int]:
+    """Count ``out_dir``'s mined observations by classification basis.
+
+    Reads ``observations.jsonl`` and tallies each observation's
+    ``x_classification_basis`` (how its taxonomy_id was reached — see
+    ``Observation.classification_basis``); an observation that records none
+    counts under ``unrecorded``. Returns ``{}`` when the file is absent or
+    holds no observation. Keys are the closed classification-basis
+    vocabulary (``scorecard.CLASSIFICATION_BASES``; any other label is
+    ``other``), values are counts only — nothing document-derived — so the
+    result is safe in the manifest and in a pasted log. Never raises.
+    """
+    from playbook_engine.scorecard import CLASSIFICATION_BASES  # noqa: PLC0415
+
+    path = out_dir / "observations.jsonl"
+    counts: dict[str, int] = {}
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                basis = raw.get("x_classification_basis", "unrecorded")
+                label = basis if basis in CLASSIFICATION_BASES else "other"
+                counts[label] = counts.get(label, 0) + 1
+    except OSError:
+        return {}
+    return dict(sorted(counts.items()))
+
+
+def render_coverage_line(coverage: dict[str, int]) -> str:
+    """One line of classification coverage by basis, or ``""`` when empty."""
+    if not coverage:
+        return ""
+    names = list(COVERAGE_LINE_BASES) + sorted(
+        basis for basis, n in coverage.items() if basis not in COVERAGE_LINE_BASES and n
+    )
+    parts = ", ".join(f"{name} {coverage.get(name, 0)}" for name in names)
+    return f"classification: {parts} ({sum(coverage.values())} observation(s))"
+
+
+# ---------------------------------------------------------------------------
 # Read / write
 # ---------------------------------------------------------------------------
 
@@ -451,6 +520,7 @@ def write_run_manifest(
     *,
     command: str,
     counts: dict[str, int] | None = None,
+    classification_coverage: dict[str, int] | None = None,
 ) -> Path:
     """Atomically write ``run_manifest.json`` into *out_dir*; return its path.
 
@@ -466,6 +536,7 @@ def write_run_manifest(
         written_by=command,
         environment=environment,
         counts=counts if counts is not None else collect_counts(out_dir),
+        classification_coverage=dict(classification_coverage or {}),
     )
     return _atomic_write_manifest(out_dir, manifest.to_dict())
 
@@ -515,6 +586,12 @@ def read_run_manifest(out_dir: Path) -> RunManifest | None:
         if isinstance(counts_raw, dict)
         else {}
     )
+    coverage_raw = raw.get("classification_coverage")
+    coverage = (
+        {str(k): int(v) for k, v in coverage_raw.items() if isinstance(v, int)}
+        if isinstance(coverage_raw, dict)
+        else {}
+    )
     try:
         environment = RunEnvironment.from_dict(env_raw)
     except TypeError:
@@ -525,6 +602,7 @@ def read_run_manifest(out_dir: Path) -> RunManifest | None:
         written_by=str(raw.get("written_by", "")),
         environment=environment,
         counts=counts,
+        classification_coverage=coverage,
     )
 
 

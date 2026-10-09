@@ -36,7 +36,9 @@ from playbook_engine.posture import (
 from playbook_engine.run_manifest import (
     EnvironmentMismatch,
     RunEnvironment,
+    classification_coverage,
     preflight,
+    render_coverage_line,
     write_run_manifest,
 )
 from playbook_engine.segmentation_qa import SegmentationQAError
@@ -584,7 +586,12 @@ def _preflight_environment(
         raise SystemExit(1) from exc
 
 
-def _record_run_manifest(out_dir: Path, environment: RunEnvironment, command: str) -> None:
+def _record_run_manifest(
+    out_dir: Path,
+    environment: RunEnvironment,
+    command: str,
+    classification_coverage: dict[str, int] | None = None,
+) -> None:
     """Stamp *out_dir* with the environment that just produced it.
 
     Best-effort by design: a read-only or full disk must not turn an
@@ -594,7 +601,9 @@ def _record_run_manifest(out_dir: Path, environment: RunEnvironment, command: st
     failing here is throwing away a completed corpus run.
     """
     try:
-        write_run_manifest(out_dir, environment, command=command)
+        write_run_manifest(
+            out_dir, environment, command=command, classification_coverage=classification_coverage
+        )
     except OSError as exc:  # pragma: no cover - disk-full / read-only out-dir
         click.secho(f"note: could not write run_manifest.json ({exc})", fg="yellow", err=True)
 
@@ -1261,13 +1270,20 @@ def mine_cmd(
         raise SystemExit(1) from exc
 
     _echo_extractor_summary(out_dir, click.echo)
+    # Classification coverage by basis (issue #235): counts only, also kept in
+    # run_manifest.json. Shows how much of the corpus reached a taxonomy_id by
+    # heading, judge, inheritance or content similarity, and how much did not.
+    coverage = classification_coverage(out_dir)
+    coverage_line = render_coverage_line(coverage)
+    if coverage_line:
+        click.echo(coverage_line)
     if rubric_policy is not None:
         _echo_rubric_report(rubric_policy, click.echo)
     # Stamp the out-dir with what just built it, so the NEXT run has
     # something to check itself against (issue #121). Written only after
     # mine_corpus returned successfully — a manifest is a claim about the
     # artifacts sitting next to it.
-    _record_run_manifest(out_dir, environment, "mine")
+    _record_run_manifest(out_dir, environment, "mine", classification_coverage=coverage)
     click.secho(f"OK  {out_dir / 'observations.jsonl'}", fg="green")
 
 
