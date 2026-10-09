@@ -4,7 +4,7 @@ Every consumer that needs a playbook's clauses or precedent records MUST go
 through these accessors rather than reaching into ``doc["evidence"]``
 directly, so a future OPF version only needs to change one file.
 
-The engine reads and writes exactly one format, OPF 0.4 (issue #238; the
+The engine reads and writes exactly one format, OPF 0.5 (issue #238; the
 0.1-0.3 shapes and their accessors were retired — git history has them):
 ``evidence.clauses`` holds one entry per clause type (with counts) and
 ``evidence.precedent`` one verdict-free record per (deal, clause type)
@@ -49,7 +49,7 @@ def is_precedent_shape(doc: dict[str, Any]) -> bool:
     """True when *doc* carries an ``evidence.precedent`` list (issue #223).
 
     A structural guard for callers that need the record before reading it
-    (``playbook precedent``); a document without one is not a valid OPF 0.4
+    (``playbook precedent``); a document without one is not a valid OPF 0.5
     document.
     """
     evidence = doc.get("evidence")

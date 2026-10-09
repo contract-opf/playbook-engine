@@ -112,7 +112,7 @@ def resolve_citation(
     """Resolve one precedent record's citation to a hash-verified source file.
 
     Args:
-        playbook:   Parsed OPF 0.4 playbook document.
+        playbook:   Parsed OPF 0.5 playbook document.
         clause_id:  ``evidence.clauses[].id`` (e.g. ``"clause.indemnification"``).
         obs_index:  Index into that clause's ``evidence.precedent`` records;
                     each cites its signed text, else the text it opened
@@ -220,7 +220,7 @@ def _resolve_ref(
 
     char_span = ref.get("char_span")
     # ``page`` is permanently outside the compiled OPF citation shape: spec/
-    # playbook.schema-0.4.json's $defs.citation is closed
+    # playbook.schema-0.5.json's $defs.citation is closed
     # (additionalProperties: false), OPF-SPEC §10.1 excludes citations from
     # the x_* extension mechanism, and §11 freezes a published format
     # against shape changes — no producer in this codebase sets it, and none conformantly

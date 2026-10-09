@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the frozen conformance vectors under ``spec/conformance/0.4/`` — issue #115.
+"""Regenerate the frozen conformance vectors under ``spec/conformance/0.5/`` — issue #115.
 
 DEV TOOL, NOT PART OF THE TEST SUITE OR THE RUNTIME PACKAGE. Run this only
 when deliberately re-stamping the conformance vectors for a new format
@@ -16,11 +16,11 @@ Usage::
 
     .venv/bin/python scripts/generate_conformance_vectors.py
 
-Writes the OPF 0.4 / digest_version 3 set (issue #223) under
-``spec/conformance/0.4/`` (``manifest.json`` + ``vectors/``); re-running it
+Writes the OPF 0.5 / digest_version 3 set (issues #223, #233) under
+``spec/conformance/0.5/`` (``manifest.json`` + ``vectors/``); re-running it
 must reproduce the committed files byte-for-byte. The OPF 0.3 / digest 2 set
-and its generator were retired with that format (issue #238) — git history
-has them. Review the resulting diff like any other spec change (it needs a
+and the 0.4 set (the same documents without opening evidence) were retired
+with those formats (issues #238, #233) — git history has them. Review the resulting diff like any other spec change (it needs a
 ``spec/CHANGELOG.md`` entry) before committing.
 """
 
@@ -60,28 +60,28 @@ def _expected(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.4 / digest_version 3 set (issue #223) — spec/conformance/0.4/
+# OPF 0.5 / digest_version 3 set (issues #223, #233) — spec/conformance/0.5/
 # ---------------------------------------------------------------------------
 
-OPF_VERSION_V04 = "0.4"
-CONFORMANCE_DIR_V04 = CONFORMANCE_DIR / "0.4"
-VECTORS_DIR_V04 = CONFORMANCE_DIR_V04 / "vectors"
+OPF_VERSION_V05 = "0.5"
+CONFORMANCE_DIR_V05 = CONFORMANCE_DIR / "0.5"
+VECTORS_DIR_V05 = CONFORMANCE_DIR_V05 / "vectors"
 _AGREEMENT_TYPE_ID = "conformance-fixture"
 
 
-def _base_v04(
+def _base_v05(
     *,
     clauses: list[dict[str, Any]] | None = None,
     precedent: list[dict[str, Any]] | None = None,
     documents: list[dict[str, Any]] | None = None,
     perspective: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """A minimal OPF 0.4 document. Clause counts and precedent ids are
+    """A minimal OPF 0.5 document. Clause counts and precedent ids are
     stamped by the reference functions (``precedent.clause_counts`` /
     ``precedent.precedent_id``) so every input is self-consistent — a vector
     a validator would reject is not a useful conformance input."""
     doc: dict[str, Any] = {
-        "opf_version": OPF_VERSION_V04,
+        "opf_version": OPF_VERSION_V05,
         "agreement_type": {"id": _AGREEMENT_TYPE_ID, "name": "Conformance Fixture Agreement"},
         "baseline": {"has_canonical_template": True},
         "taxonomy": {"source": "custom", "entries": []},
@@ -133,6 +133,10 @@ def _deal(document_id: str, *, signed_version: int | None, provenance: str) -> d
     }
 
 
+#: Sentinel: ``_prec`` derives ``opened_with`` from the other arguments.
+_DEFAULT: object = object()
+
+
 def _prec(
     document_id: str,
     taxonomy_id: str,
@@ -142,6 +146,7 @@ def _prec(
     signed: bool = True,
     signed_at: str | None = None,
     opening_text: str | None = None,
+    opened_with: str | None | object = _DEFAULT,
     refused: list[tuple[str, int]] | None = None,
     paper: str = "ours",
     rounds: int = 0,
@@ -151,6 +156,16 @@ def _prec(
         {"text": text, "round": version - 1, "ref": _ref(document_id, version)}
         for text, version in (refused or [])
     ]
+    if opened_with is _DEFAULT:
+        # An unsigned deal's opening is not anchored (null); otherwise a
+        # struck standard opened with the standard, and a clause with no
+        # distinct opening opened with the text it signed.
+        if not signed:
+            opened_with = None
+        elif opening_text is not None or standard:
+            opened_with = "standard"
+        else:
+            opened_with = "non_standard"
     record: dict[str, Any] = {
         "id": "",
         "taxonomy_id": taxonomy_id,
@@ -178,6 +193,7 @@ def _prec(
                 if signed_text is not None
                 else None
             ),
+            "opened_with": opened_with,
             "opening_text": (
                 {"text": opening_text, "ref": _ref(document_id, 1)}
                 if opening_text is not None
@@ -191,11 +207,11 @@ def _prec(
     return record
 
 
-def _vector_v04(name: str, description: str, doc: dict[str, Any]) -> dict[str, Any]:
+def _vector_v05(name: str, description: str, doc: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
-        "opf_version": OPF_VERSION_V04,
+        "opf_version": OPF_VERSION_V05,
         "engine_version": ENGINE_VERSION,
         "digest_version": DIGEST_VERSION_V3,
         "input": doc,
@@ -208,21 +224,21 @@ _STANDARD_TEXT = (
 )
 
 
-def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
-    """The OPF 0.4 / digest 3 vector set. Synthetic inputs only."""
+def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
+    """The OPF 0.5 / digest 3 vector set. Synthetic inputs only."""
     vectors: list[tuple[str, dict[str, Any]]] = []
 
-    # 001 — smallest 0.4 document: no clauses, no perspective.
-    doc_001 = _base_v04()
+    # 001 — smallest 0.5 document: no clauses, no perspective.
+    doc_001 = _base_v05()
     digest_001 = build_digest(doc_001)
     assert digest_001["perspective"] is None
     assert digest_001["clauses"] == []
     vectors.append(
         (
             "001-minimal-no-perspective",
-            _vector_v04(
+            _vector_v05(
                 "minimal-no-perspective",
-                "Smallest well-formed OPF 0.4 document: evidence {clauses: [], "
+                "Smallest well-formed OPF 0.5 document: evidence {clauses: [], "
                 "precedent: []}, no top-level perspective. expected.digest pins "
                 "the digest_version 3 skeleton — perspective is PRESENT and null "
                 "(never omitted), agreement_type is {id, name}, corpus counts are "
@@ -290,7 +306,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
             paper="theirs",
         ),
     ]
-    doc_002 = _base_v04(
+    doc_002 = _base_v05(
         clauses=[
             {
                 "id": f"clause.{tid}",
@@ -318,7 +334,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "002-variants-refused-and-exclusions",
-            _vector_v04(
+            _vector_v05(
                 "variants-refused-and-exclusions",
                 "One clause, eight deals, pinning digest_version 3 grouping and "
                 "every exclusion rule: two deals signed our standard "
@@ -355,7 +371,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
     ]
     precedent_003.append(_prec("deal-7", tid_003, signed_text=long_text))
     precedent_003.append(_prec("deal-8", tid_003, signed_text=long_text, signed_at="2025-05-05"))
-    doc_003 = _base_v04(
+    doc_003 = _base_v05(
         clauses=[
             {
                 "id": f"clause.{tid_003}",
@@ -376,7 +392,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "003-cap-totals-and-summary",
-            _vector_v04(
+            _vector_v05(
                 "cap-totals-and-summary",
                 "One clause with seven distinct signed variants: the digest lists "
                 "the top 5 (n_deals desc, last_signed desc with unknown last, then "
@@ -429,7 +445,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
             signed_text=f"Notice of termination given to {party_004} is effective on receipt.",
         ),
     ]
-    doc_004 = _base_v04(
+    doc_004 = _base_v05(
         clauses=[
             {
                 "id": f"clause.{tid_004}",
@@ -461,7 +477,7 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "004-party-alias-grouping",
-            _vector_v04(
+            _vector_v05(
                 "party-alias-grouping",
                 "The grouping key's party neutralization (OPF-SPEC §3.5.4): "
                 "every entity-registry alias (Counterparty-<n>, case-insensitive, "
@@ -480,15 +496,114 @@ def build_vectors_v04() -> list[tuple[str, dict[str, Any]]]:
             ),
         )
     )
+    # 005 — opening evidence (OPF-SPEC §3.5.5, issue #233): opened_with and
+    # opening_text for every origin, and each case where opening_text is null.
+    tid_005 = "governing_law"
+    std_005 = "This Agreement is governed by the laws of the State of Delaware."
+    ny_005 = "This Agreement is governed by the laws of the State of New York."
+    cap_005 = "Each party's liability is capped at fifty thousand dollars."
+    precedent_005 = [
+        # Opened with our standard, edited before signing: a distinct opening.
+        _prec("deal-a", tid_005, signed_text=ny_005, opening_text=std_005, rounds=1),
+        # Opened non-standard, changed to our standard: the opening is recorded
+        # whatever its origin, and the signed text is standard.
+        _prec(
+            "deal-b",
+            tid_005,
+            signed_text=std_005,
+            standard=True,
+            opening_text=ny_005,
+            opened_with="non_standard",
+            rounds=1,
+            paper="theirs",
+        ),
+        # Opened non-standard and signed unchanged: nothing distinct to record.
+        _prec("deal-c", tid_005, signed_text=ny_005, opened_with="non_standard", paper="theirs"),
+        # Added during the negotiation: the first draft had no such clause.
+        _prec("deal-d", tid_005, signed_text=ny_005, opened_with="absent", rounds=1),
+        # An unsigned deal's opening is not anchored.
+        _prec("deal-e", tid_005, signed_text=ny_005, signed=False, paper="unknown"),
+        # A case/whitespace/punctuation-only edit is not a distinct opening
+        # under the section 3.5.4 grouping key.
+        _prec(
+            "deal-f",
+            tid_005,
+            signed_text=std_005.upper(),
+            standard=True,
+            rounds=1,
+        ),
+        # Opened non-standard and struck before signing: opening_text with no
+        # signed text (and no claim that it was a refused ask).
+        _prec(
+            "deal-g",
+            tid_005,
+            signed_text=None,
+            opening_text=cap_005,
+            opened_with="non_standard",
+        ),
+    ]
+    doc_005 = _base_v05(
+        clauses=[
+            {
+                "id": f"clause.{tid_005}",
+                "taxonomy_id": tid_005,
+                "title": "Governing Law",
+                "our_standard": {
+                    "text": std_005,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "14",
+                    },
+                },
+            }
+        ],
+        precedent=precedent_005,
+        documents=[
+            _deal("deal-a", signed_version=3, provenance="our_paper"),
+            _deal("deal-b", signed_version=3, provenance="counterparty_paper"),
+            _deal("deal-c", signed_version=3, provenance="counterparty_paper"),
+            _deal("deal-d", signed_version=3, provenance="our_paper"),
+            _deal("deal-e", signed_version=None, provenance="counterparty_paper"),
+            _deal("deal-f", signed_version=3, provenance="our_paper"),
+            _deal("deal-g", signed_version=3, provenance="our_paper"),
+        ],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+    )
+    clause_005 = doc_005["evidence"]["clauses"][0]
+    assert (clause_005["n_deals"], clause_005["n_signed_standard"]) == (7, 2)
+    assert clause_005["n_variants"] == 1  # deal-a/-c/-d share one signed text
+    vectors.append(
+        (
+            "005-opening-evidence",
+            _vector_v05(
+                "opening-evidence",
+                "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text "
+                "for seven deals of one clause. deal-a opened with our standard "
+                "and signed an edit (opening_text = the standard); deal-b opened "
+                "non-standard and signed our standard (opening_text recorded "
+                "whatever its origin); deal-c opened non-standard and signed it "
+                "unchanged (opened_with non_standard, opening_text null); deal-d "
+                "added the clause in round 2 (opened_with absent, opening_text "
+                "null); deal-e is unsigned (opened_with and opening_text null); "
+                "deal-f's only edit is case (same grouping key, so opening_text "
+                "null); deal-g opened non-standard and struck it before signing "
+                "(opening_text set, signed_text null, no refused ask). The "
+                "digest is unaffected: opening evidence is not projected into "
+                "digest_version 3.",
+                doc_005,
+            ),
+        )
+    )
     return vectors
 
 
-def main_v04() -> None:
-    VECTORS_DIR_V04.mkdir(parents=True, exist_ok=True)
-    vectors = build_vectors_v04()
+def main_v05() -> None:
+    VECTORS_DIR_V05.mkdir(parents=True, exist_ok=True)
+    vectors = build_vectors_v05()
     manifest_entries = []
     for filename, vector in vectors:
-        path = VECTORS_DIR_V04 / f"{filename}.json"
+        path = VECTORS_DIR_V05 / f"{filename}.json"
         path.write_text(
             json.dumps(vector, indent=2, sort_keys=False, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -502,17 +617,17 @@ def main_v04() -> None:
         )
     manifest = {
         "format_version": {
-            "opf_version": OPF_VERSION_V04,
+            "opf_version": OPF_VERSION_V05,
             "engine_version": ENGINE_VERSION,
             "digest_version": DIGEST_VERSION_V3,
         },
-        # The frozen stamp text of the committed 0.4 manifest, reproduced
-        # verbatim. "../manifest.json" was the retired 0.3 set's manifest;
-        # spec/conformance/README.md now carries the algorithm it described.
+        # The stamp text of the 0.4 manifest, carried over with the version
+        # updated. "../manifest.json" was the retired 0.3 set's manifest;
+        # spec/conformance/README.md carries the algorithm it described.
         "algorithm": (
             "canonical / content_hash / section_digests: exactly as the 0.3 set "
             "(../manifest.json). digest: playbook_engine.digest.build_digest(input) "
-            "with the default token_budget, which for opf_version 0.4 is "
+            "with the default token_budget, which for opf_version 0.5 is "
             "build_digest_v3 (OPF-SPEC.md §3.12.1): signed variants and refused asks "
             "grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent."
             "normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', "
@@ -522,11 +637,11 @@ def main_v04() -> None:
         ),
         "vectors": manifest_entries,
     }
-    (CONFORMANCE_DIR_V04 / "manifest.json").write_text(
+    (CONFORMANCE_DIR_V05 / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"Wrote {len(vectors)} vectors + manifest.json to {CONFORMANCE_DIR_V04}")
+    print(f"Wrote {len(vectors)} vectors + manifest.json to {CONFORMANCE_DIR_V05}")
 
 
 if __name__ == "__main__":
-    main_v04()
+    main_v05()

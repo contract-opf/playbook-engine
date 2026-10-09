@@ -237,7 +237,7 @@ def test_assemble_small_corpus_end_to_end() -> None:
 
 
 def test_assemble_top_level_keys() -> None:
-    """All required (OPF 0.4 schema) top-level keys are present."""
+    """All required (OPF 0.5 schema) top-level keys are present."""
     playbook = _minimal_playbook()
     required = {
         "opf_version",
@@ -254,12 +254,12 @@ def test_assemble_top_level_keys() -> None:
 
 
 def test_assemble_opf_version() -> None:
-    """Issue #238: the assembler emits exactly one format, OPF 0.4, and takes
+    """Issue #238: the assembler emits exactly one format, OPF 0.5, and takes
     no version argument."""
     import inspect
 
     pb = _minimal_playbook()
-    assert pb["opf_version"] == "0.4"
+    assert pb["opf_version"] == "0.5"
     assert pb["digest"]["digest_version"] == "3"
     assert "opf_version" not in inspect.signature(assemble_playbook).parameters
 
@@ -367,9 +367,8 @@ def test_assemble_identity_present_with_content_hash_and_section_digests() -> No
     pb = _minimal_playbook()
     identity = pb["identity"]
     assert re.match(_HASH_RE, identity["content_hash"])
-    # "curation" is a fourth digest, always computed (a format-level rule of
-    # OPF 0.4; the engine no longer emits a curation section).
-    assert set(identity["section_digests"].keys()) == {"evidence", "posture", "floor", "curation"}
+    # OPF 0.5 has no curation section (issue #233), so no fourth digest.
+    assert set(identity["section_digests"].keys()) == {"evidence", "posture", "floor"}
     for h in identity["section_digests"].values():
         assert re.match(_HASH_RE, h)
 
@@ -634,7 +633,7 @@ def test_write_playbook_valid_json(tmp_path) -> None:
     out = tmp_path / "playbook.opf.json"
     write_playbook(playbook, out)
     parsed = json.loads(out.read_text())
-    assert parsed["opf_version"] == "0.4"
+    assert parsed["opf_version"] == "0.5"
 
 
 def test_write_playbook_atomic_no_tmp_left(tmp_path) -> None:
@@ -745,13 +744,13 @@ def _version_ingest_schema_properties(schema_filename: str) -> set[str]:
 def test_version_ingest_schema_keys_matches_schema_0_4() -> None:
     """_VERSION_INGEST_SCHEMA_KEYS (the strip-list assemble_playbook applies
     to every version_ingest entry) must stay in sync with
-    spec/playbook.schema-0.4.json's actual property set — the schema
+    spec/playbook.schema-0.5.json's actual property set — the schema
     assemble_playbook's self-validation enforces (issue #81). Used as a
     strip-list, drift in the OTHER direction (a future schema addition
     silently stripped from every published playbook) would otherwise fail
     silently — this test exists so that drift fails LOUDLY instead."""
     assert (
-        _version_ingest_schema_properties("playbook.schema-0.4.json") == _VERSION_INGEST_SCHEMA_KEYS
+        _version_ingest_schema_properties("playbook.schema-0.5.json") == _VERSION_INGEST_SCHEMA_KEYS
     )
 
 
@@ -842,7 +841,7 @@ def test_assemble_playbook_strips_reason_and_still_validates() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.4 precedent record (issue #223). Observations below are the shapes
+# OPF 0.5 precedent record (issue #223). Observations below are the shapes
 # observation_builder writes (one terminal signed/unsigned row per deal and
 # clause, proposed_then_reversed rows, conceded_before_signing rows, the
 # deterministic `standard` fact); RoundMove is what build_round_moves writes.
@@ -890,7 +889,7 @@ def _std(obs: Observation, standard: bool) -> Observation:
     return dataclasses.replace(obs, standard=standard)
 
 
-def test_v04_one_precedent_per_deal_and_clause_with_facts_only() -> None:
+def test_v05_one_precedent_per_deal_and_clause_with_facts_only() -> None:
     from playbook_engine.observation_builder import RoundMove
 
     observations = [
@@ -982,7 +981,7 @@ def test_v04_one_precedent_per_deal_and_clause_with_facts_only() -> None:
     assert "x_judgments" not in pb and "curation" not in pb
 
 
-def test_v04_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
+def test_v05_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
     observations = [_std(_obs("indemnification", text=_LONG_STD, basis="deterministic"), True)]
     a = _assemble_04(observations, [_corpus_doc("deal_001")])
     b = _assemble_04(observations, [_corpus_doc("deal_001")])
@@ -992,7 +991,7 @@ def test_v04_precedent_ids_stable_across_recompile_and_run_metadata() -> None:
     assert a["identity"]["content_hash"] == b["identity"]["content_hash"]
 
 
-def test_v04_fragment_rows_never_become_precedent() -> None:
+def test_v05_fragment_rows_never_become_precedent() -> None:
     """Sub-sentence fragments are excluded exactly as the clause-type
     compiler excludes them (MIN_OBSERVATION_TEXT_LEN)."""
     observations = [

@@ -69,7 +69,7 @@ _EVIDENCE_DIGEST = section_digest(_EMPTY_EVIDENCE_SECTION)
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.4",
+        "opf_version": "0.5",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         # issue #212: carries a perspective so the "clean doc -> zero
@@ -678,7 +678,7 @@ def test_apply_posture_interview_refreshes_identity_content_hash(tmp_path: Path)
 
     written = json.loads(opf_path.read_text(encoding="utf-8"))
     expected_doc = copy.deepcopy(written)
-    # content_hash() is a pure function of the doc minus identity/curation —
+    # content_hash() is a pure function of the doc minus identity —
     # the written identity.content_hash must match recomputing it.
     assert written["identity"]["content_hash"] == content_hash(expected_doc)
     assert written["identity"]["content_hash"] != doc["identity"]["content_hash"]

@@ -24,13 +24,72 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.4.json` | `14359a861088a100cbf5e9345b9bd92c185f73d1016939030edb867876f81e7f` |
-| `spec/conformance/0.4/` (manifest.json + vectors/*.json, concatenated) | `1abb133bf3b3b9c9583fb33501b0994941de4cf5f264843e2334db13922c54af` |
+| `playbook.schema-0.5.json` | `fc1706043da89ee70e60c7ba906d263f1d9e7804e64dea3457c66676508f4f77` |
+| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `2e34e85d37f08187f3b54e1c97225708806f318feab20a1b51d281f354308781` |
 
 Current `DIGEST_VERSION`: **3** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-08 — OPF 0.5: what every clause opened with; 0.5 replaces 0.4 (issue #233)
+
+New schema file `playbook.schema-0.5.json` (`opf_version` "0.5"). **0.4 is
+removed from this repository**, not kept beside it: the owner confirmed
+(2026-10-06, epic #236) that there are zero installed consumers, and
+contract-opf/contract-toaster accepts only 0.2/0.3 today, so nothing ever
+bound 0.4. `playbook.schema-0.4.json` and `spec/conformance/0.4/` are deleted
+(they stay in git history); the conformance set is regenerated as
+`spec/conformance/0.5/` (the four 0.4 documents with the new field, plus
+vector 005). The validator, assembler, `playbook precedent` and
+`find_precedent()` support 0.5 only. OPF-SPEC §3.5.5 documents it. **0.5 has
+no consumer until contract-opf/contract-toaster#128 vendors it;** #234
+(digest 4) and #228 (hard-rule manifest, critic dossiers) extend 0.5 before
+that, so `digest_version` stays "3" here and nothing publishes in between.
+
+- **Precedent record.** `opened_with` is REQUIRED on every
+  `evidence.precedent[]` record: `"standard"` (the first-draft text of the
+  clause type is our standard language, the exact check `standard` uses),
+  `"non_standard"` (present but not standard, including a clause type with no
+  template clause), `"absent"` (the first draft has no node of the clause
+  type: added during negotiation), or `null` (not determined: the deal has no
+  detected executed copy, or the store predates the field; never `"absent"`).
+  `opening_text` keeps its `{text, ref} | null` shape and its place in the
+  record, but its meaning widens: it is the first-draft text of the clause
+  type (every first-draft node bound into its aligned rows, joined with a
+  newline in `char_span` order, citing the first), **whatever its origin and
+  whatever paper the deal is on**, recorded when `opened_with` is `standard`
+  or `non_standard` and either `signed_text` is null or its §3.5.4 grouping
+  key differs from `signed_text`'s. In 0.4 it was recorded only for our
+  standard language struck before signing, and an edited clause lost it. The
+  record states facts only: held, conceded or moved-to-standard meanings are
+  derived by the consumer or the digest, never classified here.
+- **`curation` removed.** The optional top-level `curation` section, its
+  `curationPin` definition and `identity.section_digests.curation` are gone
+  from the 0.5 schema (the review loop that produced pins was retired in
+  #239; #239's handoff said 0.5 drops them). OPF-SPEC §3.11 is withdrawn.
+  `content_hash` now excludes only `identity` and `compiler.generated_at` /
+  `compiler.run_id`, and `compute_section_digests` returns three digests
+  (evidence, posture, floor). A 0.5 document carrying `curation` fails
+  schema validation. The conformance vectors are regenerated: their
+  `expected.section_digests` lose the `curation` key (content hashes are
+  unchanged: no vector input carried a `curation` section).
+- **New normative validator rules (0.5 only)**, each blocking: `signed`
+  false implies `opened_with` and `opening_text` are null; `opened_with`
+  `"absent"` or null implies `opening_text` is null; a non-null
+  `opening_text` has a grouping key different from `signed_text`'s (or
+  `signed_text` is null) and `moved` is true.
+- **Reference compiler.** Observations gain an engine-internal outcome
+  `opening` and an optional `opened_with`; `opening_text` no longer comes
+  from `conceded_before_signing` rows. A struck clause whose origin is
+  undetermined is now precedent with `signed_text` null, but is still not
+  claimed as a refused ask. `moved` is also true whenever `opening_text` is
+  non-null. The precedent id is unchanged (it hashes `signed_text` only).
+  `_DEVIATION_VS_TEMPLATE_VERSION` moves to 19.
+- **Unchanged:** `digest_version` "3" and its construction, the grouping key,
+  canonicalization and `identity`. The digest does not project opening
+  evidence (that is digest 4's job, #234). Vector 005 therefore leaves
+  `expected.digest` untouched by the new fields.
 
 ### 2026-10-07 — retire OPF 0.1–0.3 and digest 2: one format (issue #238)
 

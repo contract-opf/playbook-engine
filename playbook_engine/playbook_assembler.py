@@ -1,6 +1,6 @@
 """Playbook assembler — final L5 stage.
 
-Assembles the full OPF 0.4 playbook document (issue #223) — the only format
+Assembles the full OPF 0.5 playbook document (issue #223) — the only format
 the engine emits or validates (issue #238): the verdict-free per-deal
 precedent record as ``evidence`` (``playbook_engine/precedent.py``) plus a
 digest_version 3 digest, empty-but-present ``posture``/``floor``, and an
@@ -58,7 +58,7 @@ from playbook_engine.validator import validate_document
 #: verdict-free per-deal precedent record (issue #223) plus a digest_version 3
 #: digest. Older formats were retired; git history and contract-opf/opf keep
 #: them.
-OPF_VERSION = "0.4"
+OPF_VERSION = "0.5"
 _COMPILER_NAME = "playbook-engine"
 
 # Zero-width and bidirectional-control characters (ZWSP/ZWNJ/ZWJ/BOM and the
@@ -82,7 +82,7 @@ def _strip_invisible(value: Any) -> Any:
 
 
 # Keys corpus.documents[].version_ingest[] may carry into the PUBLISHED
-# playbook — mirrors spec/playbook.schema-0.4.json's
+# playbook — mirrors spec/playbook.schema-0.5.json's
 # corpus.documents.items.properties.version_ingest.items.properties exactly, whose additionalProperties:false rejects anything
 # else. corpus_documents (as read from corpus_manifest.json) can carry
 # richer, engine-internal-only keys not in this set — e.g. "reason"
@@ -117,7 +117,9 @@ def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[s
     never counts here),
     ``DROPPED_ORIGIN_UNDETERMINED`` (a clause removed before signing whose
     origin — our standard or their ask — cannot be determined because there
-    is no standard text for it), ``DROPPED_STANDARD_REMOVED_UNSIGNED``
+    is no standard text for it; in a deal with a detected executed copy the
+    text still reaches precedent as the clause's opening, issue #233),
+    ``DROPPED_STANDARD_REMOVED_UNSIGNED``
     (our standard language removed in a deal with no detected executed
     copy — never counted as a concession, issue #83) and
     ``DROPPED_REFUSED_UNSIGNED`` (non-standard language removed, or a
@@ -274,7 +276,7 @@ def assemble_playbook(
     existing_floor: dict[str, Any] | None = None,
     round_moves: list[RoundMove] | None = None,
 ) -> dict[str, Any]:
-    """Assemble and validate a complete OPF 0.4 playbook document.
+    """Assemble and validate a complete OPF 0.5 playbook document.
 
     Args:
         agreement_type:    Top-level ``{id, name}`` (``description``/``aliases``
@@ -355,7 +357,7 @@ def assemble_playbook(
                           recorded.
 
     Returns:
-        A validated OPF 0.4 playbook dict (precedent-record ``evidence``,
+        A validated OPF 0.5 playbook dict (precedent-record ``evidence``,
         empty-but-present ``posture``/``floor``, a digest_version 3
         ``digest``, and an ``identity`` block carrying
         ``content_hash``/``section_digests`` — see issue #143).
@@ -417,7 +419,7 @@ def assemble_playbook(
         compiler["run_id"] = run_id
 
     # --- assemble ---
-    # Field order mirrors spec/playbook.schema-0.4.json's property order.
+    # Field order mirrors spec/playbook.schema-0.5.json's property order.
     playbook: dict[str, Any] = {
         "opf_version": OPF_VERSION,
         "agreement_type": agreement_type,
@@ -555,7 +557,7 @@ def write_precedent_sidecar(playbook: dict[str, Any], playbook_path: Path) -> Pa
     The file is :func:`~playbook_engine.opf_accessors.precedent_jsonl` —
     one ``evidence.precedent`` record per line, sorted by id — and its bytes
     hash to the ``x_sidecars["precedent.jsonl"].sha256`` the playbook
-    records. A playbook recording no such sidecar gets none, and a stale ``precedent.jsonl`` left by an earlier 0.4
+    records. A playbook recording no such sidecar gets none, and a stale ``precedent.jsonl`` left by an earlier compile
     compile into the same directory is removed, so the directory never
     pairs a playbook with a sidecar that does not belong to it.
 

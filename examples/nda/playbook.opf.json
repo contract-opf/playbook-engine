@@ -1,5 +1,5 @@
 {
-  "opf_version": "0.4",
+  "opf_version": "0.5",
   "agreement_type": {
     "id": "nda",
     "name": "Mutual Non-Disclosure Agreement",
@@ -561,7 +561,7 @@
         "taxonomy_id": "limitation_of_liability",
         "title": "Limitation of Liability",
         "our_standard": null,
-        "n_deals": 2,
+        "n_deals": 3,
         "n_signed_standard": 0,
         "n_variants": 1,
         "n_refused": 0
@@ -872,6 +872,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -898,6 +899,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -924,6 +926,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -950,6 +953,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -976,6 +980,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1002,6 +1007,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
           "ref": {
@@ -1039,6 +1045,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1065,6 +1072,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": true,
@@ -1105,6 +1113,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1131,7 +1140,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "standard",
+        "opening_text": {
+          "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
+          "ref": {
+            "document_id": "beta-industries",
+            "version": 1,
+            "clause_path": "21",
+            "char_span": [
+              5547,
+              5680
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -1157,6 +1178,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1183,6 +1205,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1209,6 +1232,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1235,6 +1259,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1261,6 +1286,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1287,6 +1313,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1313,6 +1340,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -1339,6 +1367,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1365,6 +1394,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1391,6 +1421,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1417,6 +1448,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1443,6 +1475,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
           "ref": {
@@ -1480,6 +1513,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": true,
@@ -1506,6 +1540,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1532,6 +1567,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1558,6 +1594,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1584,6 +1621,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1610,6 +1648,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1636,6 +1675,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1662,7 +1702,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "standard",
+        "opening_text": {
+          "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+          "ref": {
+            "document_id": "delta-ventures",
+            "version": 1,
+            "clause_path": "22",
+            "char_span": [
+              5679,
+              5893
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -1688,6 +1740,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1714,6 +1767,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1740,6 +1794,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1766,7 +1821,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "standard",
+        "opening_text": {
+          "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
+          "ref": {
+            "document_id": "delta-ventures",
+            "version": 1,
+            "clause_path": "21",
+            "char_span": [
+              5545,
+              5678
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -1792,6 +1859,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1818,6 +1886,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1844,6 +1913,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1870,6 +1940,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1896,6 +1967,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1922,6 +1994,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -1948,6 +2021,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -1974,6 +2048,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2000,6 +2075,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2026,6 +2102,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2052,6 +2129,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2078,6 +2156,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2104,6 +2183,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2130,6 +2210,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2156,6 +2237,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2182,7 +2264,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
+          "ref": {
+            "document_id": "epsilon-systems",
+            "version": 1,
+            "clause_path": "7",
+            "char_span": [
+              1972,
+              2136
+            ]
+          }
+        },
         "standard": true,
         "moved": true,
         "refused_asks": []
@@ -2208,6 +2302,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2234,6 +2329,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2260,6 +2356,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2286,6 +2383,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2312,6 +2410,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2338,6 +2437,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2364,6 +2464,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2390,6 +2491,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2416,6 +2518,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2442,7 +2545,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
+          "ref": {
+            "document_id": "epsilon-systems",
+            "version": 1,
+            "clause_path": "16",
+            "char_span": [
+              4200,
+              4356
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -2468,6 +2583,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2494,6 +2610,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2520,6 +2637,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2546,6 +2664,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2572,6 +2691,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2598,6 +2718,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -2624,6 +2745,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2650,6 +2772,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2676,6 +2799,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2702,6 +2826,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2728,6 +2853,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2754,6 +2880,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2780,6 +2907,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2806,6 +2934,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2832,6 +2961,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2858,7 +2988,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "standard",
+        "opening_text": {
+          "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
+          "ref": {
+            "document_id": "gamma-holdings",
+            "version": 1,
+            "clause_path": "17",
+            "char_span": [
+              4593,
+              4840
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -2884,6 +3026,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2910,6 +3053,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2936,6 +3080,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2962,6 +3107,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -2988,6 +3134,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3014,6 +3161,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3040,6 +3188,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3066,6 +3215,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3092,6 +3242,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3118,6 +3269,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3144,6 +3296,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3170,7 +3323,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "standard",
+        "opening_text": {
+          "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
+          "ref": {
+            "document_id": "gamma-holdings",
+            "version": 1,
+            "clause_path": "8",
+            "char_span": [
+              2254,
+              2491
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3196,6 +3361,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3222,6 +3388,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3248,6 +3415,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3274,6 +3442,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3300,6 +3469,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3326,6 +3496,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3352,6 +3523,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3378,6 +3550,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": true,
@@ -3404,6 +3577,7 @@
             ]
           }
         },
+        "opened_with": "standard",
         "opening_text": null,
         "standard": true,
         "moved": false,
@@ -3430,6 +3604,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3456,6 +3631,7 @@
             ]
           }
         },
+        "opened_with": "absent",
         "opening_text": null,
         "standard": false,
         "moved": true,
@@ -3482,6 +3658,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3508,6 +3685,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3534,6 +3712,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3560,7 +3739,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; or (c) is lawfully obtained from a third party without restriction.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 1,
+            "clause_path": "3",
+            "char_span": [
+              522,
+              817
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3586,6 +3777,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3612,9 +3804,37 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
+        "refused_asks": []
+      },
+      {
+        "id": "prec.a765891d72a5733f",
+        "taxonomy_id": "limitation_of_liability",
+        "document_id": "theta-logistics",
+        "paper": "theirs",
+        "paper_basis": "llm",
+        "paper_confidence": 0.85,
+        "signed": true,
+        "rounds": 1,
+        "signed_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 1,
+            "clause_path": "13",
+            "char_span": [
+              2118,
+              2274
+            ]
+          }
+        },
+        "standard": false,
+        "moved": true,
         "refused_asks": []
       },
       {
@@ -3638,6 +3858,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3664,6 +3885,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3690,6 +3912,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3716,6 +3939,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3742,7 +3966,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
+          "ref": {
+            "document_id": "theta-logistics",
+            "version": 1,
+            "clause_path": "9",
+            "char_span": [
+              1611,
+              1729
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3768,6 +4004,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3794,6 +4031,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3820,6 +4058,7 @@
             ]
           }
         },
+        "opened_with": "absent",
         "opening_text": null,
         "standard": false,
         "moved": true,
@@ -3846,6 +4085,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3872,6 +4112,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3898,6 +4139,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3924,7 +4166,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; or (c) is lawfully obtained from a third party without restriction.",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 1,
+            "clause_path": "3",
+            "char_span": [
+              524,
+              819
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -3950,6 +4204,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -3976,6 +4231,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4002,7 +4258,19 @@
             ]
           }
         },
-        "opening_text": null,
+        "opened_with": "non_standard",
+        "opening_text": {
+          "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
+          "ref": {
+            "document_id": "zeta-diagnostics",
+            "version": 1,
+            "clause_path": "13",
+            "char_span": [
+              2120,
+              2276
+            ]
+          }
+        },
         "standard": false,
         "moved": true,
         "refused_asks": []
@@ -4028,6 +4296,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4054,6 +4323,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4069,6 +4339,7 @@
         "signed": true,
         "rounds": 2,
         "signed_text": null,
+        "opened_with": "absent",
         "opening_text": null,
         "standard": false,
         "moved": true,
@@ -4109,6 +4380,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4135,6 +4407,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4161,6 +4434,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4187,6 +4461,7 @@
             ]
           }
         },
+        "opened_with": "non_standard",
         "opening_text": null,
         "standard": false,
         "moved": false,
@@ -4199,7 +4474,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-09T00:22:51+00:00",
+      "generated_at": "2026-10-09T03:39:36+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -4232,7 +4507,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:ab5c9b33f6314acdc134d1ba14081c4e9e85149fddc8512879d646228d88fe7a"
+      "grounded_in": "evidence@sha256:4e748abbc320775fbe43a9ec9e799c90cb6253b1e0c2648c10f49b5c85ed594d"
     }
   },
   "floor": {
@@ -4252,7 +4527,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-09T00:22:52+00:00",
+        "x_signed_at": "2026-10-09T03:39:36+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -4631,13 +4906,13 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-09T00:22:50+00:00",
+    "generated_at": "2026-10-09T03:39:35+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:4d89168ce79b01497b72b514086f48baf41c3168b8af6def40de94b30397e82b",
-      "records": 127
+      "sha256": "sha256:2e631ac447f68e2879d283ceb883379c230195b549297b0a13bb77299ba6b063",
+      "records": 128
     }
   },
   "digest": {
@@ -5138,7 +5413,7 @@
         "taxonomy_id": "limitation_of_liability",
         "title": "Limitation of Liability",
         "our_standard": null,
-        "n_deals": 2,
+        "n_deals": 3,
         "n_signed_standard": 0,
         "signed_variants": [
           {
@@ -5729,12 +6004,11 @@
     ]
   },
   "identity": {
-    "content_hash": "sha256:4777b798c5007a4e6ae091e1ff7012a66554787fee5b18f44facabad530c23b7",
+    "content_hash": "sha256:dfb51f6bcc1e3627076c2d6ed3029de2d0f7c1ed79789028c54cc18344774b40",
     "section_digests": {
-      "evidence": "sha256:ab5c9b33f6314acdc134d1ba14081c4e9e85149fddc8512879d646228d88fe7a",
-      "posture": "sha256:080676ead4972053029924cf1dd57e7f5e10f0a12fe543baf3c7edb3b4c51e5a",
-      "floor": "sha256:14609f2ccf0d3ff8f43e2eb2f18cec04b1a1e6423ea39c13007b6b85c9a84d52",
-      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      "evidence": "sha256:4e748abbc320775fbe43a9ec9e799c90cb6253b1e0c2648c10f49b5c85ed594d",
+      "posture": "sha256:8373e81d98bcfe4616ce0ea2478f726a84156926d46bc4fbb04037281b62d62e",
+      "floor": "sha256:f2fcf02ab3ab583a44de791a8e5ddb95af56a1f3711c0db5056c037b7a33b10e"
     }
   }
 }

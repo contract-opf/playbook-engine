@@ -1,10 +1,10 @@
-"""OPF 0.4 evidence — the verdict-free per-deal precedent record (issue #223).
+"""OPF 0.5 evidence — the verdict-free per-deal precedent record (issues #223, #233).
 
 The evidence shapes of OPF 0.1-0.3 described categories the engine could no
 longer honestly fill once judged deviation verdicts left the consumer path
 (issue #220, and the judge itself was retired in issue #239) and the deal
 became the unit of precedent (issue #216); they were retired (issue #238 —
-git history has them). OPF 0.4's evidence is two
+git history has them). OPF 0.5's evidence is two
 lists:
 
 ``evidence.clauses[]``
@@ -16,8 +16,10 @@ lists:
     One record per (deal, clause type): what that deal signed for the clause
     (``signed_text``), whether that text is OUR standard language
     (``standard`` — the deterministic exact check of issue #220, never a
-    judged verdict), whether the clause moved during the negotiation, and
-    the counterparty asks refused before signing (``refused_asks``). Paper
+    judged verdict), what the clause opened with (``opened_with`` and, for
+    any distinct opening, ``opening_text`` — issue #233), whether the clause
+    moved during the negotiation, and the counterparty asks refused before
+    signing (``refused_asks``). Paper
     side is carried as honest metadata (``paper``) and never partitions,
     gates or weights anything (owner decision 2026-09-13 (b)).
 
@@ -43,7 +45,9 @@ from playbook_engine.clause_position_compiler import (
     _is_degenerate_observation_text,
 )
 from playbook_engine.observation_builder import (
-    OUTCOME_CONCEDED_BEFORE_SIGNING,
+    OPENED_NON_STANDARD,
+    OPENED_STANDARD,
+    OUTCOME_OPENING,
     Observation,
     RoundMove,
 )
@@ -61,7 +65,7 @@ __all__ = [
     "restamp_evidence",
 ]
 
-#: Every precedent id starts with this prefix (OPF-SPEC §3.5, OPF 0.4).
+#: Every precedent id starts with this prefix (OPF-SPEC §3.5, OPF 0.5).
 PRECEDENT_ID_PREFIX = "prec."
 
 #: Hex characters of the sha256 kept in a precedent id. 64 bits is far beyond
@@ -115,7 +119,7 @@ _COUNTERPARTY_TOKEN = "counterparty"
 
 
 def normalize_variant_text(text: str, *, party: str | None) -> str:
-    """Grouping key for signed variants and refused asks (OPF 0.4 / digest 3).
+    """Grouping key for signed variants, refused asks and openings (OPF 0.5 / digest 3).
 
     Normative as OPF-SPEC §3.5.4 "Grouping key". The standard check's
     exact-after-normalization rule
@@ -173,7 +177,7 @@ def _paper(
     """Three-valued paper side for one deal: ``(paper, paper_basis, confidence)``.
 
     An ambiguous provenance detection is ``"unknown"`` — never coerced to a
-    side. Metadata only: nothing in OPF 0.4 partitions, gates or weights by
+    side. Metadata only: nothing in OPF 0.5 partitions, gates or weights by
     paper side.
 
     ``paper_basis`` is the detection signal the deal's observations carry
@@ -226,38 +230,6 @@ def _text_entry(obs: Observation) -> dict[str, Any]:
     return {"text": obs.full_text, "ref": _ref(obs)}
 
 
-def _clause_order_key(obs: Observation) -> tuple[int, int]:
-    """Order rows of one (deal, clause) by where their text sits in its draft.
-
-    A cited draft ordinal first (a non-integer version sorts as the opening
-    draft), then the cited span's start; a row with no span sorts last.
-    """
-    version = obs.citation.version
-    span = obs.citation.char_span
-    return (
-        version if isinstance(version, int) else 0,
-        span[0] if span else 2**63 - 1,
-    )
-
-
-def _joined_text_entry(rows: list[Observation]) -> dict[str, Any] | None:
-    """Every row's text joined in clause order with ``"\\n"``, citing the first.
-
-    observation_builder writes one ``conceded_before_signing`` row per struck
-    node of a clause, so a deal that struck several nodes of a multi-node
-    standard has several rows; joining them exactly as observation_builder
-    joins a terminal group's nodes keeps every struck text (no row is dropped).
-    ``None`` when there are no rows.
-    """
-    if not rows:
-        return None
-    ordered = sorted(rows, key=_clause_order_key)
-    return {
-        "text": "\n".join(o.full_text for o in ordered if o.full_text),
-        "ref": _ref(ordered[0]),
-    }
-
-
 def _is_signed_deal(
     corpus_doc: dict[str, Any] | None, terminal: Observation | None, others: Iterable[Observation]
 ) -> bool:
@@ -265,14 +237,14 @@ def _is_signed_deal(
 
     ``corpus.documents[].signed_version`` is authoritative when recorded;
     otherwise the store's own outcomes decide (a ``"signed"`` terminal row or
-    a ``conceded_before_signing`` row both exist only in a deal with a
-    detected executed copy).
+    an ``"opening"`` row both exist only in a deal with a detected executed
+    copy).
     """
     if corpus_doc is not None and "signed_version" in corpus_doc:
         return corpus_doc.get("signed_version") is not None
     if terminal is not None:
         return terminal.outcome == "signed"
-    return any(o.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING for o in others)
+    return any(o.outcome == OUTCOME_OPENING for o in others)
 
 
 def build_precedent_evidence(
@@ -284,7 +256,7 @@ def build_precedent_evidence(
     round_moves: list[RoundMove] | None = None,
     party: str | None,
 ) -> dict[str, Any]:
-    """Build the OPF 0.4 ``evidence`` section: ``{clauses, precedent}``.
+    """Build the OPF 0.5 ``evidence`` section: ``{clauses, precedent}``.
 
     One precedent per (document_id, taxonomy_id) carrying any classified
     observation of a compiled clause type:
@@ -292,18 +264,28 @@ def build_precedent_evidence(
     - ``signed_text``: the deal's terminal text for the clause (the executed
       copy when ``signed`` is true, the last draft when it is false), or
       ``null`` when the clause was struck before signing.
-    - ``opening_text``: the text the deal opened with, when the store records
-      it as distinct evidence — today our standard language struck before
-      signing (``conceded_before_signing``): every such row of the (deal,
-      clause), joined in clause order with ``"\\n"`` and citing the first
-      (one row is written per struck node); ``null`` otherwise. ``null``
-      means "not recorded", never "opened with the signed text".
+    - ``opened_with`` (issue #233): what the clause opened with —
+      ``"standard"``, ``"non_standard"``, ``"absent"`` (added during the
+      negotiation) or ``null`` (not determined: no detected executed copy, or
+      a store that predates the field — never ``"absent"``). Read off the
+      terminal row, else the opening row, else a refused-ask row, else
+      ``null``.
+    - ``opening_text``: the first-draft text of the clause (every first-draft
+      node bound into the clause type, joined in first-draft order and citing
+      the first), recorded whatever its origin when ``opened_with`` is
+      ``"standard"`` or ``"non_standard"`` AND either ``signed_text`` is
+      ``null`` or the §3.5.4 grouping key of the opening differs from that of
+      ``signed_text`` (so a whitespace/case/punctuation-only edit is not an
+      opening); ``null`` otherwise. ``null`` means "not recorded / not
+      distinct", never "opened with the signed text" when ``opened_with`` is
+      ``null``.
     - ``standard``: the terminal row's deterministic standard fact
       (exact match after ``normalize_for_standard``, issue #220); false when
       there is no terminal text.
     - ``rounds``: the number of distinct negotiation rounds in which the
       clause changed (``round_moves``); ``moved``: it changed, was struck,
-      or carried a refused ask.
+      or carried a refused ask — always true when ``opening_text`` is
+      recorded.
     - ``refused_asks``: every ``proposed_then_reversed`` row — text proposed
       and then struck before signing — with its round and citation; always
       empty when ``signed`` is false (issue #221).
@@ -313,7 +295,7 @@ def build_precedent_evidence(
     ``first_signed`` / ``last_signed`` and every
     ``signed_variants[].last_signed`` are always ``null`` in reference
     output. The optional field exists for a third-party producer that
-    records signing dates; the 0.4 conformance vectors that set it model one.
+    records signing dates; the 0.5 conformance vectors that set it model one.
 
     Sub-sentence fragments are excluded exactly as the clause-type compiler
     excludes them (``MIN_OBSERVATION_TEXT_LEN``); unclassified observations
@@ -349,10 +331,9 @@ def build_precedent_evidence(
     for document_id, tid in sorted(groups):
         rows = groups[(document_id, tid)]
         terminal = next((o for o in rows if o.outcome in _TERMINAL_OUTCOMES), None)
-        # Every conceded row of the (deal, clause), never only the first: one
-        # row is written per struck node, so a deal that struck two nodes of
-        # a multi-node standard has two rows and both texts belong here.
-        conceded = [o for o in rows if o.outcome == OUTCOME_CONCEDED_BEFORE_SIGNING]
+        # At most one opening row per (deal, clause): the first-draft text of
+        # the whole clause type, already joined by observation_builder.
+        opening = next((o for o in rows if o.outcome == OUTCOME_OPENING), None)
         corpus_doc = docs_by_id.get(document_id)
         signed = _is_signed_deal(corpus_doc, terminal, rows)
         # Issue #221: a deal with no detected executed copy records no
@@ -361,10 +342,38 @@ def build_precedent_evidence(
         # this also keeps an observations.jsonl mined before the fix from
         # reintroducing them at project time.
         refused = [o for o in rows if o.outcome == _REFUSED_OUTCOME] if signed else []
-        if terminal is None and not conceded and not refused:
+        if terminal is None and opening is None and not refused:
             continue
         paper, paper_basis, paper_confidence = _paper(corpus_doc, rows)
         signed_text = _text_entry(terminal) if terminal is not None else None
+        # Issue #233: only a deal with a detected executed copy has an
+        # anchored opening; a store that predates the field (no row carries
+        # ``opened_with``) leaves it null, never "absent".
+        opened_with = (
+            next(
+                (
+                    o.opened_with
+                    for o in (terminal, opening, *refused)
+                    if o is not None and o.opened_with is not None
+                ),
+                None,
+            )
+            if signed
+            else None
+        )
+        opening_text = (
+            _text_entry(opening)
+            if (
+                opening is not None
+                and opened_with in (OPENED_STANDARD, OPENED_NON_STANDARD)
+                and (
+                    signed_text is None
+                    or normalize_variant_text(opening.full_text, party=party)
+                    != normalize_variant_text(signed_text["text"], party=party)
+                )
+            )
+            else None
+        )
         refused_asks = sorted(
             (
                 {"text": o.full_text, "round": _ask_round(ref), "ref": ref}
@@ -393,9 +402,10 @@ def build_precedent_evidence(
                 "signed": signed,
                 "rounds": n_rounds,
                 "signed_text": signed_text,
-                "opening_text": _joined_text_entry(conceded),
+                "opened_with": opened_with,
+                "opening_text": opening_text,
                 "standard": bool(terminal is not None and terminal.standard),
-                "moved": bool(n_rounds or conceded or refused),
+                "moved": bool(n_rounds or opening_text is not None or refused),
                 "refused_asks": refused_asks,
             }
         )
@@ -418,7 +428,7 @@ def build_precedent_evidence(
 def restamp_evidence(
     evidence: dict[str, Any], agreement_type_id: str, *, party: str | None
 ) -> None:
-    """(Re)compute every derived value of an OPF 0.4 ``evidence`` in place.
+    """(Re)compute every derived value of an OPF 0.5 ``evidence`` in place.
 
     Each precedent's ``id`` (:func:`precedent_id`) and each clause's
     ``n_*`` counts (:func:`clause_counts`, grouping by

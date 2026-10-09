@@ -7,9 +7,9 @@
 | [`fixtures/`](fixtures/) | Deliberately invalid OPF documents (a missing and an unknown `opf_version`) used by the validator's test suite |
 | [`affiliation-config/`](affiliation-config/) | A worked `playbook.config.yaml` for the Educational Affiliation Agreement taxonomy |
 | [`canary/`](canary/) | A tiny synthetic 4-document DOCX corpus (two negotiations, two tracked-changes redlines) that exists to fail loudly when the extraction layer moves: extractor identity, warm-cache replay with zero re-extraction and zero quarantine, and committed derivation counts (`tests/test_canary_corpus.py` / `make smoke-canary`) — see [`canary/README.md`](canary/README.md) |
-| [`nda/`](nda/) | A synthetic second agreement type (Mutual NDA): the OPF 0.4 reference playbook at `nda/playbook.opf.json` (`opf_version` "0.4": per-deal precedent record, `digest_version` "3"; populated Posture/Floor, reproducible from committed inputs — `tests/test_nda_derive_reproducible.py`), plus a bare structural smoke path (`tests/test_nda_smoke.py` / `make smoke-nda`) — see [`nda/README.md`](nda/README.md) |
+| [`nda/`](nda/) | A synthetic second agreement type (Mutual NDA): the OPF 0.5 reference playbook at `nda/playbook.opf.json` (`opf_version` "0.5": per-deal precedent record, `digest_version` "3"; populated Posture/Floor, reproducible from committed inputs — `tests/test_nda_derive_reproducible.py`), plus a bare structural smoke path (`tests/test_nda_smoke.py` / `make smoke-nda`) — see [`nda/README.md`](nda/README.md) |
 
-The engine emits and validates exactly one format, OPF 0.4. The worked
+The engine emits and validates exactly one format, OPF 0.5. The worked
 examples in the retired OPF 0.1 and 0.2 formats were removed with those
 formats (issue #238); git history has them. `nda/playbook.opf.json` is the
 reference playbook.
@@ -95,10 +95,10 @@ Expected output (tail):
 ```text
   judge store: out/quickstart-demo/judge/verdicts.jsonl (store-backed judges active)
   deal-alpha: 2 version file(s)
-    4 observation(s)
+    7 observation(s)
   deal-beta: 1 version file(s)
     3 observation(s)
-L1-L4 complete: 7 observations, 2 docs
+L1-L4 complete: 10 observations, 2 docs
 ```
 
 ### 4. Project the playbook

@@ -82,9 +82,9 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
     invariants = doc["floor"].get("invariants", [])
     assert len(invariants) >= 2, "NDA example must demonstrate >=2 floor.invariants"
 
-    # Issue #223: the NDA example is the OPF 0.4 reference artifact — the
+    # Issue #223: the NDA example is the OPF 0.5 reference artifact — the
     # verdict-free per-deal precedent record with a digest_version 3 digest.
-    assert doc["opf_version"] == "0.4"
+    assert doc["opf_version"] == "0.5"
     assert doc["digest"]["digest_version"] == "3"
     assert doc["digest"] == build_digest(doc), "NDA example digest is stale"
     assert doc["digest"]["perspective"] == doc["perspective"]
@@ -125,7 +125,7 @@ def test_nda_example_has_populated_posture_and_floor() -> None:
 
 
 def test_nda_example_precedent_counts_consistent() -> None:
-    """OPF 0.4 successor of the confidence-count guard (issue #223): each
+    """OPF 0.5 successor of the confidence-count guard (issue #223): each
     clause's n_* counts equal what its precedent implies, every count is
     distinct deals (issue #216), and there is one precedent per (deal,
     clause)."""

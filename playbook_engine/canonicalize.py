@@ -21,8 +21,8 @@ Array element order is NOT touched — order is semantic (e.g.
 ``evidence.precedent`` order, taxonomy entry order) and reordering would
 silently change meaning.
 
-Whole-document ``content_hash`` excludes three things so it isn't
-self-referential and isn't perturbed by non-content run/curation metadata:
+Whole-document ``content_hash`` excludes two things so it isn't
+self-referential and isn't perturbed by non-content run metadata:
 
   - the top-level ``identity`` object itself — it is where ``content_hash``
     (and the section digests) are written, so hashing it would make the hash
@@ -31,15 +31,8 @@ self-referential and isn't perturbed by non-content run/curation metadata:
     run identifier. Two compiles of byte-identical corpus content run a
     second apart (or with a different ``run_id``) must hash identically;
     only the compiler's *name*/*version* are content-relevant provenance.
-  - the top-level ``curation`` object (issue #147) — attorney-pinned
-    positions embedded in the OPF. A pin surviving a recompile unchanged, or
-    a conflict flag being raised/cleared on a pin, is not itself a change to
-    the corpus-derived content (evidence/posture/floor), so it must not
-    perturb ``content_hash``. ``curation`` gets its own digest instead (see
-    ``compute_section_digests`` below) so a consumer can still track its
-    lineage independently.
 
-A section digest (``evidence``/``posture``/``floor``/``curation``) is the
+A section digest (``evidence``/``posture``/``floor``) is the
 hash of that section's own canonical bytes in isolation — it does not
 exclude anything, since a section has no self-referential or run-metadata
 fields of its own. This lets a consumer pin/verify a single section without
@@ -47,7 +40,7 @@ needing the whole document (OPF-SPEC.md §7's ``grounded_in:
 "evidence@<digest>"``).
 
 Hash format: ``"sha256:" + hexdigest``, matching the pattern already used by
-``composes[].integrity`` in ``spec/playbook.schema-0.4.json``
+``composes[].integrity`` in ``spec/playbook.schema-0.5.json``
 (``^sha256:[0-9a-f]{64}$``).
 """
 
@@ -60,15 +53,14 @@ from typing import Any
 
 # Top-level keys excluded from the whole-document canonical form. "identity"
 # is self-referential: it carries content_hash/section_digests, the very
-# values being computed. "curation" (issue #147) is the attorney-pin overlay
-# — see module docstring for why it must not perturb content_hash.
-_EXCLUDED_TOP_LEVEL_KEYS = frozenset({"identity", "curation"})
+# values being computed.
+_EXCLUDED_TOP_LEVEL_KEYS = frozenset({"identity"})
 
 # `compiler` sub-keys excluded from the whole-document canonical form: run
 # metadata, not playbook content. See module docstring.
 _EXCLUDED_COMPILER_KEYS = frozenset({"generated_at", "run_id"})
 
-_SECTION_NAMES = ("evidence", "posture", "floor", "curation")
+_SECTION_NAMES = ("evidence", "posture", "floor")
 
 
 def canonicalize(value: Any) -> str:
@@ -105,7 +97,7 @@ def file_sha256(path: Any) -> str:
 def canonicalize_playbook(playbook: dict[str, Any]) -> str:
     """Return the whole-document canonical form used for ``content_hash``.
 
-    Strips the excluded top-level ``identity``/``curation`` keys and the
+    Strips the excluded top-level ``identity`` key and the
     excluded ``compiler`` sub-keys (``generated_at``, ``run_id``) from a deep
     copy of *playbook* before serializing — see module docstring for why.
     """
@@ -142,11 +134,9 @@ def section_digest(section: Any) -> str:
 
 
 def compute_section_digests(playbook: dict[str, Any]) -> dict[str, str]:
-    """Return ``{"evidence": ..., "posture": ..., "floor": ..., "curation": ...}``.
+    """Return ``{"evidence": ..., "posture": ..., "floor": ...}``.
 
     Each value is ``section_digest(playbook.get(name, {}))`` for
-    ``name in ("evidence", "posture", "floor", "curation")``. ``curation``
-    digests ``{}`` (a stable, well-defined value) when the playbook carries
-    no ``curation`` key at all — e.g. a corpus-only compile with no pins yet.
+    ``name in ("evidence", "posture", "floor")``.
     """
     return {name: section_digest(playbook.get(name, {})) for name in _SECTION_NAMES}

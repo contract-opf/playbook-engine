@@ -102,7 +102,7 @@ def test_wheel_contains_spec_dir(packaged_install: Path) -> None:
     """``spec/`` (schemas + builtin taxonomies) actually landed in the
     install, not just the source tree used to build it.
     """
-    assert (packaged_install / "spec" / "playbook.schema-0.4.json").is_file()
+    assert (packaged_install / "spec" / "playbook.schema-0.5.json").is_file()
     taxonomy_names = sorted(p.name for p in (packaged_install / "spec" / "taxonomy").glob("*.yaml"))
     assert "affiliation-agreement.yaml" in taxonomy_names
 
@@ -138,7 +138,7 @@ def test_sdist_contains_spec_dir(tmp_path_factory: pytest.TempPathFactory) -> No
     # cannot satisfy the assertion in place of the real top-level spec/.
     assert sdist_name.endswith(".tar.gz")
     root = sdist_name[: -len(".tar.gz")]
-    assert f"{root}/spec/playbook.schema-0.4.json" in members, members
+    assert f"{root}/spec/playbook.schema-0.5.json" in members, members
     assert f"{root}/spec/taxonomy/affiliation-agreement.yaml" in members, members
 
 
@@ -264,7 +264,7 @@ import json
 from playbook_engine.validator import validate_document
 # Intentionally minimal/invalid doc: only schema *loading* is under test
 # here (the FileNotFoundError B1 caused), not full document validity.
-result = validate_document({"opf_version": "0.4"})
+result = validate_document({"opf_version": "0.5"})
 print(json.dumps({"messages": [e.message for e in result.errors]}))
 """
     out = _run_in_target(packaged_install, script)

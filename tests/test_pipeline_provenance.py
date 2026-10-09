@@ -423,7 +423,7 @@ def test_ambiguous_provenance_is_unknown_paper_on_every_precedent(tmp_path: Path
     """Issue #225 (rewrites a test that iterated the v0.1 ``clauses`` key and so
     asserted nothing on current output): an ambiguous detection (alias_absent ->
     0.65 < AMBIGUITY_THRESHOLD) is paper "unknown" in the trail, on every
-    observation and on every OPF 0.4 precedent record of the deal, with the
+    observation and on every OPF 0.5 precedent record of the deal, with the
     detection's own basis and confidence -- and, with no template configured,
     it contributes no our_standard and no n_signed_standard."""
     corpus_dir, config_path, out_dir = _make_corpus_ambiguous(tmp_path)
@@ -445,7 +445,7 @@ def test_ambiguous_provenance_is_unknown_paper_on_every_precedent(tmp_path: Path
     )
 
     playbook = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert playbook["opf_version"] == "0.4"
+    assert playbook["opf_version"] == "0.5"
     assert validate_document(playbook).ok
     records = _precedent_for(playbook, "deal-ambig")
     assert records, "deal-ambig produced no precedent records -- nothing would be checked"

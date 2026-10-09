@@ -10,6 +10,57 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Record what every clause opened with: OPF 0.5 (issue #233, epic #236).**
+  A signed variant means much more when the record says where the deal
+  started. Until now `opening_text` was recorded only for our standard
+  language struck before signing, so an edited clause lost its opening
+  (#232 made it one `modified` row) and a struck non-standard clause left no
+  precedent at all. Every precedent record of a signed deal now carries
+  `opened_with` (`standard` | `non_standard` | `absent` | `null`), and
+  `opening_text` holds the first-draft text of the clause type whenever it
+  differs from what was signed (under the section 3.5.4 grouping key) or the
+  clause was struck, **whatever its origin and whatever paper the deal is
+  on**. The record states facts only: whether an opening was held, conceded
+  or moved to standard is for the consumer to derive. New engine-internal
+  observation outcome `opening` (`observation_builder.OUTCOME_OPENING`) and
+  a new optional `Observation.opened_with` (serialized as `opened_with` only
+  when set); the opening row is written last, so every other observation id
+  is unchanged. Only a deal with a detected executed copy records openings:
+  an unsigned deal gets `opened_with` null and no opening row. Relocation
+  guard: for a clause type with no terminal row, a first-draft node whose text
+  survives in the signed copy is relocated, not struck, and produces no
+  opening. `conceded_before_signing`, refused-ask and survival logic are
+  unchanged; the position compiler, Floor candidates and the `inspect`
+  tables ignore or list the new outcome as before (`playbook scorecard` and
+  the `mine` coverage line leave `opening` rows out of the classification
+  counts, so they stay comparable). `opening_text` no longer comes from
+  `conceded_before_signing` rows. A struck non-standard clause whose origin
+  is undetermined (e.g. no template clause) is now precedent with
+  `signed_text` null and an `opening_text`, but is still not claimed as a
+  refused ask. **One format, converted in place: `spec/playbook.schema-0.5.json`
+  replaces `playbook.schema-0.4.json`** (deleted, with `spec/conformance/0.4/`;
+  the conformance set is regenerated as `spec/conformance/0.5/` with a fifth
+  vector for the opening evidence). The validator, assembler, `playbook
+  precedent` and `find_precedent()` support 0.5 only; there is no
+  `--opf-version`. OPF 0.5 also drops the optional `curation` section (the
+  review loop that produced pins was retired in #239): the schema has no
+  top-level `curation` property, no `curationPin` definition and no
+  `identity.section_digests.curation`, `canonicalize` computes three section
+  digests (evidence, posture, floor), and the validator rejects a 0.5
+  document that carries `curation`. `digest_version` stays "3" until digest 4
+  (#234); 0.5 has no consumer until contract-opf/contract-toaster#128 vendors it.
+  `_DEVIATION_VS_TEMPLATE_VERSION` moves to 19 (L4 output changes for
+  identical inputs): re-mine, not only re-project, a store written before
+  this change. `playbook scorecard` (shape v3) gains `opening_drift` (per
+  clause with `our_standard`, the share of our-paper signed deals that
+  opened with our standard) and `template_drift.over_one_third_below_half`,
+  the trigger for the deferred decision on older Exos forms. OPF-SPEC gains
+  section 3.5.5. `examples/nda/` is regenerated: 128 precedent records
+  (theta-logistics limitation of liability is a new, struck precedent) and
+  14 openings: the eleven pairs the ticket predicted (`standard` 7,
+  `non_standard` 4) plus three clauses that #235 newly classifies on the two
+  counterparty-paper deals (see examples/nda/README.md).
+
 - **Keyless content-similarity classification, so counterparty-paper clauses
   reach precedent (issue #235).** The heading-only classifier left clauses
   under a counterparty form's own headings ("Exceptions", "Protection",
@@ -52,8 +103,8 @@ changes` heading in the release it ships under.
   Modules deleted: `curation.py`, `chat_curate.py`, `viewer.py` (the review
   HTML, its feedback loop and `--alias-map` page), `aar.py`, `prompt_renderer.py`,
   `publisher.py` and `export_profile.py`. The `curation` section is no longer
-  emitted or carried forward by `project` (OPF 0.4's schema still allows it, so
-  `section_digests.curation` stays computed; #233's 0.5 schema drops it). The
+  emitted or carried forward by `project` (OPF 0.4's schema allowed it; the
+  0.5 schema, #233, drops it). The
   `digest` lives only inside `playbook.opf.json`: there is no
   `playbook.digest.json` sidecar. Config keys `scan_role_words_extra` and
   `scan_stopwords_extra`, which only `publish` read, are rejected as unknown
@@ -507,10 +558,21 @@ adding warnings after the fact.
 
 ### Normative rule changes
 
-A conformant validator MUST reject every `opf_version` other than "0.4"
-(issue #238): 0.1, 0.2 and 0.3 documents are no longer accepted.
+A conformant validator MUST reject every `opf_version` other than "0.5"
+(issues #238, #233): 0.1, 0.2, 0.3 and 0.4 documents are no longer accepted.
 
-For `opf_version` "0.4" a conformant validator MUST reject: a precedent id
+For `opf_version` "0.5" a conformant validator MUST also reject a document
+that carries a top-level `curation` section or an
+`identity.section_digests.curation` entry (issue #233): OPF 0.5 has neither.
+
+For `opf_version` "0.5" a conformant validator MUST also reject (issue #233,
+OPF-SPEC §3.5.5): a precedent with `signed` false whose `opened_with` or
+`opening_text` is not null; a precedent whose `opened_with` is `"absent"` or
+null but whose `opening_text` is set; and a precedent whose `opening_text`
+has the same section 3.5.4 grouping key as its `signed_text`, or whose
+`moved` is not true.
+
+For `opf_version` "0.5" a conformant validator MUST reject: a precedent id
 that is duplicated or differs from its recomputation; more than one
 precedent per (document_id, taxonomy_id); a precedent whose taxonomy_id
 names no clause or whose document_id is not in `corpus.documents`; a

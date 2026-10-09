@@ -2,7 +2,7 @@
 
 Covers the observation-store side of the dynamics (the OPF 0.2/0.3
 ``stance_detail`` / ``negotiation_trail`` surfaces were retired with those
-formats, issue #238; OPF 0.4 derives each precedent's ``rounds`` from the
+formats, issue #238; OPF 0.5 derives each precedent's ``rounds`` from the
 round moves built here):
   1. proposed_by derived from a DOCX tracked insertion's author, mapped
      through our_party_aliases/our_authors — "us" on a match, "unknown"
@@ -102,8 +102,11 @@ def test_proposed_by_from_tracked_changes(tmp_path: Path) -> None:
         attributions=[enrichment],
         our_party_aliases=["Alpha Corp"],
     )
-    assert len(observations) == 1
-    obs = observations[0]
+    # The edited clause also has an opening row (issue #233); it records what
+    # the clause opened with, not a proposal, so it carries no dynamics.
+    (opening,) = [o for o in observations if o.outcome == "opening"]
+    assert opening.proposed_by is None and opening.observed_at is None
+    (obs,) = [o for o in observations if o.outcome != "opening"]
     assert obs.proposed_by == "unknown"
     # The tracked-change date is still the observation's embedded-metadata
     # date, even though the side is unattributed — date and side are

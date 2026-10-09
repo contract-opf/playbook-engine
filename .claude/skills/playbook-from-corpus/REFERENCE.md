@@ -108,7 +108,7 @@ counterparty's paper.
   engine treats any stored provenance verdict with confidence below 0.70 as
   ambiguous at mine time (`pipeline.py` ambiguity rule) and records the
   deal's paper side as `"unknown"` — the trail and every observation say
-  `"unknown"`, the OPF 0.4 precedent records say `paper: "unknown"`, and
+  `"unknown"`, the OPF 0.5 precedent records say `paper: "unknown"`, and
   `corpus.documents[]` flags it `provenance_is_ambiguous: true` (issue #225).
   The side you named is not used and the verdict is not re-queued, so a
   correct `our_paper` verdict at 0.55 leaves that deal's paper side unknown.

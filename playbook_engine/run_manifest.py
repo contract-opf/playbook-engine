@@ -467,13 +467,15 @@ def classification_coverage(out_dir: Path) -> dict[str, int]:
 
     Reads ``observations.jsonl`` and tallies each observation's
     ``x_classification_basis`` (how its taxonomy_id was reached — see
-    ``Observation.classification_basis``); an observation that records none
-    counts under ``unrecorded``. Returns ``{}`` when the file is absent or
+    ``Observation.classification_basis``), leaving out ``opening`` rows
+    (issue #233); an observation that records none counts under
+    ``unrecorded``. Returns ``{}`` when the file is absent or
     holds no observation. Keys are the closed classification-basis
     vocabulary (``scorecard.CLASSIFICATION_BASES``; any other label is
     ``other``), values are counts only — nothing document-derived — so the
     result is safe in the manifest and in a pasted log. Never raises.
     """
+    from playbook_engine.observation_builder import OUTCOME_OPENING  # noqa: PLC0415
     from playbook_engine.scorecard import CLASSIFICATION_BASES  # noqa: PLC0415
 
     path = out_dir / "observations.jsonl"
@@ -489,6 +491,10 @@ def classification_coverage(out_dir: Path) -> dict[str, int]:
                 except ValueError:
                     continue
                 if not isinstance(raw, dict):
+                    continue
+                if raw.get("outcome") == OUTCOME_OPENING:
+                    # An opening row (issue #233) restates a first-draft
+                    # clause already counted through its terminal row.
                     continue
                 basis = raw.get("x_classification_basis", "unrecorded")
                 label = basis if basis in CLASSIFICATION_BASES else "other"

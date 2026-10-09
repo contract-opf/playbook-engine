@@ -24,7 +24,7 @@ Config schema (YAML):
   perspective:                       # optional; whose "us" this playbook is
                                       # reviewed as (issue #165) — an
                                       # open-standard OPF instance must say
-                                      # who "us" is (spec/playbook.schema-0.4.json
+                                      # who "us" is (spec/playbook.schema-0.5.json
                                       # perspective). Omit entirely and
                                       # ``party`` defaults from
                                       # provenance.our_party_aliases[0] below;
@@ -161,7 +161,7 @@ class PerspectiveConfig:
     A ``PerspectiveConfig`` with only ``party`` set is a valid, useful
     config-level value (e.g. for future callers), but is NOT enough on its
     own to populate the assembled playbook's top-level ``perspective`` key:
-    ``spec/playbook.schema-0.4.json`` requires ``party`` AND
+    ``spec/playbook.schema-0.5.json`` requires ``party`` AND
     ``counterparty_type`` together or neither — see
     ``pipeline.project_playbook``.
     """

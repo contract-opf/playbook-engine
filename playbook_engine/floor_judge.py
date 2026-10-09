@@ -1,6 +1,6 @@
 """Floor judge — optional NL invariants + LLM-judge detector (issue #145).
 
-Re-envisions the OPF Floor (spec/playbook.schema-0.4.json ``floor.invariants``)
+Re-envisions the OPF Floor (spec/playbook.schema-0.5.json ``floor.invariants``)
 around *judgment*, not regex. Per the issue #145 Q4 direction (2026-07-09,
 settled):
 
@@ -61,7 +61,7 @@ _BASIS_VALUES = frozenset({"judge", "stub", "judge_error"})
 class FloorInvariant:
     """One optional natural-language Floor invariant.
 
-    Mirrors ``spec/playbook.schema-0.4.json``'s ``floor.invariants[]`` item
+    Mirrors ``spec/playbook.schema-0.5.json``'s ``floor.invariants[]`` item
     shape exactly: ``id``/``statement`` required, ``rationale`` optional.
 
     Attributes:

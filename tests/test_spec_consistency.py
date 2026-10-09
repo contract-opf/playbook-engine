@@ -19,7 +19,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 #: The one schema the engine ships (issue #238 retired 0.1-0.3).
-SCHEMA_PATH = ROOT / "spec" / "playbook.schema-0.4.json"
+SCHEMA_PATH = ROOT / "spec" / "playbook.schema-0.5.json"
 
 # After #172 renames the draft, whatever OPF-SPEC*.md exists is in scope.
 SPEC_PATHS = sorted((ROOT / "docs").glob("OPF-SPEC*.md"))
@@ -133,13 +133,13 @@ def test_every_schema_toplevel_property_documented() -> None:
 
 
 def test_conformance_section_names_the_shipped_schema() -> None:
-    """§10 must point at the schema file the engine ships (0.4), not a
+    """§10 must point at the schema file the engine ships (0.5), not a
     retired one."""
     text = _draft_spec_text()
     start = text.index("## 10. Conformance")
     end = text.index("## 11.")
     section = text[start:end]
-    assert "playbook.schema-0.4.json" in section
+    assert "playbook.schema-0.5.json" in section
     for retired in ("playbook.schema.json", "playbook.schema-0.2.json", "playbook.schema-0.3.json"):
         assert retired not in section, retired
 
@@ -149,7 +149,7 @@ def test_only_the_current_schema_ships() -> None:
     conformance set are retired (git history and contract-opf/opf keep
     them), and the changelog pins only what ships."""
     assert sorted(p.name for p in (ROOT / "spec").glob("playbook.schema*.json")) == [
-        "playbook.schema-0.4.json"
+        "playbook.schema-0.5.json"
     ]
     assert not (ROOT / "spec" / "conformance" / "manifest.json").exists()
     assert not (ROOT / "spec" / "conformance" / "vectors").exists()
@@ -159,12 +159,16 @@ def test_only_the_current_schema_ships() -> None:
         assert f"`{retired}`" not in pins, retired
 
 
-def test_content_hash_description_lists_curation() -> None:
-    """The schema's content_hash description must state the curation exclusion
-    (spec §3.10 and canonicalize.py both exclude it)."""
+def test_schema_has_no_curation_section() -> None:
+    """OPF 0.5 dropped the `curation` section (issue #233): no top-level
+    property, no `curationPin` definition, no `curation` section digest, and
+    the content_hash description no longer mentions it."""
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    description = schema["properties"]["identity"]["properties"]["content_hash"]["description"]
-    assert "curation" in description
+    identity = schema["properties"]["identity"]["properties"]
+    assert "curation" not in schema["properties"]
+    assert "curationPin" not in schema["$defs"]
+    assert "curation" not in identity["section_digests"]["properties"]
+    assert "curation" not in identity["content_hash"]["description"]
 
 
 # ---------------------------------------------------------------------------
@@ -188,12 +192,12 @@ def test_readme_links_resolve() -> None:
 
 def test_readme_claims_the_one_format() -> None:
     """README's Status section must state the engine reads and writes OPF
-    0.4 only (issue #238), not a stale earlier version."""
+    0.5 only (issue #233), not a stale earlier version."""
     text = README_PATH.read_text(encoding="utf-8")
     start = text.index("## Status")
     end = text.index("## License")
     section = text[start:end]
-    assert "0.4" in section
+    assert "0.5" in section
     assert "OPF is at `v0.1`" not in section
 
 
@@ -230,8 +234,8 @@ def test_spec_changelog_pins_every_schema() -> None:
         )
 
 
-def _conformance_fixture_digest_v04() -> str:
-    """A single sha256 over spec/conformance/0.4/manifest.json plus every
+def _conformance_fixture_digest_v05() -> str:
+    """A single sha256 over spec/conformance/0.5/manifest.json plus every
     vectors/*.json (sorted by filename, concatenated in that order), so an
     edit to the frozen conformance fixtures is covered by the same
     pin-and-changelog discipline as test_spec_changelog_pins_every_schema
@@ -239,7 +243,7 @@ def _conformance_fixture_digest_v04() -> str:
     issue #115)."""
     import hashlib
 
-    conformance_dir = ROOT / "spec" / "conformance" / "0.4"
+    conformance_dir = ROOT / "spec" / "conformance" / "0.5"
     hasher = hashlib.sha256()
     hasher.update((conformance_dir / "manifest.json").read_bytes())
     for vector_file in sorted((conformance_dir / "vectors").glob("*.json")):
@@ -247,7 +251,7 @@ def _conformance_fixture_digest_v04() -> str:
     return hasher.hexdigest()
 
 
-def test_spec_changelog_pins_v04_conformance_vectors() -> None:
+def test_spec_changelog_pins_v05_conformance_vectors() -> None:
     """spec/conformance/README.md states the conformance vectors are never
     edited in place for the same format-version stamp (issue #115), and they
     are declared normative (docs/OPF-SPEC.md §10.2). Without this guard,
@@ -256,9 +260,9 @@ def test_spec_changelog_pins_v04_conformance_vectors() -> None:
     spec/CHANGELOG.md entry. Any edit fails CI until the changelog records
     the new digest."""
     changelog = (ROOT / "spec" / "CHANGELOG.md").read_text(encoding="utf-8")
-    digest = _conformance_fixture_digest_v04()
+    digest = _conformance_fixture_digest_v05()
     assert digest in changelog, (
-        f"spec/conformance/0.4/ changed (sha256 {digest}) but spec/CHANGELOG.md "
+        f"spec/conformance/0.5/ changed (sha256 {digest}) but spec/CHANGELOG.md "
         "was not updated — record the new digest in the Current-pins table."
     )
 

@@ -409,11 +409,11 @@ def test_golden_inspection_report_renderable(tmp_path: Path) -> None:
 
 
 def test_golden_playbook_opf_version(tmp_path: Path) -> None:
-    """Compiled playbook has opf_version='0.4' (issue #223) and a precedent
+    """Compiled playbook has opf_version='0.5' (issue #223) and a precedent
     record whose every deal is a corpus document."""
     corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
     playbook = _run_pipeline(corpus_dir, config_path, out_dir)
-    assert playbook["opf_version"] == "0.4"
+    assert playbook["opf_version"] == "0.5"
     corpus_ids = {d["document_id"] for d in playbook["corpus"]["documents"]}
     precedent = playbook["evidence"]["precedent"]
     assert precedent
@@ -424,7 +424,7 @@ def test_golden_playbook_opf_version(tmp_path: Path) -> None:
 
 
 def test_golden_precedent_moves_on_multi_round_deal(tmp_path: Path) -> None:
-    """OPF 0.4: deal-alpha's per-round diffs (round_moves.jsonl) surface as
+    """OPF 0.5: deal-alpha's per-round diffs (round_moves.jsonl) surface as
     precedent ``rounds``/``moved`` — derived, never fabricated."""
     corpus_dir, config_path, out_dir = _make_golden_corpus(tmp_path)
     playbook = _run_pipeline(corpus_dir, config_path, out_dir)
@@ -466,7 +466,7 @@ def test_golden_negotiation_dynamics(tmp_path: Path) -> None:
     """Negotiation dynamics (issue #177) on the golden corpus, in the store.
 
     deal-alpha is a 3-version negotiation, so its per-round diffs must
-    surface as round moves (round_moves.jsonl at L4; OPF 0.4 derives each
+    surface as round moves (round_moves.jsonl at L4; OPF 0.5 derives each
     precedent's ``rounds`` from them — see
     test_golden_precedent_moves_on_multi_round_deal), and changed clauses
     carry proposed_by ("unknown" here — the RTF corpus has no

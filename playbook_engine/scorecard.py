@@ -33,9 +33,8 @@ error): ``playbook.opf.json``, ``observations.jsonl``,
 
 Paper side appears only under ``classification.by_paper`` and
 ``template_drift`` — diagnostics of the corpus, never inputs to the artifact.
-Fields the current OPF does not carry yet (the split of openings and of
-precedent records by ``opened_with``, issue #233; the critic ``dossiers``,
-issue #228) are ``null`` until a playbook carries them.
+Fields the current OPF does not carry yet (the critic ``dossiers``, issue
+#228) are ``null`` until a playbook carries them.
 """
 
 from __future__ import annotations
@@ -56,6 +55,7 @@ from playbook_engine.observation_builder import (
     DROPPED_REFUSED_UNSIGNED,
     DROPPED_STANDARD_REMOVED_UNSIGNED,
     DROPPED_SURVIVES_IN_TERMINAL,
+    OUTCOME_OPENING,
 )
 from playbook_engine.opf_accessors import playbook_clauses
 
@@ -78,7 +78,12 @@ __all__ = [
 #: ``opened_with``) became ``precedent.openings_by_opened_with`` (openings
 #: only — records with a non-null ``opening_text``) plus
 #: ``precedent.records_by_opened_with`` (every record).
-SCORECARD_VERSION = 2
+#:
+#: v3 (issue #233): ``opening_drift`` (per clause with ``our_standard``, the
+#: share of our-paper signed deals opening with our standard) and
+#: ``template_drift.over_one_third_below_half``; ``opening`` rows are no
+#: longer counted as classification observations.
+SCORECARD_VERSION = 3
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -126,9 +131,9 @@ PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
 #: ``opened_with`` (OPF 0.5, issue #233); a null value is ``undetermined``.
 OPENED_WITH = frozenset({"standard", "non_standard", "absent", "undetermined"})
 
-#: The engine's one format (0.4) and its planned successor (#233); any other
-#: version a playbook claims is labelled ``other``.
-OPF_VERSIONS = frozenset({"0.4", "0.5"})
+#: The engine's one format; any other version a playbook claims is labelled
+#: ``other``.
+OPF_VERSIONS = frozenset({"0.5"})
 DIGEST_VERSIONS = frozenset({"3", "4"})
 
 #: Every string the scorecard may carry as a value or a data-derived key.
@@ -291,7 +296,14 @@ def _template_section(
 
 
 def _classification_block(observations: list[dict[str, Any]]) -> dict[str, Any]:
-    """Classified share, distinct types per deal, and (when recorded) bases."""
+    """Classified share, distinct types per deal, and (when recorded) bases.
+
+    ``opening`` rows (issue #233) restate a first-draft clause that is already
+    counted through its terminal observation, so they are not classification
+    observations: leaving them in would inflate the counts and break the
+    comparison against a baseline taken before openings were recorded.
+    """
+    observations = [o for o in observations if o.get("outcome") != OUTCOME_OPENING]
     classified = [o for o in observations if o.get("taxonomy_id")]
     types_by_deal: dict[str, set[str]] = {}
     for o in observations:
@@ -377,8 +389,11 @@ def _opened_with(record: dict[str, Any]) -> str:
     return "undetermined" if value is None else _label(value, OPENED_WITH)
 
 
-def _template_drift_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Per clause with ``our_standard``: share of our-paper signed deals signing it.
+def _template_drift_section(
+    playbook: dict[str, Any] | None, *, field: str = "standard", value: Any = True
+) -> dict[str, Any] | None:
+    """Per clause with ``our_standard``: share of our-paper signed deals whose
+    record has ``field == value`` (default: signed our standard, ``standard``).
 
     The first sign of whether older forms of our paper need their own
     handling (epic #236). Anonymous: a sorted list of ratios plus summary
@@ -404,7 +419,7 @@ def _template_drift_section(playbook: dict[str, Any] | None) -> dict[str, Any] |
         if tid not in standard_tids:
             continue
         deals.setdefault(tid, set()).add(p.get("document_id"))
-        if p.get("standard") is True:
+        if p.get(field) == value:
             standard_deals.setdefault(tid, set()).add(p.get("document_id"))
     shares = sorted(
         round(len(standard_deals.get(tid, set())) / len(ds), 4) for tid, ds in deals.items()
@@ -416,6 +431,7 @@ def _template_drift_section(playbook: dict[str, Any] | None) -> dict[str, Any] |
         "min": summary["min"],
         "max": summary["max"],
         "below_half": sum(1 for s in shares if s < 0.5),
+        "over_one_third_below_half": sum(1 for s in shares if s < 0.5) * 3 > len(shares),
         "shares": shares,
     }
 
@@ -591,6 +607,12 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "classification": _classification_section(observations),
         "precedent": _precedent_section(playbook),
         "template_drift": _template_drift_section(playbook),
+        # Issue #233: the drift of what each clause OPENED with — per clause
+        # with our_standard, our-paper signed deals opening with our standard
+        # over our-paper signed deals that carry the clause. The trigger for
+        # the deferred decision on older Exos forms is
+        # ``over_one_third_below_half``.
+        "opening_drift": _template_drift_section(playbook, field="opened_with", value="standard"),
         "dropped_observations": _dropped_section(playbook, manifest),
         "digest": _digest_section(playbook),
         "queues": _queues_section(out_dir),

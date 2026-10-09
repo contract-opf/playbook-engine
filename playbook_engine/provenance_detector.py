@@ -2,7 +2,7 @@
 
 Decides whether a document is drafted on *our paper* (our standard form / our
 template) or *counterparty paper* (the counterparty's form) — or that the
-side cannot be determined (``"unknown"``).  In OPF 0.4 the result is deal
+side cannot be determined (``"unknown"``).  In OPF 0.5 the result is deal
 metadata only (the precedent record's three-valued ``paper``): it never
 partitions, gates or weights anything, and ``our_standard`` comes only from
 the configured template (owner decision 2026-09-13 (b), issue #225).
@@ -141,7 +141,7 @@ def two_valued_side(provenance: str) -> str:
     at all) is written as ``counterparty_paper``, the §2.3 direction that
     never lets it define an opening position. It is only ever written next to the honest
     record of the undetermined side: ``provenance_is_ambiguous: true`` on the
-    corpus document and ``paper: "unknown"`` on the OPF 0.4 precedent record
+    corpus document and ``paper: "unknown"`` on the OPF 0.5 precedent record
     (issue #225).
     """
     return provenance if provenance in _PROVENANCE_VALUES else "counterparty_paper"

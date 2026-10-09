@@ -1,12 +1,12 @@
 """OPF playbook validator.
 
 Validates a playbook JSON/YAML against:
-  1. spec/playbook.schema-0.4.json (JSON Schema draft 2020-12)
+  1. spec/playbook.schema-0.5.json (JSON Schema draft 2020-12)
   2. Normative rules the schema cannot express (OPF §3.5, §3.6, §4)
 
-The engine reads and writes exactly one format, OPF 0.4 (issue #238). A
-document claiming any other ``opf_version`` — including the retired 0.1,
-0.2 and 0.3 — is rejected with an "unsupported opf_version" error and no
+The engine reads and writes exactly one format, OPF 0.5 (issues #238, #233). A
+document claiming any other ``opf_version`` — including the retired 0.1-0.4 —
+is rejected with an "unsupported opf_version" error and no
 further checks.
 """
 
@@ -31,9 +31,9 @@ from playbook_engine.opf_accessors import playbook_clauses
 _QUARTER_DATE_RE = re.compile(r"^\d{4}-Q[1-4]$")
 
 #: The one OPF version this validator (and the engine) supports.
-OPF_VERSION = "0.4"
+OPF_VERSION = "0.5"
 
-_SCHEMA_PATH = Path(__file__).parent.parent / "spec" / "playbook.schema-0.4.json"
+_SCHEMA_PATH = Path(__file__).parent.parent / "spec" / "playbook.schema-0.5.json"
 
 # Public — `playbook --version` (cli.py) reports these alongside the engine
 # version so bug reports carry both, since engine version and OPF version
@@ -72,7 +72,7 @@ class ValidationResult:
 
 
 def _load_schema() -> dict[str, Any]:
-    """Load the OPF 0.4 schema."""
+    """Load the OPF 0.5 schema."""
     with _SCHEMA_PATH.open() as f:
         return json.load(f)  # type: ignore[no-any-return]
 
@@ -100,8 +100,8 @@ def _check_opf_version(doc: dict[str, Any], result: ValidationResult) -> bool:
 
     Returns True if the document claims the supported version and the checks
     may proceed; False otherwise — the shape of any other version (including
-    the retired 0.1-0.3) is not this validator's to check, so validating it
-    against the 0.4 schema would only bury the real problem under schema
+    the retired 0.1-0.4) is not this validator's to check, so validating it
+    against the 0.5 schema would only bury the real problem under schema
     noise.
     """
     version = doc.get("opf_version")
@@ -110,7 +110,7 @@ def _check_opf_version(doc: dict[str, Any], result: ValidationResult) -> bool:
         supported = ", ".join(sorted(SUPPORTED_OPF_VERSIONS))
         result.add(
             f"unsupported opf_version {version!r} (supported: {supported}) — the engine "
-            "reads and writes only OPF 0.4; the 0.1-0.3 formats were retired "
+            "reads and writes only OPF 0.5; the 0.1-0.4 formats were retired "
             "(spec/CHANGELOG.md). No other check was run.",
             path="opf_version",
         )
@@ -236,7 +236,7 @@ def _check_posture_interview_provenance(doc: dict[str, Any], result: ValidationR
     An *empty* Posture (no ``system_prompt`` at all) is untouched by this
     check -- the schema explicitly allows that shape for a corpus-only
     compile with no interview yet run (see
-    ``spec/playbook.schema-0.4.json``'s posture description, and
+    ``spec/playbook.schema-0.5.json``'s posture description, and
     ``test_v0_2_empty_posture_and_floor_are_valid``); there is nothing to
     provide provenance for until prose actually exists.
     """
@@ -514,7 +514,7 @@ def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
 
 
 def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
-    """OPF 0.4 §4: every asserted text carries a citation that resolves.
+    """OPF 0.5 §4: every asserted text carries a citation that resolves.
 
     Covers ``evidence.clauses[].our_standard.source_ref`` and, per precedent,
     ``signed_text.ref``, ``opening_text.ref`` and ``refused_asks[].ref``.
@@ -558,7 +558,7 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
 
 
 def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
-    """OPF 0.4 precedent cross-checks (normative, beyond the schema).
+    """OPF 0.5 precedent cross-checks (normative, beyond the schema).
 
     - every precedent ``id`` is unique and equals
       ``precedent.precedent_id(agreement_type.id, document_id, taxonomy_id,
@@ -570,6 +570,11 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
       agrees with that document's ``signed_version`` (when recorded);
     - ``standard: true`` requires a ``signed_text``; ``signed_at`` is a real
       date (or a ``YYYY-Qn`` quarter);
+    - opening evidence (issue #233, OPF-SPEC §3.5.5): ``signed`` false means
+      ``opened_with`` and ``opening_text`` are null; ``opened_with`` of
+      ``"absent"`` or null means ``opening_text`` is null; a non-null
+      ``opening_text`` differs from ``signed_text`` under the §3.5.4 grouping
+      key (or ``signed_text`` is null) and ``moved`` is true;
     - each clause's ``n_deals``/``n_signed_standard``/``n_variants``/
       ``n_refused`` equal what ``precedent`` implies
       (``precedent.clause_counts``, grouping with the document's own
@@ -578,9 +583,14 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
       never gates: see :func:`_check_paper`.
     """
     from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
-    from playbook_engine.precedent import clause_counts, precedent_id  # noqa: PLC0415
+    from playbook_engine.precedent import (  # noqa: PLC0415
+        clause_counts,
+        normalize_variant_text,
+        precedent_id,
+    )
 
     corpus_docs = _corpus_docs(doc)
+    party = perspective_party(doc)
     agreement_type = doc.get("agreement_type")
     agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
     clauses = [c for c in _evidence_list(doc, "clauses") if isinstance(c, dict)]
@@ -653,6 +663,7 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
                 "be standard",
                 path=f"{path}.standard",
             )
+        _check_opening(record, path, party, result, normalize_variant_text)
         signed_at = record.get("signed_at")
         if isinstance(signed_at, str) and not _QUARTER_DATE_RE.match(signed_at):
             try:
@@ -665,7 +676,6 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
     _check_paper(doc, result)
 
     records = [p for p in precedent if isinstance(p, dict)]
-    party = perspective_party(doc)
     for i, clause in enumerate(_evidence_list(doc, "clauses")):
         if not isinstance(clause, dict) or not isinstance(clause.get("taxonomy_id"), str):
             continue
@@ -678,8 +688,68 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
                 )
 
 
+def _check_opening(
+    record: dict[str, Any],
+    path: str,
+    party: str | None,
+    result: ValidationResult,
+    normalize_variant_text: Any,
+) -> None:
+    """OPF 0.5 opening-evidence MUSTs for one precedent record (issue #233).
+
+    - ``signed`` false => ``opened_with`` null and ``opening_text`` null (an
+      unsigned deal's version order is not anchored, issue #221);
+    - ``opened_with`` ``"absent"`` or null => ``opening_text`` null;
+    - ``opening_text`` non-null => its §3.5.4 grouping key differs from
+      ``signed_text``'s (or ``signed_text`` is null), and ``moved`` is true.
+    """
+    opened_with = record.get("opened_with")
+    opening = record.get("opening_text")
+    if record.get("signed") is False:
+        if opened_with is not None:
+            result.add(
+                f"precedent signed=false but opened_with={opened_with!r} — an unsigned deal "
+                "has no anchored opening, so opened_with MUST be null",
+                path=f"{path}.opened_with",
+            )
+        if opening is not None:
+            result.add(
+                "precedent signed=false but opening_text is set — an unsigned deal has no "
+                "anchored opening, so opening_text MUST be null",
+                path=f"{path}.opening_text",
+            )
+    if not isinstance(opening, dict):
+        return
+    if opened_with is None or opened_with == "absent":
+        result.add(
+            f"precedent opened_with={opened_with!r} but opening_text is set — an opening is "
+            "recorded only when opened_with is 'standard' or 'non_standard'",
+            path=f"{path}.opening_text",
+        )
+    opening_value = opening.get("text")
+    signed_text = record.get("signed_text")
+    signed_value = signed_text.get("text") if isinstance(signed_text, dict) else None
+    if (
+        isinstance(opening_value, str)
+        and isinstance(signed_value, str)
+        and normalize_variant_text(opening_value, party=party)
+        == normalize_variant_text(signed_value, party=party)
+    ):
+        result.add(
+            "precedent opening_text has the same grouping key as signed_text — the clause "
+            "did not open with distinct text, so opening_text MUST be null",
+            path=f"{path}.opening_text",
+        )
+    if record.get("moved") is not True:
+        result.add(
+            "precedent opening_text is set but moved is not true — a distinct opening "
+            "means the clause moved",
+            path=f"{path}.moved",
+        )
+
+
 def _check_paper(doc: dict[str, Any], result: ValidationResult) -> None:
-    """OPF 0.4 paper-side cross-checks (issue #225).
+    """OPF 0.5 paper-side cross-checks (issue #225).
 
     Paper side is three-valued deal metadata that gates nothing, so these
     only check that the document tells one consistent story about it:
@@ -845,11 +915,8 @@ def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
     blocking, not advisory — an unverifiable identity is worse than none.
 
     ``section_digests`` is compared key-by-key against what's actually
-    present in the document (not the full recomputed dict) because
-    ``curation`` is an optional key within ``section_digests`` too (schema:
-    only evidence/posture/floor are ``required``) — a document that omits it
-    has asserted nothing about the curation digest, so there is nothing to
-    contradict.
+    present in the document; the schema (not this check) enforces which keys
+    it may carry.
     """
     identity = doc.get("identity")
     if not isinstance(identity, dict):
@@ -885,9 +952,9 @@ def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
 
 
 def validate_document(doc: dict[str, Any]) -> ValidationResult:
-    """Validate *doc* against the OPF 0.4 schema and normative rules.
+    """Validate *doc* against the OPF 0.5 schema and normative rules.
 
-    A document whose ``opf_version`` is not "0.4" gets one blocking
+    A document whose ``opf_version`` is not "0.5" gets one blocking
     "unsupported opf_version" error and no other check (issue #238).
 
     Args:

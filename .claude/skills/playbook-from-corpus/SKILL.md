@@ -149,7 +149,7 @@ populate the config yourself:**
    block (issue #212) so the assembled playbook actually carries whose "us"
    it's reviewed as — a downstream consumer that renders a "from OUR
    perspective" affordance has nothing to key off of otherwise. `party` alone
-   is not enough: `spec/playbook.schema-0.4.json` requires `party` AND
+   is not enough: `spec/playbook.schema-0.5.json` requires `party` AND
    `counterparty_type` together or the whole `perspective` object is dropped
    (see `playbook_engine/config.py`'s `PerspectiveConfig`).
    - `perspective.party`: your own name — normally the same value as
@@ -876,7 +876,7 @@ make docker-run CORPUS=./corpus OUT=./out \
   playbook supplies precedent. Every clause's deviation is the deterministic
   standard check (its text matches our template clause → `none`, otherwise
   `substantive`), and `project` reads no stance, tolerance or fallback out of
-  it. `project` emits OPF 0.4, the one format the engine reads and writes (no
+  it. `project` emits OPF 0.5, the one format the engine reads and writes (no
   version flag): no stance at all — `evidence.precedent` holds one
   verdict-free record per (deal, clause) (what the deal signed, whether that
   is our standard, whether the clause moved, the asks refused before
@@ -1271,7 +1271,7 @@ the host — the container has no browser):
   treat anything leaving the org as needing its own review.
 
 The digest — the model-facing projection — is the `digest` section inside
-`playbook.opf.json` (for a 0.4 playbook, `digest_version` 3: per clause our
+`playbook.opf.json` (for a 0.5 playbook, `digest_version` 3: per clause our
 standard, the signed variants and refused asks grouped by exact normalization
 with distinct-deal counts and citations, no stance or verdict; target ~40K
 tokens). There is no standalone digest file.

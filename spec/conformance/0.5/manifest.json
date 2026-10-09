@@ -1,15 +1,15 @@
 {
   "format_version": {
-    "opf_version": "0.4",
+    "opf_version": "0.5",
     "engine_version": "1.0.0",
     "digest_version": "3"
   },
-  "algorithm": "canonical / content_hash / section_digests: exactly as the 0.3 set (../manifest.json). digest: playbook_engine.digest.build_digest(input) with the default token_budget, which for opf_version 0.4 is build_digest_v3 (OPF-SPEC.md §3.12.1): signed variants and refused asks grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent.normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', then deviation_classifier.normalize_for_standard with the document's perspective.party as the one party name -> 'party'), text = observation_builder.summarize_clause_text of the group representative.",
+  "algorithm": "canonical / content_hash / section_digests: exactly as the 0.3 set (../manifest.json). digest: playbook_engine.digest.build_digest(input) with the default token_budget, which for opf_version 0.5 is build_digest_v3 (OPF-SPEC.md §3.12.1): signed variants and refused asks grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent.normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', then deviation_classifier.normalize_for_standard with the document's perspective.party as the one party name -> 'party'), text = observation_builder.summarize_clause_text of the group representative.",
   "vectors": [
     {
       "name": "minimal-no-perspective",
       "file": "vectors/001-minimal-no-perspective.json",
-      "description": "Smallest well-formed OPF 0.4 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null."
+      "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 3 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null."
     },
     {
       "name": "variants-refused-and-exclusions",
@@ -25,6 +25,11 @@
       "name": "party-alias-grouping",
       "file": "vectors/004-party-alias-grouping.json",
       "description": "The grouping key's party neutralization (OPF-SPEC §3.5.4): every entity-registry alias (Counterparty-<n>, case-insensitive, on word boundaries) becomes the token 'counterparty' and the document's perspective.party becomes the token 'party' before case and punctuation are dropped. Two deals whose signed texts differ only by the counterparty alias (Counterparty-2 vs Counterparty-5) are one variant with n_deals 2, and two refused asks that differ only by alias are one group with n_deals 2. The same words with the parties' places swapped stay a separate variant (our party and the counterparty are distinct tokens). The order of the two one-deal variants pins the perspective.party rewrite: 'notice of termination given to party ...' sorts before 'party may terminate ...'."
+    },
+    {
+      "name": "opening-evidence",
+      "file": "vectors/005-opening-evidence.json",
+      "description": "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text for seven deals of one clause. deal-a opened with our standard and signed an edit (opening_text = the standard); deal-b opened non-standard and signed our standard (opening_text recorded whatever its origin); deal-c opened non-standard and signed it unchanged (opened_with non_standard, opening_text null); deal-d added the clause in round 2 (opened_with absent, opening_text null); deal-e is unsigned (opened_with and opening_text null); deal-f's only edit is case (same grouping key, so opening_text null); deal-g opened non-standard and struck it before signing (opening_text set, signed_text null, no refused ask). The digest is unaffected: opening evidence is not projected into digest_version 3."
     }
   ]
 }

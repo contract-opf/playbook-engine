@@ -89,7 +89,11 @@ class CoherenceFlag:
 # no version of the document was detected as the executed copy) are real
 # corpus evidence but never on their own make a clause type appear;
 # ``conceded_before_signing`` rows (our standard struck before signing,
-# issue #216) do, and are handled separately below.
+# issue #216) do, and are handled separately below. ``opening`` rows
+# (issue #233: what a clause type opened with) never do: they restate a
+# first-draft clause whose position is defined by its terminal, concession or
+# refused-ask rows, and a clause type seen only as an opening reaches no
+# position (and so no precedent).
 _CLAUSE_DEFINING_OUTCOMES = frozenset({"signed", "proposed_then_reversed"})
 
 

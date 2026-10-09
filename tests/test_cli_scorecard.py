@@ -102,7 +102,9 @@ _FIELD_NAMES = frozenset(
         "records_by_opened_with",
         "signed_opened_with_undetermined",
         "template_drift",
+        "opening_drift",
         "below_half",
+        "over_one_third_below_half",
         "shares",
         "dropped_observations",
         "count",
@@ -131,6 +133,7 @@ _TOP_LEVEL = {
     "classification",
     "precedent",
     "template_drift",
+    "opening_drift",
     "dropped_observations",
     "digest",
     "queues",
@@ -194,9 +197,12 @@ _NDA_FLAT_KEYS = frozenset(
         "dropped_observations.count",
         "opf_version",
         "precedent.openings",
-        "precedent.openings_by_opened_with",
+        "precedent.openings_by_opened_with.non_standard",
+        "precedent.openings_by_opened_with.standard",
         "precedent.records",
-        "precedent.records_by_opened_with",
+        "precedent.records_by_opened_with.absent",
+        "precedent.records_by_opened_with.non_standard",
+        "precedent.records_by_opened_with.standard",
         "precedent.refused_asks",
         "precedent.signed",
         "precedent.signed_opened_with_undetermined",
@@ -211,12 +217,19 @@ _NDA_FLAT_KEYS = frozenset(
         "template.has_canonical_template",
         "template.our_standard_coverage",
         "template.standards_classified",
-        "template_drift.below_half",
-        "template_drift.clauses",
-        "template_drift.max",
-        "template_drift.median",
-        "template_drift.min",
-        "template_drift.shares[]",
+        *(
+            f"{section}.{field}"
+            for section in ("template_drift", "opening_drift")
+            for field in (
+                "below_half",
+                "clauses",
+                "max",
+                "median",
+                "min",
+                "over_one_third_below_half",
+                "shares[]",
+            )
+        ),
     }
 )
 
@@ -292,8 +305,8 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 2
-    assert card["opf_version"] == "0.4"
+    assert card["scorecard_version"] == 3
+    assert card["opf_version"] == "0.5"
     assert card["corpus"] == {
         "documents": 6,
         "versions": 17,
@@ -354,11 +367,19 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     assert per_deal["n"] == cls["deals"]
     assert per_deal["min"] <= per_deal["median"] <= per_deal["max"]
 
-    # OPF 0.4 carries neither opened_with (#233) nor dossiers (#228): null, not an error.
-    assert precedent["openings_by_opened_with"] is None
-    assert precedent["records_by_opened_with"] is None
-    assert precedent["signed_opened_with_undetermined"] is None
+    # OPF 0.5 carries opened_with (#233) but not yet dossiers (#228): null, not an error.
+    assert sum(precedent["records_by_opened_with"].values()) == precedent["records"]
+    assert sum(precedent["openings_by_opened_with"].values()) == precedent["openings"] > 0
+    assert set(precedent["openings_by_opened_with"]) <= {"standard", "non_standard"}
+    # Every signed record of a fresh store has its opening determined (#233).
+    assert precedent["signed_opened_with_undetermined"] == 0
     assert card["dossiers"] is None
+    # The opening drift is the template drift's twin over `opened_with`.
+    opening = card["opening_drift"]
+    assert opening["clauses"] == drift["clauses"]
+    assert opening["shares"] == sorted(opening["shares"])
+    assert all(0.0 <= s <= 1.0 for s in opening["shares"])
+    assert opening["below_half"] == sum(1 for s in opening["shares"] if s < 0.5)
 
     # The printed table carries the same numbers.
     assert "corpus.documents" in result.output
@@ -507,7 +528,7 @@ def test_corpus_stats_fallback_without_a_manifest_passes_only_counts(
     out = tmp_path / "out"
     out.mkdir()
     playbook = {
-        "opf_version": "0.4",
+        "opf_version": "0.5",
         "corpus": {
             "stats": {
                 "documents_total": documents_total,
@@ -554,7 +575,14 @@ def test_empty_out_dir_scores_null_never_errors(tmp_path: Path) -> None:
     assert card["opf_version"] is None
     assert set(card["corpus"].values()) == {None}
     assert card["template"]["standards_classified"] is None
-    for section in ("classification", "precedent", "template_drift", "digest", "dossiers"):
+    for section in (
+        "classification",
+        "precedent",
+        "template_drift",
+        "opening_drift",
+        "digest",
+        "dossiers",
+    ):
         assert card[section] is None, section
     assert card["dropped_observations"] is None
     assert card["queues"] == {"judge_pending": 0, "judge_pending_by_kind": {}, "segment_pending": 0}

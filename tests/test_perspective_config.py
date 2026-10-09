@@ -145,7 +145,7 @@ def test_perspective_default_from_aliases(tmp_path: Path) -> None:
     from the first alias -- ``counterparty_type`` has no derivable default
     and must stay unset (never fabricated).
 
-    This is a config-level default only: ``spec/playbook.schema-0.4.json``
+    This is a config-level default only: ``spec/playbook.schema-0.5.json``
     requires ``party`` AND ``counterparty_type`` together or neither, so a
     party-only value is NOT enough to populate the assembled playbook's
     top-level ``perspective`` key (see ``test_perspective_omitted_when_only_party_known``

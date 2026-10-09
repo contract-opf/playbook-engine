@@ -157,17 +157,20 @@ def mined(tmp_path_factory: pytest.TempPathFactory) -> Path:
         assert f"{basis} " in coverage_lines[0], coverage_lines[0]
     manifest = json.loads((out_dir / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["classification_coverage"]["content_similarity"] == 14
-    assert sum(manifest["classification_coverage"].values()) == len(
-        (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
-    )
+    # The coverage counts clause observations: the "opening" rows (issue #233)
+    # restate a first-draft clause and are left out.
+    assert sum(manifest["classification_coverage"].values()) == len(_observations(out_dir))
     return out_dir
 
 
-def _observations(out_dir: Path) -> list[dict]:
-    return [
+def _observations(out_dir: Path, *, openings: bool = False) -> list[dict]:
+    """The mined observations; the ``opening`` rows (issue #233), which restate
+    a first-draft clause already classified through its own row, only on request."""
+    rows = [
         json.loads(line)
         for line in (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
     ]
+    return rows if openings else [o for o in rows if o["outcome"] != "opening"]
 
 
 def _exemplars(out_dir: Path) -> dict[str, str]:

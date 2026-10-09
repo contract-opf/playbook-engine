@@ -503,7 +503,7 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
     through the SAME born-safe pseudonymization as text_summary/full_text —
     never the raw entity name, only the alias (modeled on
     test_compiled_artifact_carries_alias_not_raw_entity_name above). The
-    compiled playbook (OPF 0.4) carries the aliased text in its precedent
+    compiled playbook (OPF 0.5) carries the aliased text in its precedent
     record and the raw name nowhere.
 
     The known entity name below is deliberately positioned to straddle
@@ -597,7 +597,7 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
     playbook_text = json.dumps(playbook)
     assert entity not in playbook_text
     assert "Wintermoor" not in playbook_text
-    # OPF 0.4 (issue #223): the precedent record carries the aliased text.
+    # OPF 0.5 (issue #223): the precedent record carries the aliased text.
     precedent_texts = [
         p["signed_text"]["text"] for p in playbook["evidence"]["precedent"] if p["signed_text"]
     ]
@@ -1186,3 +1186,68 @@ def test_mine_corpus_never_leaks_version_filename_with_squashed_name(tmp_path: P
     assert move_version_ids and move_version_ids <= {"v1", "v2"}, (
         f"round_moves.jsonl citation.version_id must be an ordinal label, got {move_version_ids}"
     )
+
+
+def test_opening_evidence_is_born_safe_from_observation_to_playbook(tmp_path: Path) -> None:
+    """Issue #233: an opening row restates FIRST-DRAFT text, which can name a
+    counterparty that later drafts no longer name. The row must be
+    pseudonymized exactly like a removed row, and the precedent's
+    ``opening_text`` carries the alias, never the raw name."""
+    first_draft = (
+        r"1. Indemnification\par "
+        rf"Alpha Corp shall indemnify {_KNOWN_ENTITY} against third-party claims "
+        r"arising from the placement programme.\par "
+        r"2. Governing Law\par "
+        r"This agreement is governed by the laws of the State of California.\par "
+    )
+    executed = (
+        r"1. Indemnification\par "
+        r"Alpha Corp shall indemnify the institution against third-party claims "
+        r"arising from the placement programme and any related costs.\par "
+        r"2. Governing Law\par "
+        r"This agreement is governed by the laws of the State of California.\par "
+    )
+    corpus_dir = tmp_path / "corpus"
+    deal_dir = corpus_dir / "deal-001"
+    deal_dir.mkdir(parents=True)
+    _write_rtf(deal_dir / "v1.rtf", first_draft)
+    _write_rtf(deal_dir / "v2.rtf", executed)
+    (deal_dir / "hints.yaml").write_text("signed_version: v2.rtf\n", encoding="utf-8")
+    cfg = {
+        "agreement_type": {
+            "id": "educational-affiliation",
+            "name": "Educational Affiliation Agreement",
+        },
+        "baseline": {},
+        "taxonomy": str(_TAXONOMY_PATH),
+        "provenance": {"our_party_aliases": ["Alpha Corp"], "known_entities": [_KNOWN_ENTITY]},
+    }
+    config_path = tmp_path / "playbook.config.yaml"
+    config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    taxonomy = load_taxonomy(_TAXONOMY_PATH)
+    config = load_config(config_path)
+    mine_corpus(
+        corpus_dir=corpus_dir,
+        config=config,
+        taxonomy=taxonomy,
+        out_dir=out_dir,
+        entity_registry_path=tmp_path / "registry.json",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (out_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    (opening,) = [r for r in rows if r["outcome"] == "opening"]
+    assert opening["taxonomy_id"] == "indemnification"
+    assert _KNOWN_ENTITY.lower() not in json.dumps(opening).lower()
+    assert "Counterparty-" in opening["full_text"], "the first-draft name became its alias"
+
+    playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
+    record = next(
+        p for p in playbook["evidence"]["precedent"] if p["taxonomy_id"] == "indemnification"
+    )
+    assert record["opened_with"] == "non_standard"
+    assert record["opening_text"]["text"] == opening["full_text"]
+    assert _KNOWN_ENTITY.lower() not in json.dumps(playbook).lower()

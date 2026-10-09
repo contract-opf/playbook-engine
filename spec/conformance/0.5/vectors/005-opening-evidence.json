@@ -1,0 +1,388 @@
+{
+  "name": "opening-evidence",
+  "description": "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text for seven deals of one clause. deal-a opened with our standard and signed an edit (opening_text = the standard); deal-b opened non-standard and signed our standard (opening_text recorded whatever its origin); deal-c opened non-standard and signed it unchanged (opened_with non_standard, opening_text null); deal-d added the clause in round 2 (opened_with absent, opening_text null); deal-e is unsigned (opened_with and opening_text null); deal-f's only edit is case (same grouping key, so opening_text null); deal-g opened non-standard and struck it before signing (opening_text set, signed_text null, no refused ask). The digest is unaffected: opening evidence is not projected into digest_version 3.",
+  "opf_version": "0.5",
+  "engine_version": "1.0.0",
+  "digest_version": "3",
+  "input": {
+    "opf_version": "0.5",
+    "agreement_type": {
+      "id": "conformance-fixture",
+      "name": "Conformance Fixture Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": true
+    },
+    "taxonomy": {
+      "source": "custom",
+      "entries": []
+    },
+    "perspective": {
+      "party": "Fixture Co",
+      "counterparty_type": "Fixture Counterparty"
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause.governing_law",
+          "taxonomy_id": "governing_law",
+          "title": "Governing Law",
+          "our_standard": {
+            "text": "This Agreement is governed by the laws of the State of Delaware.",
+            "source_ref": {
+              "document_id": "template",
+              "version": "template",
+              "clause_path": "14"
+            }
+          },
+          "n_deals": 7,
+          "n_signed_standard": 2,
+          "n_variants": 1,
+          "n_refused": 0
+        }
+      ],
+      "precedent": [
+        {
+          "id": "prec.f288cd49668e1409",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-a",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 1,
+          "signed_text": {
+            "text": "This Agreement is governed by the laws of the State of New York.",
+            "ref": {
+              "document_id": "deal-a",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": "standard",
+          "opening_text": {
+            "text": "This Agreement is governed by the laws of the State of Delaware.",
+            "ref": {
+              "document_id": "deal-a",
+              "version": 1,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "standard": false,
+          "moved": true,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.b603e975e838016c",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-b",
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 1,
+          "signed_text": {
+            "text": "This Agreement is governed by the laws of the State of Delaware.",
+            "ref": {
+              "document_id": "deal-b",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": "non_standard",
+          "opening_text": {
+            "text": "This Agreement is governed by the laws of the State of New York.",
+            "ref": {
+              "document_id": "deal-b",
+              "version": 1,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "standard": true,
+          "moved": true,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.d25a6ad2aa955a75",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-c",
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 0,
+          "signed_text": {
+            "text": "This Agreement is governed by the laws of the State of New York.",
+            "ref": {
+              "document_id": "deal-c",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": "non_standard",
+          "opening_text": null,
+          "standard": false,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.f35cee48609c937d",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-d",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 1,
+          "signed_text": {
+            "text": "This Agreement is governed by the laws of the State of New York.",
+            "ref": {
+              "document_id": "deal-d",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": "absent",
+          "opening_text": null,
+          "standard": false,
+          "moved": true,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.b675ac1522a45c4a",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-e",
+          "paper": "unknown",
+          "paper_basis": "ambiguous_detection",
+          "paper_confidence": null,
+          "signed": false,
+          "rounds": 0,
+          "signed_text": {
+            "text": "This Agreement is governed by the laws of the State of New York.",
+            "ref": {
+              "document_id": "deal-e",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": null,
+          "opening_text": null,
+          "standard": false,
+          "moved": false,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.10432311bdccccee",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-f",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 1,
+          "signed_text": {
+            "text": "THIS AGREEMENT IS GOVERNED BY THE LAWS OF THE STATE OF DELAWARE.",
+            "ref": {
+              "document_id": "deal-f",
+              "version": 3,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "opened_with": "standard",
+          "opening_text": null,
+          "standard": true,
+          "moved": true,
+          "refused_asks": []
+        },
+        {
+          "id": "prec.6b579b50949106dd",
+          "taxonomy_id": "governing_law",
+          "document_id": "deal-g",
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "signed": true,
+          "rounds": 0,
+          "signed_text": null,
+          "opened_with": "non_standard",
+          "opening_text": {
+            "text": "Each party's liability is capped at fifty thousand dollars.",
+            "ref": {
+              "document_id": "deal-g",
+              "version": 1,
+              "clause_path": "1",
+              "char_span": [
+                0,
+                40
+              ]
+            }
+          },
+          "standard": false,
+          "moved": true,
+          "refused_asks": []
+        }
+      ]
+    },
+    "posture": {},
+    "floor": {},
+    "corpus": {
+      "documents": [
+        {
+          "document_id": "deal-a",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-b",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-c",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-d",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-e",
+          "provenance": "counterparty_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": null
+        },
+        {
+          "document_id": "deal-f",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        },
+        {
+          "document_id": "deal-g",
+          "provenance": "our_paper",
+          "in_scope": true,
+          "versions": 3,
+          "signed_version": 3
+        }
+      ],
+      "stats": {}
+    },
+    "compiler": {
+      "name": "playbook-engine",
+      "version": "1.0.0",
+      "run_id": "conformance-fixture-run",
+      "generated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "expected": {
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-e\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":null,\"versions\":3},{\"document_id\":\"deal-f\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-g\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.governing_law\",\"n_deals\":7,\"n_refused\":0,\"n_signed_standard\":2,\"n_variants\":1,\"our_standard\":{\"source_ref\":{\"clause_path\":\"14\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"This Agreement is governed by the laws of the State of Delaware.\"},\"taxonomy_id\":\"governing_law\",\"title\":\"Governing Law\"}],\"precedent\":[{\"document_id\":\"deal-a\",\"id\":\"prec.f288cd49668e1409\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":1},\"text\":\"This Agreement is governed by the laws of the State of Delaware.\"},\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"This Agreement is governed by the laws of the State of New York.\"},\"standard\":false,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-b\",\"id\":\"prec.b603e975e838016c\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":1},\"text\":\"This Agreement is governed by the laws of the State of New York.\"},\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"This Agreement is governed by the laws of the State of Delaware.\"},\"standard\":true,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-c\",\"id\":\"prec.d25a6ad2aa955a75\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"This Agreement is governed by the laws of the State of New York.\"},\"standard\":false,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-d\",\"id\":\"prec.f35cee48609c937d\",\"moved\":true,\"opened_with\":\"absent\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"This Agreement is governed by the laws of the State of New York.\"},\"standard\":false,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-e\",\"id\":\"prec.b675ac1522a45c4a\",\"moved\":false,\"opened_with\":null,\"opening_text\":null,\"paper\":\"unknown\",\"paper_basis\":\"ambiguous_detection\",\"paper_confidence\":null,\"refused_asks\":[],\"rounds\":0,\"signed\":false,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-e\",\"version\":3},\"text\":\"This Agreement is governed by the laws of the State of New York.\"},\"standard\":false,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-f\",\"id\":\"prec.10432311bdccccee\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-f\",\"version\":3},\"text\":\"THIS AGREEMENT IS GOVERNED BY THE LAWS OF THE STATE OF DELAWARE.\"},\"standard\":true,\"taxonomy_id\":\"governing_law\"},{\"document_id\":\"deal-g\",\"id\":\"prec.6b579b50949106dd\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-g\",\"version\":1},\"text\":\"Each party's liability is capped at fifty thousand dollars.\"},\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":null,\"standard\":false,\"taxonomy_id\":\"governing_law\"}]},\"floor\":{},\"opf_version\":\"0.5\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:0f5ebbc769deeb2e8b42ca753c2d5bc58cc0dbbc4094ee542fb861cfd01752bb",
+    "section_digests": {
+      "evidence": "sha256:b9d4f1b791e44b4e4c9090d31c75bf2306c00e6aba854d7535703abaf08d823d",
+      "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "digest": {
+      "digest_version": "3",
+      "perspective": {
+        "party": "Fixture Co",
+        "counterparty_type": "Fixture Counterparty"
+      },
+      "agreement_type": {
+        "id": "conformance-fixture",
+        "name": "Conformance Fixture Agreement"
+      },
+      "corpus": {
+        "n_deals": 7,
+        "n_signed": 6,
+        "first_signed": null,
+        "last_signed": null
+      },
+      "clauses": [
+        {
+          "id": "clause.governing_law",
+          "taxonomy_id": "governing_law",
+          "title": "Governing Law",
+          "our_standard": {
+            "text": "This Agreement is governed by the laws of the State of Delaware.",
+            "source_ref": {
+              "document_id": "template",
+              "version": "template",
+              "clause_path": "14"
+            }
+          },
+          "n_deals": 7,
+          "n_signed_standard": 2,
+          "signed_variants": [
+            {
+              "text": "This Agreement is governed by the laws of the State of New York.",
+              "n_deals": 3,
+              "last_signed": null,
+              "ref": {
+                "document_id": "deal-a",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  0,
+                  40
+                ]
+              },
+              "precedent_ids": [
+                "prec.d25a6ad2aa955a75",
+                "prec.f288cd49668e1409",
+                "prec.f35cee48609c937d"
+              ]
+            }
+          ],
+          "refused_asks": [],
+          "n_variants_total": 1,
+          "n_refused_total": 0
+        }
+      ]
+    }
+  }
+}
