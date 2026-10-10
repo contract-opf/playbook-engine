@@ -253,6 +253,16 @@ facts only:
 
 Field semantics:
 
+- `our_standard` — the canonical template's complete language for the clause
+  type: every template clause of that type, in document order, joined into one
+  `text` (a lead-in sentence and the operative limbs under it are one
+  standard). A form's fill-in front matter (a cover table of bracketed
+  blanks with no operative sentence, ahead of the form's first operative
+  clause) is no clause and is never a standard; a fill-in table after that
+  point (a fee or notices schedule) is a clause like any other. A
+  standard joined from several template clauses cites them all
+  (`source_ref.clause_path` lists their paths, comma separated) and carries no
+  `char_span`; a single-clause standard cites that clause and its span.
 - `signed_text` — the deal's terminal text for the clause: the executed copy
   when `signed` is true, the last draft when it is false. `null` when the
   clause was struck before signing.
@@ -956,7 +966,7 @@ Every asserted clause text MUST be traceable.
 { "document_id": "string", "version": 4, "clause_path": "8.1", "char_span": [start, end] }
 ```
 - `document_id`, `version`, and `clause_path` are REQUIRED; `char_span` is optional.
-- `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page.
+- `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page. One citation form is a list: an `our_standard` joined from several template clauses (§3.5) cites them all, so its `clause_path` is their dotted paths in document order separated by `, ` (for example `2, 5, 7`), and it carries no `char_span`. A `?` entry stands for a clause the compiler could not number; it has no navigation target. Every other citation names exactly one clause.
 - `char_span`, when present, indexes into the document's full normalized text (document-relative — same coordinate system as `ClauseNode.char_span` in the clause-tree artifact), not the clause's own text. It spans the whole cited clause — from the start of its heading line through the end of its own body text (sub-clauses excluded; each carries its own span) — so a consumer resolving it lands on the clause language, not only its heading. (The reference engine also cuts an execution/signature block out of the clause that precedes it, so that block is not part of the clause text or its span.)
 - `version` is the inferred ordinal (1-based); `"template"` is reserved for the baseline. Every citation's `(document_id, version)` MUST resolve against `corpus.documents` — dangling citations are non-conformant. When the cited document publishes `version_files` (§3.8), the cited version MUST have an entry there — a citation naming bytes no consumer can verify is likewise non-conformant.
 
@@ -975,7 +985,9 @@ without the compiler's workspace:
    key. No match means the consumer's copy differs from the compiled-from
    corpus: fail loud, do not fall back to a near-name file.
 4. Open the verified file and navigate by `clause_path` (dotted numbering
-   in the normalized document) and, when present, `char_span`.
+   in the normalized document; for a comma-separated list, each path in turn,
+   skipping `?`, the cited text being those clauses joined in order) and, when
+   present, `char_span`.
 
 `playbook resolve-citation <playbook> --clause <id> --obs <n>
 --corpus-dir <dir>` is the reference implementation of these steps.

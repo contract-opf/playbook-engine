@@ -174,7 +174,9 @@ def _observations(out_dir: Path, *, openings: bool = False) -> list[dict]:
 
 
 def _exemplars(out_dir: Path) -> dict[str, str]:
-    """The pipeline's ``template_std_nodes_by_tid`` joined per taxonomy_id."""
+    """The pipeline's content exemplars: every template node joined per
+    taxonomy_id (the synthetic NDA template has no form front matter, so this
+    is its standard)."""
     nodes: dict[str, list[str]] = defaultdict(list)
     for line in (out_dir / "template_observations.jsonl").read_text(encoding="utf-8").splitlines():
         obs = json.loads(line)

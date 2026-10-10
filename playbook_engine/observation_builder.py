@@ -382,6 +382,16 @@ class Observation:
                          ``x_classification_basis`` (omitted when ``None``) —
                          read by ``playbook scorecard``, never by the
                          playbook.
+        form_front_matter: Whether this TEMPLATE observation is form front
+                         matter (issue #242): a fill-in table ahead of the
+                         template's first operative clause, which
+                         contributes to no ``our_standard`` but stays the
+                         origin reference. Decided by the template-observation
+                         producer over the full classified template
+                         (``template_standards.front_matter_indices``), so
+                         unclassified nodes still bound it. Always ``False``
+                         for deal observations. Serialized under the vendor
+                         key ``x_form_front_matter`` only when ``True``.
     """
 
     observation_id: str
@@ -411,6 +421,7 @@ class Observation:
     alignment_confidence: float | None = None
     classification_basis: str | None = None
     opened_with: str | None = None
+    form_front_matter: bool = False
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -469,6 +480,10 @@ class Observation:
         # written before the field existed reads back None, never "absent".
         if self.opened_with is not None:
             d["opened_with"] = self.opened_with
+        # form_front_matter (issue #242): vendor key, template observations
+        # only, omitted when False.
+        if self.form_front_matter:
+            d["x_form_front_matter"] = True
         return d
 
 

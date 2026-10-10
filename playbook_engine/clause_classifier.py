@@ -34,7 +34,7 @@ a ``judge_error`` and a ``needs_review`` are kept as they are.
 Content similarity (issue #235): a node every other path left
 ``basis="unclassified"`` and that has body text is compared with our standard's
 own clause text, per taxonomy_id (``content_exemplars``: the template's
-classified nodes joined). Counterparty forms use their own headings
+classified nodes joined, form front matter aside — the ``our_standard`` text). Counterparty forms use their own headings
 ("Exceptions", "Protection", "Required Disclosure"), so heading matching alone
 leaves their clauses out of precedent; the content test recovers them without
 a judge and without a key. It is deterministic and deliberately conservative:
@@ -549,7 +549,7 @@ def assign_by_content(
     Every node whose basis is ``"unclassified"`` and that has body text is
     scored (token Jaccard over ``_content_tokens``) against each exemplar in
     *content_exemplars* — ``{taxonomy_id: our standard's clause text}``, every
-    template node of the type joined, restricted to *eligible_ids* when given
+    template node of the type joined (form front matter aside), restricted to *eligible_ids* when given
     (active/custom taxonomy entries only, OPF §5). It becomes
     ``basis="content_similarity"`` only when the best score is at least
     ``CONTENT_ASSIGN_THRESHOLD`` AND at least ``CONTENT_MARGIN_RATIO`` times

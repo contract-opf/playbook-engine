@@ -32,6 +32,26 @@ digest the engine builds.
 
 ## History
 
+### 2026-10-09 — OPF 0.5: `our_standard` is the complete template clause (issue #242)
+
+In-place semantic change to the unfrozen `playbook.schema-0.5.json` (epic #236;
+0.5 has no consumer until contract-opf/contract-toaster#128 vendors it, which
+freezes it). No schema shape changes; `digest_version` stays "4".
+
+- **`our_standard.text`** (and the digest copy of it) is every template clause
+  of the type joined in document order, no longer the first one alone. A
+  form's fill-in cover table (bracketed blanks, no operative sentence, ahead
+  of the form's first operative clause) is front matter and is never a
+  standard. It still decides a struck clause's origin and the `standard`
+  fact, as every template clause does.
+- **`our_standard.source_ref.clause_path`** of a standard joined from several
+  template clauses lists their paths, comma separated (`"2, 5, 7"`; `?` for an
+  unnumbered clause), and the reference carries no `char_span`. A one-clause
+  standard is unchanged. OPF-SPEC section 4 and 4.1 define the list form.
+- A consumer that resolves `source_ref` must accept the list form.
+  Equivalence keys include the standard, so `vs_standard` labels are
+  re-derived for every clause whose standard changed.
+
 ### 2026-10-09 — OPF 0.5: hard-rule manifest, critic dossiers, provenance index (issue #228)
 
 In-place addition to the unfrozen `playbook.schema-0.5.json` (epic #236; 0.5

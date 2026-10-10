@@ -9,8 +9,12 @@ facts live in the precedent record, and the consumer does the judging.
 
 Design invariants:
   - ``our_standard`` comes only from the canonical template (``document_id
-    "template"``, ``provenance="our_paper"``); a clause type with no
-    non-empty template clause carries ``our_standard: null``.
+    "template"``, ``provenance="our_paper"``): every template node of the
+    clause type joined in document order, form front matter (a fill-in cover
+    table ahead of the first operative clause) excluded (issue #242,
+    :mod:`playbook_engine.template_standards`).
+    A clause type with no non-empty template clause carries
+    ``our_standard: null``.
   - Every asserted text carries a citation (``source_ref``).
   - Minimum-viable-observation floor (issue #210): an observation whose
     ``full_text`` is under ``MIN_OBSERVATION_TEXT_LEN`` characters after
@@ -39,6 +43,7 @@ from playbook_engine.observation_builder import (
     OUTCOME_CONCEDED_BEFORE_SIGNING,
     Observation,
 )
+from playbook_engine.template_standards import template_standards
 
 # Minimum length (issue #210), after stripping leading/trailing whitespace,
 # for an observation's `full_text` to count as clause language. Segmentation
@@ -244,11 +249,11 @@ def compile_clause_positions(
                 f"got {tmpl_obs.provenance!r} for taxonomy_id={tmpl_obs.taxonomy_id!r}."
             )
 
-    # --- template map (taxonomy_id → first template observation) ---
-    template_map: dict[str, Observation] = {}
-    for tmpl in template_observations:
-        if tmpl.taxonomy_id is not None and tmpl.taxonomy_id not in template_map:
-            template_map[tmpl.taxonomy_id] = tmpl
+    # --- template standards (taxonomy_id → every template node, joined) ---
+    # Issue #242: a clause type's standard is ALL its template nodes in
+    # document order (a lead-in node plus its operative limbs), never the
+    # first one alone, and a form's fill-in cover table is no clause.
+    standards = template_standards(template_observations)
 
     # --- clause types evidenced by the deals (skip None and fragments) ---
     deal_tids: set[str] = set()
@@ -288,20 +293,29 @@ def compile_clause_positions(
     ]
 
     positions: list[ClausePosition] = []
-    for tid in sorted(deal_tids | template_map.keys()):
-        t_obs = template_map.get(tid)
+    for tid in sorted(deal_tids | standards.keys()):
+        standard = standards.get(tid)
         our_standard: OurStandard | None = None
         # An empty-text template observation is not a usable standard
-        # (issue #182).
-        if t_obs is not None and t_obs.full_text.strip():
+        # (issue #182); neither is form front matter (issue #242).
+        if standard is not None:
+            first = standard.nodes[0].citation
+            single = len(standard.nodes) == 1
             our_standard = OurStandard(
-                # Full clause text (issue #105).
-                text=t_obs.full_text,
+                # Full clause text (issue #105), every node joined (#242).
+                text=standard.text,
+                # A one-node standard cites that node and its span. A joined
+                # one cites every node's path and carries no span: no single
+                # span covers its text.
                 source_ref=OPFCitation(
-                    document_id=t_obs.citation.document_id,
-                    version=t_obs.citation.version,
-                    clause_path=t_obs.citation.clause_path,
-                    char_span=t_obs.citation.char_span,
+                    document_id=first.document_id,
+                    version=first.version,
+                    clause_path=(
+                        first.clause_path
+                        if single
+                        else ", ".join(n.citation.clause_path or "?" for n in standard.nodes)
+                    ),
+                    char_span=first.char_span if single else None,
                 ),
             )
         positions.append(
