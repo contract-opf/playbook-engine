@@ -237,12 +237,15 @@ def test_template_observation_must_be_our_paper() -> None:
         compile_clause_positions([], [bad_template])
 
 
-def test_multiple_template_observations_first_wins() -> None:
+def test_multiple_template_observations_are_joined_in_document_order() -> None:
+    """Issue #242: a clause split across template nodes is ONE standard, the
+    nodes joined in document order (the first node alone was a lead-in)."""
     t1 = _template_obs("indemnification", text="First version.", clause_path="8")
     t2 = _template_obs("indemnification", text="Second version.", clause_path="9")
     pos = _compile([], [t1, t2])[0]
     assert pos.our_standard is not None
-    assert pos.our_standard.text == "First version."
+    assert pos.our_standard.text == "First version.\n\nSecond version."
+    assert pos.our_standard.source_ref.clause_path == "8, 9"
 
 
 def test_empty_inputs_returns_empty() -> None:

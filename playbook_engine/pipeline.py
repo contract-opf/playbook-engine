@@ -149,6 +149,11 @@ from playbook_engine.signed_detector import (
     strip_signature_block,
 )
 from playbook_engine.taxonomy import Taxonomy
+from playbook_engine.template_standards import (
+    form_front_matter,
+    front_matter_indices,
+    template_standards,
+)
 from playbook_engine.tracked_changes_overlay import (
     HunkEnrichment,
     enrich_clause_diff,
@@ -1024,17 +1029,13 @@ def _build_template_observations(
     return _template_observations_from_classified(classified)
 
 
-def _content_exemplars(
-    template_std_by_tid: dict[str, str],
-    template_std_nodes_by_tid: dict[str, list[str]] | None,
-) -> dict[str, str]:
+def _content_exemplars(template_std_by_tid: dict[str, str]) -> dict[str, str]:
     """``{taxonomy_id: our standard's clause text}`` for the content-similarity
-    fallback (issue #235): every template node carrying the taxonomy_id,
-    joined in document order (the same reference the origin test uses), or the
-    first-node standard when the per-node map is not supplied. Empty in
-    emergent mode (no template standards)."""
-    if template_std_nodes_by_tid is not None:
-        return {tid: "\n".join(nodes) for tid, nodes in template_std_nodes_by_tid.items() if nodes}
+    fallback (issue #235): the clause type's complete standard, every template
+    node carrying the taxonomy_id joined in document order (issue #242) — the
+    text ``our_standard`` carries, so form front matter is no exemplar. Not the
+    origin reference (*template_std_nodes_by_tid*), which keeps the front
+    matter. Empty in emergent mode (no template standards)."""
     return dict(template_std_by_tid)
 
 
@@ -1046,9 +1047,17 @@ def _template_observations_from_classified(
     Split out of ``_build_template_observations`` so the agent/LLM
     segmentation path (which classifies in the same pass — no
     ``classify_tree``) can reuse the identical observation shape.
+
+    *classified* is the whole template in document order. Form front matter
+    (issue #242) is decided here, over EVERY node, before the unclassified
+    ones are dropped: an unclassified operative sentence ends the front
+    matter, so a fill-in table after it (a fee schedule) stays a clause. The
+    verdict is recorded on the observation (``form_front_matter``) and
+    persisted, so ``project`` reads the same answer ``mine`` computed.
     """
+    front = front_matter_indices([cc.node.text or "" for cc in classified])
     obs: list[Observation] = []
-    for cc in classified:
+    for i, cc in enumerate(classified):
         if cc.classification.taxonomy_id is None:
             continue
         # Skip classified-but-empty template clauses (e.g. a heading-only node).
@@ -1058,6 +1067,11 @@ def _template_observations_from_classified(
         # the deal clause falls back to emergent/negotiable (issue #182).
         if not (cc.node.text or "").strip():
             continue
+        # A form's fill-in cover table stays a template observation (issue
+        # #242), flagged form_front_matter: it is no standard
+        # (template_standards excludes it from our_standard), but it is still
+        # the origin reference for our own text struck before signing (issue
+        # #216).
         clause_path = cc.node.clause_path or "?"
         obs.append(
             Observation(
@@ -1078,6 +1092,7 @@ def _template_observations_from_classified(
                 outcome="signed",
                 confidence=cc.classification.confidence,
                 basis=None,  # template observations bypass the deviation classifier
+                form_front_matter=i in front,
             )
         )
     return obs
@@ -1254,6 +1269,7 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 alignment_confidence=raw.get("x_alignment_confidence"),
                 classification_basis=raw.get("x_classification_basis"),
                 opened_with=raw.get("opened_with"),
+                form_front_matter=bool(raw.get("x_form_front_matter", False)),
             )
         )
     return result
@@ -1311,7 +1327,7 @@ def _assess_deviations_with_standards(
     (``deviation_classifier.assess_deviations_deterministic``) — "none" for
     our standard text, "substantive" otherwise, ``basis="deterministic"`` —
     against every template node for its taxonomy_id
-    (*template_std_nodes_by_tid*, falling back to the first-node
+    (*template_std_nodes_by_tid*, falling back to the joined
     *template_std_by_tid*), with *party_names* neutralized.
     """
     from itertools import groupby
@@ -2528,8 +2544,8 @@ def _compute_doc_result(
 
     *template_std_nodes_by_tid* (issue #216) is every template node's text
     per taxonomy_id, in document order — the origin reference for a clause
-    removed before signing. When ``None`` (legacy callers), the first-node
-    *template_std_by_tid* stands in.
+    removed before signing. When ``None`` (legacy callers), the joined
+    *template_std_by_tid* standard stands in.
 
     Deviations come from the deterministic standard check, never a judge.
 
@@ -2929,7 +2945,7 @@ def _compute_doc_from_l1(
     # threshold + margin (basis "content_similarity"). Emergent mode has no
     # template, so no exemplars: a no-op there. The template itself never
     # takes this path (see _build_template_observations).
-    content_exemplars = _content_exemplars(template_std_by_tid, template_std_nodes_by_tid)
+    content_exemplars = _content_exemplars(template_std_by_tid)
     ordered_ids = list(version_order.ordered_ids) or list(version_trees.keys())
     classified_by_version: dict[str, list[ClassifiedClause]] = {}
     for vid in ordered_ids:
@@ -3536,7 +3552,13 @@ def mine_corpus(
         t_observations = []
     if config.baseline.template_path and template_tree is not None:
         n_std = sum(1 for o in t_observations if o.taxonomy_id)
-        progress(f"  template standards: {n_std} clause(s) classified")
+        # Issue #242: front matter is classified but is no standard — say how
+        # many nodes left our_standard, so the exclusion is never silent.
+        n_front = len(form_front_matter(t_observations))
+        progress(
+            f"  template standards: {n_std} clause(s) classified; "
+            f"{n_front} form front-matter node(s) excluded from our_standard"
+        )
 
     # -----------------------------------------------------------------------
     # L1 → L4: per-document, optionally cached
@@ -3545,16 +3567,21 @@ def mine_corpus(
     # not the ≤ 300-char text_summary — a ≤ 300-char fragment of a real
     # indemnification/insurance clause is not a usable standard to compare
     # against (issue #105).
-    template_std_by_tid: dict[str, str] = {}
-    # Issue #216: the ORIGIN reference for a clause removed before signing is
-    # EVERY template node carrying its taxonomy_id, in document order — not
-    # only the first (template_std_by_tid above), or our own standard text
-    # from a later node of a multi-node standard clause, struck before
-    # signing, would be misread as a counterparty ask we refused.
+    # Issue #242: a clause type's standard is EVERY template node carrying its
+    # taxonomy_id, in document order, joined (a lead-in node plus its
+    # operative limbs) — the same text ``our_standard`` carries — and a form's
+    # fill-in cover table is no standard (playbook_engine.template_standards).
+    t_standards = template_standards(t_observations)
+    template_std_by_tid: dict[str, str] = {tid: std.text for tid, std in t_standards.items()}
+    # Issue #216: the ORIGIN reference for a clause removed before signing,
+    # the deterministic standard check and every observation's `standard` fact
+    # is EVERY non-empty template node carrying its taxonomy_id, in document
+    # order, node by node — form front matter INCLUDED (issue #242: it is
+    # left out of our_standard only). Otherwise our own text from a later
+    # node of a multi-node standard clause, or from our cover table, struck
+    # before signing, would be misread as a counterparty ask we refused.
     template_std_nodes_by_tid: dict[str, list[str]] = {}
     for t_obs in t_observations:
-        if t_obs.taxonomy_id is not None and t_obs.taxonomy_id not in template_std_by_tid:
-            template_std_by_tid[t_obs.taxonomy_id] = t_obs.full_text
         if t_obs.taxonomy_id is not None:
             template_std_nodes_by_tid.setdefault(t_obs.taxonomy_id, []).append(t_obs.full_text)
 

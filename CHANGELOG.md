@@ -10,6 +10,31 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **`our_standard` is the template's complete clause, not its first node, and
+  never a cover table (issue #242, epic #236).** Template mode took the first
+  template node classified to a clause type as that type's `our_standard`.
+  Where a clause is several template nodes (a lead-in sentence and its
+  operative limbs) the standard was the lead-in alone, and where the form's
+  fill-in cover table was classified to a clause type it was the table. Both
+  made every real clause of that type "unrankable" against the standard, so
+  `vs_standard` collapsed to `different_concept`. `our_standard.text` now joins
+  every template node of the type in document order (the standard check and
+  the origin reference already read every node), and a template node that is a
+  fill-in table with no operative sentence, ahead of the form's first
+  operative clause, is form front matter that contributes to no standard
+  (`playbook_engine.template_standards`; `mine` logs how many nodes it
+  excluded). Front matter is decided once, by the template-observation
+  producer over the whole classified template (an unclassified operative
+  sentence still ends it, so a later fee schedule of blanks keeps its
+  standard), and persisted on the template observation as
+  `x_form_front_matter`, so `project` reads the verdict `mine` computed. A
+  store mined before this change carries no verdict: re-mine it. Front matter is still a template observation and still the origin
+  reference, so our own cover-table text struck before signing stays our
+  concession, never a refused ask; the content-similarity exemplars are the
+  standard, so they leave it out too. A joined
+  standard's `source_ref.clause_path` lists its nodes' paths and carries no
+  `char_span`. Equivalence keys include the standard, so every clause whose
+  standard changed is queued again for a fresh `vs_standard` label.
 - **One standard flow: `index.html`, optional overrides, toaster install steps
   (issue #241, epic #236).** `playbook view bundle OUT` now writes
   `OUT/index.html` (it replaces `playbook.opf.html`): one self-contained page,
