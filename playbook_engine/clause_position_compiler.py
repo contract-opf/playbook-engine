@@ -129,13 +129,28 @@ class OPFCitation:
 
 @dataclass(frozen=True)
 class OurStandard:
-    """Our canonical clause text and its source citation."""
+    """Our canonical clause text, its parts and its source citation.
+
+    ``parts`` are the template passages of the clause type in template order
+    (issue #243); ``text`` is them joined. A one-passage standard is one
+    part. ``to_dict`` leaves each part's ``part_id`` empty:
+    ``precedent.restamp_evidence`` stamps it from the shipped text and the
+    document's ``perspective.party`` (``equivalence.stamp_standard_parts``).
+    """
 
     text: str
     source_ref: OPFCitation
+    parts: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {"text": self.text, "source_ref": self.source_ref.to_dict()}
+        parts = self.parts or (self.text,)
+        return {
+            "text": self.text,
+            "source_ref": self.source_ref.to_dict(),
+            "parts": [
+                {"part_id": "", "order": i + 1, "text": part} for i, part in enumerate(parts)
+            ],
+        }
 
 
 # Maximum number of example citations surfaced per UnclassifiedCoverage
@@ -304,6 +319,8 @@ def compile_clause_positions(
             our_standard = OurStandard(
                 # Full clause text (issue #105), every node joined (#242).
                 text=standard.text,
+                # Each node is one part of the standard (#243).
+                parts=tuple(n.full_text for n in standard.nodes),
                 # A one-node standard cites that node and its span. A joined
                 # one cites every node's path and carries no span: no single
                 # span covers its text.

@@ -125,29 +125,39 @@ configured: one item per DISTINCT non-standard text of the precedent record (a
 deal's signed text, a non-standard opening, a refused ask) that has no verdict
 against our standard yet. The same words in ten deals, on either paper, in any
 role, are one item and one shared verdict (the key is over the agreement type,
-clause type, `perspective.party`, the text and our standard, never a deal or a
-paper side). A text that exactly matches our standard (`standard: true`) is
-never queued, and neither is any text in emergent mode (no template, no
-`our_standard`).
+clause type, `perspective.party`, the text and the ORDERED parts of our
+standard, never a deal or a paper side). A text that exactly matches our
+standard (`standard: true`) is never queued, and neither is any text in
+emergent mode (no template, no `our_standard`).
+
+Our standard for a clause type is a list of **parts**: the template passages
+of that type in template order (a lead-in sentence and each operative limb,
+form front matter excluded). Each part has a stable `part_id` (a short content
+hash of its text). You judge the candidate against EVERY part; the label is
+then DERIVED by the engine, never chosen by you.
 
 **Input fields:** `taxonomy_id`, `taxonomy_title`, `perspective_party`,
-`our_standard` (our standard text for the clause type), `candidate` (the text
-to judge), `roles` (which of `signed` / `opening` / `refused` it plays).
-`agreement_type_id` and `stage` are context. There is no deal name,
-counterparty, paper side or outcome in the payload; none of those may enter
-your answer.
+`our_standard_parts` (the numbered parts: `{n, part_id, text}`, in order),
+`candidate` (the text to judge), `roles` (which of `signed` / `opening` /
+`refused` it plays). `agreement_type_id` and `stage` are context. There is no
+deal name, counterparty, paper side or outcome in the payload; none of those
+may enter your answer.
 
-**Task:** Compare the candidate's legal effect for `perspective_party` with
-our standard's, and answer with one label and one sentence.
+**Task:** For each part of our standard, say whether the candidate keeps it
+and how it compares; list what the candidate adds that no part covers; name
+the single most important difference in one sentence.
 
 **Prompt (adapt as needed):**
 
 > You are comparing a clause with our standard clause for the same clause
-> type. Perspective: {perspective_party}.
+> type, part by part. Perspective: {perspective_party}. Every direction below
+> is relative to {perspective_party}.
 >
-> Our standard:
+> Our standard, in parts:
 > ---
-> {our_standard}
+> [1] (part_id {part_id}) {text}
+> [2] (part_id {part_id}) {text}
+> ...
 > ---
 >
 > Candidate:
@@ -155,21 +165,46 @@ our standard's, and answer with one label and one sentence.
 > {candidate}
 > ---
 >
-> Which describes the candidate relative to our standard, for
-> {perspective_party}?
-> - `equivalent` -- the same legal effect (wording, order and defined-term
->   names may differ)
-> - `more_protective` -- better for {perspective_party} than our standard
-> - `less_protective` -- worse for {perspective_party} than our standard
-> - `different_concept` -- it does something our standard does not (or omits
->   what it does), so the two cannot be ranked
+> For EVERY part:
+> - `status: "present"` when the candidate keeps that part's substance (even
+>   reworded or changed), with `relation`:
+>   - `equivalent` -- the same legal effect;
+>   - `more_protective` / `less_protective` -- better / worse than our part;
+> - `status: "omitted"` when the candidate drops it, with `effect` (of the
+>   omission):
+>   - `more_protective` -- dropping it helps us (e.g. an obligation that
+>     falls on us);
+>   - `less_protective` -- dropping it hurts us;
+>   - `neutral` -- it makes no difference (e.g. a recital).
+> - `reason`: ONE sentence, only for a part whose relation is not
+>   `equivalent` or whose effect is not `neutral`; omit it otherwise.
 >
-> Respond with JSON: `{"label": "<one of the four>", "reason": "<one
-> sentence naming the operative difference>", "basis": "agent"}`
+> `additions`: each thing the candidate adds that no part covers,
+> `{"summary": "<one sentence>", "effect": "more_protective" |
+> "less_protective" | "neutral"}` (`[]` when nothing is added).
+>
+> Respond with JSON: `{"parts": [{"part_id", "status", "relation" |
+> "effect", "reason"?}, ...], "additions": [...], "reason": "<one sentence:
+> the single most important difference, or that the effect is the same>",
+> "basis": "agent"}`
+
+**The derived label** (the engine computes it; a `label` you supply must
+match it, so leave it out):
+
+| label | when |
+|---|---|
+| `different_concept` | no part is present |
+| `equivalent` | at least one part present, every present part equivalent, every omission and addition neutral |
+| `more_protective` / `less_protective` | every non-equivalent, non-neutral effect points that way |
+| `mixed` | effects point both ways (the parts say which) |
 
 **Rules:**
-- `reason` is ONE sentence naming the operative difference, never a restatement
-  of the label. No deal, party or counterparty names.
+- Judge EVERY part exactly once, by its `part_id`; never invent a part id.
+- A text that matches some of our parts, changes others, drops one and adds
+  something is the normal case: say so part by part. Do not force a whole-text
+  verdict; `mixed` and `different_concept` follow from the parts.
+- Reasons are ONE sentence naming the operative difference, never a
+  restatement of the relation. No deal, party or counterparty names.
 - Judge the language, not the negotiation. Do not use how the deal ended, who
   proposed the text, or whose paper it was on.
 - `basis` is required: `"agent"` when you (the coder or agent) judge,
@@ -177,11 +212,8 @@ our standard's, and answer with one label and one sentence.
   correction by the owner (it wins over any agent or check answer and is never
   checked).
 - Do not write `check`: checks are recorded only by `judge-apply --check`.
-- When the candidate does something our standard does not (or the two cannot
-  be ranked), `different_concept` is the honest label: it makes no
-  protectiveness claim. Do not invent a ranking. A text you leave out of the
-  verdict file stays queued (and `null` in the playbook), so the drain loop
-  cannot finish until it is answered.
+- A text you leave out of the verdict file stays queued (and `null` in the
+  playbook), so the drain loop cannot finish until it is answered.
 
 **The blind check.** Every drafted verdict is then checked by a SEPARATE
 agent pinned to `claude-opus-5-5` at reasoning effort `xhigh`, which never
@@ -189,22 +221,28 @@ sees the draft:
 
 ```bash
 playbook judge --check equivalence $OUT --config <config>
-# -> $OUT/judge/check-pending.jsonl: the drafter's payload WITHOUT label/reason
-# -> $OUT/judge/adjudication-pending.jsonl: disputed items (both answers)
+# -> $OUT/judge/check-pending.jsonl: the drafter's payload WITHOUT the judgment
+# -> $OUT/judge/adjudication-pending.jsonl: disputed items (both judgments)
 ```
 
-Answer each queue line with `{"key", "label", "reason", "model", "effort"}`,
-writing the model id you actually ran on and the effort, then:
+Answer each queue line with the same structured judgment,
+`{"key", "parts", "additions", "reason", "model", "effort"}`, writing the
+model id you actually ran on and the effort, then:
 
 ```bash
 playbook judge-apply $OUT --check $OUT/my-checks-<date>.jsonl
 ```
 
 `judge-apply --check` rejects a record whose `model` is not `claude-opus-5-5`
-or whose `effort` is not `xhigh` unless `--allow-checker-model` is passed. A
-match keeps the verdict (`check: {agreed: true, ...}`); a mismatch keeps the
-draft flagged `agreed: false` and queues it for adjudication, which a FRESH
-pinned agent answers (its answer replaces the verdict, `adjudicated: true`).
+or whose `effort` is not `xhigh` unless `--allow-checker-model` is passed.
+**Agreement** is the same derived label AND the same set of
+`(part_id, status, direction)` over the parts that are not equivalent or not
+a neutral omission; both halves are recorded (`label_agreed`,
+`parts_agreed`) and the scorecard reports them separately. A match keeps the
+verdict (`check: {agreed: true, ...}`); a mismatch keeps the draft flagged
+`agreed: false` and queues it for adjudication, which a FRESH pinned agent
+answers from both judgments (its answer replaces the verdict,
+`adjudicated: true`).
 Every line of a `--check` file is judged against the store as it stood before
 that file, and a key repeated in one file is rejected: record the adjudication
 answers in a later file, after re-running `judge --check equivalence`.
@@ -300,16 +338,26 @@ An out-of-scope document (`in_scope: false`) is retained but excluded from the
 playbook.
 
 **Equivalence verdict** (`kind: equivalence`) — one per distinct text; exactly
-`label`, `reason`, `basis` and nothing else:
+`parts`, `additions`, `reason`, `basis` (a `label`, if given, must equal the
+derived one):
 ```json
 {
-  "label": "less_protective",
-  "reason": "Drops the recipient's burden of establishing that an exclusion applies.",
+  "parts": [
+    {"part_id": "3f9a2c1d", "status": "present", "relation": "equivalent"},
+    {"part_id": "77b0e4aa", "status": "present", "relation": "less_protective",
+     "reason": "Drops the recipient's burden of establishing that an exclusion applies."},
+    {"part_id": "c41e09b2", "status": "omitted", "effect": "neutral"}
+  ],
+  "additions": [
+    {"summary": "Adds a right to disclose to professional advisers.", "effect": "less_protective"}
+  ],
+  "reason": "Drops the recipient's burden of proof and lets it disclose to advisers.",
   "basis": "agent"
 }
 ```
-`label` is `equivalent`, `more_protective`, `less_protective` or
-`different_concept`, relative to `perspective_party`.
+`relation` is `equivalent`, `more_protective` or `less_protective`; `effect`
+is `more_protective`, `less_protective` or `neutral`; both relative to
+`perspective_party`. The example derives `less_protective`.
 
 ### SegNode (agent segmentation — `segment` / `segment-apply`, issue #191)
 
@@ -379,8 +427,8 @@ restate existing rules — that would discard thousands of sound verdicts.
 **The derived half** needs no discipline; it moves on its own when the
 machine-readable rubric moves: the classifier-eligible taxonomy entries
 (id + label + description) for `classify`, the agreement-type definition for
-`scope`, the answer vocabulary for `provenance`, the label vocabulary for
-`equivalence`. Editing
+`scope`, the answer vocabulary for `provenance`, the label, status,
+relation and effect vocabularies for `equivalence`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is

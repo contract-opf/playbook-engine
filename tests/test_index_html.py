@@ -34,7 +34,12 @@ from playbook_engine.canonicalize import content_hash
 from playbook_engine.clause_position_compiler import compile_clause_positions
 from playbook_engine.cli import cli
 from playbook_engine.document_renderer import INDEX_FILENAME, TAB_IDS, render_index_html
-from playbook_engine.equivalence import equivalence_key, summarize
+from playbook_engine.equivalence import (
+    equivalence_key,
+    part_id_of,
+    summarize,
+    validate_draft_verdict,
+)
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.overrides import OVERRIDES_FILENAME
 from playbook_engine.playbook_assembler import assemble_playbook
@@ -380,6 +385,24 @@ _TAXONOMY = {
 }
 
 
+def _verdict(label: str, reason: str) -> dict[str, Any]:
+    """The stored verdict ``judge-apply --verdicts`` banks for a one-part standard
+    whose parts derive *label* (issue #243)."""
+    pid = part_id_of(_STANDARD, _PARTY)
+    parts: list[dict[str, Any]] = [{"part_id": pid, "status": "present", "relation": label}]
+    additions: list[dict[str, Any]] = []
+    if label == "different_concept":
+        parts = [{"part_id": pid, "status": "omitted", "effect": "neutral"}]
+    elif label == "mixed":
+        parts = [{**parts[0], "relation": "less_protective", "reason": "Worse part."}]
+        additions = [{"summary": "Better addition.", "effect": "more_protective"}]
+    elif label != "equivalent":
+        parts[0]["reason"] = "Part reason."
+    return validate_draft_verdict(
+        {"parts": parts, "additions": additions, "reason": reason, "basis": "agent"}, [pid]
+    )
+
+
 def _playbook(
     tmp_path: Path, variants: list[tuple[str, str | None]], *, copies: dict[str, int] | None = None
 ) -> dict[str, Any]:
@@ -398,8 +421,8 @@ def _playbook(
             docs.append(_doc(f"deal_{n:02d}"))
         if label is not None:
             store.put_by_key(
-                equivalence_key(_TYPE_ID, "survival_period", _PARTY, text, _STANDARD),
-                {"label": label, "reason": f"Because {label}.", "basis": "agent"},
+                equivalence_key(_TYPE_ID, "survival_period", _PARTY, text, [_STANDARD]),
+                _verdict(label, f"Because {label}."),
             )
     template = [_obs("template", _STANDARD, standard=True)]
     positions, _, _ = compile_clause_positions(observations, template)
@@ -421,15 +444,16 @@ def _variant(i: int) -> str:
     return f"Each party shall keep the other party's information confidential, subject to {words[i]} terms."
 
 
-def test_rows_are_ordered_less_protective_then_different_concept_then_more_then_equivalent(
+def test_rows_are_ordered_less_protective_then_mixed_then_different_concept_then_more_then_equivalent(
     tmp_path: Path,
 ) -> None:
-    labels = ["equivalent", "more_protective", "different_concept", "less_protective"]
+    labels = ["equivalent", "more_protective", "different_concept", "mixed", "less_protective"]
     playbook = _playbook(tmp_path, [(_variant(i), label) for i, label in enumerate(labels)])
     rows = build_review_rows(playbook)
     assert [r["label"] for r in rows.rows] == list(REVIEW_LABEL_ORDER)
     assert REVIEW_LABEL_ORDER == (
         "less_protective",
+        "mixed",
         "different_concept",
         "more_protective",
         "equivalent",
@@ -461,6 +485,7 @@ def test_the_list_is_cut_to_what_the_digest_shows_and_counts_the_rest(tmp_path: 
     rows = build_review_rows(playbook)
     assert rows.by_label() == {
         "less_protective": 2,
+        "mixed": 0,
         "different_concept": 2,
         "more_protective": 1,
         "equivalent": 0,
@@ -504,8 +529,8 @@ def test_a_judged_text_no_digest_group_holds_is_counted_as_not_shown(tmp_path: P
     store = VerdictStore(tmp_path / "judge" / "verdicts.jsonl")
     for i in (0, 1):
         store.put_by_key(
-            equivalence_key(_TYPE_ID, "survival_period", _PARTY, _variant(i), _STANDARD),
-            {"label": "less_protective", "reason": "Shorter.", "basis": "agent"},
+            equivalence_key(_TYPE_ID, "survival_period", _PARTY, _variant(i), [_STANDARD]),
+            _verdict("less_protective", "Shorter."),
         )
     observations = [
         _obs("deal_std", _STANDARD, standard=True),

@@ -138,6 +138,15 @@ _FIELD_NAMES = frozenset(
         "by_label",
         "agreement_rate",
         "checker_models",
+        # Issue #243: label and parts agreement, part-map tokens, parts per standard.
+        "label_agreed",
+        "parts_agreed",
+        "label_agreement_rate",
+        "parts_agreement_rate",
+        "part_tokens",
+        "addition_tokens",
+        "standard_parts",
+        "parts",
         "eligible",
         "unjudged",
         "drafted",
@@ -241,9 +250,19 @@ _NDA_FLAT_KEYS = frozenset(
                 "equivalent",
                 "more_protective",
                 "less_protective",
+                "mixed",
                 "different_concept",
             )
         ),
+        # Issue #243: the agreement halves, the part-map tokens and the parts
+        # of each standard (the NDA example's standards are one part each).
+        "equivalence.label_agreed",
+        "equivalence.parts_agreed",
+        "equivalence.label_agreement_rate",
+        "equivalence.parts_agreement_rate",
+        *(f"equivalence.part_tokens.{t}" for t in ("=", "+", "-", "x+", "x-", "x0")),
+        *(f"equivalence.addition_tokens.{t}" for t in ("+", "-", "0")),
+        *(f"equivalence.standard_parts.{field}" for field in ("clauses", "parts", "max", "mean")),
         *(
             f"equivalence.{scope}.{field}"
             for scope in ("totals", "by_role.signed", "by_role.opening", "by_role.refused")
@@ -370,7 +389,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 6
+    assert card["scorecard_version"] == 7
     assert card["opf_version"] == "0.5"
     assert card["corpus"] == {
         "documents": 6,

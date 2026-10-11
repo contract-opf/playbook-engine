@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from click.testing import CliRunner
 
@@ -544,6 +545,7 @@ def test_v4_opening_counts_and_variant_provenance() -> None:
         "equivalent": 0,
         "more_protective": 0,
         "less_protective": 0,
+        "mixed": 0,
         "different_concept": 0,
         "unjudged": 3,
     }
@@ -643,7 +645,7 @@ def _labelled_playbook(tmp_path: Path, labels: dict[str, str]) -> dict:
     """
     from playbook_engine.agent_judge import StoreBackedEquivalenceJudge, VerdictStore
     from playbook_engine.clause_position_compiler import compile_clause_positions
-    from playbook_engine.equivalence import equivalence_key
+    from playbook_engine.equivalence import equivalence_key, part_id_of, validate_draft_verdict
     from playbook_engine.observation_builder import Observation, ObservationCitation
     from playbook_engine.playbook_assembler import assemble_playbook
 
@@ -693,9 +695,17 @@ def _labelled_playbook(tmp_path: Path, labels: dict[str, str]) -> dict:
     )
     positions, _, _ = compile_clause_positions(rows, [template])
     store = VerdictStore(tmp_path / "judge" / "verdicts.jsonl")
+    pid = part_id_of(_STD, None)
     for name, label in labels.items():
-        key = equivalence_key("nda", "governing_law", None, _LABEL_TEXTS[name], _STD)
-        store.put_by_key(key, {"label": label, "reason": "Test reason.", "basis": "agent"})
+        key = equivalence_key("nda", "governing_law", None, _LABEL_TEXTS[name], [_STD])
+        # The shape ``judge-apply --verdicts`` banks: parts that derive *label*.
+        store.put_by_key(
+            key,
+            validate_draft_verdict(
+                {**_one_part_judgment(pid, label), "reason": "Test reason.", "basis": "agent"},
+                [pid],
+            ),
+        )
     documents = [
         {
             "document_id": d,
@@ -718,6 +728,61 @@ def _labelled_playbook(tmp_path: Path, labels: dict[str, str]) -> dict:
     )
     assert validate_document(pb, verdict_store=store).ok
     return pb
+
+
+def _one_part_judgment(pid: str, label: str) -> dict[str, Any]:
+    """``{parts, additions}`` over a one-part standard that derives *label*."""
+    if label == "equivalent":
+        return {
+            "parts": [{"part_id": pid, "status": "present", "relation": label}],
+            "additions": [],
+        }
+    if label == "different_concept":
+        return {
+            "parts": [{"part_id": pid, "status": "omitted", "effect": "neutral"}],
+            "additions": [],
+        }
+    if label == "mixed":
+        return {
+            "parts": [
+                {"part_id": pid, "status": "present", "relation": "less_protective", "reason": "R."}
+            ],
+            "additions": [{"summary": "S.", "effect": "more_protective"}],
+        }
+    return {
+        "parts": [{"part_id": pid, "status": "present", "relation": label, "reason": "R."}],
+        "additions": [],
+    }
+
+
+def test_v4_mixed_leads_with_less_protective_and_carries_its_part_map(tmp_path: Path) -> None:
+    """Issue #243: ``mixed`` and ``less_protective`` share the first tier
+    (group order inside it), ahead of ``different_concept``; every judged
+    entry carries its part map, addition tokens and reason, an unjudged one
+    nulls."""
+    labels = {**_LABELS, "more": "mixed"}
+    pb = _labelled_playbook(tmp_path, labels)
+    (clause,) = pb["digest"]["clauses"]
+    listed = clause["signed_variants"]
+    assert [v["label"] for v in listed] == [
+        "less_protective",  # 2 deals
+        "mixed",  # 1 deal, same tier
+        "different_concept",
+        None,
+        "equivalent",
+    ]
+    assert (listed[0]["part_map"], listed[0]["additions"]) == (["-"], [])
+    assert (listed[1]["part_map"], listed[1]["additions"]) == (["-"], ["+"])
+    assert listed[1]["reason"] == "Test reason."
+    assert (listed[2]["part_map"], listed[2]["additions"]) == (["x0"], [])
+    assert (listed[3]["part_map"], listed[3]["additions"], listed[3]["reason"]) == (
+        None,
+        None,
+        None,
+    )
+    assert "part_map" not in listed[-1]  # the collapsed equivalent entry
+    assert clause["positions"]["mixed"] == 1
+    assert pb["digest"]["part_map_legend"]["part_map"]["x0"].startswith("our part is omitted")
 
 
 def test_v4_equivalent_variants_collapse_and_worse_ones_lead(tmp_path: Path) -> None:
@@ -745,6 +810,7 @@ def test_v4_equivalent_variants_collapse_and_worse_ones_lead(tmp_path: Path) -> 
         "equivalent": 3,
         "more_protective": 1,
         "less_protective": 2,
+        "mixed": 0,
         "different_concept": 1,
         "unjudged": 1,
     }

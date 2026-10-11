@@ -20,7 +20,7 @@ corpus/                  -- six fictional negotiations (four on our paper, two
                              on counterparty paper)
 canned-verdicts.jsonl    -- pre-computed judge verdicts (classification,
                              provenance, scope, and the 27 `vs_standard`
-                             equivalence labels) for every item the
+                             part-by-part equivalence judgments) for every item the
                              deterministic pipeline can't resolve on its own
                              (deviation is never judged by default -- it is
                              the deterministic standard check)
@@ -96,14 +96,19 @@ compelled-disclosure clause gained an appended notice proviso (Jaccard 0.48).
 It splits into removed + added, and the removed text is counted as
 `survives_in_terminal`.
 
-**How each distinct text compares with our standard (issue #240).** Every
+**How each distinct text compares with our standard (issues #240, #243).** Every
 non-standard text the record carries (24 distinct signed texts, 3 distinct
 non-standard openings, 1 distinct refused ask: 27 in all) has a `vs_standard`
-label judged once against the standard form, shared by every deal that
-carries the same words: 7 equivalent (for example the four parties clauses
-that only fill the counterparty name into the template's placeholder), 3 more
-protective, 12 less protective, 5 a different concept (a different governing
-law or venue). The canned verdicts are `basis: "agent"` with `check: null`:
+judgment made once against the standard form, part by part, and shared by
+every deal that carries the same words. Each of this form's clauses is one
+template passage, so each standard is one part; the judgment says how the
+text compares with it and what it adds, and the label is derived from that:
+7 equivalent (for example the four parties clauses that only fill the
+counterparty name into the template's placeholder), 3 more protective, 16
+less protective (including a governing law or venue other than our chosen
+Delaware), and 1 mixed (a notice deadline of five business days instead of
+"promptly", less protective, that must now be in writing, an addition that is
+more protective). The canned verdicts are `basis: "agent"` with `check: null`:
 this fully offline example runs no independent check, which is what a
 real run adds with `playbook judge --check equivalence`. An exact match with
 the standard (`standard: true`) is never labelled, and `vs_standard` is

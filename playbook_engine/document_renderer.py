@@ -72,6 +72,7 @@ _TAB_LABELS = {
 
 _LABEL_NAMES = {
     "less_protective": "Less protective",
+    "mixed": "Mixed",
     "different_concept": "Different concept",
     "more_protective": "More protective",
     "equivalent": "Equivalent",
@@ -630,9 +631,12 @@ def _render_review_tab(review: ReviewRows) -> str:
         )
     return f"""<section class="card">
   <h2>Review (optional)</h2>
-  <p>The consuming model is shown one label for each non-standard text — equivalent to our
-  standard, more or less protective, or a different concept — and checks it against the cited
-  text. These are the labels it is shown, worst first. <strong>Nothing waits on this
+  <p>The consuming model is shown one judgment for each non-standard text: how it compares
+  with each part of our standard (kept with the same effect, kept but more or less protective,
+  or left out) and what it adds, and the label that follows — equivalent, more or less
+  protective, mixed, or a different concept. It checks them against the cited text. These are
+  the judgments it is shown, worst first. You can confirm a label, change it, or change how
+  a single part compares (open a row). <strong>Nothing waits on this
   list:</strong> confirm what is right, change what is not, skip the rest. Your word is final
   and is recorded as <code>owner</code>.</p>
   <p class="hint">{" ".join(extra)}</p>

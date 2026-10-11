@@ -339,7 +339,14 @@
               5898,
               6128
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "6e18ffa4",
+              "order": 1,
+              "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -363,7 +370,14 @@
               1970,
               2254
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "508230d8",
+              "order": 1,
+              "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -387,7 +401,14 @@
               4594,
               4841
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "1433fca4",
+              "order": 1,
+              "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 3,
@@ -411,7 +432,14 @@
               6708,
               6888
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "7316d0b8",
+              "order": 1,
+              "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -435,7 +463,14 @@
               584,
               969
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "2b545423",
+              "order": 1,
+              "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -459,7 +494,14 @@
               5683,
               5897
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "c85af045",
+              "order": 1,
+              "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 2,
@@ -483,7 +525,14 @@
               6286,
               6502
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "6c3f6b50",
+              "order": 1,
+              "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -507,7 +556,14 @@
               970,
               1502
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "0b842824",
+              "order": 1,
+              "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -531,7 +587,14 @@
               5097,
               5256
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "34a71273",
+              "order": 1,
+              "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -555,7 +618,14 @@
               5549,
               5682
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "f3576a40",
+              "order": 1,
+              "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 2,
@@ -579,7 +649,14 @@
               5257,
               5548
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "5cb7a434",
+              "order": 1,
+              "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -616,7 +693,14 @@
               3836,
               4121
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "a9c13068",
+              "order": 1,
+              "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -640,7 +724,14 @@
               4318,
               4593
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "f041c579",
+              "order": 1,
+              "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -664,7 +755,14 @@
               4122,
               4317
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "d4b4b096",
+              "order": 1,
+              "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -688,7 +786,14 @@
               2255,
               2492
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "974ba077",
+              "order": 1,
+              "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 3,
@@ -712,7 +817,14 @@
               6129,
               6285
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "399a19d5",
+              "order": 1,
+              "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -736,7 +848,14 @@
               0,
               368
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "ef473c34",
+              "order": 1,
+              "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\")."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 0,
@@ -760,7 +879,14 @@
               1503,
               1877
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "c455b375",
+              "order": 1,
+              "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -784,7 +910,14 @@
               369,
               583
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "e7fb263b",
+              "order": 1,
+              "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -821,7 +954,14 @@
               3165,
               3559
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "25db59b8",
+              "order": 1,
+              "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained."
+            }
+          ]
         },
         "n_deals": 4,
         "n_signed_standard": 4,
@@ -845,7 +985,14 @@
               6503,
               6707
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "eda1214b",
+              "order": 1,
+              "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -869,7 +1016,14 @@
               1878,
               1969
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "c2a820d4",
+              "order": 1,
+              "text": "Recipient shall protect Confidential Information using reasonable care."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 3,
@@ -893,7 +1047,14 @@
               2719,
               2954
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "bdd2069e",
+              "order": 1,
+              "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -917,7 +1078,14 @@
               2493,
               2718
             ]
-          }
+          },
+          "parts": [
+            {
+              "part_id": "ec653011",
+              "order": 1,
+              "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period."
+            }
+          ]
         },
         "n_deals": 6,
         "n_signed_standard": 4,
@@ -1090,8 +1258,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Moves the exclusive forum from Wilmington, Delaware to New York County; a different venue choice rather than a stronger or weaker protection.",
+            "label": "less_protective",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "parts": [
+              {
+                "part_id": "c85af045",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to New York County courts."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -1183,7 +1360,16 @@
             },
             "vs_standard": {
               "label": "less_protective",
-              "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+              "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+              "parts": [
+                {
+                  "part_id": "0b842824",
+                  "status": "present",
+                  "relation": "less_protective",
+                  "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion."
+                }
+              ],
+              "additions": [],
               "basis": "agent",
               "check": null
             }
@@ -1239,8 +1425,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Substitutes New York law for Delaware law; a different governing-law choice that is not clearly better or worse for AlphaCorp.",
+            "label": "less_protective",
+            "reason": "Substitutes New York law for our chosen Delaware law.",
+            "parts": [
+              {
+                "part_id": "f3576a40",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Replaces our chosen Delaware governing law with New York law."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -1453,7 +1648,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "parts": [
+              {
+                "part_id": "ef473c34",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -1598,7 +1801,16 @@
           },
           "vs_standard": {
             "label": "more_protective",
-            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "reason": "Raises the standard of care above reasonable care.",
+            "parts": [
+              {
+                "part_id": "c2a820d4",
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Adds a same-degree-of-care-as-its-own duty on top of the reasonable-care floor."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -1838,8 +2050,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Moves the exclusive forum from Wilmington, Delaware to New York County; a different venue choice rather than a stronger or weaker protection.",
+            "label": "less_protective",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "parts": [
+              {
+                "part_id": "c85af045",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to New York County courts."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -1967,8 +2188,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Substitutes New York law for Delaware law; a different governing-law choice that is not clearly better or worse for AlphaCorp.",
+            "label": "less_protective",
+            "reason": "Substitutes New York law for our chosen Delaware law.",
+            "parts": [
+              {
+                "part_id": "f3576a40",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Replaces our chosen Delaware governing law with New York law."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -2181,7 +2411,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "parts": [
+              {
+                "part_id": "ef473c34",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -2452,7 +2690,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the prompt-written-notice step before a compelled disclosure, so the Discloser cannot seek a protective order.",
+            "reason": "No notice before a compelled disclosure.",
+            "parts": [
+              {
+                "part_id": "508230d8",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the prompt written notice before a compelled disclosure, so the Discloser cannot seek a protective order."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -2915,7 +3162,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "parts": [
+              {
+                "part_id": "ef473c34",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3200,7 +3455,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Narrows the restriction from disclosing the existence of the discussions to issuing a press release or public announcement.",
+            "reason": "Only public announcements about the discussions are restricted.",
+            "parts": [
+              {
+                "part_id": "1433fca4",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Narrows the restriction from disclosing the existence of the discussions to issuing a press release or public announcement."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3552,8 +3816,22 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Replaces the 'promptly' notice duty with a fixed five-business-day written deadline, which is more certain but can be slower than prompt notice.",
+            "label": "mixed",
+            "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "parts": [
+              {
+                "part_id": "974ba077",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Allows up to five business days for notice where our part requires prompt notice."
+              }
+            ],
+            "additions": [
+              {
+                "summary": "Requires the notice of an unauthorized disclosure to be in writing.",
+                "effect": "more_protective"
+              }
+            ],
             "basis": "agent",
             "check": null
           }
@@ -3626,7 +3904,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Only fills the counterparty's name into the standard's placeholder; the parties clause has the same legal effect.",
+            "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "parts": [
+              {
+                "part_id": "ef473c34",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3855,7 +4141,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business.",
+            "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "parts": [
+              {
+                "part_id": "6e18ffa4",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3888,7 +4183,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted; the dropped purpose phrase changes nothing.",
+            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted.",
+            "parts": [
+              {
+                "part_id": "508230d8",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3922,6 +4225,14 @@
           "vs_standard": {
             "label": "equivalent",
             "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "parts": [
+              {
+                "part_id": "7316d0b8",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3953,8 +4264,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Moves the exclusive forum from Wilmington, Delaware to San Francisco; a different venue choice rather than a stronger or weaker protection.",
+            "label": "less_protective",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "parts": [
+              {
+                "part_id": "c85af045",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to San Francisco courts."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -3987,7 +4307,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the statement that the Agreement supersedes all prior discussions, so earlier understandings are not displaced.",
+            "reason": "Earlier understandings are not displaced.",
+            "parts": [
+              {
+                "part_id": "6c3f6b50",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the statement that the Agreement supersedes all prior discussions."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4020,7 +4349,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Omits the recipient's burden of establishing that an exclusion applies; the four exclusions are otherwise substantively the same.",
+            "reason": "The four exclusions are the same but the recipient no longer bears the burden of proving one.",
+            "parts": [
+              {
+                "part_id": "0b842824",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Omits the recipient's burden of establishing that an exclusion applies."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4039,7 +4377,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "parts": [
+              {
+                "part_id": "0b842824",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4069,8 +4416,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Substitutes California law for Delaware law and drops the conflict-of-laws carve-out; a different governing-law choice.",
+            "label": "less_protective",
+            "reason": "Substitutes California law for our chosen Delaware law.",
+            "parts": [
+              {
+                "part_id": "f3576a40",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Substitutes California law for our chosen Delaware law and drops the conflict-of-laws carve-out."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4103,7 +4459,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the acknowledgement that damages are inadequate and the 'in addition to any other remedy' preservation, weakening the injunctive-relief basis.",
+            "reason": "A weaker basis for injunctive relief.",
+            "parts": [
+              {
+                "part_id": "5cb7a434",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the acknowledgement that damages are inadequate and the preservation of other remedies."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4164,7 +4529,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Same disclaimer of any warranty of accuracy or completeness without the 'AS IS' label.",
+            "reason": "Same disclaimer of any warranty of accuracy or completeness without the AS IS label.",
+            "parts": [
+              {
+                "part_id": "d4b4b096",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4197,7 +4570,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the rule that notices are effective on receipt, leaving when a notice takes effect undefined.",
+            "reason": "When a notice takes effect is left undefined.",
+            "parts": [
+              {
+                "part_id": "399a19d5",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the rule that notices are effective on receipt."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4230,7 +4612,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the reformation step (modify to the minimum extent necessary), so an unenforceable provision is lost rather than narrowed.",
+            "reason": "No reformation of an unenforceable provision.",
+            "parts": [
+              {
+                "part_id": "eda1214b",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the reformation step, so an unenforceable provision is lost rather than narrowed."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4263,7 +4654,16 @@
           },
           "vs_standard": {
             "label": "more_protective",
-            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "reason": "Raises the standard of care above reasonable care.",
+            "parts": [
+              {
+                "part_id": "c2a820d4",
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Adds a same-degree-of-care-as-its-own duty on top of the reasonable-care floor."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4296,7 +4696,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Omits the express 'notwithstanding expiration or termination' language, so survival after termination is implied rather than stated.",
+            "reason": "Survival after termination is implied rather than stated.",
+            "parts": [
+              {
+                "part_id": "bdd2069e",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Omits the express survival notwithstanding expiration or termination."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4315,7 +4724,16 @@
           },
           "vs_standard": {
             "label": "more_protective",
-            "reason": "Extends the confidentiality survival period from three to five years.",
+            "reason": "Five years of confidentiality instead of three.",
+            "parts": [
+              {
+                "part_id": "bdd2069e",
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Extends the confidentiality period from three to five years."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4346,7 +4764,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term.",
+            "reason": "No right to end the agreement early on notice.",
+            "parts": [
+              {
+                "part_id": "ec653011",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4379,7 +4806,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business.",
+            "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "parts": [
+              {
+                "part_id": "6e18ffa4",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4412,7 +4848,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted; the dropped purpose phrase changes nothing.",
+            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted.",
+            "parts": [
+              {
+                "part_id": "508230d8",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4446,6 +4890,14 @@
           "vs_standard": {
             "label": "equivalent",
             "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "parts": [
+              {
+                "part_id": "7316d0b8",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4477,8 +4929,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Moves the exclusive forum from Wilmington, Delaware to San Francisco; a different venue choice rather than a stronger or weaker protection.",
+            "label": "less_protective",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "parts": [
+              {
+                "part_id": "c85af045",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to San Francisco courts."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4511,7 +4972,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the statement that the Agreement supersedes all prior discussions, so earlier understandings are not displaced.",
+            "reason": "Earlier understandings are not displaced.",
+            "parts": [
+              {
+                "part_id": "6c3f6b50",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the statement that the Agreement supersedes all prior discussions."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4544,7 +5014,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Omits the recipient's burden of establishing that an exclusion applies; the four exclusions are otherwise substantively the same.",
+            "reason": "The four exclusions are the same but the recipient no longer bears the burden of proving one.",
+            "parts": [
+              {
+                "part_id": "0b842824",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Omits the recipient's burden of establishing that an exclusion applies."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4563,7 +5042,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion, so fewer carve-outs protect AlphaCorp as recipient.",
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "parts": [
+              {
+                "part_id": "0b842824",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4593,8 +5081,17 @@
             ]
           },
           "vs_standard": {
-            "label": "different_concept",
-            "reason": "Substitutes California law for Delaware law and drops the conflict-of-laws carve-out; a different governing-law choice.",
+            "label": "less_protective",
+            "reason": "Substitutes California law for our chosen Delaware law.",
+            "parts": [
+              {
+                "part_id": "f3576a40",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Substitutes California law for our chosen Delaware law and drops the conflict-of-laws carve-out."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4627,7 +5124,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the acknowledgement that damages are inadequate and the 'in addition to any other remedy' preservation, weakening the injunctive-relief basis.",
+            "reason": "A weaker basis for injunctive relief.",
+            "parts": [
+              {
+                "part_id": "5cb7a434",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the acknowledgement that damages are inadequate and the preservation of other remedies."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4700,7 +5206,15 @@
           },
           "vs_standard": {
             "label": "equivalent",
-            "reason": "Same disclaimer of any warranty of accuracy or completeness without the 'AS IS' label.",
+            "reason": "Same disclaimer of any warranty of accuracy or completeness without the AS IS label.",
+            "parts": [
+              {
+                "part_id": "d4b4b096",
+                "status": "present",
+                "relation": "equivalent"
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4733,7 +5247,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the rule that notices are effective on receipt, leaving when a notice takes effect undefined.",
+            "reason": "When a notice takes effect is left undefined.",
+            "parts": [
+              {
+                "part_id": "399a19d5",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the rule that notices are effective on receipt."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4797,7 +5320,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the reformation step (modify to the minimum extent necessary), so an unenforceable provision is lost rather than narrowed.",
+            "reason": "No reformation of an unenforceable provision.",
+            "parts": [
+              {
+                "part_id": "eda1214b",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the reformation step, so an unenforceable provision is lost rather than narrowed."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4830,7 +5362,16 @@
           },
           "vs_standard": {
             "label": "more_protective",
-            "reason": "Adds a 'same degree of care as its own' duty on top of the reasonable-care floor, raising the standard of care.",
+            "reason": "Raises the standard of care above reasonable care.",
+            "parts": [
+              {
+                "part_id": "c2a820d4",
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Adds a same-degree-of-care-as-its-own duty on top of the reasonable-care floor."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4863,7 +5404,16 @@
           },
           "vs_standard": {
             "label": "more_protective",
-            "reason": "Extends the confidentiality survival period from three to five years.",
+            "reason": "Five years of confidentiality instead of three.",
+            "parts": [
+              {
+                "part_id": "bdd2069e",
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Extends the confidentiality period from three to five years."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4896,7 +5446,16 @@
           },
           "vs_standard": {
             "label": "less_protective",
-            "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term.",
+            "reason": "No right to end the agreement early on notice.",
+            "parts": [
+              {
+                "part_id": "ec653011",
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term."
+              }
+            ],
+            "additions": [],
             "basis": "agent",
             "check": null
           }
@@ -4914,7 +5473,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-09T08:29:49+00:00",
+      "generated_at": "2026-10-10T18:44:15+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -4947,7 +5506,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:025848111a68be211f85957c47f8bf1f776ecbb5456edeb3be85709a3554493f"
+      "grounded_in": "evidence@sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab"
     }
   },
   "floor": {
@@ -4967,7 +5526,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-09T08:29:50+00:00",
+        "x_signed_at": "2026-10-10T18:44:16+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -5346,12 +5905,12 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-09T08:29:48+00:00",
+    "generated_at": "2026-10-10T18:44:13+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:19fcf8774f38e3e9d42d7b7c7b9e919515494d4de89523bc770b1692710c983d",
+      "sha256": "sha256:e91aa1a5429fc683b04e6d6c193b847c83679b8faf9a8045f73971f740755769",
       "records": 128
     }
   },
@@ -5371,13 +5930,37 @@
       "first_signed": null,
       "last_signed": null
     },
+    "part_map_legend": {
+      "part_map": {
+        "=": "our part is present with the same legal effect",
+        "+": "our part is present but more protective for perspective.party",
+        "-": "our part is present but less protective for perspective.party",
+        "x+": "our part is omitted, which is more protective for perspective.party",
+        "x-": "our part is omitted, which is less protective for perspective.party",
+        "x0": "our part is omitted with no effect on perspective.party"
+      },
+      "additions": {
+        "+": "an addition no part covers, more protective for perspective.party",
+        "-": "an addition no part covers, less protective for perspective.party",
+        "0": "an addition no part covers, neutral for perspective.party"
+      },
+      "label_by": {
+        "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
+        "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+      }
+    },
     "clauses": [
       {
         "id": "clause.assignment",
         "taxonomy_id": "assignment",
         "title": "Assignment",
         "our_standard": {
-          "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
+          "parts": [
+            {
+              "part_id": "6e18ffa4",
+              "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5397,6 +5980,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5408,6 +5992,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "No assignment without consent, even to an affiliate or a successor.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5434,7 +6023,12 @@
         "taxonomy_id": "compelled_disclosure",
         "title": "Compelled Disclosure",
         "our_standard": {
-          "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
+          "parts": [
+            {
+              "part_id": "508230d8",
+              "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5454,6 +6048,7 @@
           "equivalent": 2,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5493,6 +6088,11 @@
             "n_to_standard": 1,
             "n_struck": 0,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "No notice before a compelled disclosure.",
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -5516,7 +6116,12 @@
         "taxonomy_id": "confidentiality_of_discussions",
         "title": "Confidentiality of the Discussions",
         "our_standard": {
-          "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
+          "parts": [
+            {
+              "part_id": "1433fca4",
+              "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5536,6 +6141,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 1,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5547,6 +6153,11 @@
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Only public announcements about the discussions are restricted.",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -5572,7 +6183,12 @@
         "taxonomy_id": "counterparts",
         "title": "Counterparts",
         "our_standard": {
-          "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
+          "parts": [
+            {
+              "part_id": "7316d0b8",
+              "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5592,6 +6208,7 @@
           "equivalent": 2,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5634,7 +6251,12 @@
         "taxonomy_id": "definition_confidential_info",
         "title": "Definition of Confidential Information",
         "our_standard": {
-          "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
+          "parts": [
+            {
+              "part_id": "2b545423",
+              "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5654,6 +6276,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5669,7 +6292,12 @@
         "taxonomy_id": "dispute_resolution_venue",
         "title": "Dispute Resolution & Venue",
         "our_standard": {
-          "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+          "parts": [
+            {
+              "part_id": "c85af045",
+              "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5688,8 +6316,9 @@
           "standard": 2,
           "equivalent": 0,
           "more_protective": 0,
-          "less_protective": 0,
-          "different_concept": 4,
+          "less_protective": 4,
+          "mixed": 0,
+          "different_concept": 0,
           "unjudged": 0
         },
         "signed_variants": [
@@ -5699,7 +6328,12 @@
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
-            "label": "different_concept",
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5720,7 +6354,12 @@
             "last_signed": null,
             "n_from_standard": 2,
             "n_unchanged": 0,
-            "label": "different_concept",
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -5747,7 +6386,12 @@
         "taxonomy_id": "entire_agreement_amendment",
         "title": "Entire Agreement & Amendment",
         "our_standard": {
-          "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
+          "parts": [
+            {
+              "part_id": "6c3f6b50",
+              "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5767,6 +6411,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5778,6 +6423,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Earlier understandings are not displaced.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5804,7 +6454,12 @@
         "taxonomy_id": "exclusions_from_confidential",
         "title": "Exclusions from Confidential Information",
         "our_standard": {
-          "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
+          "parts": [
+            {
+              "part_id": "0b842824",
+              "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5824,6 +6479,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5835,6 +6491,11 @@
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "The four exclusions are the same but the recipient no longer bears the burden of proving one.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5855,6 +6516,11 @@
             "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
             "n_deals": 1,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
             "ref": {
               "document_id": "beta-industries",
               "version": 2,
@@ -5876,6 +6542,11 @@
             "n_to_standard": 0,
             "n_struck": 0,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -5900,7 +6571,12 @@
         "taxonomy_id": "export_control",
         "title": "Export Control",
         "our_standard": {
-          "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
+          "parts": [
+            {
+              "part_id": "34a71273",
+              "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5920,6 +6596,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -5935,7 +6612,12 @@
         "taxonomy_id": "governing_law",
         "title": "Governing Law",
         "our_standard": {
-          "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
+          "parts": [
+            {
+              "part_id": "f3576a40",
+              "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -5954,8 +6636,9 @@
           "standard": 2,
           "equivalent": 0,
           "more_protective": 0,
-          "less_protective": 0,
-          "different_concept": 4,
+          "less_protective": 4,
+          "mixed": 0,
+          "different_concept": 0,
           "unjudged": 0
         },
         "signed_variants": [
@@ -5965,7 +6648,12 @@
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
-            "label": "different_concept",
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Substitutes California law for our chosen Delaware law.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -5986,7 +6674,12 @@
             "last_signed": null,
             "n_from_standard": 2,
             "n_unchanged": 0,
-            "label": "different_concept",
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Substitutes New York law for our chosen Delaware law.",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -6013,7 +6706,12 @@
         "taxonomy_id": "injunctive_relief",
         "title": "Injunctive Relief",
         "our_standard": {
-          "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
+          "parts": [
+            {
+              "part_id": "5cb7a434",
+              "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6033,6 +6731,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6044,6 +6743,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "A weaker basis for injunctive relief.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6079,6 +6783,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 2
         },
@@ -6090,6 +6795,9 @@
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": null,
+            "part_map": null,
+            "additions": null,
+            "reason": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 3,
@@ -6113,6 +6821,9 @@
             "n_to_standard": 0,
             "n_struck": 1,
             "label": null,
+            "part_map": null,
+            "additions": null,
+            "reason": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -6138,7 +6849,12 @@
         "taxonomy_id": "no_license_ip_ownership",
         "title": "No License / IP Ownership",
         "our_standard": {
-          "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
+          "parts": [
+            {
+              "part_id": "a9c13068",
+              "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6158,6 +6874,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6173,7 +6890,12 @@
         "taxonomy_id": "no_obligation_to_proceed",
         "title": "No Obligation to Proceed",
         "our_standard": {
-          "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
+          "parts": [
+            {
+              "part_id": "f041c579",
+              "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6193,6 +6915,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6208,7 +6931,12 @@
         "taxonomy_id": "no_warranty_as_is",
         "title": "No Warranty / AS IS",
         "our_standard": {
-          "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
+          "parts": [
+            {
+              "part_id": "d4b4b096",
+              "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6228,6 +6956,7 @@
           "equivalent": 2,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6270,7 +6999,12 @@
         "taxonomy_id": "notice_of_unauthorized_disclosure",
         "title": "Notice of Unauthorized Disclosure",
         "our_standard": {
-          "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
+          "parts": [
+            {
+              "part_id": "974ba077",
+              "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6290,7 +7024,8 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
-          "different_concept": 1,
+          "mixed": 1,
+          "different_concept": 0,
           "unjudged": 0
         },
         "signed_variants": [
@@ -6300,7 +7035,14 @@
             "last_signed": null,
             "n_from_standard": 1,
             "n_unchanged": 0,
-            "label": "different_concept",
+            "label": "mixed",
+            "part_map": [
+              "-"
+            ],
+            "additions": [
+              "+"
+            ],
+            "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -6326,7 +7068,12 @@
         "taxonomy_id": "notices",
         "title": "Notices",
         "our_standard": {
-          "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
+          "parts": [
+            {
+              "part_id": "399a19d5",
+              "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6346,6 +7093,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6357,6 +7105,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "When a notice takes effect is left undefined.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6383,7 +7136,12 @@
         "taxonomy_id": "parties_and_recitals",
         "title": "Parties & Recitals",
         "our_standard": {
-          "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
+          "parts": [
+            {
+              "part_id": "ef473c34",
+              "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\")."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6403,6 +7161,7 @@
           "equivalent": 4,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6459,7 +7218,12 @@
         "taxonomy_id": "permitted_disclosure_reps",
         "title": "Permitted Disclosure to Representatives",
         "our_standard": {
-          "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
+          "parts": [
+            {
+              "part_id": "c455b375",
+              "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6479,6 +7243,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6494,7 +7259,12 @@
         "taxonomy_id": "purpose_permitted_use",
         "title": "Purpose & Permitted Use",
         "our_standard": {
-          "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
+          "parts": [
+            {
+              "part_id": "e7fb263b",
+              "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6514,6 +7284,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6538,6 +7309,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6547,6 +7319,9 @@
             "text": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
             "n_deals": 1,
             "label": null,
+            "part_map": null,
+            "additions": null,
+            "reason": null,
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 2,
@@ -6571,7 +7346,12 @@
         "taxonomy_id": "return_or_destruction",
         "title": "Return or Destruction of Materials",
         "our_standard": {
-          "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
+          "parts": [
+            {
+              "part_id": "25db59b8",
+              "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6591,6 +7371,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6606,7 +7387,12 @@
         "taxonomy_id": "severability",
         "title": "Severability",
         "our_standard": {
-          "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
+          "parts": [
+            {
+              "part_id": "eda1214b",
+              "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6626,6 +7412,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6637,6 +7424,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "No reformation of an unenforceable provision.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6663,7 +7455,12 @@
         "taxonomy_id": "standard_of_care",
         "title": "Standard of Care",
         "our_standard": {
-          "text": "Recipient shall protect Confidential Information using reasonable care.",
+          "parts": [
+            {
+              "part_id": "c2a820d4",
+              "text": "Recipient shall protect Confidential Information using reasonable care."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6683,6 +7480,7 @@
           "equivalent": 0,
           "more_protective": 3,
           "less_protective": 0,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6694,6 +7492,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "more_protective",
+            "part_map": [
+              "+"
+            ],
+            "additions": [],
+            "reason": "Raises the standard of care above reasonable care.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6715,6 +7518,11 @@
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "more_protective",
+            "part_map": [
+              "+"
+            ],
+            "additions": [],
+            "reason": "Raises the standard of care above reasonable care.",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -6740,7 +7548,12 @@
         "taxonomy_id": "survival_period",
         "title": "Survival of Confidentiality Obligations",
         "our_standard": {
-          "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
+          "parts": [
+            {
+              "part_id": "bdd2069e",
+              "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6760,6 +7573,7 @@
           "equivalent": 0,
           "more_protective": 1,
           "less_protective": 1,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6771,6 +7585,11 @@
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Survival after termination is implied rather than stated.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6791,6 +7610,11 @@
             "n_from_standard": 0,
             "n_unchanged": 1,
             "label": "more_protective",
+            "part_map": [
+              "+"
+            ],
+            "additions": [],
+            "reason": "Five years of confidentiality instead of three.",
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 3,
@@ -6813,6 +7637,11 @@
             "n_to_standard": 0,
             "n_struck": 0,
             "label": "more_protective",
+            "part_map": [
+              "+"
+            ],
+            "additions": [],
+            "reason": "Five years of confidentiality instead of three.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -6836,7 +7665,12 @@
         "taxonomy_id": "term",
         "title": "Term",
         "our_standard": {
-          "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
+          "parts": [
+            {
+              "part_id": "ec653011",
+              "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period."
+            }
+          ],
           "source_ref": {
             "document_id": "template",
             "version": "template",
@@ -6856,6 +7690,7 @@
           "equivalent": 0,
           "more_protective": 0,
           "less_protective": 2,
+          "mixed": 0,
           "different_concept": 0,
           "unjudged": 0
         },
@@ -6867,6 +7702,11 @@
             "n_from_standard": 0,
             "n_unchanged": 2,
             "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "No right to end the agreement early on notice.",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6944,7 +7784,12 @@
       "taxonomy_id": "assignment",
       "title": "Assignment",
       "our_standard": {
-        "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets."
+        "parts": [
+          {
+            "part_id": "6e18ffa4",
+            "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -6954,7 +7799,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "Neither party may assign this Agreement without the prior written consent of the other party.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "6e18ffa4",
+                "reason": "Removes the affiliate and merger-successor carve-out, so AlphaCorp needs consent to assign even in a sale of its business."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -6965,7 +7825,12 @@
       "taxonomy_id": "compelled_disclosure",
       "title": "Compelled Disclosure",
       "our_standard": {
-        "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required."
+        "parts": [
+          {
+            "part_id": "508230d8",
+            "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -6975,14 +7840,39 @@
           "kind": "changed_opening",
           "opening": "If Recipient is required by law or legal process to disclose Confidential Information, it shall disclose only that portion legally required.",
           "signed": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "No notice before a compelled disclosure.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "508230d8",
+                "reason": "Drops the prompt written notice before a compelled disclosure, so the Discloser cannot seek a protective order."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.2cbae90493c10f2c",
           "kind": "signed_variant",
           "opening": null,
           "signed": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "equivalent",
+            "label_by": "parts",
+            "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted.",
+            "part_map": [
+              "="
+            ],
+            "part_reasons": [],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -6993,7 +7883,12 @@
       "taxonomy_id": "confidentiality_of_discussions",
       "title": "Confidentiality of the Discussions",
       "our_standard": {
-        "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange."
+        "parts": [
+          {
+            "part_id": "1433fca4",
+            "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7003,7 +7898,22 @@
           "kind": "signed_variant",
           "opening": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
           "signed": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Only public announcements about the discussions are restricted.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "1433fca4",
+                "reason": "Narrows the restriction from disclosing the existence of the discussions to issuing a press release or public announcement."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7014,7 +7924,12 @@
       "taxonomy_id": "counterparts",
       "title": "Counterparts",
       "our_standard": {
-        "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement."
+        "parts": [
+          {
+            "part_id": "7316d0b8",
+            "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7024,7 +7939,17 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "This Agreement may be signed in counterparts, each of which is deemed an original.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "equivalent",
+            "label_by": "parts",
+            "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "part_map": [
+              "="
+            ],
+            "part_reasons": [],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7035,7 +7960,12 @@
       "taxonomy_id": "definition_confidential_info",
       "title": "Definition of Confidential Information",
       "our_standard": {
-        "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected."
+        "parts": [
+          {
+            "part_id": "2b545423",
+            "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7048,7 +7978,12 @@
       "taxonomy_id": "dispute_resolution_venue",
       "title": "Dispute Resolution & Venue",
       "our_standard": {
-        "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction."
+        "parts": [
+          {
+            "part_id": "c85af045",
+            "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7058,14 +7993,44 @@
           "kind": "signed_variant",
           "opening": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
           "signed": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "c85af045",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to New York County courts."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.48aa9562d17197c1",
           "kind": "signed_variant",
           "opening": null,
           "signed": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "c85af045",
+                "reason": "Moves exclusive jurisdiction from our chosen Wilmington, Delaware courts to San Francisco courts."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7076,7 +8041,12 @@
       "taxonomy_id": "entire_agreement_amendment",
       "title": "Entire Agreement & Amendment",
       "our_standard": {
-        "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties."
+        "parts": [
+          {
+            "part_id": "6c3f6b50",
+            "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7086,7 +8056,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Earlier understandings are not displaced.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "6c3f6b50",
+                "reason": "Drops the statement that the Agreement supersedes all prior discussions."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7097,7 +8082,12 @@
       "taxonomy_id": "exclusions_from_confidential",
       "title": "Exclusions from Confidential Information",
       "our_standard": {
-        "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
+        "parts": [
+          {
+            "part_id": "0b842824",
+            "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7107,14 +8097,44 @@
           "kind": "changed_opening",
           "opening": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; or (c) is lawfully obtained from a third party without restriction.",
           "signed": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "0b842824",
+                "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.55b0f3a1eb6df7c8",
           "kind": "refused_ask",
           "opening": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of confidentiality.",
           "signed": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
-          "outcome": "ask_refused"
+          "outcome": "ask_refused",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "0b842824",
+                "reason": "Drops the independent-development exclusion and the recipient's burden of establishing an exclusion."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7125,7 +8145,12 @@
       "taxonomy_id": "export_control",
       "title": "Export Control",
       "our_standard": {
-        "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement."
+        "parts": [
+          {
+            "part_id": "34a71273",
+            "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7138,7 +8163,12 @@
       "taxonomy_id": "governing_law",
       "title": "Governing Law",
       "our_standard": {
-        "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles."
+        "parts": [
+          {
+            "part_id": "f3576a40",
+            "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7148,14 +8178,44 @@
           "kind": "signed_variant",
           "opening": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
           "signed": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Substitutes New York law for our chosen Delaware law.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "f3576a40",
+                "reason": "Replaces our chosen Delaware governing law with New York law."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.95daf3a231f7a092",
           "kind": "signed_variant",
           "opening": null,
           "signed": "This Agreement is governed by the laws of the State of California.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "Substitutes California law for our chosen Delaware law.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "f3576a40",
+                "reason": "Substitutes California law for our chosen Delaware law and drops the conflict-of-laws carve-out."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7166,7 +8226,12 @@
       "taxonomy_id": "injunctive_relief",
       "title": "Injunctive Relief",
       "our_standard": {
-        "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity."
+        "parts": [
+          {
+            "part_id": "5cb7a434",
+            "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7176,7 +8241,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "A weaker basis for injunctive relief.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "5cb7a434",
+                "reason": "Drops the acknowledgement that damages are inadequate and the preservation of other remedies."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7201,7 +8281,8 @@
           "kind": "changed_opening",
           "opening": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
           "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": null
         }
       ],
       "n_omitted": 0,
@@ -7212,7 +8293,12 @@
       "taxonomy_id": "no_license_ip_ownership",
       "title": "No License / IP Ownership",
       "our_standard": {
-        "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information."
+        "parts": [
+          {
+            "part_id": "a9c13068",
+            "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7225,7 +8311,12 @@
       "taxonomy_id": "no_obligation_to_proceed",
       "title": "No Obligation to Proceed",
       "our_standard": {
-        "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time."
+        "parts": [
+          {
+            "part_id": "f041c579",
+            "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7238,7 +8329,12 @@
       "taxonomy_id": "no_warranty_as_is",
       "title": "No Warranty / AS IS",
       "our_standard": {
-        "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses."
+        "parts": [
+          {
+            "part_id": "d4b4b096",
+            "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7248,7 +8344,17 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "equivalent",
+            "label_by": "parts",
+            "reason": "Same disclaimer of any warranty of accuracy or completeness without the AS IS label.",
+            "part_map": [
+              "="
+            ],
+            "part_reasons": [],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7259,7 +8365,12 @@
       "taxonomy_id": "notice_of_unauthorized_disclosure",
       "title": "Notice of Unauthorized Disclosure",
       "our_standard": {
-        "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects."
+        "parts": [
+          {
+            "part_id": "974ba077",
+            "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7269,7 +8380,27 @@
           "kind": "signed_variant",
           "opening": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
           "signed": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "mixed",
+            "label_by": "parts",
+            "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "974ba077",
+                "reason": "Allows up to five business days for notice where our part requires prompt notice."
+              }
+            ],
+            "additions": [
+              {
+                "effect": "+",
+                "summary": "Requires the notice of an unauthorized disclosure to be in writing."
+              }
+            ]
+          }
         }
       ],
       "n_omitted": 0,
@@ -7280,7 +8411,12 @@
       "taxonomy_id": "notices",
       "title": "Notices",
       "our_standard": {
-        "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt."
+        "parts": [
+          {
+            "part_id": "399a19d5",
+            "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7290,7 +8426,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "When a notice takes effect is left undefined.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "399a19d5",
+                "reason": "Drops the rule that notices are effective on receipt."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7301,7 +8452,12 @@
       "taxonomy_id": "parties_and_recitals",
       "title": "Parties & Recitals",
       "our_standard": {
-        "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\")."
+        "parts": [
+          {
+            "part_id": "ef473c34",
+            "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and [Counterparty] (\"Counterparty\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\")."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7311,7 +8467,17 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "equivalent",
+            "label_by": "parts",
+            "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "part_map": [
+              "="
+            ],
+            "part_reasons": [],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7322,7 +8488,12 @@
       "taxonomy_id": "permitted_disclosure_reps",
       "title": "Permitted Disclosure to Representatives",
       "our_standard": {
-        "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives."
+        "parts": [
+          {
+            "part_id": "c455b375",
+            "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7335,7 +8506,12 @@
       "taxonomy_id": "purpose_permitted_use",
       "title": "Purpose & Permitted Use",
       "our_standard": {
-        "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose."
+        "parts": [
+          {
+            "part_id": "e7fb263b",
+            "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7356,7 +8532,8 @@
           "kind": "refused_ask",
           "opening": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
           "signed": null,
-          "outcome": "ask_refused"
+          "outcome": "ask_refused",
+          "vs_standard": null
         }
       ],
       "n_omitted": 0,
@@ -7367,7 +8544,12 @@
       "taxonomy_id": "return_or_destruction",
       "title": "Return or Destruction of Materials",
       "our_standard": {
-        "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained."
+        "parts": [
+          {
+            "part_id": "25db59b8",
+            "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7380,7 +8562,12 @@
       "taxonomy_id": "severability",
       "title": "Severability",
       "our_standard": {
-        "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force."
+        "parts": [
+          {
+            "part_id": "eda1214b",
+            "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7390,7 +8577,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "If any provision is held invalid, the remaining provisions remain in effect.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "No reformation of an unenforceable provision.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "eda1214b",
+                "reason": "Drops the reformation step, so an unenforceable provision is lost rather than narrowed."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7401,7 +8603,12 @@
       "taxonomy_id": "standard_of_care",
       "title": "Standard of Care",
       "our_standard": {
-        "text": "Recipient shall protect Confidential Information using reasonable care."
+        "parts": [
+          {
+            "part_id": "c2a820d4",
+            "text": "Recipient shall protect Confidential Information using reasonable care."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7411,14 +8618,44 @@
           "kind": "signed_variant",
           "opening": "Recipient shall protect Confidential Information using reasonable care.",
           "signed": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "more_protective",
+            "label_by": "parts",
+            "reason": "Raises the standard of care above reasonable care.",
+            "part_map": [
+              "+"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "c2a820d4",
+                "reason": "Adds a same-degree-of-care-as-its-own duty on top of the reasonable-care floor."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.886f17441be8ec35",
           "kind": "signed_variant",
           "opening": null,
           "signed": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "more_protective",
+            "label_by": "parts",
+            "reason": "Raises the standard of care above reasonable care.",
+            "part_map": [
+              "+"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "c2a820d4",
+                "reason": "Adds a same-degree-of-care-as-its-own duty on top of the reasonable-care floor."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7429,7 +8666,12 @@
       "taxonomy_id": "survival_period",
       "title": "Survival of Confidentiality Obligations",
       "our_standard": {
-        "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
+        "parts": [
+          {
+            "part_id": "bdd2069e",
+            "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7439,14 +8681,44 @@
           "kind": "changed_opening",
           "opening": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
           "signed": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "more_protective",
+            "label_by": "parts",
+            "reason": "Five years of confidentiality instead of three.",
+            "part_map": [
+              "+"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "bdd2069e",
+                "reason": "Extends the confidentiality period from three to five years."
+              }
+            ],
+            "additions": []
+          }
         },
         {
           "precedent_id": "prec.1c2c87601dffd71b",
           "kind": "signed_variant",
           "opening": null,
           "signed": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "more_protective",
+            "label_by": "parts",
+            "reason": "Five years of confidentiality instead of three.",
+            "part_map": [
+              "+"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "bdd2069e",
+                "reason": "Extends the confidentiality period from three to five years."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7457,7 +8729,12 @@
       "taxonomy_id": "term",
       "title": "Term",
       "our_standard": {
-        "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period."
+        "parts": [
+          {
+            "part_id": "ec653011",
+            "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period."
+          }
+        ]
       },
       "n_floor_rules": 0,
       "floor_rules": [],
@@ -7467,7 +8744,22 @@
           "kind": "signed_variant",
           "opening": null,
           "signed": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
-          "outcome": "signed"
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "less_protective",
+            "label_by": "parts",
+            "reason": "No right to end the agreement early on notice.",
+            "part_map": [
+              "-"
+            ],
+            "part_reasons": [
+              {
+                "part_id": "ec653011",
+                "reason": "Drops the early-termination right on thirty days' notice and the limit that disclosures may be made only during the term."
+              }
+            ],
+            "additions": []
+          }
         }
       ],
       "n_omitted": 0,
@@ -7771,11 +9063,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:da897d3e818cee2aca7a4cf2ddf940fd25858f0fe4e8e19849314483a3b736cf",
+    "content_hash": "sha256:fa5afcee13d94f52815d2f883f1f27d4de76002ca6089e404999cc6069e7ce6e",
     "section_digests": {
-      "evidence": "sha256:025848111a68be211f85957c47f8bf1f776ecbb5456edeb3be85709a3554493f",
-      "posture": "sha256:ac1a4e441ff5cad870bf7c565d3602c06aa28cd6a44533428e6b992e80473b77",
-      "floor": "sha256:5bef34891929c6fd77b973967b63533ea5936f7ddb702236265fd5a13729bb93"
+      "evidence": "sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab",
+      "posture": "sha256:a41f9c21ab78b03977101836a82eee2c6e224d75ef3627d10072b717276a5698",
+      "floor": "sha256:1e068514c00a1c56cf9e7b97ed09b8f78ffe254449f5713c553fe36c361d2f51"
     }
   }
 }

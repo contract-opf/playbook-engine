@@ -42,6 +42,7 @@ from playbook_engine.digest import build_digest_v4
 from playbook_engine.dossiers import (
     build_derived_sections,
     dossier_budget,
+    dossier_standard_text,
     dossier_tokens,
 )
 
@@ -212,6 +213,37 @@ def test_v05_label_vector_collapses_equivalent_variants_and_lists_uncovered() ->
     assert digest["clauses"][0]["n_variants_total"] == 6
 
 
+def test_v05_standard_parts_and_owner_label_vector_pins_the_part_rules() -> None:
+    """009 (issue #243): a several-part standard with a repeated passage
+    (``-2``), part maps of several tokens with omissions and additions, part
+    reasons naming parts other than the first, and an owner label carried
+    with the owner's reason and ``label_by: "owner"``."""
+    vector = _load_vector_v05("vectors/009-standard-parts-and-owner-label.json")
+    doc, expected = vector["input"], vector["expected"]
+    pids = [p["part_id"] for p in doc["evidence"]["clauses"][0]["our_standard"]["parts"]]
+    assert len(pids) == 4 and pids[3] == f"{pids[1]}-2"
+    clause = expected["digest"]["clauses"][0]
+    assert [p["part_id"] for p in clause["our_standard"]["parts"]] == pids
+    mixed = clause["signed_variants"][0]
+    assert mixed["label"] == "mixed" and "label_by" not in mixed, "parts is the default"
+    assert (mixed["part_map"], mixed["additions"]) == (["=", "x0", "-", "="], ["+"])
+    assert clause["refused_asks"][0]["part_map"] == ["=", "x0", "x-", "x0"]
+    opening = clause["changed_openings"][0]
+    owner = next(
+        p["opening_text"]["vs_standard"]["owner_label"]
+        for p in doc["evidence"]["precedent"]
+        if p["opening_text"] and "owner_label" in p["opening_text"].get("vs_standard", {})
+    )
+    assert (opening["label"], opening["label_by"]) == ("more_protective", "owner")
+    assert opening["reason"] == owner["reason"]
+    assert opening["part_map"] == ["-", "x+", "=", "+"], "the owner's label keeps the judged map"
+    excerpts = expected["dossiers"]["clause.confidentiality"]["excerpts"]
+    assert [r["part_id"] for r in excerpts[0]["vs_standard"]["part_reasons"]] == [pids[2]]
+    second = excerpts[1]["vs_standard"]
+    assert (second["label_by"], second["reason"]) == ("owner", owner["reason"])
+    assert [r["part_id"] for r in second["part_reasons"]] == [pids[0], pids[1], pids[3]]
+
+
 # ---------------------------------------------------------------------------
 # Proof the suite has teeth (issue #115 reviewer gate): a tampered expected
 # value must be DETECTED, not silently pass. These mutate only an in-memory
@@ -311,8 +343,7 @@ def test_v05_hard_rules_and_dossiers_vector_pins_selection_and_the_bound() -> No
     ]
     assert dossier_tokens(term) > dossier_budget(None)
     for clause_id, dossier in expected["dossiers"].items():
-        standard = dossier["our_standard"]
-        budget = dossier_budget(standard["text"] if standard else None)
+        budget = dossier_budget(dossier_standard_text(dossier))
         # Only a dossier holding its single kept excerpt (no Floor rule left
         # listed) may be over its budget.
         assert dossier_tokens(dossier) <= budget or (
@@ -330,7 +361,7 @@ def test_v05_hard_rules_and_dossiers_vector_pins_selection_and_the_bound() -> No
         "survival-reference",
         "survival-scope",
     ]
-    assert dossier_tokens(survival) <= dossier_budget(survival["our_standard"]["text"])
+    assert dossier_tokens(survival) <= dossier_budget(dossier_standard_text(survival))
     index = expected["provenance_index"]["dossiers"]["clause.venue"]
     assert [row["precedent_id"] for row in index] == [e["precedent_id"] for e in venue["excerpts"]]
     assert not any(row["omitted"] for row in index)

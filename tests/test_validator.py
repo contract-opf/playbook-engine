@@ -921,3 +921,74 @@ def test_v05_rejects_an_opening_on_a_record_that_did_not_move() -> None:
     _nda_opening_record(doc)["moved"] = False
     errors = _blocking(_restamp_identity(doc))
     assert any("opening_text is set but moved is not true" in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# vs_standard part by part — issue #243
+# ---------------------------------------------------------------------------
+
+
+def _judged_slot(doc: dict[str, Any], label: str) -> dict[str, Any]:
+    """The first ``vs_standard`` labelled *label* in the committed NDA example
+    (produced by ``judge-apply`` + ``project`` from its canned verdicts)."""
+    for record in doc["evidence"]["precedent"]:
+        for holder in [
+            record.get("signed_text"),
+            record.get("opening_text"),
+            *(record.get("refused_asks") or []),
+        ]:
+            vs = holder.get("vs_standard") if isinstance(holder, dict) else None
+            if isinstance(vs, dict) and vs["label"] == label:
+                return vs
+    raise AssertionError(f"no {label} judgment in the NDA example")
+
+
+def test_nda_example_judgments_are_part_by_part() -> None:
+    doc = _nda()
+    vs = _judged_slot(doc, "mixed")
+    assert vs["parts"] and vs["additions"]
+    assert validate_document(doc).ok
+
+
+def test_validator_rejects_a_stored_label_that_disagrees_with_its_parts() -> None:
+    doc = _nda()
+    vs = _judged_slot(doc, "less_protective")
+    vs["label"] = "more_protective"
+    assert "disagrees with its parts, which derive 'less_protective'" in _messages(doc)
+
+
+def test_validator_rejects_an_unknown_part_id() -> None:
+    doc = _nda()
+    vs = _judged_slot(doc, "less_protective")
+    vs["parts"][0]["part_id"] = "deadbeef"
+    messages = _messages(doc)
+    assert "names part_id 'deadbeef', which is not a part of this clause's our_standard" in messages
+    assert "must judge every part of our standard exactly once" in messages
+
+
+def test_validator_rejects_a_present_part_without_a_relation() -> None:
+    doc = _nda()
+    vs = _judged_slot(doc, "equivalent")
+    del vs["parts"][0]["relation"]
+    assert "is present but has no relation" in _messages(doc)
+
+
+def test_validator_rejects_an_owner_label_without_owner_basis() -> None:
+    doc = _nda()
+    vs = _judged_slot(doc, "less_protective")
+    vs["owner_label"] = {"label": "equivalent", "reason": "Immaterial."}
+    vs["label"] = "equivalent"
+    assert "owner_label is set but basis is not 'owner'" in _messages(doc)
+    vs["basis"] = "owner"
+    assert "owner_label is set but basis" not in _messages(doc)
+    assert "disagrees with its parts" not in _messages(doc)
+
+
+def test_validator_rejects_a_standard_part_id_that_is_not_its_content_hash() -> None:
+    doc = _nda()
+    clause = next(c for c in doc["evidence"]["clauses"] if c.get("our_standard"))
+    clause["our_standard"]["parts"][0]["part_id"] = "00000000"
+    assert "is not the content hash of its text" in _messages(doc)
+    clause = next(c for c in doc["evidence"]["clauses"] if c.get("our_standard"))
+    clause["our_standard"]["text"] += " Extra."
+    assert "our_standard.text is not its parts joined in order" in _messages(doc)

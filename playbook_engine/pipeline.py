@@ -122,7 +122,7 @@ from playbook_engine.playbook_assembler import (
     write_playbook,
     write_precedent_sidecar,
 )
-from playbook_engine.precedent import build_precedent_evidence
+from playbook_engine.precedent import build_precedent_evidence, restamp_evidence
 from playbook_engine.provenance_detector import (
     PROVENANCE_UNKNOWN,
     ProvenanceJudge,
@@ -4736,6 +4736,9 @@ def equivalence_subjects(
             party=party,
         )
     )
+    # As the assembler does: ids (precedent ids, standard part ids) over the
+    # stripped text, so the payload's part ids are the playbook's.
+    restamp_evidence(evidence, config.agreement_type.id, party=party)
     return collect_subjects(evidence, config.agreement_type.id, party)
 
 

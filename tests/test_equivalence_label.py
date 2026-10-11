@@ -74,6 +74,76 @@ _OPENING_VARIANT = "Each party shall keep the other party's information confiden
 _REFUSED_ASK = "The receiving party may use the information for any purpose it sees fit."
 
 
+def _part_id() -> str:
+    """The id of the one part of the fixture standard (issue #243)."""
+    from playbook_engine.equivalence import part_id_of
+
+    return part_id_of(_STANDARD, _PARTY)
+
+
+def _parts_for(label: str, part_id: str | None = None) -> dict[str, Any]:
+    """``{parts, additions}`` over a one-part standard that DERIVES *label*."""
+    pid = part_id or _part_id()
+    if label == "equivalent":
+        return {
+            "parts": [{"part_id": pid, "status": "present", "relation": "equivalent"}],
+            "additions": [],
+        }
+    if label == "different_concept":
+        return {
+            "parts": [{"part_id": pid, "status": "omitted", "effect": "neutral"}],
+            "additions": [],
+        }
+    if label == "mixed":
+        return {
+            "parts": [
+                {
+                    "part_id": pid,
+                    "status": "present",
+                    "relation": "less_protective",
+                    "reason": "Worse part.",
+                }
+            ],
+            "additions": [{"summary": "A better addition.", "effect": "more_protective"}],
+        }
+    return {
+        "parts": [
+            {"part_id": pid, "status": "present", "relation": label, "reason": "Part reason."}
+        ],
+        "additions": [],
+    }
+
+
+def _verdict(
+    label: str, reason: str, basis: str = "agent", part_id: str | None = None
+) -> dict[str, Any]:
+    """A draft verdict as ``judge-apply --verdicts`` stores it (derived label included)."""
+    from playbook_engine.equivalence import validate_draft_verdict
+
+    return validate_draft_verdict({**_parts_for(label, part_id), "reason": reason, "basis": basis})
+
+
+def _vs_object(label: str, reason: str, *, check: Any = None) -> dict[str, Any]:
+    """The ``vs_standard`` object a stored *label* verdict projects to."""
+    return {**_verdict(label, reason), "check": check}
+
+
+def _check(
+    agreed: bool,
+    *,
+    adjudicated: bool = False,
+    label_agreed: bool | None = None,
+    parts_agreed: bool | None = None,
+) -> dict[str, Any]:
+    return {
+        "agreed": agreed,
+        "label_agreed": agreed if label_agreed is None else label_agreed,
+        "parts_agreed": agreed if parts_agreed is None else parts_agreed,
+        "by": CHECKER_MODEL,
+        "adjudicated": adjudicated,
+    }
+
+
 def _invoke(args: list[str]) -> CliResult:
     return CliRunner().invoke(cli, args)
 
@@ -189,25 +259,27 @@ def _two_paper_playbook(judge: StoreBackedEquivalenceJudge | None = None) -> dic
 
 
 def test_key_is_over_the_five_fields_and_ignores_everything_else() -> None:
-    key = equivalence_key("nda", "survival_period", _PARTY, _SIGNED_VARIANT, _STANDARD)
-    assert key == equivalence_key("nda", "survival_period", _PARTY, _SIGNED_VARIANT, _STANDARD)
+    key = equivalence_key("nda", "survival_period", _PARTY, _SIGNED_VARIANT, [_STANDARD])
+    assert key == equivalence_key("nda", "survival_period", _PARTY, _SIGNED_VARIANT, [_STANDARD])
     # Whitespace, case and punctuation are not part of the text identity.
     assert key == equivalence_key(
         "nda",
         "survival_period",
         _PARTY,
         "  EACH party shall keep the other party's information confidential, for five years  ",
-        _STANDARD,
+        [_STANDARD],
     )
     # Our party's name is neutralized, a counterparty alias too.
     assert equivalence_key(
-        "nda", "survival_period", _PARTY, f"{_PARTY} shall pay Counterparty-7.", _STANDARD
+        "nda", "survival_period", _PARTY, f"{_PARTY} shall pay Counterparty-7.", [_STANDARD]
     ) == equivalence_key(
-        "nda", "survival_period", _PARTY, f"{_PARTY} shall pay Counterparty-12.", _STANDARD
+        "nda", "survival_period", _PARTY, f"{_PARTY} shall pay Counterparty-12.", [_STANDARD]
     )
     # Each of the five fields moves it.
-    base = ("nda", "survival_period", _PARTY, _SIGNED_VARIANT, _STANDARD)
-    for i, other in enumerate(("other", "other", "Other Corp", "A different text.", "Other std.")):
+    base = ("nda", "survival_period", _PARTY, _SIGNED_VARIANT, [_STANDARD])
+    for i, other in enumerate(
+        ("other", "other", "Other Corp", "A different text.", ["Other std."])
+    ):
         args = list(base)
         args[i] = other
         assert equivalence_key(*args) != key, i  # type: ignore[arg-type]
@@ -237,10 +309,7 @@ def test_same_text_in_two_deals_on_both_paper_sides_is_one_subject_and_one_verdi
     queued = [json.loads(line) for line in pending._queue_path.read_text().splitlines()]
     assert len(queued) == 1 and queued[0]["kind"] == "equivalence"
 
-    store.put_by_key(
-        subjects[0].key,
-        {"label": "more_protective", "reason": "Five years instead of three.", "basis": "agent"},
-    )
+    store.put_by_key(subjects[0].key, _verdict("more_protective", "Five years instead of three."))
     labelled = _two_paper_playbook(StoreBackedEquivalenceJudge(store=store))
     by_deal = {p["document_id"]: p for p in labelled["evidence"]["precedent"]}
     assert (
@@ -263,7 +332,7 @@ def test_a_standard_true_text_is_never_queued_and_stays_null() -> None:
     assert by_deal["deal_a"]["signed_text"]["vs_standard"] is None
     keys = {s.key for s in collect_subjects(playbook["evidence"], "test-agreement", _PARTY)}
     standard_key = equivalence_key(
-        "test-agreement", "survival_period", _PARTY, _STANDARD, _STANDARD
+        "test-agreement", "survival_period", _PARTY, _STANDARD, [_STANDARD]
     )
     assert standard_key not in keys
 
@@ -376,22 +445,15 @@ def test_an_unjudged_text_is_null_not_guessed(tmp_path: Path) -> None:
 
 def test_an_unchecked_draft_still_reaches_the_playbook_with_check_null(tmp_path: Path) -> None:
     store = VerdictStore(tmp_path / "judge" / "verdicts.jsonl")
-    key = equivalence_key("test-agreement", "survival_period", _PARTY, _SIGNED_VARIANT, _STANDARD)
-    store.put_by_key(
-        key, {"label": "more_protective", "reason": "Longer survival.", "basis": "agent"}
-    )
+    key = equivalence_key("test-agreement", "survival_period", _PARTY, _SIGNED_VARIANT, [_STANDARD])
+    store.put_by_key(key, _verdict("more_protective", "Longer survival."))
     playbook = _two_paper_playbook(StoreBackedEquivalenceJudge(store=store))
     vs = next(
         p["signed_text"]["vs_standard"]
         for p in playbook["evidence"]["precedent"]
         if p["document_id"] == "deal_b"
     )
-    assert vs == {
-        "label": "more_protective",
-        "reason": "Longer survival.",
-        "basis": "agent",
-        "check": None,
-    }
+    assert vs == _vs_object("more_protective", "Longer survival.")
     totals = summarize(playbook["evidence"], "test-agreement", _PARTY)["totals"]
     assert (totals["drafted"], totals["checked"], totals["unchecked"]) == (1, 0, 1)
 
@@ -404,7 +466,7 @@ def test_a_stale_rubric_requeues_instead_of_replaying(tmp_path: Path) -> None:
 
     store.put_by_key(
         subject.key,
-        {"label": "equivalent", "reason": "Same.", "basis": "agent"},
+        _verdict("equivalent", "Same."),
         rubric=RubricStamp(kind="equivalence", version="v0+stale"),
     )
     pending = PendingQueue(tmp_path / "pending.jsonl")
@@ -422,17 +484,19 @@ def test_a_stale_rubric_requeues_instead_of_replaying(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_draft_verdict_needs_label_reason_and_basis_and_nothing_else() -> None:
-    good = {"label": "equivalent", "reason": "Same effect.", "basis": "agent"}
+def test_a_draft_verdict_needs_parts_additions_reason_and_basis_and_nothing_else() -> None:
+    good = {**_parts_for("equivalent"), "reason": "Same effect.", "basis": "agent"}
     validate_verdict("equivalence", good)
     assert infer_verdict_kind(good) == "equivalence"
     for bad in (
         {**good, "label": "better"},
+        {**good, "label": "less_protective"},  # not what the parts derive
         {**good, "reason": "  "},
-        {"label": "equivalent", "reason": "x"},  # basis missing
+        {k: v for k, v in good.items() if k != "basis"},
         {**good, "basis": "needs_review"},
         {**good, "basis": "guess"},
         {**good, "check": {"agreed": True, "by": "x", "adjudicated": False}},
+        {"label": "equivalent", "reason": "x", "basis": "agent"},  # the retired flat shape
     ):
         with pytest.raises(ValueError):
             validate_verdict("equivalence", bad)
@@ -447,17 +511,15 @@ def _drafted_store(tmp_path: Path) -> tuple[VerdictStore, Any]:
     store = VerdictStore(tmp_path / "judge" / "verdicts.jsonl")
     playbook = _two_paper_playbook()
     (subject,) = collect_subjects(playbook["evidence"], "test-agreement", _PARTY)
-    store.put_by_key(
-        subject.key,
-        {"label": "more_protective", "reason": "DRAFT-REASON-SENTINEL", "basis": "agent"},
-    )
+    store.put_by_key(subject.key, _verdict("more_protective", "DRAFT-REASON-SENTINEL"))
     return store, subject
 
 
-def _answer(key: str, label: str, reason: str = "Checker reason.", **over: str) -> dict[str, str]:
+def _answer(key: str, label: str, reason: str = "Checker reason.", **over: str) -> dict[str, Any]:
+    """A ``judge-apply --check`` record whose parts derive *label*."""
     return {
         "key": key,
-        "label": label,
+        **_parts_for(label),
         "reason": reason,
         "model": CHECKER_MODEL,
         "effort": CHECKER_EFFORT,
@@ -474,7 +536,9 @@ def test_a_check_item_never_contains_the_drafted_label_or_reason(tmp_path: Path)
     blob = json.dumps(item)
     assert "DRAFT-REASON-SENTINEL" not in blob
     assert "more_protective" not in blob
-    assert not {"label", "reason", "basis", "draft", "check"} & set(item["payload"])
+    assert not {"label", "reason", "parts", "additions", "basis", "draft", "check"} & set(
+        item["payload"]
+    )
 
 
 def test_check_records_with_the_wrong_model_or_effort_are_rejected_unless_overridden(
@@ -493,7 +557,7 @@ def test_check_records_with_the_wrong_model_or_effort_are_rejected_unless_overri
         allow_checker_model=True,
     )
     ((_key, verdict),) = result.updates
-    assert verdict["check"] == {"agreed": True, "by": "other-model", "adjudicated": False}
+    assert verdict["check"] == {**_check(True), "by": "other-model"}
     assert store.get_by_key(subject.key)["reason"] == "DRAFT-REASON-SENTINEL"  # store untouched
 
 
@@ -503,7 +567,7 @@ def test_agreement_keeps_the_verdict_and_records_who_checked(tmp_path: Path) -> 
     assert (result.agreed, result.disagreed) == (1, 0)
     ((_k, verdict),) = result.updates
     assert verdict["label"] == "more_protective" and verdict["reason"] == "DRAFT-REASON-SENTINEL"
-    assert verdict["check"] == {"agreed": True, "by": CHECKER_MODEL, "adjudicated": False}
+    assert verdict["check"] == _check(True)
 
 
 def test_a_disagreement_produces_an_adjudication_item_and_its_answer_becomes_the_verdict(
@@ -517,14 +581,23 @@ def test_a_disagreement_produces_an_adjudication_item_and_its_answer_becomes_the
     # The draft still flows through, flagged as disputed.
     disputed = store.get_by_key(subject.key)
     assert disputed["label"] == "more_protective"
-    assert disputed["check"] == {"agreed": False, "by": CHECKER_MODEL, "adjudicated": False}
+    assert disputed["check"] == _check(False)
 
     queues = build_check_queues(store, [subject])
     assert queues.check == [] and len(queues.adjudication) == 1
     payload = queues.adjudication[0]["payload"]
-    assert payload["draft"] == {"label": "more_protective", "reason": "DRAFT-REASON-SENTINEL"}
-    assert payload["check"] == {"label": "equivalent", "reason": "CHECK-REASON"}
-    assert payload["our_standard"] == _STANDARD and payload["candidate"] == _SIGNED_VARIANT
+    assert payload["draft"] == {
+        "label": "more_protective",
+        "reason": "DRAFT-REASON-SENTINEL",
+        **_parts_for("more_protective"),
+    }
+    assert payload["check"] == {
+        "label": "equivalent",
+        "reason": "CHECK-REASON",
+        **_parts_for("equivalent"),
+    }
+    assert payload["our_standard_parts"] == [{"n": 1, "part_id": _part_id(), "text": _STANDARD}]
+    assert payload["candidate"] == _SIGNED_VARIANT
 
     second = apply_check_records(
         store, [(1, _answer(subject.key, "less_protective", "ADJUDICATION-REASON"))]
@@ -534,7 +607,7 @@ def test_a_disagreement_produces_an_adjudication_item_and_its_answer_becomes_the
         store.put_by_key(key, verdict)
     final = store.get_by_key(subject.key)
     assert (final["label"], final["reason"]) == ("less_protective", "ADJUDICATION-REASON")
-    assert final["check"] == {"agreed": False, "by": CHECKER_MODEL, "adjudicated": True}
+    assert final["check"] == _check(False, adjudicated=True)
     assert build_check_queues(store, [subject]).settled == 1
     # The draft and the checker's answer stay in the trail.
     assert final["draft"]["label"] == "more_protective"
@@ -546,9 +619,7 @@ def test_a_disagreement_produces_an_adjudication_item_and_its_answer_becomes_the
 
 def test_an_owner_correction_wins_and_is_never_checked(tmp_path: Path) -> None:
     store, subject = _drafted_store(tmp_path)
-    store.put_by_key(
-        subject.key, {"label": "equivalent", "reason": "Owner view.", "basis": "owner"}
-    )
+    store.put_by_key(subject.key, _verdict("equivalent", "Owner view.", basis="owner"))
     assert build_check_queues(store, [subject]).check == []
     result = apply_check_records(store, [(1, _answer(subject.key, "less_protective"))])
     assert result.skipped_owner == 1 and result.updates == []
@@ -583,11 +654,7 @@ def test_a_key_repeated_in_one_check_file_is_rejected_and_nothing_is_written(
     assert "line 2" in result.output and "already answered on line 1" in result.output
     assert verdicts_path.read_bytes() == before  # nothing written to the store
     stored = VerdictStore(verdicts_path).get_by_key(subject.key)
-    assert stored == {
-        "label": "more_protective",
-        "reason": "DRAFT-REASON-SENTINEL",
-        "basis": "agent",
-    }
+    assert stored == _verdict("more_protective", "DRAFT-REASON-SENTINEL")
     # The check alone still applies, and leaves the dispute for the adjudication queue.
     first = apply_check_records(store, records[:1])
     assert (first.disagreed, first.adjudicated) == (1, 0)
@@ -595,7 +662,7 @@ def test_a_key_repeated_in_one_check_file_is_rejected_and_nothing_is_written(
 
 def test_check_file_parsing_names_the_bad_line(tmp_path: Path) -> None:
     path = tmp_path / "check.jsonl"
-    path.write_text(json.dumps({"key": "k", "label": "equivalent"}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({"key": "k", "reason": "x"}) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="line 1.*missing"):
         load_check_records(path)
 
@@ -636,7 +703,23 @@ def _message(text: str, *, stop_reason: str = "end_turn", model: str = CHECKER_M
 
 
 def test_api_path_uses_the_pinned_settings_and_records_the_model_it_ran_on() -> None:
-    answer = json.dumps({"label": "equivalent", "reason": "Same effect."})
+    answer = json.dumps(
+        {
+            "parts": [
+                {"part_id": "p1", "status": "present", "direction": "equivalent", "reason": "x"},
+                {"part_id": "p2", "status": "omitted", "direction": "equivalent", "reason": ""},
+            ],
+            "additions": [],
+            "reason": "Same effect.",
+        }
+    )
+    payload = {
+        "candidate": "a",
+        "our_standard_parts": [
+            {"n": 1, "part_id": "p1", "text": "One."},
+            {"n": 2, "part_id": "p2", "text": "Two."},
+        ],
+    }
     results = [
         SimpleNamespace(custom_id="k1", result=_message(answer, model="claude-opus-5-5")),
         SimpleNamespace(
@@ -646,15 +729,21 @@ def test_api_path_uses_the_pinned_settings_and_records_the_model_it_ran_on() -> 
     batches = _FakeBatches(results)
     client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
     items = [
-        {"key": "k1", "kind": "equivalence_check", "payload": {"candidate": "a"}},
+        {"key": "k1", "kind": "equivalence_check", "payload": payload},
         {"key": "k2", "kind": "equivalence_check", "payload": {"candidate": "b"}},
         {"key": "k3", "kind": "equivalence_check", "payload": {"candidate": "c"}},
     ]
     records, unchecked = check_via_api(items, client=client, poll_interval_s=0)
+    # One direction per part maps onto the judgment shape: an equivalent
+    # omission reads as neutral, and a reason on an equivalent part is dropped.
     assert records == [
         {
             "key": "k1",
-            "label": "equivalent",
+            "parts": [
+                {"part_id": "p1", "status": "present", "relation": "equivalent"},
+                {"part_id": "p2", "status": "omitted", "effect": "neutral"},
+            ],
+            "additions": [],
             "reason": "Same effect.",
             "model": "claude-opus-5-5",
             "effort": "xhigh",
@@ -678,8 +767,8 @@ def test_api_path_uses_the_pinned_settings_and_records_the_model_it_ran_on() -> 
 
 def test_validator_rejects_a_label_the_store_never_produced(tmp_path: Path) -> None:
     store = VerdictStore(tmp_path / "judge" / "verdicts.jsonl")
-    key = equivalence_key("test-agreement", "survival_period", _PARTY, _SIGNED_VARIANT, _STANDARD)
-    store.put_by_key(key, {"label": "equivalent", "reason": "Same.", "basis": "agent"})
+    key = equivalence_key("test-agreement", "survival_period", _PARTY, _SIGNED_VARIANT, [_STANDARD])
+    store.put_by_key(key, _verdict("equivalent", "Same."))
     playbook = _two_paper_playbook(StoreBackedEquivalenceJudge(store=store))
     assert validate_document(playbook, verdict_store=store).ok
     assert validate_document(playbook).ok  # no store: the cross-check is skipped
@@ -690,7 +779,7 @@ def test_validator_rejects_a_label_the_store_never_produced(tmp_path: Path) -> N
     assert any("verdict store has no equivalence verdict" in str(e) for e in result.errors)
 
     other = VerdictStore(tmp_path / "other" / "verdicts.jsonl")
-    other.put_by_key(key, {"label": "less_protective", "reason": "x.", "basis": "agent"})
+    other.put_by_key(key, _verdict("less_protective", "x."))
     result = validate_document(playbook, verdict_store=other)
     assert any("differs from the stored verdict" in str(e) for e in result.errors)
 
@@ -698,12 +787,7 @@ def test_validator_rejects_a_label_the_store_never_produced(tmp_path: Path) -> N
 def test_validator_rejects_a_label_on_a_standard_true_text() -> None:
     playbook = _two_paper_playbook()
     record = next(p for p in playbook["evidence"]["precedent"] if p["standard"] is True)
-    record["signed_text"]["vs_standard"] = {
-        "label": "equivalent",
-        "reason": "Identical.",
-        "basis": "agent",
-        "check": None,
-    }
+    record["signed_text"]["vs_standard"] = _vs_object("equivalent", "Identical.")
     result = validate_document(_rehash(playbook))
     assert any("standard fact is true" in str(e) for e in result.errors)
 
@@ -712,12 +796,7 @@ def test_validator_rejects_a_label_on_a_clause_with_no_our_standard() -> None:
     observations = [_obs("deal_b", _SIGNED_VARIANT)]
     playbook = _assemble(observations, [_doc("deal_b", "our_paper")], template=False)
     record = playbook["evidence"]["precedent"][0]
-    record["signed_text"]["vs_standard"] = {
-        "label": "equivalent",
-        "reason": "x.",
-        "basis": "agent",
-        "check": None,
-    }
+    record["signed_text"]["vs_standard"] = _vs_object("equivalent", "x.")
     result = validate_document(_rehash(playbook))
     assert any("no our_standard" in str(e) for e in result.errors)
 
@@ -726,16 +805,15 @@ def test_validator_rejects_an_adjudicated_check_that_agreed() -> None:
     """OPF-SPEC §3.5.6: ``check.adjudicated`` true implies ``check.agreed`` false."""
     playbook = _two_paper_playbook()
     record = next(p for p in playbook["evidence"]["precedent"] if p["document_id"] == "deal_b")
-    vs: dict[str, Any] = {
-        "label": "less_protective",
-        "reason": "Shorter protection than our standard.",
-        "basis": "agent",
-        "check": {"agreed": False, "by": CHECKER_MODEL, "adjudicated": True},
-    }
+    vs: dict[str, Any] = _vs_object(
+        "less_protective",
+        "Shorter protection than our standard.",
+        check=_check(False, adjudicated=True),
+    )
     record["signed_text"]["vs_standard"] = vs
     assert validate_document(_rehash(playbook)).ok  # the legal adjudicated shape
 
-    vs["check"] = {"agreed": True, "by": CHECKER_MODEL, "adjudicated": True}
+    vs["check"] = _check(True, adjudicated=True)
     result = validate_document(_rehash(playbook))
     assert not result.ok
     assert any(
@@ -778,7 +856,7 @@ def _non_equivalence_canned() -> list[str]:
     return [
         line
         for line in _CANNED.read_text(encoding="utf-8").splitlines()
-        if line.strip() and "label" not in json.loads(line)["verdict"]
+        if line.strip() and "parts" not in json.loads(line)["verdict"]
     ]
 
 
@@ -819,7 +897,11 @@ def _draft(out_dir: Path, items: list[dict[str, Any]], *, label: str = "less_pro
         json.dumps(
             {
                 "key": item["key"],
-                "verdict": {"label": label, "reason": f"DRAFT-{i}", "basis": "agent"},
+                "verdict": {
+                    **_item_parts(item, label),
+                    "reason": f"DRAFT-{i}",
+                    "basis": "agent",
+                },
             }
         )
         for i, item in enumerate(items)
@@ -828,6 +910,15 @@ def _draft(out_dir: Path, items: list[dict[str, Any]], *, label: str = "less_pro
     result = _invoke(["judge-apply", str(out_dir), "--verdicts", str(path)])
     assert result.exit_code == 0, result.output
     return path
+
+
+def _item_parts(item: dict[str, Any], label: str) -> dict[str, Any]:
+    """``{parts, additions}`` deriving *label* over every part an item asks about:
+    the label's judgment on the first part, the others equivalent."""
+    pids = [p["part_id"] for p in item["payload"]["our_standard_parts"]]
+    first = _parts_for(label, pids[0])
+    rest = [{"part_id": pid, "status": "present", "relation": "equivalent"} for pid in pids[1:]]
+    return {"parts": first["parts"] + rest, "additions": first["additions"]}
 
 
 def test_judge_queues_one_equivalence_item_per_distinct_text(judged_nda: Path) -> None:
@@ -841,14 +932,14 @@ def test_judge_queues_one_equivalence_item_per_distinct_text(judged_nda: Path) -
         "taxonomy_id",
         "taxonomy_title",
         "perspective_party",
-        "our_standard",
+        "our_standard_parts",
         "candidate",
         "roles",
     }
     for item in items:
         assert set(item["payload"]) == expected_keys
         assert item["rubric_version"] == rubric_version("equivalence")
-        assert item["payload"]["candidate"] != item["payload"]["our_standard"]
+        assert item["payload"]["our_standard_parts"]
     # The example's document ids never reach a judge. (Its candidate texts can
     # still carry party names; this checks the document-id slugs only.)
     blob = json.dumps(items)
@@ -931,7 +1022,7 @@ def test_draft_check_adjudicate_project_end_to_end(judged_nda: Path, tmp_path: P
             json.dumps(
                 {
                     "key": item["key"],
-                    "label": "less_protective" if n == 0 else "equivalent",
+                    **_item_parts(item, "less_protective" if n == 0 else "equivalent"),
                     "reason": f"CHECK-{n}",
                     "model": CHECKER_MODEL,
                     "effort": CHECKER_EFFORT,
@@ -964,7 +1055,7 @@ def test_draft_check_adjudicate_project_end_to_end(judged_nda: Path, tmp_path: P
         json.dumps(
             {
                 "key": adjudication[0]["key"],
-                "label": "more_protective",
+                **_item_parts(adjudication[0], "more_protective"),
                 "reason": "ADJUDICATED",
                 "model": CHECKER_MODEL,
                 "effort": CHECKER_EFFORT,
@@ -982,17 +1073,9 @@ def test_draft_check_adjudicate_project_end_to_end(judged_nda: Path, tmp_path: P
         for s in iter_slots(playbook["evidence"])
         if s.entry["vs_standard"]
     }
-    assert by_reason["DRAFT-0"]["check"] == {
-        "agreed": True,
-        "by": CHECKER_MODEL,
-        "adjudicated": False,
-    }
+    assert by_reason["DRAFT-0"]["check"] == _check(True)
     assert by_reason["ADJUDICATED"]["label"] == "more_protective"
-    assert by_reason["ADJUDICATED"]["check"] == {
-        "agreed": False,
-        "by": CHECKER_MODEL,
-        "adjudicated": True,
-    }
+    assert by_reason["ADJUDICATED"]["check"] == _check(False, adjudicated=True)
     assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0
 
     # Scorecard (counts only): drafted / checked / agreed / adjudicated / unchecked by role.
@@ -1015,7 +1098,7 @@ def test_judge_apply_check_rejects_the_wrong_checker_unless_overridden(
     _draft(out_dir, items[:1])
     record = {
         "key": items[0]["key"],
-        "label": "less_protective",
+        **_item_parts(items[0], "less_protective"),
         "reason": "Checked.",
         "model": "claude-haiku-5-5",
         "effort": "xhigh",
@@ -1079,7 +1162,7 @@ def test_label_evidence_only_writes_labels_for_eligible_texts() -> None:
     playbook = _two_paper_playbook()
     evidence = json.loads(json.dumps(playbook["evidence"]))
     (subject,) = collect_subjects(evidence, "test-agreement", _PARTY)
-    vs = {"label": "equivalent", "reason": "x.", "basis": "agent", "check": None}
+    vs = _vs_object("equivalent", "x.")
     label_evidence(evidence, "test-agreement", _PARTY, {subject.key: vs})
     got = {p["document_id"]: p["signed_text"]["vs_standard"] for p in evidence["precedent"]}
     assert got == {"deal_a": None, "deal_b": vs, "deal_c": vs}

@@ -435,13 +435,19 @@ def restamp_evidence(
     Each precedent's ``id`` (:func:`precedent_id`) and each clause's
     ``n_*`` counts (:func:`clause_counts`, grouping by
     :func:`normalize_variant_text` with *party* — the document's
-    ``perspective.party``) are functions of the texts they describe. The
+    ``perspective.party``) and each standard part's ``part_id``
+    (``equivalence.stamp_standard_parts``, issue #243) are functions of the
+    texts they describe. The
     assembler strips zero-width/bidi-control characters from the whole
     document after building it, so it calls this again afterwards — the ids
     and counts a validator recomputes over the shipped text must be the ones
     the document carries.
     """
+    from playbook_engine.equivalence import stamp_standard_parts  # noqa: PLC0415
+
     precedent = evidence["precedent"]
+    for clause in evidence["clauses"]:
+        stamp_standard_parts(clause.get("our_standard"), party)
     for record in precedent:
         signed_text = record.get("signed_text")
         new_id = precedent_id(
