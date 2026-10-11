@@ -55,6 +55,15 @@ from playbook_engine.digest import (
     clause_precedent_groups_with_members,
     playbook_precedent_records,
 )
+from playbook_engine.equivalence import (
+    LABELS,
+    STANDARD_PART_SEPARATOR,
+    addition_map,
+    label_by,
+    label_reason,
+    part_map,
+    standard_parts,
+)
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 
 #: A dossier's budget is never below this many tokens (chars/4 of its
@@ -313,13 +322,17 @@ def select_excerpts(
 ) -> list[dict[str, Any]]:
     """The at most :data:`MAX_EXCERPTS` precedent excerpts of one clause, in order.
 
-    Each excerpt is ``{precedent_id, kind, opening, signed, outcome}`` over ONE
-    precedent record, verbatim and never re-summarised: ``opening`` is the
-    record's ``opening_text`` and ``signed`` its ``signed_text`` (``null``
-    when struck before signing, outcome ``struck_before_signing``); a record
-    without an ``opening_text`` is its signed text alone (``opening`` null). A
-    refused-ask excerpt carries the ask as ``opening`` and what the deal
-    signed instead as ``signed`` (outcome ``ask_refused``).
+    Each excerpt is ``{precedent_id, kind, opening, signed, outcome,
+    vs_standard}`` over ONE precedent record, verbatim and never
+    re-summarised: ``opening`` is the record's ``opening_text`` and ``signed``
+    its ``signed_text`` (``null`` when struck before signing, outcome
+    ``struck_before_signing``); a record without an ``opening_text`` is its
+    signed text alone (``opening`` null). A refused-ask excerpt carries the
+    ask as ``opening`` and what the deal signed instead as ``signed`` (outcome
+    ``ask_refused``). ``vs_standard`` is the judgment of the text the
+    excerpt's group stands for — the signed text of a signed variant, the
+    opening of a changed opening, the ask of a refused ask — with its part
+    map and part reasons (:func:`excerpt_vs_standard`, issue #243).
 
     Candidates, in this order (digest 4's group order, ``digest.py``), each
     contributing ONE record of its group, skipping a group or a record
@@ -386,19 +399,54 @@ def _text_of(ref: Any) -> str | None:
     return text if isinstance(text, str) else None
 
 
+def excerpt_vs_standard(entry: Any) -> dict[str, Any] | None:
+    """The judgment of an excerpt's text as a dossier carries it (issue #243).
+
+    ``{label, label_by, reason, part_map, part_reasons: [{part_id, reason}],
+    additions: [{effect, summary}]}`` — the digest's compact part map, who set
+    the label and its reason (the owner's when the owner overrode the derived
+    label, as in the digest) plus what the digest leaves out: the one-sentence
+    reason of every part that is not equivalent (or an omission that is not
+    neutral) and the summary of every addition, each with its token. ``None``
+    when the text is not judged.
+    """
+    vs = entry.get("vs_standard") if isinstance(entry, dict) else None
+    if not isinstance(vs, dict) or vs.get("label") not in LABELS:
+        return None
+    return {
+        "label": vs["label"],
+        "label_by": label_by(vs),
+        "reason": label_reason(vs),
+        "part_map": part_map(vs),
+        "part_reasons": [
+            {"part_id": p.get("part_id"), "reason": p["reason"]}
+            for p in vs.get("parts") or []
+            if isinstance(p, dict) and isinstance(p.get("reason"), str)
+        ],
+        "additions": [
+            {"effect": token, "summary": a.get("summary")}
+            for a, token in zip(vs.get("additions") or [], addition_map(vs), strict=False)
+            if isinstance(a, dict)
+        ],
+    }
+
+
 def _excerpt(kind: str, record: dict[str, Any], ask: Any) -> dict[str, Any]:
     signed = _text_of(record.get("signed_text"))
     if kind == KIND_REFUSED_ASK:
         opening, outcome = _text_of(ask), OUTCOME_ASK_REFUSED
+        judged = ask
     else:
         opening = _text_of(record.get("opening_text"))
         outcome = OUTCOME_SIGNED if signed is not None else OUTCOME_STRUCK
+        judged = record.get("signed_text" if kind == KIND_SIGNED_VARIANT else "opening_text")
     return {
         "precedent_id": str(record.get("id")),
         "kind": kind,
         "opening": opening,
         "signed": signed,
         "outcome": outcome,
+        "vs_standard": excerpt_vs_standard(judged),
     }
 
 
@@ -426,6 +474,19 @@ def dossier_budget(standard_text: Any) -> int:
     if not isinstance(standard_text, str):
         return DOSSIER_MIN_BUDGET
     return max(DOSSIER_MIN_BUDGET, DOSSIER_STANDARD_MULTIPLE * (len(standard_text) // 4))
+
+
+def dossier_standard_text(dossier: Any) -> str | None:
+    """Our standard's text as a dossier carries it: its parts joined in order
+    (``None`` when the dossier has no standard). Equals the clause's
+    ``our_standard.text``, so it gives the same :func:`dossier_budget`."""
+    standard = dossier.get("our_standard") if isinstance(dossier, dict) else None
+    parts = standard.get("parts") if isinstance(standard, dict) else None
+    if not isinstance(parts, list):
+        return None
+    return STANDARD_PART_SEPARATOR.join(
+        str(p.get("text", "")) for p in parts if isinstance(p, dict)
+    )
 
 
 def clause_standard_text(clause: dict[str, Any]) -> str | None:
@@ -458,7 +519,16 @@ def _dossier_of(
         "clause_id": clause.get("id"),
         "taxonomy_id": clause.get("taxonomy_id"),
         "title": clause.get("title"),
-        "our_standard": {"text": standard_text} if standard_text is not None else None,
+        "our_standard": (
+            {
+                "parts": [
+                    {"part_id": p.get("part_id"), "text": p.get("text")}
+                    for p in standard_parts(clause)
+                ]
+            }
+            if standard_text is not None
+            else None
+        ),
         "n_floor_rules": n_rules,
         "floor_rules": floor_rules,
         "excerpts": list(excerpts),
@@ -476,7 +546,7 @@ def build_dossier(
 ) -> dict[str, Any]:
     """The critic dossier of one ``evidence.clauses[]`` entry.
 
-    ``{clause_id, taxonomy_id, title, our_standard: {text}|null, n_floor_rules,
+    ``{clause_id, taxonomy_id, title, our_standard: {parts}|null, n_floor_rules,
     floor_rules: [{rule_id, statement, rationale?}], excerpts, n_omitted,
     omitted_precedent_ids}``. The rationale is the signed Floor's own words for
     this clause (its ``x_taxonomy_id`` invariants, at most

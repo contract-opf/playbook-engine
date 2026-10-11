@@ -148,21 +148,34 @@ playbook view bundle ./out      # ./out/index.html: the playbook and an optional
 ```
 
 With a template, each distinct non-standard text a deal signed, opened with
-or had refused also carries a `vs_standard` label: *equivalent* to our
-standard, *more protective*, *less protective* or a *different concept*,
-judged once per text against your standard (never per deal or per side of
-the table), with a one-sentence reason. It lets "the same concept phrased
-five ways" read as one thing instead of five. An independent model
-(`claude-opus-5-5` at `xhigh` effort) checks every drafted label blind and
+or had refused also carries a `vs_standard` judgment, made PART BY PART: your
+standard for a clause type is its template passages in order, and for each
+one the judgment says whether the text keeps it (with the same effect, or
+more or less protective) or leaves it out (and whether that helps, hurts or
+does not matter), plus what the text adds. The label follows from that:
+*equivalent* to our standard, *more protective*, *less protective*, *mixed*
+(better in one part, worse in another) or a *different concept* (none of
+your passages kept). It is judged once per text against your standard
+(never per deal or per side of the table), with a one-sentence reason, and
+the consuming model is shown a compact part map, so it does not redo the
+comparison on every review. It lets "the same concept phrased five ways"
+read as one thing instead of five. An independent model (`claude-opus-5-5`
+at `xhigh` effort) checks every drafted judgment blind, label and parts, and
 settles disagreements; nothing waits for you. Start from the labels that
-matter: `less_protective` and `different_concept`. The Review tab of
-`index.html` lists exactly the labels the consuming model is shown, worst
-first, each with Confirm / Change label / a note; it is optional and nothing
-waits on it. **Connect folder** (Chrome, Edge) saves your edits straight to
+matter: `less_protective` and `mixed`. The Review tab of `index.html` lists
+exactly the judgments the consuming model is shown, worst first, each with
+its part map, Confirm / Change label / change one part (each change with a
+reason the consuming model reads) / a note; it is
+optional and nothing waits on it. **Connect folder** (Chrome, Edge) saves your edits straight to
 `./out/overrides.json` as you make them; elsewhere **Download edits** gives you
 the same file to drop there. `playbook apply-overrides ./out` (or the next
 `playbook project`, which skips and reports any entry it cannot apply instead of
-stopping) folds it in: the label is re-stamped `"basis": "owner"`,
+stopping) folds it in: a part you changed re-derives the label (with your
+reason when you type one; without one the model's reason, written for the
+old part map, is replaced by a placeholder), a label you
+set is recorded with your reason over the model's parts (the digest and the
+dossiers then mark it `label_by: "owner"` and carry your reason, not the
+model's), and either is re-stamped `"basis": "owner"`,
 your word wins over any agent or check answer, and the digest and
 `content_hash` are recomputed by the engine. `apply-overrides` rejects a malformed file, or an entry for a
 text the playbook no longer carries, with the reason and changes

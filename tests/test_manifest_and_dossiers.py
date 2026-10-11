@@ -28,6 +28,7 @@ from playbook_engine.dossiers import (
     build_manifest,
     build_provenance_index,
     dossier_budget,
+    dossier_standard_text,
     dossier_tokens,
     floor_rule_errors,
     refresh_derived_sections,
@@ -469,6 +470,7 @@ def test_excerpts_are_a_concession_then_a_changed_opening_and_capped_at_two() ->
         "opening": _STD,
         "signed": _V_A,
         "outcome": "signed",
+        "vs_standard": None,  # unjudged (issue #243: a judged one carries its part map)
     }
     # 2: the first changed-openings group, in digest order.
     assert second["kind"] == "changed_opening"
@@ -587,6 +589,7 @@ def test_a_concession_excerpt_is_the_concession_in_a_mixed_group() -> None:
             "opening": _STD,
             "signed": _V_A,
             "outcome": "signed",
+            "vs_standard": None,
         }
     ]
 
@@ -723,7 +726,7 @@ def test_a_single_excerpt_over_the_budget_is_kept_whole() -> None:
     (excerpt,) = dossier["excerpts"]
     assert excerpt["signed"] == huge
     assert excerpt["opening"] == _record(pb, "d1")["opening_text"]["text"]
-    assert dossier_tokens(dossier) > dossier_budget(dossier["our_standard"]["text"])
+    assert dossier_tokens(dossier) > dossier_budget(dossier_standard_text(dossier))
     assert (dossier["n_omitted"], dossier["omitted_precedent_ids"]) == (0, [])
     # Still over budget with its one excerpt, so every listed Floor rule is dropped
     # whole (n_floor_rules counts all six); the manifest states each verbatim.
@@ -755,8 +758,8 @@ def test_the_budget_scales_with_our_standard() -> None:
     assert len(short_d["excerpts"]) == 1 and short_d["n_omitted"] == 1
     assert len(scaled_d["excerpts"]) == 2 and scaled_d["n_omitted"] == 0
     assert dossier_tokens(scaled_d) > DOSSIER_MIN_BUDGET
-    assert dossier_tokens(scaled_d) <= dossier_budget(scaled_d["our_standard"]["text"])
-    assert scaled_d["our_standard"]["text"] == big_std
+    assert dossier_tokens(scaled_d) <= dossier_budget(dossier_standard_text(scaled_d))
+    assert dossier_standard_text(scaled_d) == big_std
     assert validate_document(scaled).ok
 
 
@@ -809,7 +812,7 @@ def test_long_statement_derived_rule_ids_are_listed_whole(
         zip(ids, statements, strict=True)
     )[: len(listed)]
     assert len(dossier["excerpts"]) == 2 and dossier["n_omitted"] == 0
-    assert dossier_tokens(dossier) <= dossier_budget(dossier["our_standard"]["text"])
+    assert dossier_tokens(dossier) <= dossier_budget(dossier_standard_text(dossier))
     assert validate_document(doc).ok, [str(e) for e in validate_document(doc).errors]
     # Re-projecting over the signed Floor succeeds and reproduces the sections.
     again = _playbook(rows, signed=signed, floor=doc["floor"])
@@ -842,7 +845,7 @@ def test_long_floor_rules_are_dropped_whole_from_a_dossier_with_no_excerpt(
     assert dossier["excerpts"] == [] and dossier["n_omitted"] == 0
     assert dossier["n_floor_rules"] == 3
     assert [r["statement"] for r in dossier["floor_rules"]] == statements[:2]
-    budget = dossier_budget(dossier["our_standard"]["text"])
+    budget = dossier_budget(dossier_standard_text(dossier))
     assert dossier_tokens(dossier) <= budget
     # With all three rules listed it would be over budget.
     all_listed = copy.deepcopy(dossier)
@@ -1356,7 +1359,7 @@ def test_nda_example_manifest_and_dossiers() -> None:
     assert len(doc["dossiers"]) == 26
     for clause_id, dossier in doc["dossiers"].items():
         assert (
-            dossier_tokens(dossier) <= dossier_budget((dossier["our_standard"] or {}).get("text"))
+            dossier_tokens(dossier) <= dossier_budget(dossier_standard_text(dossier))
             or len(dossier["excerpts"]) <= 1
         ), clause_id
         assert dossier["n_omitted"] == len(dossier["omitted_precedent_ids"])

@@ -16,6 +16,11 @@ File format (``overrides_version`` 1, the one and only version)::
         {"target": "vs_standard", "id": "<64-hex cache key>",
          "value": {"label": "less_protective", "reason": "<optional sentence>"},
          "basis": "owner", "note": "<optional>"},
+        {"target": "vs_standard", "id": "<64-hex cache key>",
+         "value": {"parts": [{"part_id": "<id>", "status": "present",
+                              "relation": "less_protective", "reason": "<optional>"}],
+                   "additions": [...], "reason": "<optional sentence>"},
+         "basis": "owner"},
         {"target": "posture", "id": "system_prompt",
          "value": "<text>", "basis": "owner"},
         {"target": "floor", "id": "<invariant id>", "field": "statement" | "rationale",
@@ -27,8 +32,17 @@ Keys are stable ids: a ``vs_standard`` entry is addressed by the verdict cache
 key of OPF-SPEC §3.5.6 (:func:`playbook_engine.equivalence.equivalence_key`) —
 ONE verdict per distinct text, shared by every precedent record, in every role,
 that carries the text — and a Posture or Floor entry by the field it replaces.
-Every entry carries ``basis: "owner"``. A ``vs_standard`` override re-stamps the
-label ``basis: "owner"`` with no check (the owner's word is final), writes the
+Every entry carries ``basis: "owner"``. A ``vs_standard`` value either sets the
+derived label's INPUTS — ``parts`` (merged by ``part_id`` over the current
+judgment; every part of our standard must end up judged) and optionally
+``additions`` — so the label is re-derived (issue #243), with the owner's
+``reason``; without one, the judgment's reason is kept only while the part map
+and addition tokens it was written for are unchanged, and a fallback replaces
+it otherwise (it explained the old map, and maybe the old label) — or sets the
+``label`` itself: the label the parts already imply confirms the judgment, any
+other label is recorded as ``owner_label`` with its reason, over the model's parts.
+Either way the judgment is re-stamped ``basis: "owner"`` with no check (the
+owner's word is final), and the override writes the
 same owner verdict into the run's verdict store (when the out-dir has one, so a
 re-projection replays it), and — like every override — is folded in by
 ``playbook project`` and, on demand, ``playbook apply-overrides``. The digest,
@@ -58,9 +72,13 @@ from playbook_engine.equivalence import (
     BASIS_OWNER,
     EQUIVALENCE_KIND,
     LABELS,
+    addition_map,
+    canonical_judgment,
     is_eligible,
     iter_slots,
+    part_map,
     slot_key,
+    standard_parts,
 )
 from playbook_engine.opf_accessors import (
     SIDECARS_KEY,
@@ -259,18 +277,10 @@ def parse_overrides(raw: Any) -> list[Override]:
             if fld is not None:
                 problems.append(f"{where}: a vs_standard entry takes no field")
                 ok = False
-            if not isinstance(value, dict) or set(value) - {"label", "reason"}:
-                problems.append(f"{where}: vs_standard value must be an object of label[, reason]")
+            why = _vs_value_problem(value)
+            if why is not None:
+                problems.append(f"{where}: {why}")
                 ok = False
-            else:
-                if value.get("label") not in LABELS:
-                    problems.append(
-                        f"{where}: label must be one of {list(LABELS)}, got {value.get('label')!r}"
-                    )
-                    ok = False
-                if "reason" in value and not _nonempty_str(value["reason"]):
-                    problems.append(f"{where}: reason must be a non-empty sentence when present")
-                    ok = False
         elif target == TARGET_POSTURE:
             if ident != POSTURE_FIELD:
                 problems.append(f'{where}: the only posture field is "{POSTURE_FIELD}"')
@@ -327,14 +337,145 @@ def load_overrides(path: Path) -> list[Override]:
 # ---------------------------------------------------------------------------
 
 
-def _vs_standard_object(entry: Override, current: Mapping[str, Any] | None) -> dict[str, Any]:
-    label = entry.value["label"]
-    reason = entry.value.get("reason")
-    if not reason:
-        same_label = isinstance(current, Mapping) and current.get("label") == label
-        kept = current.get("reason") if isinstance(current, Mapping) else None
-        reason = kept if same_label and _nonempty_str(kept) else _REASON_FALLBACK
-    return {"label": label, "reason": reason, "basis": BASIS_OWNER, "check": None}
+_VS_LABEL_KEYS = frozenset({"label", "reason"})
+_VS_PARTS_KEYS = frozenset({"parts", "additions", "reason"})
+_PARTS_FALLBACK = "Set by the owner."
+
+
+def _vs_value_problem(value: Any) -> str | None:
+    """Why *value* is not a ``vs_standard`` override value, or ``None``.
+
+    ``{label[, reason]}`` or ``{parts[, additions][, reason]}`` (issue #243).
+    A part names its ``part_id`` and ``status`` and a ``relation`` (present)
+    or ``effect`` (omitted); its ``reason`` is optional here (the owner's
+    word needs none).
+    """
+    if not isinstance(value, dict):
+        return "vs_standard value must be an object"
+    if "label" in value:
+        if set(value) - _VS_LABEL_KEYS:
+            return "vs_standard value is {label[, reason]} or {parts[, additions][, reason]}"
+        if value.get("label") not in LABELS:
+            return f"label must be one of {list(LABELS)}, got {value.get('label')!r}"
+    elif "parts" in value:
+        if set(value) - _VS_PARTS_KEYS:
+            return "vs_standard value is {label[, reason]} or {parts[, additions][, reason]}"
+        parts = value.get("parts")
+        if not isinstance(parts, list) or not parts:
+            return "parts must be a non-empty list of {part_id, status, relation|effect}"
+        for i, part in enumerate(parts):
+            try:
+                _owner_part(part, i)
+            except ValueError as exc:
+                return str(exc)
+        additions = value.get("additions")
+        if additions is not None:
+            try:
+                canonical_judgment(
+                    {"parts": [_PLACEHOLDER_PART], "additions": additions, "reason": "x"}
+                )
+            except ValueError as exc:
+                return str(exc)
+    else:
+        return "vs_standard value is {label[, reason]} or {parts[, additions][, reason]}"
+    if "reason" in value and not _nonempty_str(value["reason"]):
+        return "reason must be a non-empty sentence when present"
+    return None
+
+
+_PLACEHOLDER_PART = {"part_id": "p", "status": "present", "relation": "equivalent"}
+
+
+def _owner_part(part: Any, i: int) -> dict[str, Any]:
+    """One owner-set part, in judgment shape (a missing reason filled in)."""
+    if not isinstance(part, dict):
+        raise ValueError(f"parts[{i}] must be an object")
+    filled = dict(part)
+    direction = filled.get("relation", filled.get("effect"))
+    if direction in ("more_protective", "less_protective") and not _nonempty_str(
+        filled.get("reason")
+    ):
+        filled["reason"] = _PARTS_FALLBACK
+    if direction in ("equivalent", "neutral"):
+        filled.pop("reason", None)
+    canonical_judgment({"parts": [filled], "additions": [], "reason": "x"})
+    return filled
+
+
+def _same_map(judgment: Mapping[str, Any], current: Mapping[str, Any] | None) -> bool:
+    """Whether *judgment* has the part map and addition tokens of *current*
+    (the judgment a ``reason`` was written for), so that reason still fits."""
+    if not isinstance(current, Mapping):
+        return False
+    return (part_map(judgment), addition_map(judgment)) == (
+        part_map(current),
+        addition_map(current),
+    )
+
+
+def _vs_standard_object(
+    entry: Override, current: Mapping[str, Any] | None, part_ids: list[str]
+) -> dict[str, Any]:
+    """The owner's ``vs_standard`` for *entry* over the *current* judgment.
+
+    Raises ``ValueError`` when the entry cannot apply: a label for a text
+    nobody has judged (there are no parts to keep), or parts that leave a
+    part of our standard unjudged or name one it does not have.
+    """
+    value = entry.value
+    current_parts = list(current.get("parts") or []) if isinstance(current, Mapping) else []
+    current_adds = list(current.get("additions") or []) if isinstance(current, Mapping) else []
+    current_reason = current.get("reason") if isinstance(current, Mapping) else None
+    if "parts" in value:
+        merged = {p.get("part_id"): dict(p) for p in current_parts}
+        for i, part in enumerate(value["parts"]):
+            owner = _owner_part(part, i)
+            merged[owner["part_id"]] = owner
+        judgment = canonical_judgment(
+            {
+                "parts": list(merged.values()),
+                "additions": value.get("additions", current_adds),
+                "reason": value.get("reason") or _PARTS_FALLBACK,
+            },
+            part_ids,
+        )
+        if not value.get("reason") and _same_map(judgment, current) and current_reason:
+            # The current reason was written for this very part map and these
+            # additions, so it still describes them; a part map the owner
+            # changed (and so, possibly, the derived label) gets the owner's
+            # reason or the fallback — never the reason for the old map.
+            judgment["reason"] = current_reason
+        return {**judgment, "basis": BASIS_OWNER, "check": None}
+    if not current_parts:
+        raise ValueError(
+            "this text has no judgment to set the label of — give its per-part relations "
+            "(value.parts) instead, or judge it first"
+        )
+    judgment = canonical_judgment(
+        {"parts": current_parts, "additions": current_adds, "reason": current_reason}, part_ids
+    )
+    label = value["label"]
+    out: dict[str, Any] = {**judgment, "basis": BASIS_OWNER, "check": None}
+    if label == judgment["label"]:
+        if value.get("reason"):
+            out["reason"] = value["reason"]
+        return out
+    prior = current.get("owner_label") if isinstance(current, Mapping) else None
+    kept = (
+        prior.get("reason") if isinstance(prior, Mapping) and prior.get("label") == label else None
+    )
+    out["owner_label"] = {"label": label, "reason": value.get("reason") or kept or _REASON_FALLBACK}
+    out["label"] = label
+    return out
+
+
+def _stored_verdict(vs: Mapping[str, Any]) -> dict[str, Any]:
+    """The verdict-store record of an owner ``vs_standard``."""
+    out = {k: vs[k] for k in ("parts", "additions", "label", "reason")}
+    out["basis"] = BASIS_OWNER
+    if "owner_label" in vs:
+        out["owner_label"] = dict(vs["owner_label"])
+    return out
 
 
 def apply_overrides(
@@ -382,17 +523,18 @@ def apply_overrides(
                 )
                 continue
             before = slots[0].entry.get("vs_standard")
-            new = _vs_standard_object(entry, before)
+            part_ids = [str(p.get("part_id")) for p in standard_parts(slots[0].clause)]
+            try:
+                new = _vs_standard_object(entry, before, part_ids)
+            except ValueError as exc:
+                problems.append(f"{entry.describe()}: {exc}")
+                continue
             moved = False
             for slot in slots:
                 if slot.entry.get("vs_standard") != new:
-                    slot.entry["vs_standard"] = dict(new)
+                    slot.entry["vs_standard"] = json.loads(json.dumps(new))
                     moved = True
-            result.verdicts[entry.id] = {
-                "label": new["label"],
-                "reason": new["reason"],
-                "basis": BASIS_OWNER,
-            }
+            result.verdicts[entry.id] = _stored_verdict(new)
             if moved:
                 result.changed[TARGET_VS_STANDARD] += 1
             else:

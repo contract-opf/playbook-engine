@@ -24,13 +24,61 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.5.json` | `50de992a5960356a4137e0f09dbc77f3eb4902c5b4dd99a1767c9332b2f20c8b` |
-| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `2718c523458d81cfaccd756bb71a554385bd2e7a47cbaec8b7ffc87d3e1cca3c` |
+| `playbook.schema-0.5.json` | `f09c1b7abc08c14b80f7f2b8d572fd5cf26d9491a0566e27311387af960e6657` |
+| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `79cb9f0b4b01b4dc914258ff530a5a5aa22d1b9bf17dd54e4663a16a796fb308` |
 
 Current `DIGEST_VERSION`: **4** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-10 — OPF 0.5: `vs_standard` part by part, derived label (issue #243)
+
+In-place change to the unfrozen `playbook.schema-0.5.json` (epic #236; 0.5
+has no consumer until contract-opf/contract-toaster#128 vendors it, which
+freezes it; the owner's 2026-10-10 direction is to change the format now when
+that serves the consumer). `digest_version` stays "4"; its shape changes in
+place.
+
+- **`our_standard.parts[]`** (required on a non-null standard): `{part_id,
+  order, text}` per template passage of the clause type, in order; `text` is
+  the parts joined with a blank line. `part_id` is the first 8 hex chars of
+  `sha256` over the part's §3.5.4 grouping key (with `perspective.party`),
+  `-2`, `-3`, ... on a repeat within one standard.
+- **`vsStandardVerdict`**: gains required `parts[]` (each `present` with a
+  `relation` or `omitted` with an `effect`, `reason` only when not
+  equivalent/neutral) and `additions[]` (`{summary, effect}`); `label` gains
+  `mixed` and is DERIVED from the parts and additions (OPF-SPEC §3.5.6);
+  optional `owner_label {label, reason}` (basis `owner` only) overrides it;
+  `check` gains required `label_agreed` and `parts_agreed` (`agreed` is
+  both). The cache key's last field is the ordered list of part grouping
+  keys instead of the joined standard.
+- **New validator MUSTs**: the label equals the derived label (or
+  `owner_label.label`); `parts` judges every standard part exactly once, in
+  order, and names no other; a present part has a relation; `owner_label`
+  needs basis `owner`; `check.agreed` = `label_agreed and parts_agreed`;
+  `our_standard.text` is its parts joined and every `part_id` / `order` is the
+  computed one; with the verdict store, the whole judgment must be the stored
+  one.
+- **Digest 4**: `our_standard` is `{parts: [{part_id, text}], source_ref}`
+  (the joined text is not repeated); top-level `part_map_legend` (the tokens
+  and the `label_by` values); every variant, refused ask and changed opening
+  gains `part_map`, `additions` (tokens) and `reason` (all three null when
+  unjudged), and `label_by: "owner"` only when `owner_label` is set (`reason`
+  is then the owner's; a label derived from the parts, the default the legend
+  states, carries no `label_by`); `positions` gains `mixed`;
+  signed variants order `less_protective` and `mixed` first, then
+  `different_concept`, unjudged, `more_protective`, the collapsed equivalent
+  entry.
+- **Dossiers**: `our_standard` is `{parts: [{part_id, text}]}`; every excerpt
+  gains `vs_standard` (`{label, label_by, reason, part_map, part_reasons,
+  additions}` or null; `reason` the owner's when `label_by` is `owner`).
+- Conformance vectors regenerated (vectors 001-008 have one-part standards;
+  vector 007's changed opening is `mixed`; vector 008's excerpts carry
+  `vs_standard: null`). New vector 009 pins a standard of four parts with a
+  repeated passage (`<hash>-2`), part maps of four tokens with omissions and
+  additions, dossier part reasons naming parts other than the first, and an
+  owner label carried as `label_by: "owner"` with the owner's reason.
 
 ### 2026-10-09 — OPF 0.5: `our_standard` is the complete template clause (issue #242)
 

@@ -860,29 +860,163 @@ def _check_paper(doc: dict[str, Any], result: ValidationResult) -> None:
             )
 
 
+def _check_standard_parts(doc: dict[str, Any], result: ValidationResult) -> None:
+    """``our_standard.parts`` (OPF 0.5, issue #243) are what ``text`` is made of.
+
+    Each clause's standard: ``text`` is its parts' texts joined in order
+    (``equivalence.STANDARD_PART_SEPARATOR``); ``order`` counts from 1; and
+    each ``part_id`` is the content hash of its part
+    (``equivalence.part_ids_of``, with the document's ``perspective.party``),
+    so a consumer can trust a part map's ids to name these exact passages.
+    """
+    from playbook_engine.equivalence import (  # noqa: PLC0415
+        STANDARD_PART_SEPARATOR,
+        part_ids_of,
+    )
+    from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
+
+    party = perspective_party(doc)
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        std = clause.get("our_standard") if isinstance(clause, dict) else None
+        if not isinstance(std, dict):
+            continue
+        parts = std.get("parts")
+        path = f"evidence.clauses[{i}].our_standard"
+        if not isinstance(parts, list) or not parts:
+            result.add("our_standard has no parts", path=f"{path}.parts")
+            continue
+        texts = [str(p.get("text", "")) if isinstance(p, dict) else "" for p in parts]
+        if std.get("text") != STANDARD_PART_SEPARATOR.join(texts):
+            result.add(
+                "our_standard.text is not its parts joined in order — the parts must be the "
+                "passages the text is made of",
+                path=f"{path}.text",
+            )
+        for j, (part, pid) in enumerate(zip(parts, part_ids_of(texts, party), strict=True)):
+            if not isinstance(part, dict):
+                continue
+            if part.get("order") != j + 1:
+                result.add(
+                    f"our_standard part {j} has order {part.get('order')!r}, expected {j + 1}",
+                    path=f"{path}.parts[{j}].order",
+                )
+            if part.get("part_id") != pid:
+                result.add(
+                    f"our_standard part_id {part.get('part_id')!r} is not the content hash of "
+                    f"its text ({pid!r}) — re-run `playbook project`",
+                    path=f"{path}.parts[{j}].part_id",
+                )
+
+
+def _check_vs_semantics(
+    vs: dict[str, Any], part_ids: list[str], path: str, result: ValidationResult
+) -> None:
+    """One ``vs_standard``'s parts, derived label and check (issue #243)."""
+    from playbook_engine.equivalence import (  # noqa: PLC0415
+        BASIS_OWNER,
+        LABELS,
+        STATUS_PRESENT,
+        derive_label,
+    )
+
+    parts = [p for p in vs.get("parts") or [] if isinstance(p, dict)]
+    additions = [a for a in vs.get("additions") or [] if isinstance(a, dict)]
+    ids = [p.get("part_id") for p in parts]
+    for j, part in enumerate(parts):
+        pid = part.get("part_id")
+        if pid not in part_ids:
+            result.add(
+                f"vs_standard names part_id {pid!r}, which is not a part of this clause's "
+                "our_standard",
+                path=f"{path}.parts[{j}].part_id",
+            )
+        if part.get("status") == STATUS_PRESENT and part.get("relation") is None:
+            result.add(
+                f"vs_standard part {pid!r} is present but has no relation — a present part "
+                "says how it compares with our part (equivalent, more or less protective)",
+                path=f"{path}.parts[{j}]",
+            )
+    duplicated = sorted({str(pid) for pid in ids if ids.count(pid) > 1})
+    missing = [pid for pid in part_ids if pid not in ids]
+    if duplicated or missing:
+        result.add(
+            "vs_standard must judge every part of our standard exactly once"
+            + (f"; judged twice: {duplicated}" if duplicated else "")
+            + (f"; not judged: {missing}" if missing else ""),
+            path=f"{path}.parts",
+        )
+    elif ids != part_ids:
+        result.add("vs_standard parts are not in our standard's order", path=f"{path}.parts")
+    owner_label = vs.get("owner_label")
+    if owner_label is not None and vs.get("basis") != BASIS_OWNER:
+        result.add(
+            "vs_standard.owner_label is set but basis is not 'owner'",
+            path=f"{path}.owner_label",
+        )
+    expected = (
+        owner_label.get("label")
+        if isinstance(owner_label, dict)
+        else derive_label(parts, additions)
+    )
+    label = vs.get("label")
+    if label in LABELS and label != expected:
+        result.add(
+            f"vs_standard.label {label!r} disagrees with its parts, which derive "
+            f"{expected!r} — the label is derived from the parts and additions "
+            "(only an owner_label overrides it)",
+            path=f"{path}.label",
+        )
+    check = vs.get("check")
+    if isinstance(check, dict):
+        if check.get("adjudicated") is True and check.get("agreed") is not False:
+            result.add(
+                "vs_standard.check is adjudicated but agreed is not false — an "
+                "adjudication only follows a disagreement",
+                path=f"{path}.check",
+            )
+        halves = (check.get("label_agreed"), check.get("parts_agreed"))
+        if all(isinstance(h, bool) for h in halves) and (check.get("agreed") is True) != (
+            halves[0] and halves[1]
+        ):
+            result.add(
+                "vs_standard.check.agreed must be true exactly when the label and the parts "
+                "both agreed",
+                path=f"{path}.check",
+            )
+
+
 def _check_equivalence(
     doc: dict[str, Any], result: ValidationResult, verdict_store: Any | None
 ) -> None:
-    """OPF 0.5 ``vs_standard`` cross-checks (issue #240, OPF-SPEC §3.5.6).
+    """OPF 0.5 ``vs_standard`` cross-checks (issues #240, #243, OPF-SPEC §3.5.6).
 
-    - a non-null label MUST NOT sit on a signed text whose ``standard`` fact
-      is true (an exact match is equivalent by definition and stays null) nor
-      on a text of a clause with no ``our_standard`` (nothing to be compared
-      with);
+    - a non-null judgment MUST NOT sit on a signed text whose ``standard``
+      fact is true (an exact match is equivalent by definition and stays
+      null) nor on a text of a clause with no ``our_standard`` (nothing to be
+      compared with);
+    - it judges every part of the clause's ``our_standard`` exactly once, in
+      order, and names no other part; a ``present`` part has a ``relation``;
+    - its ``label`` is the one :func:`~playbook_engine.equivalence.derive_label`
+      computes from its parts and additions, unless an owner overrode it
+      (``owner_label``, ``basis: "owner"`` only);
     - ``check.adjudicated`` true implies ``check.agreed`` false (an
-      adjudication only follows a disagreement);
+      adjudication only follows a disagreement), and ``check.agreed`` is
+      ``label_agreed and parts_agreed``;
     - when the run's verdict store is present (*verdict_store*, a
-      ``VerdictStore``), every non-null label MUST have a stored verdict under
-      its cache key (``equivalence.equivalence_key``) carrying the same label
-      — a label the store never produced is invented.
+      ``VerdictStore``), every non-null judgment MUST be the one stored under
+      its cache key (``equivalence.equivalence_key``) — a label or a part the
+      store never produced is invented.
     """
     from playbook_engine.equivalence import (  # noqa: PLC0415
         ROLE_SIGNED,
         iter_slots,
         slot_key,
+        standard_parts,
+        vs_standard_of,
     )
     from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
 
+    _check_standard_parts(doc, result)
     evidence = doc.get("evidence")
     if not isinstance(evidence, dict):
         return
@@ -918,17 +1052,8 @@ def _check_equivalence(
                 path=path,
             )
             continue
-        check = vs.get("check")
-        if (
-            isinstance(check, dict)
-            and check.get("adjudicated") is True
-            and check.get("agreed") is not False
-        ):
-            result.add(
-                "vs_standard.check is adjudicated but agreed is not false — an "
-                "adjudication only follows a disagreement",
-                path=f"{path}.check",
-            )
+        part_ids = [str(p.get("part_id")) for p in standard_parts(slot.clause)]
+        _check_vs_semantics(vs, part_ids, path, result)
         if verdict_store is None or not isinstance(agreement_type_id, str):
             continue
         verdict_key = slot_key(slot, agreement_type_id, party)
@@ -939,11 +1064,27 @@ def _check_equivalence(
                 f"under its cache key ({verdict_key!r}) — the label was not produced by this run",
                 path=path,
             )
-        elif stored.verdict.get("label") != vs.get("label"):
+            continue
+        try:
+            replayed = vs_standard_of(stored.verdict, part_ids)
+        except ValueError as exc:
+            result.add(
+                f"vs_standard is set but the stored verdict under its cache key is malformed "
+                f"({exc}) — re-run `playbook project`",
+                path=path,
+            )
+            continue
+        if replayed.get("label") != vs.get("label"):
             result.add(
                 f"vs_standard.label {vs.get('label')!r} differs from the stored verdict's "
-                f"label {stored.verdict.get('label')!r} — re-run `playbook project`",
+                f"label {replayed.get('label')!r} — re-run `playbook project`",
                 path=f"{path}.label",
+            )
+        elif replayed != vs:
+            result.add(
+                "vs_standard differs from the stored verdict under its cache key (its parts, "
+                "additions, reason or check) — re-run `playbook project`",
+                path=path,
             )
 
 
@@ -1025,8 +1166,7 @@ def _check_manifest_and_dossiers(doc: dict[str, Any], result: ValidationResult) 
                     f"(at most {dz.MAX_EXCERPTS})",
                     path=f"dossiers.{clause_id}.excerpts",
                 )
-            standard = dossier.get("our_standard")
-            budget = dz.dossier_budget(standard.get("text") if isinstance(standard, dict) else None)
+            budget = dz.dossier_budget(dz.dossier_standard_text(dossier))
             if n_excerpts != 1 and dz.dossier_tokens(dossier) > budget:
                 result.add(
                     f"dossier {clause_id!r} is {dz.dossier_tokens(dossier)} tokens, over its "

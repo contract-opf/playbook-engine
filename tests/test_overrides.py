@@ -86,8 +86,28 @@ def _non_equivalence_canned() -> list[str]:
     return [
         line
         for line in _CANNED.read_text(encoding="utf-8").splitlines()
-        if line.strip() and "label" not in json.loads(line)["verdict"]
+        if line.strip() and "parts" not in json.loads(line)["verdict"]
     ]
+
+
+def _judgment(item: dict[str, Any], label: str) -> dict[str, Any]:
+    """``{parts, additions}`` that derive *label*, over the parts the item asks about
+    (issue #243: the label is derived, never judged): the label's judgment on the
+    first part, the rest equivalent."""
+    pids = [p["part_id"] for p in item["payload"]["our_standard_parts"]]
+    first: dict[str, Any] = {"part_id": pids[0], "status": "present", "relation": "equivalent"}
+    additions: list[dict[str, Any]] = []
+    if label == "different_concept":
+        first = {"part_id": pids[0], "status": "omitted", "effect": "neutral"}
+    elif label == "mixed":
+        first = {**first, "relation": "less_protective", "reason": "Worse in this part."}
+        additions = [{"summary": "A better addition.", "effect": "more_protective"}]
+    elif label != "equivalent":
+        first = {**first, "relation": label, "reason": "Differs in this part."}
+    rest = [{"part_id": pid, "status": "present", "relation": "equivalent"} for pid in pids[1:]]
+    if label == "different_concept":
+        rest = [{"part_id": pid, "status": "omitted", "effect": "neutral"} for pid in pids[1:]]
+    return {"parts": [first, *rest], "additions": additions}
 
 
 @pytest.fixture(scope="module")
@@ -116,7 +136,7 @@ def derived_nda(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 {
                     "key": item["key"],
                     "verdict": {
-                        "label": LABELS[i % len(LABELS)],
+                        **_judgment(item, LABELS[i % len(LABELS)]),
                         "reason": f"Model reason {i}.",
                         "basis": "agent",
                     },
@@ -240,16 +260,47 @@ def test_confirming_a_label_restamps_the_basis_and_keeps_the_models_reason(
     assert after["identity"]["content_hash"] != before["identity"]["content_hash"]
 
 
-def test_changing_the_label_replaces_the_reason_that_would_now_contradict_it(
+def test_changing_the_label_records_an_owner_label_over_the_models_parts(
     out_dir: Path,
 ) -> None:
+    """Issue #243: the label is derived from the parts, so an owner who sets a
+    different label overrides the derivation with a reason (``owner_label``);
+    the model's per-part facts stay as judged in the evidence. The model's
+    reason explains the derived label and so contradicts the owner's: no
+    model-facing projection carries it beside the owner's label (#241's rule),
+    the digest and the Review row carry the owner's reason instead."""
     before = _load(out_dir)
     row = _first_row(before, "more_protective")
+    owner_reason = "Worse for us on the point that matters."
     _write_overrides(out_dir, [_vs(row["key"], "less_protective")])
     assert _invoke(["apply-overrides", str(out_dir)]).exit_code == 0
     for vs in _entries_for(_load(out_dir), row["key"]):
-        assert vs["label"] == "less_protective"
-        assert vs["reason"] != row["reason"]
+        assert vs["owner_label"] == {
+            "label": "less_protective",
+            "reason": "Label set by the owner.",
+        }
+    entry = _vs(row["key"], "less_protective")
+    entry["value"]["reason"] = owner_reason
+    _write_overrides(out_dir, [entry])
+    assert _invoke(["apply-overrides", str(out_dir)]).exit_code == 0
+    after = _load(out_dir)
+    for vs in _entries_for(after, row["key"]):
+        assert vs["label"] == "less_protective" and vs["basis"] == "owner"
+        assert vs["owner_label"] == {"label": "less_protective", "reason": owner_reason}
+        assert vs["reason"] == row["reason"]
+        assert [p["status"] for p in vs["parts"]] == [p["status"] for p in row["parts"]]
+    shown = [
+        e
+        for clause in after["digest"]["clauses"]
+        for name in ("signed_variants", "refused_asks", "changed_openings")
+        for e in clause[name]
+        if e.get("label_by") == "owner"
+    ]
+    assert shown, "premise: the overridden text is in the digest"
+    assert all(e["reason"] == owner_reason and e["label"] == "less_protective" for e in shown)
+    after_row = next(r for r in build_review_rows(after).rows if r["key"] == row["key"])
+    assert after_row["owner_reason"] == owner_reason
+    assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0
 
 
 def test_reapplying_an_applied_file_changes_nothing(out_dir: Path) -> None:

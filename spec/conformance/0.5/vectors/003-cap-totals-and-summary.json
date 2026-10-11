@@ -344,6 +344,25 @@
         "first_signed": "2025-05-05",
         "last_signed": "2025-05-05"
       },
+      "part_map_legend": {
+        "part_map": {
+          "=": "our part is present with the same legal effect",
+          "+": "our part is present but more protective for perspective.party",
+          "-": "our part is present but less protective for perspective.party",
+          "x+": "our part is omitted, which is more protective for perspective.party",
+          "x-": "our part is omitted, which is less protective for perspective.party",
+          "x0": "our part is omitted with no effect on perspective.party"
+        },
+        "additions": {
+          "+": "an addition no part covers, more protective for perspective.party",
+          "-": "an addition no part covers, less protective for perspective.party",
+          "0": "an addition no part covers, neutral for perspective.party"
+        },
+        "label_by": {
+          "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
+          "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+        }
+      },
       "clauses": [
         {
           "id": "clause.limitation_of_liability",
@@ -359,6 +378,7 @@
             "equivalent": 0,
             "more_protective": 0,
             "less_protective": 0,
+            "mixed": 0,
             "different_concept": 0,
             "unjudged": 8
           },
@@ -370,6 +390,9 @@
               "n_from_standard": 0,
               "n_unchanged": 2,
               "label": null,
+              "part_map": null,
+              "additions": null,
+              "reason": null,
               "ref": {
                 "document_id": "deal-8",
                 "version": 3,
@@ -391,6 +414,9 @@
               "n_from_standard": 0,
               "n_unchanged": 1,
               "label": null,
+              "part_map": null,
+              "additions": null,
+              "reason": null,
               "ref": {
                 "document_id": "deal-1",
                 "version": 3,
@@ -411,6 +437,9 @@
               "n_from_standard": 0,
               "n_unchanged": 1,
               "label": null,
+              "part_map": null,
+              "additions": null,
+              "reason": null,
               "ref": {
                 "document_id": "deal-2",
                 "version": 3,
@@ -431,6 +460,9 @@
               "n_from_standard": 0,
               "n_unchanged": 1,
               "label": null,
+              "part_map": null,
+              "additions": null,
+              "reason": null,
               "ref": {
                 "document_id": "deal-3",
                 "version": 3,
@@ -451,6 +483,9 @@
               "n_from_standard": 0,
               "n_unchanged": 1,
               "label": null,
+              "part_map": null,
+              "additions": null,
+              "reason": null,
               "ref": {
                 "document_id": "deal-4",
                 "version": 3,
@@ -491,14 +526,16 @@
             "kind": "signed_variant",
             "opening": null,
             "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars. This limitation does not apply to a breach of the confidentiality obligations in this Agreement, to a party's indemnification obligations, or to a party's gross negligence or wilful misconduct. Neither party is liable for any indirect, incidental or consequential damages.",
-            "outcome": "signed"
+            "outcome": "signed",
+            "vs_standard": null
           },
           {
             "precedent_id": "prec.22c50d618e1622cd",
             "kind": "signed_variant",
             "opening": null,
             "signed": "Liability is capped at 1 times the fees paid.",
-            "outcome": "signed"
+            "outcome": "signed",
+            "vs_standard": null
           }
         ],
         "n_omitted": 0,

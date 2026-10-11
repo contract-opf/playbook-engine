@@ -49,7 +49,8 @@ from typing import Any
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
-from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget
+from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget, dossier_standard_text
+from playbook_engine.equivalence import ADDITION_TOKENS, PART_TOKENS
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
 from playbook_engine.equivalence import ROLES as EQUIVALENCE_ROLES
 from playbook_engine.equivalence import summarize as summarize_equivalence
@@ -101,7 +102,13 @@ __all__ = [
 #:
 #: v6 (issue #228): the ``dossiers`` section gains ``cut_texts``,
 #: ``excerpts_dropped``, ``over_budget_single_excerpt`` and ``max_budget``.
-SCORECARD_VERSION = 6
+#:
+#: v7 (issue #243): ``equivalence`` judges part by part — ``by_label`` gains
+#: ``mixed``; the section gains ``label_agreed`` / ``parts_agreed`` and their
+#: rates (agreement on the label and on the parts, reported separately),
+#: ``part_tokens`` / ``addition_tokens`` (part-map token counts) and
+#: ``standard_parts`` (parts per standard).
+SCORECARD_VERSION = 7
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -148,8 +155,14 @@ PENDING_KINDS = frozenset({"classify", "provenance", "scope", "segment", "equiva
 #: the out-dir.
 CHECKER_MODELS = frozenset({CHECKER_MODEL})
 
-#: ``vs_standard`` labels and the three roles a judged text can play.
-EQUIVALENCE_VOCABULARY = frozenset(EQUIVALENCE_LABELS) | frozenset(EQUIVALENCE_ROLES)
+#: ``vs_standard`` labels, the three roles a judged text can play, and the
+#: part-map tokens (issue #243).
+EQUIVALENCE_VOCABULARY = (
+    frozenset(EQUIVALENCE_LABELS)
+    | frozenset(EQUIVALENCE_ROLES)
+    | frozenset(PART_TOKENS.values())
+    | frozenset(ADDITION_TOKENS.values())
+)
 
 #: Observation ``provenance`` values — the paper-side diagnostic split.
 PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
@@ -705,8 +718,7 @@ def _dossiers_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(dossier, dict):
             budgets.append(DOSSIER_MIN_BUDGET)
             continue
-        standard = dossier.get("our_standard")
-        budgets.append(dossier_budget(standard.get("text") if isinstance(standard, dict) else None))
+        budgets.append(dossier_budget(dossier_standard_text(dossier)))
         dropped += _count(dossier.get("n_omitted")) or 0
         excerpts = dossier.get("excerpts")
         if sizes[-1] > budgets[-1] and isinstance(excerpts, list) and len(excerpts) == 1:

@@ -9,11 +9,14 @@ per distinct text however many deals or roles (signed, opening, refused) carry
 it. A judged text the digest does not show changes nothing the model sees, so it
 is not a row; ``n_not_shown`` counts them.
 
-Order: ``less_protective``, ``different_concept``, ``more_protective``,
-``equivalent``; inside a label, the text with the most deals first. Each row
-carries the verdict cache key the page addresses an override by
-(:mod:`playbook_engine.overrides`) and a locator the page uses to show the full
-text on demand (the row itself holds only the sentence-boundary summary).
+Order: ``less_protective``, ``mixed``, ``different_concept``,
+``more_protective``, ``equivalent``; inside a label, the text with the most
+deals first. Each row carries the verdict cache key the page addresses an
+override by (:mod:`playbook_engine.overrides`), the judgment's part map (issue
+#243: one entry per part of our standard with its token and reason, and the
+additions), the owner's reason when the owner set the label over the parts
+(``owner_reason``, from ``owner_label``) and a locator the page uses to show the full text on demand (the
+row itself holds only the sentence-boundary summary).
 
 Pure and read-only: the rows are a function of the playbook.
 """
@@ -33,10 +36,14 @@ from playbook_engine.equivalence import (
     ROLE_REFUSED,
     ROLE_SIGNED,
     ROLES,
+    addition_map,
+    derive_label,
     equivalence_key,
     is_eligible,
     iter_slots,
+    part_map,
     slot_key,
+    standard_part_texts,
 )
 from playbook_engine.observation_builder import summarize_clause_text
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
@@ -44,7 +51,13 @@ from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 __all__ = ["REVIEW_LABEL_ORDER", "ReviewRows", "build_review_rows"]
 
 #: Display order of the labels in the Review tab (worse or unrankable first).
-REVIEW_LABEL_ORDER = ("less_protective", "different_concept", "more_protective", "equivalent")
+REVIEW_LABEL_ORDER = (
+    "less_protective",
+    "mixed",
+    "different_concept",
+    "more_protective",
+    "equivalent",
+)
 
 assert set(REVIEW_LABEL_ORDER) == set(LABELS)
 
@@ -118,6 +131,7 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
         standard_text = standard.get("text") if isinstance(standard, dict) else None
         if not isinstance(standard_text, str) or not standard_text.strip():
             continue
+        part_texts = standard_part_texts(clause)
         entries = _digest_entries(digest, tid)
         equivalent_collapsed = any(
             e.get("label") == "equivalent" and "n_texts" in e for e in entries["signed_variants"]
@@ -145,7 +159,7 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
                     deals = {r.get("document_id") for r in members}
                 if not isinstance(text, str) or not text.strip():
                     continue
-                key = equivalence_key(type_id, str(tid), party, text, standard_text)
+                key = equivalence_key(type_id, str(tid), party, text, part_texts)
                 label = entry.get("label")
                 if name == "signed_variants" and label == "equivalent":
                     visible = equivalent_collapsed
@@ -168,8 +182,10 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
                         "title": clause.get("title") or tid,
                         "label": label,
                         "reason": (vs or {}).get("reason") or "",
+                        "owner_reason": _owner_reason(vs or {}),
                         "basis": (vs or {}).get("basis") or "",
                         "check": _check_state(vs or {}),
+                        **_part_rows(vs or {}),
                         "roles": [role],
                         "text": summarize_clause_text(text),
                         "standard": summarize_clause_text(standard_text),
@@ -201,6 +217,47 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
         if key is not None
     }
     return ReviewRows(rows, n_not_shown=len(judged - shown), n_unjudged=len(unjudged))
+
+
+def _owner_reason(vs: dict[str, Any]) -> str:
+    """The owner's reason for overriding the derived label (``owner_label``), or ``""``.
+
+    The row's ``reason`` stays the judgment's own (it explains the part map);
+    this one explains the label the owner set over it.
+    """
+    owner = vs.get("owner_label")
+    reason = owner.get("reason") if isinstance(owner, dict) else None
+    return reason if isinstance(reason, str) else ""
+
+
+def _part_rows(vs: dict[str, Any]) -> dict[str, Any]:
+    """The judgment's parts and additions as the page shows them.
+
+    ``parts``: one ``{n, part_id, status, direction, token, reason}`` per part
+    of our standard, in order; ``additions``: ``{token, effect, summary}``;
+    ``derived_label``: what the parts imply (it differs from ``label`` only
+    when the owner overrode the label, ``owner_label``).
+    """
+    parts = [p for p in vs.get("parts") or [] if isinstance(p, dict)]
+    additions = [a for a in vs.get("additions") or [] if isinstance(a, dict)]
+    return {
+        "parts": [
+            {
+                "n": i + 1,
+                "part_id": p.get("part_id"),
+                "status": p.get("status"),
+                "direction": p.get("relation") or p.get("effect"),
+                "token": token,
+                "reason": p.get("reason") or "",
+            }
+            for i, (p, token) in enumerate(zip(parts, part_map(vs), strict=False))
+        ],
+        "additions": [
+            {"token": token, "effect": a.get("effect"), "summary": a.get("summary") or ""}
+            for a, token in zip(additions, addition_map(vs), strict=False)
+        ],
+        "derived_label": derive_label(parts, additions) if parts else None,
+    }
 
 
 def _first_vs(members: list[Any], role: str) -> dict[str, Any] | None:

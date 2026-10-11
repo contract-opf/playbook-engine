@@ -13,8 +13,14 @@ OPF-SPEC §3.5.4's exact grouping key (``precedent.normalize_variant_text``)
 with distinct-deal counts, citations and precedent ids; plus ``perspective``,
 ``agreement_type``, corpus counts and the clause types the playbook has no
 evidence for at all. No stance, band or risk field. The one judged value is
-the ``vs_standard`` label (issue #240), carried as an index the consumer
-checks against the cited text, never an instruction.
+the ``vs_standard`` judgment (issues #240, #243), carried as an index the
+consumer checks against the cited text, never an instruction: each judged
+text's label plus its compact part map — one token per part of our standard
+(present and equivalent, more or less protective, or omitted with its
+effect), one token per addition, ``label_by: "owner"`` when the owner set the
+label over the parts (absent, the label is derived from them) and the
+one-sentence reason (the owner's when the owner set the label). Our standard is carried as its ordered parts, and
+``part_map_legend`` says what each token means.
 
 The full OPF document carries every precedent's full text and measures in
 the millions of characters on a real corpus — far beyond what a consuming
@@ -43,6 +49,15 @@ import re
 from typing import Any
 
 from playbook_engine.canonicalize import canonicalize
+from playbook_engine.equivalence import (
+    LABEL_BY_OWNER,
+    PART_MAP_LEGEND,
+    addition_map,
+    label_by,
+    label_reason,
+    part_map,
+    standard_parts,
+)
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 from playbook_engine.precedent import clause_counts
@@ -133,6 +148,37 @@ def _label_of(entry: Any) -> str | None:
     vs = entry.get("vs_standard") if isinstance(entry, dict) else None
     label = vs.get("label") if isinstance(vs, dict) else None
     return label if label in VS_LABELS else None
+
+
+def _judged(entry: Any) -> dict[str, Any] | None:
+    """The ``vs_standard`` of *entry* when it is judged, else ``None``."""
+    vs = entry.get("vs_standard") if isinstance(entry, dict) else None
+    return vs if isinstance(vs, dict) and vs.get("label") in VS_LABELS else None
+
+
+def part_map_fields(entry: Any) -> dict[str, Any]:
+    """The compact part map of a judged text (issue #243): ``{part_map,
+    additions, reason[, label_by]}`` — one token per part of our standard, one
+    token per addition (:data:`~playbook_engine.equivalence.PART_TOKENS`,
+    :data:`~playbook_engine.equivalence.ADDITION_TOKENS`) and the one-sentence
+    reason — the owner's when the owner set the label, else the most important
+    difference; all ``None`` when the text is not judged. ``label_by: "owner"``
+    is present only when the owner overrode the derived label
+    (``owner_label``); absent, the label is derived from the parts (``parts``,
+    the default the legend states), which saves a key on every other entry of
+    a budgeted digest. The per-part reasons stay in the evidence and the
+    dossiers."""
+    vs = _judged(entry)
+    if vs is None:
+        return {"part_map": None, "additions": None, "reason": None}
+    out: dict[str, Any] = {
+        "part_map": part_map(vs),
+        "additions": addition_map(vs),
+        "reason": label_reason(vs),
+    }
+    if label_by(vs) == LABEL_BY_OWNER:
+        out["label_by"] = LABEL_BY_OWNER
+    return out
 
 
 def clause_precedent_groups(
@@ -230,6 +276,7 @@ def clause_precedent_groups_with_members(
                 }
             ),
             "label": _label_of(rep["signed_text"]),
+            **part_map_fields(rep["signed_text"]),
             "ref": rep["signed_text"].get("ref"),
             "precedent_ids": sorted({str(m.get("id")) for m in members}),
         }
@@ -271,6 +318,7 @@ def clause_precedent_groups_with_members(
             "text": summarize_clause_text(rep_ask["text"]),
             "n_deals": n,
             "label": _label_of(rep_ask),
+            **part_map_fields(rep_ask),
             "ref": rep_ask.get("ref"),
             "precedent_ids": sorted(g["ids"]),
         }
@@ -291,6 +339,7 @@ def clause_precedent_groups_with_members(
                 {m.get("document_id") for m in members if m.get("signed_text") is None}
             ),
             "label": _label_of(rep["opening_text"]),
+            **part_map_fields(rep["opening_text"]),
             "ref": rep["opening_text"].get("ref"),
             "precedent_ids": sorted({str(m.get("id")) for m in members}),
         }
@@ -311,15 +360,17 @@ VS_LABELS = EQUIVALENCE_LABELS
 #: How many exemplar texts the collapsed "equivalent to our standard" entry carries.
 _EQUIVALENT_EXEMPLARS = 2
 
-#: Display tier of a signed-variant entry (lower first): worse-or-unrankable
-#: variants lead, then those nobody has judged, then the more protective ones;
-#: the collapsed equivalent entry closes the list.
+#: Display tier of a signed-variant entry (lower first): the variants worse
+#: for us in some part lead (``less_protective`` and ``mixed``, issue #243),
+#: then the unrankable ones, then those nobody has judged, then the more
+#: protective ones; the collapsed equivalent entry closes the list.
 _VARIANT_TIERS = {
     "less_protective": 0,
-    "different_concept": 0,
-    None: 1,
-    "more_protective": 2,
-    "equivalent": 3,
+    "mixed": 0,
+    "different_concept": 1,
+    None: 2,
+    "more_protective": 3,
+    "equivalent": 4,
 }
 
 
@@ -329,8 +380,9 @@ def arrange_variant_slots(variants: list[dict[str, Any]]) -> list[list[dict[str,
     *variants* are :func:`clause_precedent_groups`' ``signed_variants`` (one
     per grouping key). Every group labelled ``equivalent`` shares ONE slot
     (in group order), closing the list; every other group is a slot of its
-    own, ordered ``less_protective``/``different_concept`` first, then
-    unjudged, then ``more_protective`` (each tier in group order).
+    own, ordered ``less_protective``/``mixed`` first, then
+    ``different_concept``, then unjudged, then ``more_protective`` (each tier
+    in group order).
     :func:`_arrange_variants` renders the slots; the critic dossiers read
     them to pick excerpts in exactly the digest's order.
     """
@@ -450,6 +502,21 @@ def _corpus_summary(playbook: dict[str, Any], precedent: list[dict[str, Any]]) -
     }
 
 
+def digest_standard(clause: dict[str, Any]) -> dict[str, Any] | None:
+    """Our standard as the digest carries it (issue #243): ``{parts: [{part_id,
+    text}], source_ref}`` — the parts the part maps index, in order, without
+    repeating their joined ``text`` (``null`` when the clause has none)."""
+    std = clause.get("our_standard")
+    if not isinstance(std, dict):
+        return None
+    return {
+        "parts": [
+            {"part_id": p.get("part_id"), "text": p.get("text")} for p in standard_parts(clause)
+        ],
+        "source_ref": std.get("source_ref"),
+    }
+
+
 def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, Any]:
     """Digest 4 with a fixed per-list cap of *top_n* (``None`` = uncapped)."""
     precedent = playbook_precedent_records(playbook)
@@ -463,13 +530,12 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
         changed = groups["changed_openings"]
         listed = _arrange_variants(variants)
         counts = clause_counts(str(tid), precedent, party=party)
-        our_standard = clause.get("our_standard")
         clauses.append(
             {
                 "id": clause.get("id"),
                 "taxonomy_id": tid,
                 "title": clause.get("title"),
-                "our_standard": our_standard if isinstance(our_standard, dict) else None,
+                "our_standard": digest_standard(clause),
                 "n_deals": clause.get("n_deals"),
                 "n_signed_standard": clause.get("n_signed_standard"),
                 "n_opened_standard": counts["n_opened_standard"],
@@ -494,6 +560,7 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
             else None
         ),
         "corpus": _corpus_summary(playbook, precedent),
+        "part_map_legend": PART_MAP_LEGEND,
         "clauses": clauses,
         "uncovered_clause_types": uncovered_clause_types(playbook),
     }

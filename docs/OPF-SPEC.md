@@ -225,7 +225,8 @@ facts only:
 "evidence": {
   "clauses": [ {                       // one per clause type
     "id": "clause.governing_law", "taxonomy_id": "governing_law", "title": "Governing Law",
-    "our_standard": { "text": "...", "source_ref": Citation } | null,
+    "our_standard": { "text": "...", "source_ref": Citation,
+                      "parts": [ { "part_id": "3f9a2c1d", "order": 1, "text": "..." } ] } | null,
     "n_deals": 6,                      // distinct deals with a precedent for this clause
     "n_signed_standard": 2,            // distinct signed deals that signed our standard
     "n_variants": 2,                   // distinct non-standard texts signed (signed deals)
@@ -263,6 +264,14 @@ Field semantics:
   standard joined from several template clauses cites them all
   (`source_ref.clause_path` lists their paths, comma separated) and carries no
   `char_span`; a single-clause standard cites that clause and its span.
+  `parts` (OPF 0.5, issue #243) are those template passages in order, one part
+  each (a one-passage standard is one part): `text` is the parts' texts joined
+  with a blank line (`"\n\n"`), `order` counts from 1, and `part_id` is the
+  first 8 hex characters of `sha256` over the part's §3.5.4 grouping key (with
+  `perspective.party`), so it survives a template edit elsewhere; a later part
+  of the same standard with the same hash is `<hash>-2`, `<hash>-3`, ....
+  A validator MUST reject a standard whose `text` is not its parts joined, or
+  whose `part_id` or `order` is not the one so computed.
 - `signed_text` — the deal's terminal text for the clause: the executed copy
   when `signed` is true, the last draft when it is false. `null` when the
   clause was struck before signing.
@@ -424,7 +433,7 @@ origin-gated definition (`refused_asks[]`, §3.5.4). A first-draft node whose
 text is relocated, not struck (it occurs verbatim in the signed copy under
 another clause), produces no opening and no struck record.
 
-#### 3.5.6 OPF 0.5 — `vs_standard`, the equivalence label (issue #240)
+#### 3.5.6 OPF 0.5 — `vs_standard`, the equivalence judgment (issues #240, #243)
 
 The exact-match `standard` fact answers only "did they sign our words
 unchanged". On counterparty paper that is almost always false even where the
@@ -434,65 +443,116 @@ producer judge each DISTINCT text once against our standard and carry the
 answer as an index the consumer's model can check against the cited text. It
 is an index, never an instruction, and it is the one place a judged verdict
 appears in `evidence` (owner decision (c) of issue #227, narrowed for this
-label only; every other fact in the record stays verdict-free).
+judgment only; every other fact in the record stays verdict-free).
+
+The judgment is made **part by part** (issue #243). A single whole-text label
+cannot say that a text keeps some of our passages, changes others, drops one
+and adds something, which is the usual case; it says "can't rank", and the
+consumer has to redo the comparison on every review. So the judge says, for
+EVERY part of our standard (§3.5, `our_standard.parts`), whether the text
+keeps it and how it compares, lists what the text adds, and the label is
+DERIVED from those facts.
 
 `vs_standard` is an OPTIONAL key (a producer SHOULD always write it; absent
 is read as `null`) on `signed_text`, `opening_text` and each `refused_asks[]`
 entry of a precedent record:
 
-```json
+```jsonc
 "vs_standard": {
-  "label":  "equivalent" | "more_protective" | "less_protective" | "different_concept",
-  "reason": "<one sentence naming the operative difference; no deal names>",
+  "parts": [                                  // every part of our standard, once, in order
+    { "part_id": "3f9a2c1d", "status": "present",
+      "relation": "equivalent" | "more_protective" | "less_protective",
+      "reason": "<one sentence; only when relation is not equivalent>" },
+    { "part_id": "77b0e4aa", "status": "omitted",
+      "effect": "more_protective" | "less_protective" | "neutral",
+      "reason": "<one sentence; only when effect is not neutral>" }
+  ],
+  "additions": [ { "summary": "<one sentence>",
+                   "effect": "more_protective" | "less_protective" | "neutral" } ],
+  "label":  "equivalent" | "more_protective" | "less_protective" | "mixed" | "different_concept",
+  "reason": "<one sentence: the single most important difference; no deal names>",
   "basis":  "judge" | "agent" | "owner",
-  "check":  {"agreed": true, "by": "<checker model id>", "adjudicated": false} | null
+  "check":  { "agreed": true, "label_agreed": true, "parts_agreed": true,
+              "by": "<checker model id>", "adjudicated": false } | null,
+  "owner_label": { "label": "...", "reason": "..." }       // OPTIONAL, basis "owner" only
 } | null
 ```
 
-- `label` is relative to `perspective.party`: `equivalent` is the same legal
-  effect as our standard, `more_protective` / `less_protective` better /
-  worse for that party, `different_concept` does something our standard does
-  not (or omits what it does), so the two cannot be ranked.
-- `basis` names who produced the verdict. `owner` is an after-the-fact
+- Every direction is relative to `perspective.party`. A `present` part's
+  `relation` compares the text's version of that part with ours; an
+  `omitted` part's `effect` is what dropping it does (dropping an obligation
+  that falls on the party can be `more_protective`; dropping a recital is
+  `neutral`). An addition is something the text adds that no part covers.
+- **The derived label.** `label` is a pure function of `parts` and
+  `additions`: `different_concept` when no part is `present`; `equivalent`
+  when at least one part is present, every present part is `equivalent` and
+  every omission and addition is `neutral`; `more_protective` /
+  `less_protective` when every non-equivalent, non-neutral effect points that
+  way; `mixed` when they point both ways. A text that only drops a neutral
+  recital is therefore still rankable. An owner MAY override the label
+  (`owner_label`, with the owner's reason); `label` is then the owner's and
+  the parts stay as judged. Every model-facing projection that carries the
+  parts beside the label (the digest, §3.12.2; the dossiers, §3.12.3) marks
+  such a label `label_by: "owner"` and carries the owner's reason, so the
+  consumer never reads a label beside a reason that contradicts it. An owner
+  MAY instead change the parts (or additions), and the label is re-derived
+  from them; the judgment's `reason` is then the owner's, or, when the owner
+  gives none, it is kept only if the part map and addition tokens it was
+  written for are unchanged and is otherwise replaced by a fallback (it
+  explained the old map and, perhaps, the old label).
+- `basis` names who produced the judgment. `owner` is an after-the-fact
   correction and wins over any agent or check answer; it is never checked.
-- `check` is the independent blind check of the verdict. `agreed: true`: the
-  checker, who never saw the verdict, reached the same label. `agreed: false,
-  adjudicated: false`: it did not, and the disagreement awaits adjudication
-  (the verdict shown is still the draft). `agreed: false, adjudicated: true`:
-  a fresh agent saw both answers and its label is the verdict. `null`: not
-  checked yet. A consumer reads an unchecked or disputed label as weaker
-  evidence than an agreed or adjudicated one, and never blocks on it.
+- `check` is the independent blind check: a checker that never saw the
+  judgment answers the same structured question. `label_agreed`: it derived
+  the same label; `parts_agreed`: it found the same set of `(part_id, status,
+  direction)` over the parts that are not equivalent or not a neutral
+  omission; `agreed` is both. `agreed: false, adjudicated: false`: the
+  disagreement awaits adjudication (the judgment shown is still the draft).
+  `agreed: false, adjudicated: true`: a fresh agent saw both judgments and its
+  answer is the judgment. `null`: not checked yet. A consumer reads an
+  unchecked or disputed judgment as weaker evidence than an agreed or
+  adjudicated one, and never blocks on it.
 - `null` means "not yet judged", never a guess. It is the only value for: a
   signed text whose `standard` fact is true (an exact match is equivalent by
   definition); any text of a clause whose `our_standard` is `null` (emergent
   mode: nothing to compare with); an opening whose `opened_with` is
   `"standard"`. A refused ask, a non-standard opening and a non-standard
   signed text are judged.
-- **Cache key (the identity of "the same text").** A verdict is shared by every
-  deal, paper side and role carrying the same text: `sha256` over the JSON
-  array `[agreement_type.id, taxonomy_id, perspective.party, K(text),
-  K(our_standard.text)]`, where `K` is the §3.5.4 grouping key. The paper
-  side, the document id, the role and the opening draft are not part of it.
-  What a judge is shown carries none of them either: the taxonomy id and
-  title, `perspective.party`, our standard, the candidate text and its roles.
+- **Cache key (the identity of "the same text").** A judgment is shared by
+  every deal, paper side and role carrying the same text against the same
+  parts: `sha256` over the JSON array `[agreement_type.id, taxonomy_id,
+  perspective.party, K(text), [K(part.text) for each part of our_standard,
+  in order]]`, where `K` is the §3.5.4 grouping key. The paper side, the
+  document id, the role and the opening draft are not part of it. What a
+  judge is shown carries none of them either: the taxonomy id and title,
+  `perspective.party`, the numbered parts of our standard (`{n, part_id,
+  text}`), the candidate text and its roles.
 
 Normative rules (a conformant validator MUST enforce each):
 
 - A non-null `vs_standard` MUST NOT appear on a signed text whose `standard`
   is `true`, nor on a text of a clause whose `our_standard` is `null`.
-- `check.adjudicated` `true` ⇒ `check.agreed` is `false`.
+- `parts` names every part of the clause's `our_standard` exactly once, in
+  order, and no other `part_id`; a `present` part has a `relation`.
+- `label` equals the derived label of `parts` and `additions`, unless
+  `owner_label` is set (then it equals `owner_label.label`); `owner_label`
+  requires `basis` `owner`.
+- `check.adjudicated` `true` ⇒ `check.agreed` is `false`; `check.agreed` is
+  `label_agreed and parts_agreed`.
 - When the producing run's verdict store is available, every non-null
-  `vs_standard` MUST have a stored verdict under its cache key carrying the
-  same label (a label the run never produced is invented).
+  `vs_standard` MUST be the judgment stored under its cache key (a label or a
+  part the run never produced is invented).
 
 The reference compiler drafts verdicts with the `playbook-from-corpus` skill
 (`playbook judge` queues one `equivalence` item per distinct eligible text
 once a template is configured), checks every draft with a separate
 `claude-opus-5-5` / `xhigh` agent (`playbook judge --check equivalence`,
-`playbook judge-apply --check`), writes the labels at `playbook project` and
-reports drafted / checked / agreed / adjudicated / unchecked counts in
-`playbook scorecard`. Digest 4 (issue #234) uses the labels to collapse
-equivalent variants into one entry (§3.12.2).
+`playbook judge-apply --check`), writes the judgments at `playbook project`
+and reports drafted / checked / agreed (on the label and on the parts,
+separately) / adjudicated / unchecked counts in `playbook scorecard`. Digest
+4 (issue #234) uses the labels to collapse equivalent variants into one entry
+and carries every other judged text's compact part map (§3.12.2); the critic
+dossiers carry the part reasons (§3.12.3).
 
 ### 3.6 `posture` (NEW) — negotiation intent as generated prose
 
@@ -691,10 +751,10 @@ An OPF 0.5 document carries `digest_version` "4" (§3.12.2).
 Replaced in place by digest 4 (§3.12.2, issue #234). Section number left
 unassigned so the numbering of §3.12.2 is stable.
 
-#### 3.12.2 `digest_version` "4" (OPF 0.5, issues #223, #234, #240)
+#### 3.12.2 `digest_version` "4" (OPF 0.5, issues #223, #234, #240, #243)
 
 The verdict-free projection of §3.5.4's precedent record, plus the one judged
-index of §3.5.6 (`vs_standard.label`):
+index of §3.5.6 (`vs_standard`: its label and compact part map):
 
 ```jsonc
 "digest": {
@@ -702,15 +762,24 @@ index of §3.5.6 (`vs_standard.label`):
   "perspective": { "party": "...", "counterparty_type": "..." } | null,  // copy of §3.1
   "agreement_type": { "id": "...", "name": "..." },
   "corpus": { "n_deals": 6, "n_signed": 6, "first_signed": null, "last_signed": null },
+  "part_map_legend": { "part_map": { "=": "...", "+": "...", "-": "...",
+                                     "x+": "...", "x-": "...", "x0": "..." },
+                       "additions": { "+": "...", "-": "...", "0": "..." },
+                       "label_by": { "parts": "...", "owner": "..." } },
   "clauses": [ {
-    "id": "...", "taxonomy_id": "...", "title": "...", "our_standard": {...} | null,
+    "id": "...", "taxonomy_id": "...", "title": "...",
+    "our_standard": { "parts": [ { "part_id": "...", "text": "..." } ],
+                      "source_ref": Citation } | null,
     "n_deals": 6, "n_signed_standard": 2,
     "n_opened_standard": 4, "n_kept_standard": 2,
     "positions": { "standard": 2, "equivalent": 0, "more_protective": 0,
-                   "less_protective": 0, "different_concept": 2, "unjudged": 2 },
+                   "less_protective": 0, "mixed": 1, "different_concept": 1, "unjudged": 2 },
     "signed_variants": [
       { "text": "...", "n_deals": 2, "last_signed": null,
-        "n_from_standard": 2, "n_unchanged": 0, "label": "less_protective" | ... | null,
+        "n_from_standard": 2, "n_unchanged": 0, "label": "mixed" | ... | null,
+        "part_map": ["=", "-", "x0"] | null, "additions": ["+"] | null,
+        "label_by": "owner",               // only when the owner set the label
+        "reason": "..." | null,
         "ref": Citation, "precedent_ids": ["prec.…"] },
       { "label": "equivalent", "n_deals": 3, "n_texts": 2, "n_from_standard": 1,
         "n_unchanged": 2, "last_signed": null,
@@ -718,9 +787,14 @@ index of §3.5.6 (`vs_standard.label`):
         "precedent_ids": ["prec.…"] }                               // the collapsed entry
     ],
     "refused_asks":    [ { "text": "...", "n_deals": 1, "label": ... | null,
+                           "part_map": [...] | null, "additions": [...] | null,
+                           "label_by": "owner", "reason": "..." | null,
                            "ref": Citation, "precedent_ids": ["prec.…"] } ],
     "changed_openings": [ { "text": "...", "n_deals": 3, "n_to_standard": 1, "n_struck": 1,
-                            "label": ... | null, "ref": Citation, "precedent_ids": ["prec.…"] } ],
+                            "label": ... | null, "part_map": [...] | null,
+                            "additions": [...] | null, "label_by": "owner",
+                            "reason": "..." | null,
+                            "ref": Citation, "precedent_ids": ["prec.…"] } ],
     "n_variants_total": 2, "n_refused_total": 0, "n_changed_openings_total": 1
   } ],
   "uncovered_clause_types": [ { "taxonomy_id": "...", "label": "..." } ]
@@ -745,7 +819,10 @@ index of §3.5.6 (`vs_standard.label`):
   that text is: `standard` (the signed text is our standard language; equals
   `n_signed_standard`), each `vs_standard.label` (§3.5.6) of a non-standard
   signed text, and `unjudged` (a non-standard signed text with no label).
-  All six keys are always present.
+  All seven keys are always present.
+- `our_standard` — the clause's standard as its ordered parts
+  (`{part_id, text}`, §3.5) and its `source_ref`; the joined `text` is not
+  repeated (it is the parts joined with a blank line).
 - `signed_variants` — the non-standard `signed_text` of signed deals,
   grouped by §3.5.4's grouping key (exact; counterparty aliases and
   `perspective.party` neutralized — not `standard`'s configured party
@@ -762,6 +839,23 @@ index of §3.5.6 (`vs_standard.label`):
     not judged. An index to check against the cited text, never an
     instruction. The label is orthogonal to the opening facts: a variant can
     be both a concession and `equivalent`.
+  - **Part map** (issue #243). A judged entry carries `part_map`, one token
+    per part of our standard in order: `=` present and equivalent, `+` / `-`
+    present but more / less protective, `x+` / `x-` / `x0` omitted with a
+    more protective / less protective / neutral effect; `additions`, one
+    token per addition (`+`, `-`, `0`); and `reason`, one sentence. The
+    label is derived from the part map and additions (§3.5.6, `parts`, the
+    default), and `reason` is then the judgment's most important difference;
+    such an entry carries no `label_by`, which saves a key on every entry of
+    a budgeted digest. `label_by: "owner"` is present only when the owner
+    overrode the derived label (`owner_label`): the part map and additions
+    stay as judged and may imply another label, and `reason` is the owner's
+    (`owner_label.reason`), never the judgment's reason for the label the
+    owner overrode, which would contradict the label shown. `part_map`,
+    `additions` and `reason` are `null` on an unjudged entry, which carries
+    no `label_by`. Per-part reasons are not in the digest (they are in the
+    evidence and the dossiers). `part_map_legend` states the tokens and the
+    `label_by` values (a constant).
   - **Collapse.** Every group whose `label` is `equivalent` is replaced by ONE
     entry (always last): `{label: "equivalent", n_deals (distinct deals
     across the collapsed groups), n_texts (groups collapsed), n_from_standard,
@@ -769,8 +863,9 @@ index of §3.5.6 (`vs_standard.label`):
     groups in the order above, each {text, ref}), precedent_ids (all)}`. It
     has no `text` or `ref` of its own.
   - **Order.** Individual entries come in four tiers: `less_protective` and
-    `different_concept` first, then those with a `null` label, then
-    `more_protective`; the collapsed entry closes the list.
+    `mixed` first (worse for us in some part), then `different_concept`, then
+    those with a `null` label, then `more_protective`; the collapsed entry
+    closes the list.
 - `refused_asks` — every refused ask, grouped the same way, representative
   the earliest-round ask (then lowest `document_id`), with the
   representative's `label`; ordered `n_deals` desc, then grouping key.
@@ -856,7 +951,7 @@ condition, permissible_proof, fallback_language}`.
 
 **`dossiers`** — `{clause id: dossier}`, one per `evidence.clauses[]` entry,
 bounded by a **budget** and carrying **at most two precedent excerpts**:
-`{clause_id, taxonomy_id, title, our_standard: {text}|null, n_floor_rules,
+`{clause_id, taxonomy_id, title, our_standard: {parts: [{part_id, text}]}|null, n_floor_rules,
 floor_rules: [{rule_id, statement, rationale?}] (at most three, fewer when
 dropped for size; `n_floor_rules` counts every one), excerpts, n_omitted,
 omitted_precedent_ids}`. The rationale is the signed Floor's own
@@ -870,11 +965,18 @@ cut-off clause can drop its operative carve-out or cap and so plant a false
 fact. There are no prefix cuts and no ellipsis truncation.
 
 An **excerpt** is one precedent record rendered as an opening-to-signed pair,
-`{precedent_id, kind, opening, signed, outcome}`: `opening` is the record's
+`{precedent_id, kind, opening, signed, outcome, vs_standard}`: `opening` is the record's
 `opening_text` and `signed` its `signed_text`, verbatim; with no recorded
 `opening_text` the excerpt is the signed text alone (`opening` `null`); a
 record whose clause was struck before signing has `signed` `null` and
-`outcome` `struck_before_signing`. Selection is deterministic, in this order,
+`outcome` `struck_before_signing`. `vs_standard` (issue #243) is the judgment
+of the text the excerpt's group stands for (the signed text of a signed
+variant, the opening of a changed opening, the ask of a refused ask):
+`{label, label_by, reason, part_map, part_reasons: [{part_id, reason}],
+additions: [{effect, summary}]}` — the digest's part map, `label_by` and
+`reason` (the owner's when the owner set the label, §3.12.2) plus the reason
+of every part that is not equivalent or not a neutral omission and every
+addition's summary — or `null` when that text is not judged. Selection is deterministic, in this order,
 each candidate contributing one record of its group, and a group or a record
 already chosen being skipped, until two are chosen:
 
@@ -1090,7 +1192,7 @@ grouping by §3.5.4's grouping key (including its counterparty-alias and
 `perspective.party` neutralization), the `n_deals`/`last_signed` ordering,
 the cap with uncapped totals, refused-ask grouping across deals, the
 sentence-boundary summary, and `perspective` carried as `null` when the
-document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order and `uncovered_clause_types`; vector 008 pins the hard-rule manifest (a presence or predicate rule names its clause), the dossier excerpt order (the concession's own record, the `signed_at` then lowest-`precedent_id` record order and a refused-ask excerpt) and the budget (a whole excerpt dropped and named, a single over-budget excerpt kept whole with its Floor rule dropped, and the last Floor rule dropped whole from a dossier with no excerpt so that it fits), and the provenance index with its corpus snapshot hash, source-file hashes and the dropped excerpt indexed as `omitted` with its deal (§3.12.3). The canonical-serialization algorithm itself is stated in
+document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order, the part maps (a mixed changed opening) and `uncovered_clause_types`; vector 008 pins the hard-rule manifest (a presence or predicate rule names its clause), the dossier excerpt order (the concession's own record, the `signed_at` then lowest-`precedent_id` record order and a refused-ask excerpt) and the budget (a whole excerpt dropped and named, a single over-budget excerpt kept whole with its Floor rule dropped, and the last Floor rule dropped whole from a dossier with no excerpt so that it fits), and the provenance index with its corpus snapshot hash, source-file hashes and the dropped excerpt indexed as `omitted` with its deal (§3.12.3); vector 009 pins the part rules on a standard of several parts (a repeated passage's `-2` `part_id`, multi-token part maps with omissions and additions, part reasons naming parts other than the first) and an owner label carried with `label_by` `owner` and the owner's reason (§3.5.6, §3.12.2, §3.12.3). The canonical-serialization algorithm itself is stated in
 `spec/conformance/README.md`. (The OPF 0.3 / digest 2 vector set, which also
 pinned key ordering, Unicode emission and float/int formatting edge cases,
 was retired with that format, issue #238; those edge cases are unit-tested
@@ -1174,6 +1276,7 @@ opening evidence, so it must be re-mined, not only re-projected.
 ## Appendix B — Changelog
 - **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set is regenerated for digest 4 with vectors 006 and 007.
 - **0.5 (issue #240)** — Equivalence label (§3.5.6): an optional `vs_standard` `{label, reason, basis, check} | null` on `signed_text`, `opening_text` and each `refused_asks[]` entry, judged once per distinct text against our standard and blind-checked by an independent model; three new validator MUSTs.
+- **0.5 (issue #243)** — `vs_standard` is judged part by part (§3.5.6): `our_standard.parts[]` (ordered template passages with content-hash `part_id`s, §3.5); each judgment carries `parts` (present with a `relation` or omitted with an `effect`) and `additions`, and its `label` — gaining `mixed` — is DERIVED from them; `check` records `label_agreed` and `parts_agreed`; an owner may override the label (`owner_label`). The cache key covers the ordered parts. Digest 4 carries our standard as its parts, a `part_map_legend`, and on every judged variant, ask and opening a compact `part_map`, `additions` tokens and the `reason`, plus `label_by: "owner"` (and then the owner's reason) only when the owner set the label; `mixed` leads with `less_protective`; dossier excerpts carry their judgment's part map, `label_by`, reason and part reasons. The 0.5 conformance vectors are regenerated, and vector 009 pins a standard of several parts and an owner label. Replaced in place: nothing outside the engine had vendored 0.5.
 - **0.5** — Opening evidence (§3.5.5): every precedent record gains `opened_with` (`standard` | `non_standard` | `absent` | `null`) and `opening_text` is recorded for any distinct opening, whatever its origin (0.4 recorded it only for our standard struck before signing). Three new validator MUSTs. The optional top-level `curation` section (§3.11) and `identity.section_digests.curation` are removed: the 0.5 schema rejects them (issue #233, after the review loop that produced pins was retired in issue #239). New schema file `playbook.schema-0.5.json`; it replaces 0.4 in the reference engine (no consumer ever bound 0.4). `digest_version` "3" is unchanged until digest 4 lands (epic #236); 0.5 has no consumer until contract-opf/contract-toaster#128 vendors it.
 - **Retirement (issue #238)** — The reference engine reads and writes only 0.4 (now 0.5); OPF 0.1–0.3 and `digest_version` "2" are retired (validators reject them as unsupported). Not a new shape: 0.4 is unchanged. §3.5.1–§3.5.3 and §3.12's digest 2 rules are replaced by history notes.
 - **0.4** — Verdict-free per-deal precedent record as the evidence shape (§3.5.4): `evidence.{clauses, precedent}` with distinct-deal counts, deterministic `standard`, three-valued paper metadata that gates nothing, and recomputable precedent ids; `digest_version` "3" (§3.12.1) with `perspective`, grouped signed variants and refused asks, and a digest-equals-recomputation rule; judged verdicts only under `x_judgments`. New schema file `playbook.schema-0.4.json`; 0.3 frozen.

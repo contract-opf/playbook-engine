@@ -2360,6 +2360,11 @@ def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: boo
         f"  agreed {result.agreed}, disagreed {result.disagreed} (awaiting adjudication), "
         f"adjudicated {result.adjudicated}, owner-decided (skipped) {result.skipped_owner}"
     )
+    if result.agreed or result.disagreed:
+        click.echo(
+            f"  of {result.agreed + result.disagreed} blind check(s): same label "
+            f"{result.label_agreed}, same parts {result.parts_agreed}"
+        )
     if result.disagreed:
         click.echo("  re-run `playbook judge --check equivalence` to queue the disagreements")
 
@@ -2380,7 +2385,8 @@ def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: boo
     default=None,
     help=(
         "JSONL file of equivalence check or adjudication answers instead of verdicts (each "
-        "line: {'key', 'label', 'reason', 'model', 'effort'}). A record whose model is not "
+        "line: {'key', 'parts', 'additions', 'reason', 'model', 'effort'}). A record whose "
+        "model is not "
         "claude-opus-5-5 or whose effort is not xhigh is rejected unless "
         "--allow-checker-model is passed."
     ),
@@ -2460,6 +2466,8 @@ def judge_apply_cmd(
     # any --config dependency: the version travels with the queue.
     pending_kinds: dict[str, str] = {}
     pending_rubrics: dict[str, str] = {}
+    # Equivalence items: the part ids of our standard the answer must cover.
+    pending_part_ids: dict[str, list[str]] = {}
     pending_path = out_dir_resolved / "judge" / "pending.jsonl"
     if pending_path.is_file():
         for pline in pending_path.read_text(encoding="utf-8").splitlines():
@@ -2475,6 +2483,12 @@ def judge_apply_cmd(
                 rubric_v = pitem.get("rubric_version")
                 if isinstance(rubric_v, str) and rubric_v:
                     pending_rubrics[pitem["key"]] = rubric_v
+                payload = pitem.get("payload")
+                std_parts = payload.get("our_standard_parts") if isinstance(payload, dict) else None
+                if pitem["kind"] == "equivalence" and isinstance(std_parts, list):
+                    pending_part_ids[pitem["key"]] = [
+                        str(p.get("part_id")) for p in std_parts if isinstance(p, dict)
+                    ]
 
     # Validate all lines first before touching the store.
     raw_lines = verdicts_path.read_text(encoding="utf-8").splitlines()
@@ -2526,6 +2540,14 @@ def judge_apply_cmd(
             raise SystemExit(1)
         try:
             validate_verdict(kind, record["verdict"])
+            if kind == "equivalence":
+                # Issue #243: stored with its DERIVED label, and checked
+                # against the parts of our standard the item asked about.
+                from playbook_engine.equivalence import validate_draft_verdict  # noqa: PLC0415
+
+                record["verdict"] = validate_draft_verdict(
+                    record["verdict"], pending_part_ids.get(record["key"])
+                )
         except (ValueError, TypeError) as exc:
             # TypeError is a defensive backstop: validate_verdict type-checks
             # confidence fields up front (issue #161) so a malformed verdict

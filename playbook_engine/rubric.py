@@ -88,7 +88,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from playbook_engine.equivalence import EQUIVALENCE_KIND, LABELS
+from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELATIONS, STATUSES
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,9 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # skill's equivalence step (compare the candidate's legal effect for
     # perspective.party with our standard's); the label vocabulary is the
     # derived half, so adding or renaming a label re-queues every verdict.
-    EQUIVALENCE_KIND: "v1",
+    # v2 (issue #243): the judgment is part by part (present/omitted with a
+    # relation or effect, plus additions) and the label is derived from it.
+    EQUIVALENCE_KIND: "v2",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -256,7 +258,12 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     "scope": lambda *, taxonomy, agreement_type: {
         "agreement_type": _agreement_type_surface(agreement_type)
     },
-    EQUIVALENCE_KIND: lambda *, taxonomy, agreement_type: {"labels": list(LABELS)},
+    EQUIVALENCE_KIND: lambda *, taxonomy, agreement_type: {
+        "labels": list(LABELS),
+        "statuses": list(STATUSES),
+        "relations": list(RELATIONS),
+        "effects": list(EFFECTS),
+    },
 }
 
 

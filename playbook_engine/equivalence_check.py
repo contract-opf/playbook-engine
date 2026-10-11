@@ -7,20 +7,26 @@ anyone relies on it, with no owner gate in front of the consumer:
    (``basis`` ``"agent"`` / ``"judge"``).
 2. **Blind check.** ``playbook judge --check equivalence <out>`` writes
    ``judge/check-pending.jsonl``: one item per drafted, unchecked verdict
-   carrying exactly the payload the drafter saw — WITHOUT the drafted label or
-   reason. A SEPARATE agent pinned to :data:`CHECKER_MODEL` at reasoning effort
-   :data:`CHECKER_EFFORT` answers it (never the drafter), or the keyed API path
+   carrying exactly the payload the drafter saw — WITHOUT the drafted
+   judgment. A SEPARATE agent pinned to :data:`CHECKER_MODEL` at reasoning
+   effort :data:`CHECKER_EFFORT` answers it with the same structured judgment
+   (parts, additions, reason; never the drafter), or the keyed API path
    (:func:`check_via_api`) does.
 3. **Record.** ``playbook judge-apply --check <file>`` records each answer with
    the checker's model id and effort and REJECTS a record whose model id or
    effort is not the pinned pair, unless ``--allow-checker-model`` is passed:
    enforcement is the recorded id, not the launch configuration.
-4. **Agreement** keeps the verdict, with ``check: {agreed: true, by, adjudicated:
-   false}``. **Disagreement** records ``check: {agreed: false, by,
-   adjudicated: false}`` (the draft still flows through) and puts the item on
-   ``judge/adjudication-pending.jsonl``; a fresh pinned agent sees both labels
-   and reasons, the text and our standard, and its answer replaces the verdict
-   with ``check: {agreed: false, by, adjudicated: true}``.
+4. **Agreement** (issue #243) is the same derived label AND the same set of
+   ``(part_id, status, direction)`` over the parts that are not equivalent
+   or not a neutral omission (:func:`~playbook_engine.equivalence.agreement_signature`);
+   both halves are recorded (``label_agreed``, ``parts_agreed``) so the
+   scorecard reports them separately. Agreement keeps the verdict, with
+   ``check: {agreed: true, label_agreed: true, parts_agreed: true, by,
+   adjudicated: false}``. **Disagreement** records ``agreed: false`` (the
+   draft still flows through) and puts the item on
+   ``judge/adjudication-pending.jsonl``; a fresh pinned agent sees both
+   judgments, the text and our standard's parts, and its answer replaces the
+   verdict with ``adjudicated: true``.
 5. **Flow-through.** An unchecked draft is written to the playbook anyway
    (``check: null``); nothing blocks. A verdict whose ``basis`` is ``"owner"``
    is never checked and wins over any agent or check answer.
@@ -43,8 +49,16 @@ from typing import Any
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.equivalence import (
     BASIS_OWNER,
+    EFFECT_NEUTRAL,
+    EFFECTS,
+    LABEL_EQUIVALENT,
     LABELS,
+    RELATIONS,
+    STATUS_PRESENT,
+    STATUSES,
     EquivalenceSubject,
+    agreement_signature,
+    canonical_judgment,
 )
 
 __all__ = [
@@ -87,8 +101,14 @@ def _is_equivalence_verdict(verdict: Mapping[str, Any] | None) -> bool:
     return (
         isinstance(verdict, Mapping)
         and verdict.get("label") in LABELS
+        and isinstance(verdict.get("parts"), list)
         and isinstance(verdict.get("reason"), str)
     )
+
+
+def _judgment(verdict: Mapping[str, Any]) -> dict[str, Any]:
+    """The structured judgment of a stored verdict, draft or answer."""
+    return {k: verdict.get(k) for k in ("label", "reason", "parts", "additions")}
 
 
 def _state(verdict: Mapping[str, Any]) -> str:
@@ -137,7 +157,7 @@ def build_check_queues(store: VerdictStore, subjects: Iterable[EquivalenceSubjec
                 {"key": subject.key, "kind": CHECK_KIND, "payload": dict(subject.payload)}
             )
         elif state == "disputed":
-            draft = verdict.get("draft") or {"label": verdict["label"], "reason": verdict["reason"]}
+            draft = verdict.get("draft") or verdict
             checker = verdict.get("checker") or {}
             queues.adjudication.append(
                 {
@@ -145,8 +165,8 @@ def build_check_queues(store: VerdictStore, subjects: Iterable[EquivalenceSubjec
                     "kind": ADJUDICATION_KIND,
                     "payload": {
                         **subject.payload,
-                        "draft": {"label": draft.get("label"), "reason": draft.get("reason")},
-                        "check": {"label": checker.get("label"), "reason": checker.get("reason")},
+                        "draft": _judgment(draft),
+                        "check": _judgment(checker),
                     },
                 }
             )
@@ -171,15 +191,17 @@ def write_check_queues(judge_dir: Path, queues: CheckQueues) -> tuple[Path, Path
 # Applying check / adjudication answers
 # ---------------------------------------------------------------------------
 
-#: A check record, one JSON object per line of the ``--check`` file.
-_RECORD_KEYS = frozenset({"key", "label", "reason", "model", "effort"})
+#: A check record, one JSON object per line of the ``--check`` file. ``label``
+#: is optional: it is derived from the parts, and a supplied one must match.
+_RECORD_KEYS = frozenset({"key", "parts", "additions", "reason", "model", "effort"})
+_OPTIONAL_RECORD_KEYS = frozenset({"label"})
 
 
 def load_check_records(path: Path) -> list[tuple[int, dict[str, Any]]]:
     """Parse a ``--check`` file into ``(line_number, record)`` pairs.
 
     Raises ``ValueError`` (with the line number) on malformed JSON or a record
-    that is not ``{key, label, reason, model, effort}``.
+    that is not ``{key, parts, additions, reason, model, effort[, label]}``.
     """
     records: list[tuple[int, dict[str, Any]]] = []
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -192,10 +214,11 @@ def load_check_records(path: Path) -> list[tuple[int, dict[str, Any]]]:
         if not isinstance(record, dict):
             raise ValueError(f"line {lineno}: expected a JSON object")
         missing = sorted(_RECORD_KEYS - set(record))
-        extra = sorted(set(record) - _RECORD_KEYS)
+        extra = sorted(set(record) - _RECORD_KEYS - _OPTIONAL_RECORD_KEYS)
         if missing or extra:
             raise ValueError(
-                f"line {lineno}: a check record is {{key, label, reason, model, effort}}"
+                f"line {lineno}: a check record is "
+                "{key, parts, additions, reason, model, effort}"
                 + (f"; missing {missing}" if missing else "")
                 + (f"; unexpected {extra}" if extra else "")
             )
@@ -206,10 +229,6 @@ def load_check_records(path: Path) -> list[tuple[int, dict[str, Any]]]:
 def _validate_record(record: Mapping[str, Any], *, allow_checker_model: bool) -> None:
     if not isinstance(record["key"], str) or not record["key"]:
         raise ValueError("'key' must be a non-empty string")
-    if record["label"] not in LABELS:
-        raise ValueError(f"'label' must be one of {list(LABELS)}, got {record['label']!r}")
-    if not isinstance(record["reason"], str) or not record["reason"].strip():
-        raise ValueError("'reason' must be a non-empty string")
     model, effort = record["model"], record["effort"]
     if not isinstance(model, str) or not model or not isinstance(effort, str) or not effort:
         raise ValueError("'model' and 'effort' must be non-empty strings (the checker's own)")
@@ -233,6 +252,9 @@ class ApplyResult:
 
     agreed: int = 0
     disagreed: int = 0
+    #: Of the blind checks: same derived label / same non-equivalent parts.
+    label_agreed: int = 0
+    parts_agreed: int = 0
     adjudicated: int = 0
     skipped_owner: int = 0
     #: ``(key, new verdict)`` pairs to write, in order; at most one per key.
@@ -240,42 +262,50 @@ class ApplyResult:
 
 
 def _transition(
-    verdict: dict[str, Any], record: Mapping[str, Any], result: ApplyResult
+    verdict: dict[str, Any], answer: dict[str, Any], record: Mapping[str, Any], result: ApplyResult
 ) -> dict[str, Any]:
-    answer = {
-        "label": record["label"],
-        "reason": record["reason"],
-        "by": record["model"],
-        "effort": record["effort"],
-    }
-    draft = verdict.get("draft") or {
-        "label": verdict["label"],
-        "reason": verdict["reason"],
-        "basis": verdict["basis"],
-    }
+    """The verdict after *answer* (a canonical judgment) is recorded on it."""
+    trail = {**answer, "by": record["model"], "effort": record["effort"]}
+    draft = verdict.get("draft") or {**_judgment(verdict), "basis": verdict["basis"]}
     state = _state(verdict)
     if state == "unchecked":
-        agreed = record["label"] == verdict["label"]
+        label_agreed = answer["label"] == verdict["label"]
+        parts_agreed = agreement_signature(answer) == agreement_signature(verdict)
+        agreed = label_agreed and parts_agreed
         result.agreed += agreed
         result.disagreed += not agreed
+        result.label_agreed += label_agreed
+        result.parts_agreed += parts_agreed
         return {
-            "label": verdict["label"],
-            "reason": verdict["reason"],
+            **_judgment(verdict),
             "basis": verdict["basis"],
-            "check": {"agreed": agreed, "by": record["model"], "adjudicated": False},
+            "check": {
+                "agreed": agreed,
+                "label_agreed": label_agreed,
+                "parts_agreed": parts_agreed,
+                "by": record["model"],
+                "adjudicated": False,
+            },
             "draft": draft,
-            "checker": answer,
+            "checker": trail,
         }
-    # state == "disputed": the answer is the adjudication.
+    # state == "disputed": the answer is the adjudication. The check's own
+    # agreement halves stay as recorded (they describe the blind check).
     result.adjudicated += 1
+    prior = verdict.get("check") or {}
     return {
-        "label": record["label"],
-        "reason": record["reason"],
+        **answer,
         "basis": verdict["basis"],
-        "check": {"agreed": False, "by": record["model"], "adjudicated": True},
+        "check": {
+            "agreed": False,
+            "label_agreed": bool(prior.get("label_agreed")),
+            "parts_agreed": bool(prior.get("parts_agreed")),
+            "by": record["model"],
+            "adjudicated": True,
+        },
         "draft": draft,
         "checker": verdict.get("checker"),
-        "adjudicator": answer,
+        "adjudicator": trail,
     }
 
 
@@ -327,7 +357,11 @@ def apply_check_records(
                     "this verdict is already settled (agreed or adjudicated); re-draft it to "
                     "check it again"
                 )
-            result.updates.append((key, _transition(verdict, record, result)))
+            part_ids = [str(p.get("part_id")) for p in verdict.get("parts") or []]
+            answer = canonical_judgment(
+                {k: record.get(k) for k in ("parts", "additions", "reason", "label")}, part_ids
+            )
+            result.updates.append((key, _transition(verdict, answer, record, result)))
         except ValueError as exc:
             raise ValueError(f"line {lineno}: {exc}") from exc
     return result
@@ -339,16 +373,25 @@ def apply_check_records(
 
 _CHECK_SYSTEM_PROMPT = """\
 You are checking one clause from a contract negotiation precedent record. You are
-given our standard clause for a clause type, a candidate clause text, and the
-party whose perspective counts (`perspective_party`). Compare the candidate's
-legal effect for that party with our standard's, and answer with exactly one
-label and one sentence naming the operative difference:
+given the numbered parts of our standard clause for a clause type
+(`our_standard_parts`, each with a `part_id`), a candidate clause text, and the
+party whose perspective counts (`perspective_party`). Compare the candidate with
+our standard PART BY PART, for that party:
 
-- equivalent: the same legal effect for the party as our standard;
-- more_protective: better for the party than our standard;
-- less_protective: worse for the party than our standard;
-- different_concept: it does something our standard does not, or omits what our
-  standard does, so the two cannot be compared as more or less protective.
+- for EVERY part, `status` is `present` when the candidate keeps that part's
+  substance (perhaps reworded or changed) and `omitted` when it drops it;
+- `direction` of a present part: `equivalent` (same legal effect),
+  `more_protective` or `less_protective` (better or worse for the party than
+  that part of our standard);
+- `direction` of an omitted part: the effect of the omission for the party,
+  `more_protective`, `less_protective` or `neutral` (dropping an obligation that
+  falls on the party can be more protective; dropping a recital is neutral);
+- `reason`: one sentence for a part that is not equivalent or an omission that
+  is not neutral, otherwise an empty string;
+- `additions`: each thing the candidate adds that no part covers, with a
+  one-sentence `summary` and its `effect` for the party (empty when none);
+- top-level `reason`: one sentence naming the single most important difference
+  (or saying the legal effect is the same).
 
 Judge the language only. You are told nothing about who proposed it, whose
 paper it was on, or how a negotiation ended, and none of that may matter.
@@ -357,21 +400,81 @@ paper it was on, or how a negotiation ended, and none of that may matter.
 _ADJUDICATE_SYSTEM_PROMPT = (
     _CHECK_SYSTEM_PROMPT
     + """
-Two earlier reviewers disagreed about this candidate. Their labels and reasons are
-included as `draft` and `check`. Decide afresh from the texts; do not simply side
-with either of them.
+Two earlier reviewers disagreed about this candidate. Their judgments are included
+as `draft` and `check`. Decide afresh from the texts; do not simply side with
+either of them.
 """
 )
 
+#: Structured-output schema of an answer. One flat ``direction`` per part
+#: (structured outputs cannot express "relation when present, effect when
+#: omitted"); :func:`_judgment_from_answer` maps it onto the judgment shape.
 _ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "label": {"type": "string", "enum": list(LABELS)},
+        "parts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "part_id": {"type": "string"},
+                    "status": {"type": "string", "enum": list(STATUSES)},
+                    "direction": {
+                        "type": "string",
+                        "enum": sorted(set(RELATIONS) | set(EFFECTS)),
+                    },
+                    "reason": {"type": "string"},
+                },
+                "required": ["part_id", "status", "direction", "reason"],
+                "additionalProperties": False,
+            },
+        },
+        "additions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "effect": {"type": "string", "enum": list(EFFECTS)},
+                },
+                "required": ["summary", "effect"],
+                "additionalProperties": False,
+            },
+        },
         "reason": {"type": "string"},
     },
-    "required": ["label", "reason"],
+    "required": ["parts", "additions", "reason"],
     "additionalProperties": False,
 }
+
+
+def _judgment_from_answer(answer: Mapping[str, Any]) -> dict[str, Any]:
+    """An API answer (one ``direction`` per part) as a judgment record body.
+
+    A present part's direction is its ``relation`` (``neutral`` reads as
+    ``equivalent``); an omitted part's is its ``effect`` (``equivalent`` reads
+    as ``neutral``). A reason on an equivalent part or a neutral omission is
+    dropped. :func:`canonical_judgment` then validates the result.
+    """
+    parts: list[dict[str, Any]] = []
+    for part in answer.get("parts") or []:
+        status = part.get("status")
+        direction = part.get("direction")
+        out: dict[str, Any] = {"part_id": part.get("part_id"), "status": status}
+        if status == STATUS_PRESENT:
+            out["relation"] = LABEL_EQUIVALENT if direction == EFFECT_NEUTRAL else direction
+            notable = out["relation"] != LABEL_EQUIVALENT
+        else:
+            out["effect"] = EFFECT_NEUTRAL if direction == LABEL_EQUIVALENT else direction
+            notable = out["effect"] != EFFECT_NEUTRAL
+        if notable:
+            out["reason"] = part.get("reason")
+        parts.append(out)
+    return {
+        "parts": parts,
+        "additions": list(answer.get("additions") or []),
+        "reason": answer.get("reason"),
+    }
 
 
 def _build_request(item: Mapping[str, Any], *, max_tokens: int) -> dict[str, Any]:
@@ -415,8 +518,8 @@ def check_via_api(
 ) -> tuple[list[dict[str, Any]], int]:
     """Answer check or adjudication *items* through the Message Batches API.
 
-    Returns ``(records, unchecked)``: one ``{key, label, reason, model,
-    effort}`` record per answered item — ``model`` is the model id the API
+    Returns ``(records, unchecked)``: one ``{key, parts, additions, reason,
+    model, effort}`` record per answered item — ``model`` is the model id the API
     reports the response actually ran on, never the requested one — and the
     count of items left unchecked (a refusal, an errored or unparsable
     result). There is NO server-side refusal fallback: a fallback would answer
@@ -448,6 +551,7 @@ def check_via_api(
     records: list[dict[str, Any]] = []
     unchecked = 0
     answered: set[str] = set()
+    by_key = {item["key"]: item.get("payload") or {} for item in items}
     for entry in client.messages.batches.results(batch_id):
         key = entry.custom_id
         answered.add(key)
@@ -465,10 +569,12 @@ def check_via_api(
             (b for b in (message.content or []) if getattr(b, "type", None) == "text"), None
         )
         try:
-            answer = json.loads(text_block.text)  # type: ignore[union-attr]
-            label, reason = answer["label"], answer["reason"]
-            if label not in LABELS or not isinstance(reason, str) or not reason.strip():
-                raise ValueError("answer is not a valid label and reason")
+            body = _judgment_from_answer(json.loads(text_block.text))  # type: ignore[union-attr]
+            part_ids = [
+                str(p.get("part_id"))
+                for p in (by_key.get(key) or {}).get("our_standard_parts") or []
+            ]
+            canonical_judgment(body, part_ids or None)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             _log.warning("equivalence check %s: unparsable answer (%s); left unchecked", key, exc)
             unchecked += 1
@@ -476,8 +582,7 @@ def check_via_api(
         records.append(
             {
                 "key": key,
-                "label": label,
-                "reason": reason,
+                **body,
                 "model": str(getattr(message, "model", "")),
                 "effort": CHECKER_EFFORT,
             }

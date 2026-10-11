@@ -965,16 +965,20 @@ make docker-run CORPUS=./corpus OUT=./out \
   human review; do not silently guess.
 - **Equivalence** (`kind: equivalence`, template mode only): for each
   distinct non-standard text (a signed text, a non-standard opening, a
-  refused ask) decide whether it is `equivalent`, `more_protective`,
-  `less_protective` or `different_concept` relative to our standard, for
-  `perspective_party`, with a one-sentence `reason` and `"basis": "agent"`.
-  These are queued by `judge` in the same round as any classify, scope and
-  provenance items, and new ones can appear after classification verdicts
-  land, so keep looping until `pending.jsonl` is empty. See
-  REFERENCE.md § "Equivalence". Each text is judged ONCE, however many deals
-  and roles carry it, and never by deal or paper side. Use
-  `different_concept` when the two cannot be ranked rather than guessing a
-  ranking.
+  refused ask) judge it PART BY PART against our standard's numbered parts
+  (`our_standard_parts`), for `perspective_party`: every part `present`
+  (with a `relation`: `equivalent`, `more_protective`, `less_protective`) or
+  `omitted` (with the omission's `effect`: `more_protective`,
+  `less_protective`, `neutral`), a one-sentence reason for each part that is
+  not equivalent or neutral, the `additions` no part covers, a one-sentence
+  top-level `reason` and `"basis": "agent"`. The label (`equivalent`,
+  `more_protective`, `less_protective`, `mixed`, `different_concept`) is
+  DERIVED by the engine from the parts — do not choose it. These are queued
+  by `judge` in the same round as any classify, scope and provenance items,
+  and new ones can appear after classification verdicts land, so keep
+  looping until `pending.jsonl` is empty. See REFERENCE.md § "Equivalence".
+  Each text is judged ONCE, however many deals and roles carry it, and
+  never by deal or paper side.
 
 **The blind check (Step 6b).** Every drafted equivalence verdict is then
 checked by a separate agent pinned to `claude-opus-5-5` at `xhigh` effort
@@ -983,7 +987,8 @@ checked by a separate agent pinned to `claude-opus-5-5` at `xhigh` effort
 ```bash
 playbook judge --check equivalence $OUT --config <config>
 # Agent (a DIFFERENT agent, claude-opus-5-5 / xhigh): answer each line of
-# $OUT/judge/check-pending.jsonl with {"key","label","reason","model","effort"}
+# $OUT/judge/check-pending.jsonl with the same part-by-part judgment,
+# {"key","parts","additions","reason","model","effort"}
 # (the model id you actually ran on) into $OUT/my-checks-<date>.jsonl, then:
 playbook judge-apply $OUT --check $OUT/my-checks-<date>.jsonl
 # A disagreement lands in $OUT/judge/adjudication-pending.jsonl; a FRESH
@@ -1409,7 +1414,8 @@ Writes exactly **one** human-readable artifact, self-contained, no network
   signed variants, the openings not signed as proposed, the refused asks, the
   clause types with no evidence), **Review (optional)** (the shortest useful
   list of model judgments — the `vs_standard` labels the consuming model is
-  shown, worst first — each with Confirm / Change label / note) and **Posture &
+  shown, worst first — each with Confirm / Change label / change one part
+  (each with the owner's reason, which the digest then carries) / note) and **Posture &
   Floor** (the authored text, with edit fields). Edits save to
   `$OUT/overrides.json`: the page's **Connect folder** button (Chrome, Edge)
   writes it straight into the out-dir on every change, and **Download edits**
@@ -1434,7 +1440,7 @@ with how many were conceded from our standard and how many signed as proposed;
 the variants judged equivalent to our standard collapse into one entry), the
 refused asks and the openings not signed as proposed, grouped by exact
 normalization with distinct-deal counts and citations, plus the clause types
-with no evidence at all; verdict-free except the one judged `vs_standard` label on each text; target ~40K tokens). There is no standalone digest file.
+with no evidence at all; verdict-free except the one judged `vs_standard` judgment on each text, carried as its label plus a compact part map (one token per part of our standard, one per addition) and a one-sentence reason; target ~40K tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
 disk** — the page contains it, never replaces it. A consumer extracts the

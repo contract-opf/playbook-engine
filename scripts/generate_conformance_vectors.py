@@ -40,6 +40,7 @@ from playbook_engine.canonicalize import (
 )
 from playbook_engine.digest import DIGEST_VERSION_V4, build_digest_v4
 from playbook_engine.dossiers import build_derived_sections
+from playbook_engine.equivalence import iter_slots, stamp_standard_parts, standard_parts
 from playbook_engine.opf_accessors import perspective_party
 from playbook_engine.precedent import clause_counts, precedent_id
 
@@ -107,8 +108,11 @@ def _base_v05(
     party = perspective_party(doc)
     stamped = []
     for clause in clauses or []:
+        clause = _with_parts(clause)
+        stamp_standard_parts(clause.get("our_standard"), party)
         stamped.append({**clause, **clause_counts(clause["taxonomy_id"], records, party=party)})
     doc["evidence"] = {"clauses": stamped, "precedent": records}
+    _stamp_judgment_parts(doc["evidence"])
     doc["posture"] = {}
     doc["floor"] = floor or {}
     doc["corpus"] = {"documents": documents or [], "stats": {}}
@@ -144,11 +148,108 @@ def _deal(document_id: str, *, signed_version: int | None, provenance: str) -> d
 _DEFAULT: object = object()
 
 
-def _vs(label: str | None) -> dict[str, Any] | None:
-    """A ``vs_standard`` object (OPF-SPEC §3.5.6) carrying *label*, or ``None``."""
+#: Stands for the one part of a one-part fixture standard until ``_base_v05``
+#: stamps the real ``part_id``; ``_part(n)`` stands for the n-th part of a
+#: standard of several (vector 009).
+_PART = "__part__"
+
+
+def _part(n: int) -> str:
+    return f"{_PART}{n}"
+
+
+#: A part-by-part judgment (OPF-SPEC §3.5.6, issue #243) that DERIVES each
+#: label: ``(parts, additions)`` over a one-part standard.
+_JUDGMENTS: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {
+    "equivalent": ([{"part_id": _PART, "status": "present", "relation": "equivalent"}], []),
+    "more_protective": (
+        [
+            {
+                "part_id": _PART,
+                "status": "present",
+                "relation": "more_protective",
+                "reason": "Synthetic fixture part reason.",
+            }
+        ],
+        [],
+    ),
+    "less_protective": (
+        [
+            {
+                "part_id": _PART,
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Synthetic fixture part reason.",
+            }
+        ],
+        [],
+    ),
+    "mixed": (
+        [
+            {
+                "part_id": _PART,
+                "status": "present",
+                "relation": "less_protective",
+                "reason": "Synthetic fixture part reason.",
+            }
+        ],
+        [{"summary": "Synthetic fixture addition.", "effect": "more_protective"}],
+    ),
+    "different_concept": (
+        [{"part_id": _PART, "status": "omitted", "effect": "neutral"}],
+        [{"summary": "Synthetic fixture addition.", "effect": "neutral"}],
+    ),
+}
+
+
+def _vs(label: str | dict[str, Any] | None) -> dict[str, Any] | None:
+    """A ``vs_standard`` judgment (OPF-SPEC §3.5.6) whose parts derive *label*, or ``None``.
+
+    A dict is a judgment written out in full (vector 009's several-part
+    standard) and is copied as given."""
     if label is None:
         return None
-    return {"label": label, "reason": "Synthetic fixture reason.", "basis": "agent", "check": None}
+    if isinstance(label, dict):
+        return copy.deepcopy(label)
+    parts, additions = _JUDGMENTS[label]
+    return {
+        "label": label,
+        "reason": "Synthetic fixture reason.",
+        "parts": [dict(p) for p in parts],
+        "additions": [dict(a) for a in additions],
+        "basis": "agent",
+        "check": None,
+    }
+
+
+def _with_parts(clause: dict[str, Any]) -> dict[str, Any]:
+    """*clause* with its ``our_standard`` cut into one part (ids stamped later)."""
+    std = clause.get("our_standard")
+    if not isinstance(std, dict) or "parts" in std:
+        return clause
+    return {
+        **clause,
+        "our_standard": {
+            **std,
+            "parts": [{"part_id": "", "order": 1, "text": std["text"]}],
+        },
+    }
+
+
+def _stamp_judgment_parts(evidence: dict[str, Any]) -> None:
+    """Point every fixture judgment at its clause's standard parts: ``_PART`` at
+    the one part of a one-part standard, ``_part(n)`` at the n-th part."""
+    ids = {c["taxonomy_id"]: [p["part_id"] for p in standard_parts(c)] for c in evidence["clauses"]}
+    for slot in iter_slots(evidence):
+        vs = slot.entry.get("vs_standard")
+        if not isinstance(vs, dict):
+            continue
+        pids = ids[slot.record["taxonomy_id"]]
+        for part in vs["parts"]:
+            if part["part_id"] == _PART:
+                (part["part_id"],) = pids
+            else:
+                part["part_id"] = pids[int(part["part_id"][len(_PART) :]) - 1]
 
 
 def _prec(
@@ -165,9 +266,9 @@ def _prec(
     paper: str = "ours",
     rounds: int = 0,
     counterparty_alias: str | None = None,
-    signed_vs: str | None = None,
-    opening_vs: str | None = None,
-    refused_vs: str | None = None,
+    signed_vs: str | dict[str, Any] | None = None,
+    opening_vs: str | dict[str, Any] | None = None,
+    refused_vs: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     refused_asks = [
         {
@@ -803,7 +904,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             signed_text=texts_007["diff"],
             signed_vs="different_concept",
             opening_text=texts_007["more"],
-            opening_vs="more_protective",
+            opening_vs="mixed",
             opened_with="non_standard",
             rounds=1,
             paper="theirs",
@@ -873,10 +974,15 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
                 "two exemplars and the concession count; the rest are listed "
                 "individually in tier order: less_protective (two deals), "
                 "different_concept, the unjudged one (a signed text with no "
-                "label), more_protective, then the collapsed entry. "
+                "label), more_protective, then the collapsed entry. Each "
+                "judged entry carries its part map (one token per part of our "
+                "one-part standard), its addition tokens and its reason "
+                "(issue #243); the unjudged one carries nulls. "
                 "positions counts signed deals by standard, each label and "
                 "unjudged. The refused ask and the changed opening carry their "
-                "labels. The taxonomy lists one covered entry, an active and a "
+                "labels (the changed opening is mixed: its one part less "
+                "protective, an addition more protective). The taxonomy lists "
+                "one covered entry, an active and a "
                 "custom entry with no evidence (uncovered_clause_types, sorted by "
                 "taxonomy_id) and an inactive entry (never listed).",
                 doc_007,
@@ -1139,6 +1245,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             "opening": std_c,
             "signed": v1_c,
             "outcome": "signed",
+            "vs_standard": None,
         },
         {
             "precedent_id": ids_c["deal-f"],
@@ -1146,6 +1253,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             "opening": r1_c,
             "signed": std_c,
             "outcome": "ask_refused",
+            "vs_standard": None,
         },
     ]
     index_008 = derived_008["provenance_index"]
@@ -1224,6 +1332,236 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
                 "resolves to deal-e, which no kept excerpt cites, and deal-e is listed in "
                 "documents for it.",
                 doc_008,
+            ),
+        )
+    )
+    # 009 — a standard of several parts, one of them repeated, and an owner
+    # label over a judged part map (issue #243).
+    tid_009 = "confidentiality"
+    parts_009 = [
+        "The Recipient shall hold the Discloser's Confidential Information in confidence.",
+        "This Section survives the end of this Agreement.",
+        "The Recipient shall notify the Discloser promptly of any unauthorized disclosure.",
+        "This Section survives the end of this Agreement.",
+    ]
+    std_009 = "\n\n".join(parts_009)
+    v1_009 = (
+        "The Recipient shall hold the Discloser's Confidential Information in confidence "
+        "and shall notify the Discloser within thirty days of any unauthorized disclosure, "
+        "and shall return or destroy it on request. This Section survives the end of this "
+        "Agreement."
+    )
+    v2_009 = (
+        "The Recipient keeps the Discloser's Confidential Information in confidence and "
+        "notifies the Discloser promptly of any unauthorized disclosure."
+    )
+    ask_009 = (
+        "The Recipient shall hold the Discloser's Confidential Information in confidence "
+        "and may disclose it to its advisers."
+    )
+    o1_009 = (
+        "The Recipient shall use reasonable efforts to hold the Discloser's Confidential "
+        "Information in confidence and shall notify the Discloser promptly of any "
+        "unauthorized disclosure. This Section survives the end of this Agreement."
+    )
+
+    def _p(n: int, status: str, direction: str, reason: str | None = None) -> dict[str, Any]:
+        key = "relation" if status == "present" else "effect"
+        part: dict[str, Any] = {"part_id": _part(n), "status": status, key: direction}
+        if reason is not None:
+            part["reason"] = reason
+        return part
+
+    # Signed in deal-a after opening with our standard: mixed. Part 2 dropped
+    # (neutral), part 3 less protective, part 4 (the repeat) kept, and an
+    # addition more protective.
+    vs_v1_009 = {
+        "label": "mixed",
+        "reason": "Synthetic fixture reason: a later notice deadline.",
+        "parts": [
+            _p(1, "present", "equivalent"),
+            _p(2, "omitted", "neutral"),
+            _p(3, "present", "less_protective", "Synthetic fixture: notice within thirty days."),
+            _p(4, "present", "equivalent"),
+        ],
+        "additions": [
+            {
+                "summary": "Synthetic fixture: return or destroy on request.",
+                "effect": "more_protective",
+            }
+        ],
+        "basis": "agent",
+        "check": None,
+    }
+    # Signed in deal-b: equivalent although it drops both survival sentences
+    # (neutral omissions) and adds a neutral sentence.
+    vs_v2_009 = {
+        "label": "equivalent",
+        "reason": "Synthetic fixture reason: same duties, no survival sentence.",
+        "parts": [
+            _p(1, "present", "equivalent"),
+            _p(2, "omitted", "neutral"),
+            _p(3, "present", "equivalent"),
+            _p(4, "omitted", "neutral"),
+        ],
+        "additions": [],
+        "basis": "agent",
+        "check": None,
+    }
+    # Asked and refused in deal-c: less protective (part 3 dropped, an
+    # adviser carve-out added).
+    vs_ask_009 = {
+        "label": "less_protective",
+        "reason": "Synthetic fixture reason: no notice duty.",
+        "parts": [
+            _p(1, "present", "equivalent"),
+            _p(2, "omitted", "neutral"),
+            _p(3, "omitted", "less_protective", "Synthetic fixture: the notice duty is gone."),
+            _p(4, "omitted", "neutral"),
+        ],
+        "additions": [
+            {"summary": "Synthetic fixture: disclosure to advisers.", "effect": "less_protective"}
+        ],
+        "basis": "agent",
+        "check": None,
+    }
+    # Opened in deal-d, which signed our standard: the parts derive mixed
+    # (part 1 less protective, part 2 omitted more protective, part 4 the
+    # repeat more protective) but the owner set the label to more_protective,
+    # with a reason.
+    vs_o1_009 = {
+        "label": "more_protective",
+        "reason": "Synthetic fixture reason: reasonable efforts only.",
+        "parts": [
+            _p(1, "present", "less_protective", "Synthetic fixture: reasonable efforts only."),
+            _p(
+                2,
+                "omitted",
+                "more_protective",
+                "Synthetic fixture: the first survival sentence is gone.",
+            ),
+            _p(3, "present", "equivalent"),
+            _p(4, "present", "more_protective", "Synthetic fixture: survival kept once, narrower."),
+        ],
+        "additions": [],
+        "basis": "owner",
+        "check": None,
+        "owner_label": {
+            "label": "more_protective",
+            "reason": "Synthetic fixture owner reason: survival matters more here.",
+        },
+    }
+    precedent_009 = [
+        _prec(
+            "deal-a",
+            tid_009,
+            signed_text=v1_009,
+            signed_vs=vs_v1_009,
+            opening_text=std_009,
+            rounds=1,
+        ),
+        _prec("deal-b", tid_009, signed_text=v2_009, signed_vs=vs_v2_009, paper="theirs"),
+        _prec(
+            "deal-c",
+            tid_009,
+            signed_text=std_009,
+            standard=True,
+            refused=[(ask_009, 2)],
+            refused_vs=vs_ask_009,
+            rounds=1,
+        ),
+        _prec(
+            "deal-d",
+            tid_009,
+            signed_text=std_009,
+            standard=True,
+            opening_text=o1_009,
+            opening_vs=vs_o1_009,
+            opened_with="non_standard",
+            rounds=1,
+            paper="theirs",
+        ),
+    ]
+    doc_009 = _base_v05(
+        clauses=[
+            {
+                "id": f"clause.{tid_009}",
+                "taxonomy_id": tid_009,
+                "title": "Confidentiality",
+                "our_standard": {
+                    "text": std_009,
+                    "parts": [{"part_id": "", "order": 0, "text": t} for t in parts_009],
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "4",
+                    },
+                },
+            }
+        ],
+        precedent=precedent_009,
+        documents=[
+            _deal(
+                f"deal-{c}",
+                signed_version=3,
+                provenance="counterparty_paper" if c in "bd" else "our_paper",
+            )
+            for c in "abcd"
+        ],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+    )
+    pids_009 = [p["part_id"] for p in doc_009["evidence"]["clauses"][0]["our_standard"]["parts"]]
+    assert pids_009[3] == f"{pids_009[1]}-2", pids_009
+    digest_009 = build_digest_v4(doc_009)
+    entry_009 = digest_009["clauses"][0]
+    assert [p["part_id"] for p in entry_009["our_standard"]["parts"]] == pids_009
+    mixed_009 = entry_009["signed_variants"][0]
+    assert mixed_009["label"] == "mixed" and "label_by" not in mixed_009
+    assert mixed_009["part_map"] == ["=", "x0", "-", "="] and mixed_009["additions"] == ["+"]
+    assert entry_009["signed_variants"][1]["n_texts"] == 1
+    assert entry_009["refused_asks"][0]["part_map"] == ["=", "x0", "x-", "x0"]
+    assert entry_009["refused_asks"][0]["additions"] == ["-"]
+    opening_009 = entry_009["changed_openings"][0]
+    assert opening_009["label"] == "more_protective" and opening_009["label_by"] == "owner"
+    assert opening_009["part_map"] == ["-", "x+", "=", "+"]
+    assert opening_009["reason"] == vs_o1_009["owner_label"]["reason"]
+    dossier_009 = build_derived_sections(doc_009)["dossiers"][f"clause.{tid_009}"]
+    excerpts_009 = dossier_009["excerpts"]
+    assert [x["kind"] for x in excerpts_009] == ["signed_variant", "changed_opening"]
+    assert [r["part_id"] for r in excerpts_009[0]["vs_standard"]["part_reasons"]] == [pids_009[2]]
+    assert [r["part_id"] for r in excerpts_009[1]["vs_standard"]["part_reasons"]] == [
+        pids_009[0],
+        pids_009[1],
+        pids_009[3],
+    ]
+    assert excerpts_009[1]["vs_standard"]["label_by"] == "owner"
+    vectors.append(
+        (
+            "009-standard-parts-and-owner-label",
+            _vector_v05(
+                "standard-parts-and-owner-label",
+                "A standard of four parts whose second and fourth parts are the same "
+                "passage (OPF-SPEC §3.5, §3.5.6, §3.12.2, §3.12.3, issue #243). The "
+                "fourth part's part_id is the second's content hash with -2 appended, "
+                "and the digest's our_standard carries all four parts in order. Every "
+                "part map has one token per part, in standard order. Deal-a opened with "
+                "our standard and signed a mixed variant (=, x0, -, = plus a more "
+                "protective addition): a concession, the first signed variant, and the "
+                "dossier's first excerpt, whose part_reasons name only the third part. "
+                "Deal-b signed a variant that drops both copies of the repeated passage "
+                "as neutral omissions: still equivalent, so it collapses (n_texts 1). "
+                "Deal-c's refused ask keeps the first part, drops the rest (the third "
+                "less protective) and adds a less protective sentence: less_protective. "
+                "Deal-d opened with language whose parts derive mixed (-, x+, =, +) but "
+                "the owner set the label to more_protective with a reason (owner_label): "
+                "its changed opening in the digest carries label more_protective, "
+                "label_by owner and the owner's reason, never the judgment's own reason, "
+                "with the part map as judged; every other judged entry carries no "
+                "label_by (its label is derived from its parts, the default the legend "
+                "states) and the judgment's reason. The dossier's second excerpt is that "
+                "changed opening, with label_by owner, the owner's reason and part "
+                "reasons for the first, second and fourth (repeated, -2) parts.",
+                doc_009,
             ),
         )
     )

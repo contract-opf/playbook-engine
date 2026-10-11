@@ -17,7 +17,7 @@ CSS = r"""
   --line: #e5e7eb; --accent: #1d4ed8; --accent-ink: #ffffff; --quote: #f9fafb;
   --warn-bg: #fffbeb; --warn-line: #fde68a; --warn-ink: #713f12;
   --ok: #166534; --bad: #991b1b;
-  --c-less: #b91c1c; --c-diff: #b45309; --c-more: #166534; --c-equiv: #475569;
+  --c-less: #b91c1c; --c-diff: #b45309; --c-more: #166534; --c-equiv: #475569; --c-mixed: #6d28d9;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -25,7 +25,7 @@ CSS = r"""
     --line: #2d323c; --accent: #7aa2ff; --accent-ink: #0b1020; --quote: #232731;
     --warn-bg: #2a2310; --warn-line: #5b4a14; --warn-ink: #f3dc9b;
     --ok: #6ee7a0; --bad: #fca5a5;
-    --c-less: #fca5a5; --c-diff: #fcd34d; --c-more: #86efac; --c-equiv: #cbd5e1;
+    --c-less: #fca5a5; --c-diff: #fcd34d; --c-more: #86efac; --c-equiv: #cbd5e1; --c-mixed: #c4b5fd;
   }
 }
 * { box-sizing: border-box; }
@@ -76,7 +76,14 @@ ol.steps li { margin: .4rem 0; }
   border: 1px solid currentColor; border-radius: 999px; padding: 0 .5rem; font-family: system-ui, sans-serif; }
 .chip.less_protective { color: var(--c-less); } .chip.different_concept { color: var(--c-diff); }
 .chip.more_protective { color: var(--c-more); } .chip.equivalent { color: var(--c-equiv); }
-.chip.owner { color: var(--ok); }
+.chip.mixed { color: var(--c-mixed); } .chip.owner { color: var(--ok); }
+.pmap { display: flex; flex-wrap: wrap; gap: .25rem; align-items: baseline; font-size: .82rem; margin: .3rem 0; }
+.tok { font-family: ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 .3rem; }
+.tok.t-eq { color: var(--c-equiv); } .tok.t-more { color: var(--c-more); } .tok.t-less { color: var(--c-less); }
+.tok.t-omit { color: var(--c-diff); }
+ol.parts { padding-left: 1.4rem; } ol.parts li { margin: .5rem 0; }
+ol.parts .why { font-size: .85rem; color: var(--muted); }
 .savebar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
 #save-status { font-size: .88rem; color: var(--muted); }
 #save-status.bad { color: var(--bad); }
@@ -143,10 +150,34 @@ JS = r"""
   var PF = readJSON('pf-data') || { posture: null, floor: [] };
   var FILE = META.overrides_file || 'overrides.json';
   var LABEL_NAMES = {
-    less_protective: 'Less protective', different_concept: 'Different concept',
+    less_protective: 'Less protective', mixed: 'Mixed', different_concept: 'Different concept',
     more_protective: 'More protective', equivalent: 'Equivalent'
   };
-  var LABELS = ['less_protective', 'different_concept', 'more_protective', 'equivalent'];
+  var LABELS = ['less_protective', 'mixed', 'different_concept', 'more_protective', 'equivalent'];
+  /* the part map (issue #243): one token per part of our standard */
+  var PART_CHOICES = [
+    ['present', 'equivalent', '=', 'kept, same effect'],
+    ['present', 'more_protective', '+', 'kept, more protective for us'],
+    ['present', 'less_protective', '-', 'kept, less protective for us'],
+    ['omitted', 'more_protective', 'x+', 'left out, more protective for us'],
+    ['omitted', 'less_protective', 'x-', 'left out, less protective for us'],
+    ['omitted', 'neutral', 'x0', 'left out, no effect']
+  ];
+  function tokenOf(status, direction) {
+    var c = PART_CHOICES.filter(function (x) { return x[0] === status && x[1] === direction; })[0];
+    return c ? c[2] : '?';
+  }
+  function tokenClass(token) {
+    return token === '=' ? 't-eq' : token === '+' ? 't-more' : token === '-' ? 't-less' : 't-omit';
+  }
+  function deriveLabel(parts, additions) {
+    if (!parts.some(function (p) { return p.status === 'present'; })) return 'different_concept';
+    var dirs = {};
+    parts.forEach(function (p) { dirs[p.direction] = 1; });
+    (additions || []).forEach(function (a) { dirs[a.effect] = 1; });
+    var more = !!dirs.more_protective, less = !!dirs.less_protective;
+    return more && less ? 'mixed' : more ? 'more_protective' : less ? 'less_protective' : 'equivalent';
+  }
 
   /* ---------- tabs ---------- */
   var tabs = $$('[role=tab]');
@@ -402,13 +433,56 @@ JS = r"""
     var slot = row.loc.role === 'signed' ? rec.signed_text : row.loc.role === 'opening' ? rec.opening_text : (rec.refused_asks || [])[row.loc.i || 0];
     return slot && slot.text || null;
   }
-  function standardText(row) {
+  function standardParts(row) {
     loadCanonical();
     var cl = ((canonical.evidence || {}).clauses || []).filter(function (c) { return c.taxonomy_id === row.taxonomy_id; })[0];
-    return cl && cl.our_standard && cl.our_standard.text || null;
+    return cl && cl.our_standard && cl.our_standard.parts || [];
   }
   function rowEdit(row) { return edits['vs_standard|' + row.key + '|']; }
-  function effLabel(row) { var e = rowEdit(row); return e ? e.value.label : row.label; }
+  /* the row's parts with any part the owner changed applied */
+  function effParts(row) {
+    var e = rowEdit(row), changed = {};
+    if (e && e.value.parts) e.value.parts.forEach(function (p) { changed[p.part_id] = p; });
+    return (row.parts || []).map(function (p) {
+      var c = changed[p.part_id];
+      return c ? { n: p.n, part_id: p.part_id, status: c.status, direction: c.relation || c.effect,
+        token: tokenOf(c.status, c.relation || c.effect), reason: '', owner: true } : p;
+    });
+  }
+  function effLabel(row) {
+    var e = rowEdit(row);
+    if (!e) return row.label;
+    if (e.value.parts) return deriveLabel(effParts(row), row.additions);
+    return e.value.label;
+  }
+  function setPartEdit(row, part, status, direction) {
+    var e = rowEdit(row);
+    var list = e && e.value.parts ? e.value.parts.filter(function (p) { return p.part_id !== part.part_id; }) : [];
+    var orig = (row.parts || []).filter(function (p) { return p.part_id === part.part_id; })[0];
+    if (!orig || orig.status !== status || orig.direction !== direction) {
+      var v = { part_id: part.part_id, status: status };
+      if (status === 'present') v.relation = direction; else v.effect = direction;
+      list.push(v);
+    }
+    if (list.length) {
+      var value = { parts: list };
+      if (e && e.value.parts && e.value.reason) value.reason = e.value.reason;
+      edits['vs_standard|' + row.key + '|'] = entry('vs_standard', row.key, null, value, e && e.note);
+    }
+    else delete edits['vs_standard|' + row.key + '|'];
+    changed();
+  }
+  function partMap(parts, additions) {
+    var box = h('div', { class: 'pmap', 'aria-label': 'Part map' }, [h('span', { class: 'muted', text: 'Parts:' })]);
+    parts.forEach(function (p) {
+      box.appendChild(h('span', { class: 'tok ' + tokenClass(p.token), title: p.reason || '', text: p.n + ' ' + p.token }));
+    });
+    if ((additions || []).length) {
+      box.appendChild(h('span', { class: 'muted', text: 'adds:' }));
+      additions.forEach(function (a) { box.appendChild(h('span', { class: 'tok', title: a.summary || '', text: a.token })); });
+    }
+    return box;
+  }
   function matches(row) {
     if (filter === 'all') return true;
     if (filter === 'todo') return !rowEdit(row);
@@ -430,23 +504,57 @@ JS = r"""
         h('strong', { text: row.title }),
         h('span', { class: 'muted small', text: row.n_deals + ' deal' + (row.n_deals === 1 ? '' : 's') + ' - ' + row.roles.join(', ') + ' - judged by ' + row.basis + (row.check && row.check !== 'owner' ? ' (' + row.check + ')' : '') })
       ]);
-      if (e) head.appendChild(h('span', { class: 'chip owner', text: e.value.label === row.label ? 'You confirmed' : 'You set: ' + LABEL_NAMES[e.value.label] }));
+      if (e) {
+        var mine = effLabel(row);
+        var said = e.value.parts ? 'You changed ' + e.value.parts.length + ' part(s): ' + LABEL_NAMES[mine]
+          : mine === row.label ? 'You confirmed' : 'You set: ' + LABEL_NAMES[mine];
+        head.appendChild(h('span', { class: 'chip owner', text: said }));
+      }
       art.appendChild(head);
+      if (row.owner_reason) art.appendChild(h('p', { class: 'reason owner-reason', text: 'Owner: ' + row.owner_reason }));
       if (row.reason) art.appendChild(h('p', { class: 'reason', text: row.reason }));
+      if ((row.parts || []).length) art.appendChild(partMap(effParts(row), row.additions));
       art.appendChild(h('blockquote', { text: row.text }, [h('div', { class: 'cite', text: row.cite })]));
-      var det = h('details', {}, [h('summary', { text: 'Show the full text and our standard' })]);
+      var det = h('details', {}, [h('summary', { text: 'Show the full text and our standard, part by part' })]);
       det.addEventListener('toggle', function () {
         if (!det.open || det.getAttribute('data-filled')) return;
         det.setAttribute('data-filled', '1');
         det.appendChild(h('h3', { text: 'Full text' }));
         det.appendChild(h('blockquote', { text: fullText(row) || row.text }));
-        det.appendChild(h('h3', { text: 'Our standard' }));
-        det.appendChild(h('blockquote', { text: standardText(row) || row.standard }));
+        det.appendChild(h('h3', { text: 'Our standard, part by part' }));
+        var texts = {};
+        standardParts(row).forEach(function (sp) { texts[sp.part_id] = sp.text; });
+        var ol = h('ol', { class: 'parts' });
+        effParts(row).forEach(function (p) {
+          var li = h('li', {}, [h('span', { class: 'tok ' + tokenClass(p.token), text: p.token })]);
+          if (p.reason) li.appendChild(h('span', { class: 'why', text: ' ' + p.reason }));
+          var psel = h('select', { 'aria-label': 'How part ' + p.n + ' compares' });
+          PART_CHOICES.forEach(function (c) {
+            var o = h('option', { value: c[0] + '|' + c[1], text: c[2] + '  ' + c[3] });
+            if (c[0] === p.status && c[1] === p.direction) o.selected = true;
+            psel.appendChild(o);
+          });
+          psel.addEventListener('change', function () {
+            var v = psel.value.split('|');
+            setPartEdit(row, p, v[0], v[1]); fill();
+          });
+          li.appendChild(h('div', {}, [psel]));
+          li.appendChild(h('blockquote', { text: texts[p.part_id] || '' }));
+          ol.appendChild(li);
+        });
+        if (!(row.parts || []).length) det.appendChild(h('blockquote', { text: row.standard }));
+        else det.appendChild(ol);
+        (row.additions || []).forEach(function (a) {
+          det.appendChild(h('p', { class: 'reason', text: 'Adds (' + a.token + '): ' + a.summary }));
+        });
       });
       art.appendChild(det);
       var acts = h('div', { class: 'acts' });
       var confirm = h('button', { type: 'button', class: 'btn secondary', text: 'Confirm' });
-      confirm.addEventListener('click', function () { setEdit(row, row.label, e && e.note); fill(); });
+      confirm.addEventListener('click', function () {
+        if (!(e && e.value.parts)) setEdit(row, row.label, e && e.note);
+        fill();
+      });
       var sel = h('select', { 'aria-label': 'Change label' });
       sel.appendChild(h('option', { value: '', text: 'Change label...' }));
       LABELS.forEach(function (l) { if (l !== row.label) sel.appendChild(h('option', { value: l, text: LABEL_NAMES[l] })); });
@@ -454,7 +562,31 @@ JS = r"""
       acts.appendChild(confirm); acts.appendChild(sel);
       if (e) {
         var note = h('input', { type: 'text', placeholder: 'Note (optional)', 'aria-label': 'Note', value: e.note || '' });
-        note.addEventListener('change', function () { setEdit(row, e.value.label, note.value.trim() || null); });
+        note.addEventListener('change', function () {
+          e.note = note.value.trim() || null; if (!e.note) delete e.note; changed();
+        });
+        if (!e.value.parts && e.value.label !== row.label) {
+          /* a label set over the judged parts carries the owner's reason to the reviewing model */
+          var why = h('input', { type: 'text', class: 'label-reason', placeholder: 'Why this label? (the reviewing model reads it)',
+            'aria-label': 'Reason for the label', value: e.value.reason || '' });
+          why.addEventListener('change', function () {
+            var r = why.value.trim();
+            if (r) e.value.reason = r; else delete e.value.reason;
+            changed();
+          });
+          acts.appendChild(why);
+        }
+        if (e.value.parts) {
+          /* changed parts replace the judgment's reason, written for the old part map */
+          var pwhy = h('input', { type: 'text', class: 'parts-reason', placeholder: 'Why these parts? (the reviewing model reads it)',
+            'aria-label': 'Reason for the parts', value: e.value.reason || '' });
+          pwhy.addEventListener('change', function () {
+            var r = pwhy.value.trim();
+            if (r) e.value.reason = r; else delete e.value.reason;
+            changed();
+          });
+          acts.appendChild(pwhy);
+        }
         var undo = h('button', { type: 'button', class: 'btn secondary', text: 'Undo' });
         undo.addEventListener('click', function () { clearEdit(row); fill(); });
         acts.appendChild(note); acts.appendChild(undo);

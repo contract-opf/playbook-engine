@@ -556,7 +556,7 @@ _VERDICT_KINDS: dict[
     "provenance": (_validate_provenance, lambda v: "provenance" in v),
     "scope": (_validate_scope, lambda v: "in_scope" in v),
     "classify": (_validate_classify, lambda v: "taxonomy_id" in v),
-    EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "label" in v),
+    EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "parts" in v),
 }
 
 
@@ -986,7 +986,9 @@ class StoreBackedEquivalenceJudge:
             and self.rubric.evaluate(EQUIVALENCE_KIND, record.rubric_version, current_rubric).replay
         ):
             try:
-                return vs_standard_of(record.verdict)
+                # Against THIS standard's parts: a judgment about other parts
+                # (a hand-edited store) is malformed, never replayed.
+                return vs_standard_of(record.verdict, subject.part_ids)
             except ValueError as exc:
                 _log.warning(
                     "StoreBackedEquivalenceJudge: malformed stored verdict for key %s (%s); "

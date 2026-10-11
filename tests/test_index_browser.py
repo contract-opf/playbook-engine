@@ -50,7 +50,7 @@ from click.testing import CliRunner
 from playbook_engine.cli import cli
 from playbook_engine.document_renderer import TAB_IDS
 from playbook_engine.overrides import OVERRIDES_FILENAME
-from playbook_engine.review_rows import build_review_rows
+from playbook_engine.review_rows import REVIEW_LABEL_ORDER, build_review_rows
 from tests.chrome_cdp import Browser, find_browser
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -119,7 +119,7 @@ def _expected_pair(doc: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any],
     first, second = rows[0], rows[1]
     changed_to = next(
         label
-        for label in ("less_protective", "different_concept", "more_protective", "equivalent")
+        for label in REVIEW_LABEL_ORDER  # the page's own label order (issue #243 adds mixed)
         if label != second["label"]
     )
     return first, second, changed_to
@@ -189,6 +189,176 @@ def test_the_download_fallback_writes_the_overrides_file(out_dir: Path, tmp_path
     _check_saved(saved, doc, first, second, changed_to)
     after = _applies_cleanly(out_dir, saved)
     assert after["identity"]["content_hash"] != doc["identity"]["content_hash"]
+
+
+def test_changing_one_part_saves_the_part_and_the_engine_rederives_the_label(
+    out_dir: Path, tmp_path: Path
+) -> None:
+    """Issue #243: a row shows its part map; opening it lists our standard part by
+    part, each with a select; changing one part saves ``{parts: [...]}`` (only
+    the part changed), which ``apply-overrides`` folds in by re-deriving the
+    label."""
+    assert _EXE is not None
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    doc = _doc(out_dir)
+    row = build_review_rows(doc).rows[0]
+    part = row["parts"][0]
+    target = ("omitted", "neutral") if part["status"] == "present" else ("present", "equivalent")
+    with Browser(_EXE, download_dir=downloads) as browser:
+        browser.add_script_on_load("delete window.showDirectoryPicker;")
+        browser.goto((out_dir / "index.html").as_uri())
+        browser.eval("document.querySelector('[data-tab=review]').click()")
+        tokens = browser.eval(
+            "[...document.querySelectorAll('article.rv:nth-of-type(1) .pmap .tok')]"
+            ".map(t => t.textContent).join(',')"
+        )
+        assert tokens.split(",")[0] == f"1 {part['token']}"
+        browser.eval(
+            "(() => { const d = document.querySelector('article.rv:nth-of-type(1) details');"
+            "d.open = true; d.dispatchEvent(new Event('toggle')); })()"
+        )
+        browser.wait_for(
+            "document.querySelectorAll('article.rv:nth-of-type(1) ol.parts li').length > 0"
+        )
+        browser.eval(
+            "(() => { const sel = document.querySelector('article.rv:nth-of-type(1) ol.parts select');"
+            f"sel.value = {json.dumps('|'.join(target))}; sel.dispatchEvent(new Event('change')); }})()"
+        )
+        browser.wait_for("Object.keys(window.__indexPage.edits()).length === 1")
+        _click(browser, "#btn-download")
+        saved = _wait_download(downloads)
+        assert browser.problems() == []
+    (entry,) = saved["overrides"]
+    status, direction = target
+    expected_part = {"part_id": part["part_id"], "status": status}
+    expected_part["relation" if status == "present" else "effect"] = direction
+    assert entry["id"] == row["key"] and entry["value"] == {"parts": [expected_part]}
+    after = _applies_cleanly(out_dir, saved)
+    vs = next(
+        h["vs_standard"]
+        for r in after["evidence"]["precedent"]
+        for h in [r.get("signed_text"), r.get("opening_text"), *(r.get("refused_asks") or [])]
+        if isinstance(h, dict)
+        and isinstance(h.get("vs_standard"), dict)
+        and h["vs_standard"]["basis"] == "owner"
+    )
+    assert vs["parts"][0]["status"] == status
+    assert "owner_label" not in vs
+
+
+def test_changing_a_label_sends_the_owners_reason_to_the_model(
+    out_dir: Path, tmp_path: Path
+) -> None:
+    """Issue #243: a label changed on the page carries the owner's reason
+    (``value.reason``); once applied, the digest marks the label owner-set
+    with that reason and the rebuilt page shows it on the row."""
+    assert _EXE is not None
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    doc = _doc(out_dir)
+    row = build_review_rows(doc).rows[0]
+    changed_to = next(label for label in REVIEW_LABEL_ORDER if label != row["label"])
+    why = "Owner reason typed on the page."
+    with Browser(_EXE, download_dir=downloads) as browser:
+        browser.add_script_on_load("delete window.showDirectoryPicker;")
+        browser.goto((out_dir / "index.html").as_uri())
+        browser.eval("document.querySelector('[data-tab=review]').click()")
+        browser.eval(
+            "(() => { const sel = document.querySelector('article.rv:nth-of-type(1) .acts select');"
+            f"sel.value = {json.dumps(changed_to)}; sel.dispatchEvent(new Event('change')); }})()"
+        )
+        browser.wait_for("!!document.querySelector('article.rv:nth-of-type(1) input.label-reason')")
+        browser.eval(
+            "(() => { const i = document.querySelector('article.rv:nth-of-type(1) input.label-reason');"
+            f"i.value = {json.dumps(why)}; i.dispatchEvent(new Event('change')); }})()"
+        )
+        _click(browser, "#btn-download")
+        saved = _wait_download(downloads)
+        assert browser.problems() == []
+    (entry,) = saved["overrides"]
+    assert entry["id"] == row["key"]
+    assert entry["value"] == {"label": changed_to, "reason": why}
+    after = _applies_cleanly(out_dir, saved)
+    owned = [
+        e
+        for clause in after["digest"]["clauses"]
+        for name in ("signed_variants", "refused_asks", "changed_openings")
+        for e in clause[name]
+        if e.get("label_by") == "owner"
+    ]
+    assert owned and all(e["reason"] == why and e["label"] == changed_to for e in owned)
+    copy = out_dir.parent / "apply-copy"
+    assert CliRunner().invoke(cli, ["view", "bundle", str(copy)]).exit_code == 0
+    with Browser(_EXE) as browser:
+        browser.goto((copy / "index.html").as_uri())
+        browser.eval("document.querySelector('[data-tab=review]').click()")
+        shown = browser.eval(
+            "[...document.querySelectorAll('article.rv .owner-reason')].map(p => p.textContent)"
+        )
+        assert shown == [f"Owner: {why}"]
+        assert browser.problems() == []
+
+
+def test_changing_a_part_sends_the_owners_reason_to_the_model(
+    out_dir: Path, tmp_path: Path
+) -> None:
+    """Issue #243 review: changed parts carry the owner's reason typed on the
+    page (``value.reason``), which replaces the judgment's reason (written for
+    the old part map) in the digest once applied."""
+    assert _EXE is not None
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    doc = _doc(out_dir)
+    row = build_review_rows(doc).rows[0]
+    part = row["parts"][0]
+    target = ("omitted", "neutral") if part["status"] == "present" else ("present", "equivalent")
+    why = "Owner reason for the changed part."
+    with Browser(_EXE, download_dir=downloads) as browser:
+        browser.add_script_on_load("delete window.showDirectoryPicker;")
+        browser.goto((out_dir / "index.html").as_uri())
+        browser.eval("document.querySelector('[data-tab=review]').click()")
+        browser.eval(
+            "(() => { const d = document.querySelector('article.rv:nth-of-type(1) details');"
+            "d.open = true; d.dispatchEvent(new Event('toggle')); })()"
+        )
+        browser.wait_for(
+            "document.querySelectorAll('article.rv:nth-of-type(1) ol.parts li').length > 0"
+        )
+        browser.eval(
+            "(() => { const sel = document.querySelector('article.rv:nth-of-type(1) ol.parts select');"
+            f"sel.value = {json.dumps('|'.join(target))}; sel.dispatchEvent(new Event('change')); }})()"
+        )
+        browser.wait_for("!!document.querySelector('article.rv:nth-of-type(1) input.parts-reason')")
+        assert not browser.eval(
+            "!!document.querySelector('article.rv:nth-of-type(1) input.label-reason')"
+        )
+        browser.eval(
+            "(() => { const i = document.querySelector('article.rv:nth-of-type(1) input.parts-reason');"
+            f"i.value = {json.dumps(why)}; i.dispatchEvent(new Event('change')); }})()"
+        )
+        _click(browser, "#btn-download")
+        saved = _wait_download(downloads)
+        assert browser.problems() == []
+    (entry,) = saved["overrides"]
+    status, direction = target
+    expected_part = {"part_id": part["part_id"], "status": status}
+    expected_part["relation" if status == "present" else "effect"] = direction
+    assert entry["id"] == row["key"]
+    assert entry["value"] == {"parts": [expected_part], "reason": why}
+    after = _applies_cleanly(out_dir, saved)
+    owned = [
+        h["vs_standard"]
+        for r in after["evidence"]["precedent"]
+        for h in [r.get("signed_text"), r.get("opening_text"), *(r.get("refused_asks") or [])]
+        if isinstance(h, dict)
+        and isinstance(h.get("vs_standard"), dict)
+        and h["vs_standard"]["basis"] == "owner"
+    ]
+    assert owned and all(vs["reason"] == why for vs in owned)
+    assert row["reason"] in json.dumps(doc["digest"])
+    assert row["reason"] not in json.dumps(after["digest"])
+    assert why in json.dumps(after["digest"])
 
 
 def _check_saved(

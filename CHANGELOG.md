@@ -10,6 +10,51 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **`vs_standard` is judged part by part, and the label is derived (issue
+  #243, epic #236).** One whole-text label left about three quarters of the
+  acceptance corpus's judged texts `different_concept`: texts that keep some
+  of our passages, change others, drop one and add something cannot be ranked
+  as a whole, so the consuming model had to redo the comparison on every
+  review. Now `our_standard.parts[]` lists the template passages of a clause
+  type in order (`{part_id, order, text}`; `part_id` is a short content hash,
+  stable across edits elsewhere; `text` is the parts joined). The judge
+  answers, for every part, `present` with a `relation` (`equivalent`,
+  `more_protective`, `less_protective`) or `omitted` with an `effect`
+  (`more_protective`, `less_protective`, `neutral`), one-sentence reasons for
+  the parts that differ, the `additions` no part covers, and a one-sentence
+  `reason`. The `label` is derived by a pure function and gains `mixed`
+  (effects both ways); a text with no part present is `different_concept`,
+  and one that only drops a neutral recital is `equivalent`. The cache key
+  covers the ordered part texts, so every text is queued again (equivalence
+  rubric v2). The blind check answers the same structured question and
+  records `label_agreed` and `parts_agreed` (agreement is both); the
+  scorecard (v7) reports them separately with part-map token counts and
+  parts per standard. Digest 4 carries our standard as its parts, a
+  `part_map_legend`, and on every judged variant, ask and changed opening a
+  compact `part_map` (`=`, `+`, `-`, `x+`, `x-`, `x0`), `additions` tokens
+  and the `reason`, plus `label_by: "owner"` only on an owner-set label (a
+  label derived from the parts, the default the legend states, carries no
+  key, so the budgeted digest spends nothing on it); `mixed` variants lead
+  with `less_protective`.
+  Dossier excerpts carry their judgment's part map, `label_by`, reason and
+  part reasons. The Review tab shows each row's part map; an owner override
+  may set per-part relations (the label is re-derived) or the label itself
+  (`owner_label`), each with a reason typed on the page. An
+  owner-set label reaches the consuming model as `label_by: "owner"` with the
+  owner's reason, never beside the model's reason for the label it replaced,
+  and the Review row shows the owner's reason. Changed parts carry the
+  owner's reason; without one, the model's reason is kept only while the part
+  map and additions it was written for are unchanged, and is otherwise
+  replaced by a fallback, so a re-derived label never sits beside the
+  model's reason for the old one. The validator recomputes the label from the parts and
+  rejects a mismatch, an unknown `part_id`, a part judged twice or not at
+  all, and a present part without a relation. The 0.5 conformance vectors and
+  the NDA example's canned verdicts are regenerated (synthetic, CI only); new
+  vector 009 pins a standard of several parts (a repeated passage's `-2`
+  `part_id`, multi-token part maps, part reasons beyond the first part) and an
+  owner label.
+  OPF 0.5 is changed in place: nothing outside the engine had vendored it.
+
 - **`our_standard` is the template's complete clause, not its first node, and
   never a cover table (issue #242, epic #236).** Template mode took the first
   template node classified to a clause type as that type's `our_standard`.
