@@ -13,6 +13,7 @@ on:
   push:
     paths:
       - "Dockerfile"
+      - "docker/constraints.txt"
       - "pyproject.toml"
       - ".github/workflows/docker-smoke.yml"
   workflow_dispatch:
@@ -25,6 +26,28 @@ jobs:
 
       - name: Build image
         run: docker build -t playbook-engine:smoke .
+
+      - name: Installed docling stack matches docker/constraints.txt
+        run: |
+          # Every `name==version` pin in the constraints file must be what is
+          # actually installed (torch carries a +cpu local suffix). Fails the
+          # build if a pin silently drifted instead of letting extraction
+          # degrade later (issue #244).
+          docker run --rm -v "$PWD/docker/constraints.txt:/c.txt:ro" \
+            --entrypoint python playbook-engine:smoke -c "
+          import importlib.metadata as m
+          bad = []
+          for line in open('/c.txt'):
+              line = line.split('#')[0].strip()
+              if not line:
+                  continue
+              name, want = line.split('==')
+              have = m.version(name).split('+')[0]
+              if have != want:
+                  bad.append(f'{name}: pinned {want}, installed {have}')
+          assert not bad, bad
+          print('OK pins match')
+          "
 
       - name: lint-corpus against the judge-fixture corpus
         run: |

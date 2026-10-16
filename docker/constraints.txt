@@ -1,0 +1,29 @@
+# Pinned docling / OCR stack for the Docker runtime (issue #244).
+#
+# Why this exists: the Dockerfile used to install `docling` unpinned. A newer
+# docling release changed its automatic OCR engine selection so that our
+# `--ocr-lang eng` was rejected (no installed engine served `eng`), docling
+# failed, and extraction silently fell back to the legacy reader. The weekly
+# Docker Smoke Test caught it. These pins are the exact set in the image built
+# from the last known-good commit, so a docling release can never degrade
+# extraction without a deliberate change here.
+#
+# How to bump deliberately:
+#   1. Edit the pins below (move docling and its sibling packages together).
+#   2. `make docker-build`, then run the smoke test
+#      (`gh workflow run docker-smoke.yml --ref <branch>`, or the steps in
+#      .github/workflows/docker-smoke.yml locally). It must report
+#      `extractor=docling`, not `legacy`.
+#   3. Only then merge. A bump that needs the new OCR API (`iso:` language
+#      codes, explicit engine selection) also needs the matching extraction.py
+#      change in the same commit.
+#
+# torch/torchvision come from the CPU-only index (see the Dockerfile); the pin
+# is the public version, which matches the `+cpu` local build.
+docling==2.113.0
+docling-core==2.87.0
+docling-ibm-models==3.13.3
+docling-parse==7.8.0
+rapidocr==3.9.1
+torch==2.13.0
+torchvision==0.28.0
