@@ -392,6 +392,69 @@ class TestDockerfileStamping:
         assert "playbook_engine.__version__" in text
 
 
+class TestDockerfilePinsDoclingStack:
+    """Issue #244: an unpinned docling release silently degraded extraction to
+    the legacy reader. The runtime stack must be pinned and the pin enforced."""
+
+    _REQUIRED = {
+        "docling": "2.113.0",
+        "docling-core": "2.87.0",
+        "docling-ibm-models": "3.13.3",
+        "docling-parse": "7.8.0",
+        "rapidocr": "3.9.1",
+        "torch": "2.13.0",
+    }
+
+    @staticmethod
+    def _pins() -> dict[str, str]:
+        pins: dict[str, str] = {}
+        text = (REPO_ROOT / "docker" / "constraints.txt").read_text(encoding="utf-8")
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            name, _, version = line.partition("==")
+            assert version, f"constraint must be an exact == pin: {raw!r}"
+            pins[name.strip()] = version.strip()
+        return pins
+
+    def test_constraints_pin_the_known_good_stack_exactly(self) -> None:
+        pins = self._pins()
+        for name, version in self._REQUIRED.items():
+            assert pins.get(name) == version, name
+        assert "torchvision" in pins
+
+    def test_dockerfile_applies_the_constraints_to_both_installs(self) -> None:
+        text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "COPY docker/constraints.txt" in text
+        installs = [
+            ln
+            for ln in text.splitlines()
+            if "pip install" in ln and "/app" not in ln and not ln.lstrip().startswith("#")
+        ]
+        assert len(installs) == 2
+        for ln in installs:
+            assert "-c /tmp/constraints.txt" in ln, ln
+
+    def test_dockerfile_comments_cite_the_pinned_docling_version(self) -> None:
+        text = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+        assert "2.110.0" not in text
+        assert self._REQUIRED["docling"] in text
+
+    def test_smoke_workflow_reruns_when_pins_change_and_checks_them(self) -> None:
+        text = (REPO_ROOT / ".github" / "workflows" / "docker-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        assert '"docker/constraints.txt"' in text
+        assert "docker/constraints.txt" in text.split("jobs:", 1)[1]
+
+    def test_docker_context_does_not_exclude_the_constraints_file(self) -> None:
+        ignored = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        assert not any(
+            ln.strip().rstrip("/") in {"docker", "docker/constraints.txt"} for ln in ignored
+        )
+
+
 class TestDockerRunIsGated:
     def test_makefile_reads_the_version_from_the_source_tree(self) -> None:
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")

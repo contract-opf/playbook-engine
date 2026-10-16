@@ -28,11 +28,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # docling (large, changes rarely) is installed BEFORE the app is copied so
-# editing engine code below does not invalidate this layer. Pin the
+# editing engine code below does not invalidate this layer. Use the
 # CPU-only torch build — the pipeline runs inference on CPU, and the default
 # CUDA wheels would add ~6 GB of GPU libraries we never use.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir docling
+#
+# The whole docling/OCR stack is pinned in docker/constraints.txt (issue #244):
+# an unpinned docling once changed its OCR engine selection under us and
+# extraction silently fell back to the legacy reader. The same constraints
+# apply to the docling install, so docling cannot move torch to another
+# version. See that file for how to bump the pins deliberately.
+COPY docker/constraints.txt /tmp/constraints.txt
+RUN pip install --no-cache-dir -c /tmp/constraints.txt torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -c /tmp/constraints.txt docling
 
 # All of docling's models (layout, table-structure, and the RapidOCR default
 # OCR backend) are resolved through one setting: `settings.artifacts_path`,
@@ -47,7 +54,7 @@ RUN pip install --no-cache-dir torch torchvision --index-url https://download.py
 # HF-hosted models *and* RapidOCR, which docling resolves relative to the
 # same `artifacts_path` (`RapidOcrModel` in
 # `docling.models.stages.ocr.rapid_ocr_model`) — confirmed by reading the
-# installed docling 2.110.0 source, not assumed.
+# installed docling 2.113.0 source (the pinned version), not assumed.
 ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
 
 # Pre-fetch every model docling needs (as root, at build time) into that
@@ -73,7 +80,7 @@ RUN HF_HUB_DISABLE_XET=1 docling-tools models download --output-dir /opt/docling
 # `RapidOcrOptions.lang` defaults to `["chinese"]`, and running the Chinese
 # recognition model on Latin-script text is exactly what drops inter-word
 # spaces (docling upstream issues #2887, #1635, #2927 — docling's own code
-# comments cite these). docling 2.110.0 already ships an `english`/`latin`
+# comments cite these). docling 2.113.0 already ships an `english`/`latin`
 # RapidOCR model set that fixes this, but selecting it requires passing
 # `--ocr-lang eng` (or setting `RapidOcrOptions.lang`) on the *conversion*
 # call in `playbook_engine/extraction.py::_run_docling` — there is no
