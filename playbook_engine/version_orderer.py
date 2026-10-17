@@ -746,6 +746,27 @@ def _exhaustive_chain(
     return best_chain, basis
 
 
+_TIE_DECIMALS = 9
+
+
+def _tied(distance: float) -> float:
+    """Round a distance so float-noise-equal distances compare as a tie."""
+    return round(distance, _TIE_DECIMALS)
+
+
+def _tie_rank(version_id: str, hints: Hints | None) -> tuple[int, str, int, str]:
+    """Total-order tie-break key for one version: earlier hint first, then id.
+
+    Order: has-a-timestamp, the timestamp, explicit-order position, then the
+    version id, so the key is a total order independent of any container
+    iteration order.
+    """
+    ts = hints.timestamps.get(version_id) if hints else None
+    order = (hints.order or []) if hints else []
+    pos = order.index(version_id) if version_id in order else len(order)
+    return (0 if ts else 1, str(ts) if ts else "", pos, version_id)
+
+
 def _greedy_chain(
     non_signed: list[str],
     signed_id: str | None,
@@ -756,28 +777,35 @@ def _greedy_chain(
 
     Hint tie-breaking applies to the start-node selection and nearest-
     neighbour step so timestamps/order seeding still has effect for large
-    version sets (NB1).
+    version sets (NB1). Ties (within float noise) are broken by the merged
+    hint timestamps/order, then by version id, so the chain is identical
+    across processes and PYTHONHASHSEED values.
 
     NOTE: distance values are computed from _all_distances, so all expected
     keys are always present; direct indexing is used to fail loud on bugs.
     """
+    # Every tie below is broken explicitly (merged hint rank, then version id)
+    # and never by set/dict iteration order: each CLI call is a fresh process
+    # with its own PYTHONHASHSEED, so an iteration-order tie-break would give a
+    # different chain on every run (issue #226).
+    rank = {v: _tie_rank(v, hints) for v in non_signed}
+
     # Start from the version farthest from the signed anchor (likely the template).
     if signed_id:
-        start = max(non_signed, key=lambda v: dist[(v, signed_id)])
+        start = min(non_signed, key=lambda v: (-_tied(dist[(v, signed_id)]), rank[v]))
     else:
         # No signed anchor: start from the version most different from all others.
         avg_dist = {v: sum(dist[(v, u)] for u in non_signed if u != v) for v in non_signed}
-        start = max(non_signed, key=lambda v: avg_dist[v])
+        start = min(non_signed, key=lambda v: (-_tied(avg_dist[v]), rank[v]))
 
-    remaining = set(non_signed)
-    remaining.discard(start)
+    remaining = [v for v in non_signed if v != start]
     chain = [start]
 
     while remaining:
         current = chain[-1]
-        nearest = min(remaining, key=lambda v: dist[(current, v)])
+        nearest = min(remaining, key=lambda v: (_tied(dist[(current, v)]), rank[v]))
         chain.append(nearest)
-        remaining.discard(nearest)
+        remaining.remove(nearest)
 
     if signed_id:
         chain.append(signed_id)
