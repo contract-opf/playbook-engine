@@ -1285,3 +1285,59 @@ def test_hints_yaml_timestamps_override_document_timestamps() -> None:
     assert order_versions(versions).ordered_ids == ("b", "a")
     hints = Hints(timestamps={"a": "2025-01-01", "b": "2025-06-01"})
     assert order_versions(versions, hints).ordered_ids == ("a", "b")
+
+
+# ---------------------------------------------------------------------------
+# Greedy chain determinism (issue #226): ties must not depend on hash order
+# ---------------------------------------------------------------------------
+
+_GREEDY_TIE_SNIPPET = """
+import json, sys
+from playbook_engine.version_orderer import Hints, _greedy_chain
+
+ids = [f"v{i}" for i in range(1, 11)]
+dist = {}
+for a in ids + ["sig"]:
+    for b in ids + ["sig"]:
+        dist[(a, b)] = 0.0 if a == b else 0.5
+hints = Hints(timestamps=json.loads(sys.argv[1])) if sys.argv[1] != "null" else None
+chain, basis = _greedy_chain(ids, "sig", dist, hints)
+print(json.dumps([chain, basis]))
+"""
+
+
+def _greedy_under_seed(seed: int, timestamps: dict[str, str] | None) -> list:
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONHASHSEED": str(seed)}
+    out = subprocess.run(
+        [sys.executable, "-c", _GREEDY_TIE_SNIPPET, json.dumps(timestamps)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    return json.loads(out.stdout)
+
+
+def test_greedy_chain_ties_identical_across_hash_seeds() -> None:
+    """Every distance ties, so the chain is decided only by the tie-break.
+    With no hints it is the version-id order; the result is the same under
+    every PYTHONHASHSEED."""
+    results = [_greedy_under_seed(seed, None) for seed in range(8)]
+    assert all(r == results[0] for r in results)
+    chain, basis = results[0]
+    assert basis == "greedy"
+    assert chain == sorted(f"v{i}" for i in range(1, 11)) + ["sig"]
+
+
+def test_greedy_chain_ties_break_on_hint_timestamps_then_id() -> None:
+    """Hint timestamps decide ties before the version id does."""
+    # Reverse the timestamps so the hint order is the opposite of id order.
+    timestamps = {f"v{i}": f"2024-01-{11 - i:02d}" for i in range(1, 11)}
+    results = [_greedy_under_seed(seed, timestamps) for seed in range(8)]
+    assert all(r == results[0] for r in results)
+    chain, _ = results[0]
+    assert chain == [f"v{i}" for i in range(10, 0, -1)] + ["sig"]
