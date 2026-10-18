@@ -67,6 +67,7 @@ from playbook_engine.staging import (
     _place,
     _recreate_out_dir,
     _write_hints,
+    discover_prior_templates,
 )
 from playbook_engine.version_orderer import (
     VersionInput,
@@ -230,6 +231,7 @@ class _FileEvidence:
 def _gather_evidence(
     src_dir: Path,
     progress: Callable[[str], None] = lambda _: None,
+    exclude: frozenset[Path] = frozenset(),
 ) -> tuple[dict[str, _FileEvidence], list[dict[str, str]]]:
     """Ingest every supported file under *src_dir* and extract per-file evidence.
 
@@ -242,12 +244,15 @@ def _gather_evidence(
                   #44 — this loop can run seconds per file on scanned PDFs, so
                   a large loose corpus otherwise sits silent for minutes with
                   no way to distinguish a hang from work).
+        exclude:  Files that are not deal documents (the root
+                  ``prior-template*`` forms); the caller reports them.
     """
     files = sorted(
         p
         for p in src_dir.rglob("*")
         if p.is_file()
         and p.suffix.lower() in _SUPPORTED
+        and p not in exclude
         and not any(part.startswith(".") for part in p.relative_to(src_dir).parts)
     )
 
@@ -442,12 +447,22 @@ def build_staging_plan(
     Returns:
         A dict matching the schema documented in issue #186: ``layout``,
         ``deals`` (each with ``deal_id``, ``counterparty_guess``,
-        ``confidence``, ``files``), ``unassigned``, and ``warnings``.
+        ``confidence``, ``files``), ``unassigned``, and ``warnings``. Root
+        ``prior-template*`` files (older versions of our form) appear in
+        neither ``deals`` nor ``unassigned``; ``warnings`` names each one.
     """
-    evidence, unreadable = _gather_evidence(src_dir, progress)
+    # Older versions of our form (root ``prior-template*`` files) are not deal
+    # documents: ``stage --from-plan`` stages them beside the current template
+    # (``staging.scaffold_config``). Left out here, and said so in ``warnings``.
+    prior_forms = discover_prior_templates(src_dir)
+    evidence, unreadable = _gather_evidence(src_dir, progress, frozenset(prior_forms))
     rel_paths = sorted(evidence)
 
-    warnings: list[str] = []
+    warnings: list[str] = [
+        f"{p.name}: left out of deal assembly — an older version of our form "
+        "(prior-template*), staged beside the template when the plan is executed"
+        for p in prior_forms
+    ]
     unassigned: list[dict[str, str]] = list(unreadable)
 
     if not rel_paths:

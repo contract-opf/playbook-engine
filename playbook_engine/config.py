@@ -12,6 +12,16 @@ Config schema (YAML):
                                        # (e.g. a consuming app's own dial key)
   baseline:
     template: ./template/file.rtf    # path relative to config file, or null
+    prior_templates:                 # optional; every OLDER version of our form
+                                      # the user could find (OPF 0.6 intake). A
+                                      # missing or empty list means "none
+                                      # supplied" and is valid -- the engine
+                                      # then reconstructs former wording from
+                                      # the corpus.
+      - path: ./template/form-2019.docx   # relative to this config file; must exist
+        label: "2019 form"                # required, unique across the list
+        in_use_from: 2019                 # optional; ISO date, "YYYY-MM" or a year
+        in_use_until: 2021-06             # optional; must not precede in_use_from
   taxonomy: ./spec/taxonomy/file.yaml
     # or: builtin:file.yaml          # resolves against the engine's own
     #                                  bundled spec/taxonomy/ dir (see
@@ -111,9 +121,11 @@ Config schema (YAML):
 
 from __future__ import annotations
 
+import calendar
 import difflib
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -142,10 +154,27 @@ class AgreementType:
     aliases: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class PriorTemplate:
+    """One older version of our own standard form (``baseline.prior_templates``).
+
+    ``in_use_from`` / ``in_use_until`` are normalized to the precision the
+    user gave -- ``"YYYY"``, ``"YYYY-MM"`` or ``"YYYY-MM-DD"`` -- or ``None``
+    when omitted. Use :func:`period_start` / :func:`period_end` to compare them.
+    """
+
+    path: Path  # absolute
+    label: str
+    in_use_from: str | None = None
+    in_use_until: str | None = None
+
+
 @dataclass
 class BaselineConfig:
     has_canonical_template: bool
     template_path: Path | None  # absolute; None when has_canonical_template is False
+    # Older versions of our form, in config order. Empty means "none supplied".
+    prior_templates: list[PriorTemplate] = field(default_factory=list)
 
 
 @dataclass
@@ -266,6 +295,28 @@ class EngineConfig:
 # ---------------------------------------------------------------------------
 
 
+class _NoDateLoader(yaml.SafeLoader):
+    """``SafeLoader`` that leaves unquoted dates as plain strings.
+
+    The stock loader turns ``2021-06-15`` into a ``date`` and raises a bare
+    ``ValueError`` (not ``YAMLError``) on an impossible one such as
+    ``2021-06-31``, which would crash the load without naming the entry.
+    Dates arrive as strings instead, so :func:`normalize_in_use_date` can
+    validate them and name the offending ``prior_templates[i]`` field.
+    """
+
+
+_NoDateLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def load_config_yaml(text: str) -> Any:
+    """Parse config YAML with :class:`_NoDateLoader` (dates stay strings)."""
+    return yaml.load(text, Loader=_NoDateLoader)  # noqa: S506 - SafeLoader subclass
+
+
 class ConfigError(ValueError):
     """Friendly configuration error."""
 
@@ -307,7 +358,8 @@ TOP_LEVEL_KEYS = frozenset(
     }
 )
 AGREEMENT_TYPE_KEYS = frozenset({"id", "name", "description", "aliases"})
-BASELINE_KEYS = frozenset({"template"})
+BASELINE_KEYS = frozenset({"template", "prior_templates"})
+PRIOR_TEMPLATE_KEYS = frozenset({"path", "label", "in_use_from", "in_use_until"})
 PROVENANCE_KEYS = frozenset({"our_party_aliases", "our_authors", "known_entities"})
 PERSPECTIVE_KEYS = frozenset({"party", "counterparty_type"})
 SEGMENTATION_KEYS = frozenset({"llm", "batch", "cache", "normalize_trail", "model", "agent"})
@@ -355,6 +407,133 @@ def _check_unknown_keys(mapping: dict[str, Any], known: frozenset[str], context:
     msg = unknown_key_message(mapping, known, context)
     if msg is not None:
         raise ConfigError(msg)
+
+
+# ---------------------------------------------------------------------------
+# baseline.prior_templates
+# ---------------------------------------------------------------------------
+
+_MIN_YEAR, _MAX_YEAR = 1900, 2100
+_YEAR_RE = re.compile(r"^\d{4}$")
+_MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
+_DAY_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def normalize_in_use_date(value: Any, context: str) -> str | None:
+    """Normalize one ``in_use_from`` / ``in_use_until`` value, or raise :class:`ConfigError`.
+
+    Accepts an ISO date (``2021-06-15``), a month (``2021-06``) or a year
+    (``2021``), as a string, a YAML-parsed ``date`` or an int year. Returns
+    the value at the precision given (``"YYYY"``, ``"YYYY-MM"``,
+    ``"YYYY-MM-DD"``); ``None`` stays ``None``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ConfigError(f"{context} must be an ISO date, a YYYY-MM month or a year")
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        text = value.isoformat()
+    elif isinstance(value, int):
+        text = f"{value:04d}"
+    elif isinstance(value, str):
+        text = value.strip()
+    else:
+        raise ConfigError(f"{context} must be an ISO date, a YYYY-MM month or a year")
+    try:
+        if _YEAR_RE.match(text):
+            year = int(text)
+        elif m := _MONTH_RE.match(text):
+            year = int(m.group(1))
+            date(year, int(m.group(2)), 1)
+        elif m := _DAY_RE.match(text):
+            year = int(m.group(1))
+            date(year, int(m.group(2)), int(m.group(3)))
+        else:
+            raise ValueError(text)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{context} {value!r} is not a valid ISO date, YYYY-MM month or year"
+        ) from exc
+    if not _MIN_YEAR <= year <= _MAX_YEAR:
+        raise ConfigError(f"{context} {value!r}: year must be between {_MIN_YEAR} and {_MAX_YEAR}")
+    return text
+
+
+def period_start(value: str) -> date:
+    """First day covered by a normalized ``YYYY`` / ``YYYY-MM`` / ``YYYY-MM-DD`` value."""
+    parts = [int(p) for p in value.split("-")]
+    return date(parts[0], parts[1] if len(parts) > 1 else 1, parts[2] if len(parts) > 2 else 1)
+
+
+def period_end(value: str) -> date:
+    """Last day covered by a normalized ``YYYY`` / ``YYYY-MM`` / ``YYYY-MM-DD`` value."""
+    parts = [int(p) for p in value.split("-")]
+    if len(parts) == 1:
+        return date(parts[0], 12, 31)
+    if len(parts) == 2:
+        return date(parts[0], parts[1], calendar.monthrange(parts[0], parts[1])[1])
+    return date(parts[0], parts[1], parts[2])
+
+
+def parse_prior_templates(
+    raw_list: Any, base_dir: Path, current_template: Path | None
+) -> list[PriorTemplate]:
+    """Validate ``baseline.prior_templates`` and resolve it to :class:`PriorTemplate` values.
+
+    ``None`` or an empty list is valid ("none supplied"). Each entry needs an
+    existing ``path`` (relative to the config file) and a unique ``label``;
+    dates are optional but must parse and must not run backwards. A file may
+    appear only once, and may not be the current template.
+    """
+    if raw_list is None:
+        return []
+    if not isinstance(raw_list, list):
+        raise ConfigError("baseline.prior_templates must be a list (or omitted)")
+    priors: list[PriorTemplate] = []
+    labels: dict[str, int] = {}
+    paths: dict[Path, int] = {}
+    for i, entry in enumerate(raw_list):
+        ctx = f"baseline.prior_templates[{i}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{ctx} must be a mapping with path and label")
+        _check_unknown_keys(entry, PRIOR_TEMPLATE_KEYS, ctx)
+        path_val = _require(entry, "path", ctx)
+        label_val = _require(entry, "label", ctx)
+        if not isinstance(path_val, str) or not path_val.strip():
+            raise ConfigError(f"{ctx}.path must be a non-empty path string")
+        if not isinstance(label_val, str) or not label_val.strip():
+            raise ConfigError(f"{ctx}.label must be a non-empty string")
+        label = label_val.strip()
+        resolved = (base_dir / path_val).resolve()
+        if not resolved.is_file():
+            raise ConfigError(f"{ctx}.path not found (or is not a file): {resolved}")
+        key = label.casefold()
+        if key in labels:
+            raise ConfigError(
+                f"{ctx}.label {label!r} duplicates baseline.prior_templates[{labels[key]}]; "
+                "labels must be unique"
+            )
+        if resolved in paths:
+            raise ConfigError(
+                f"{ctx}.path is the same file as baseline.prior_templates[{paths[resolved]}]"
+            )
+        if current_template is not None and resolved == current_template:
+            raise ConfigError(f"{ctx}.path is the current baseline.template, not an older version")
+        frm = normalize_in_use_date(entry.get("in_use_from"), f"{ctx}.in_use_from")
+        until = normalize_in_use_date(entry.get("in_use_until"), f"{ctx}.in_use_until")
+        if frm is not None and until is not None and period_start(frm) > period_end(until):
+            raise ConfigError(
+                f"{ctx}: in_use_from {frm} is after in_use_until {until}; "
+                "the date range runs backwards"
+            )
+        labels[key] = i
+        paths[resolved] = i
+        priors.append(
+            PriorTemplate(path=resolved, label=label, in_use_from=frm, in_use_until=until)
+        )
+    return priors
 
 
 _BUILTIN_SCHEME = "builtin:"
@@ -420,7 +599,7 @@ def load_config(path: Path) -> EngineConfig:
 
     raw_text = path.read_text(encoding="utf-8")
     try:
-        raw: dict[str, Any] = yaml.safe_load(raw_text)
+        raw: dict[str, Any] = load_config_yaml(raw_text)
     except yaml.YAMLError as exc:
         raise ConfigError(f"Config file is not valid YAML: {exc}") from exc
 
@@ -461,15 +640,19 @@ def load_config(path: Path) -> EngineConfig:
         raise ConfigError("config.baseline must be a mapping")
     _check_unknown_keys(bl_raw, BASELINE_KEYS, "baseline")
     template_val = bl_raw.get("template")
-    if template_val is None:
-        baseline = BaselineConfig(has_canonical_template=False, template_path=None)
-    else:
+    tpl_path: Path | None = None
+    if template_val is not None:
         if not isinstance(template_val, str) or not template_val:
             raise ConfigError("baseline.template must be a path string or null")
         tpl_path = (base_dir / template_val).resolve()
         if not tpl_path.is_file():
             raise ConfigError(f"baseline.template not found (or is not a file): {tpl_path}")
-        baseline = BaselineConfig(has_canonical_template=True, template_path=tpl_path)
+    prior_templates = parse_prior_templates(bl_raw.get("prior_templates"), base_dir, tpl_path)
+    baseline = BaselineConfig(
+        has_canonical_template=tpl_path is not None,
+        template_path=tpl_path,
+        prior_templates=prior_templates,
+    )
 
     # --- taxonomy ---
     tax_val = _require(raw, "taxonomy", "config")

@@ -111,6 +111,7 @@ running it explicitly is still faster than finding out at the start of a mine.
 | `CONFIG_MISSING_TAXONOMY` | Set `taxonomy:` in your config to the taxonomy YAML path. |
 | `CONFIG_TAXONOMY_NOT_FOUND` | Check the taxonomy path — the file is missing or misspelled. |
 | `CONFIG_TEMPLATE_NOT_FOUND` | Check `baseline.template` — the file is missing. Set to `null` if you don't have a template. |
+| `CONFIG_PRIOR_TEMPLATES_INVALID` | Fix `baseline.prior_templates` — a file is missing, a label is repeated, or a date is invalid or runs backwards. The message names the entry. |
 
 ### Common warnings and what they mean
 
@@ -119,6 +120,7 @@ running it explicitly is still faster than finding out at the start of a mine.
 | `DOC_SINGLE_VERSION` | Only one file in a subfolder — can't show negotiation history. Consider adding more drafts. |
 | `DOC_UNSUPPORTED_FILES` | Stray `.txt`, `.xlsx`, etc. files — harmless, but worth cleaning up. |
 | `CONFIG_NO_TEMPLATE` | No canonical template configured — the playbook will be emergent (weaker positions). |
+| `CONFIG_NO_PRIOR_TEMPLATES` | You have a standard form and at least 10 deals but listed no older versions of it. Add every older version you can find under `baseline.prior_templates`; without them our own former wording is reconstructed from the corpus. Never an error. |
 
 ---
 

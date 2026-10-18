@@ -34,6 +34,9 @@ from playbook_engine.config import (
     PROVENANCE_KEYS,
     SEGMENTATION_KEYS,
     TOP_LEVEL_KEYS,
+    ConfigError,
+    load_config_yaml,
+    parse_prior_templates,
     unknown_key_message,
 )
 from playbook_engine.pipeline import (
@@ -288,7 +291,7 @@ def lint_corpus(
     # Config (optional)
     # -----------------------------------------------------------------------
     if config_path is not None:
-        _lint_config(config_path, report, corpus_suffixes)
+        _lint_config(config_path, report, corpus_suffixes, deal_count=len(doc_dirs))
 
     return report
 
@@ -461,8 +464,20 @@ def _lint_duplicate_stems(doc_dir: Path, version_files: list[Path], report: Lint
         )
 
 
-def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str]) -> None:
+# A template-mode run over at least this many deals should have been offered
+# the chance to supply older versions of our form (OPF 0.6 intake, #246).
+PRIOR_TEMPLATES_WARN_MIN_DEALS = 10
+
+
+def _lint_config(
+    config_path: Path, report: LintReport, corpus_suffixes: set[str], deal_count: int = 0
+) -> None:
     """Check the engine config YAML.
+
+    ``deal_count``: number of deal (document) directories in the corpus --
+    used for the missing-older-versions warning below. Which side's paper a
+    deal is on is only decided when ``mine`` reads the text, so this counts
+    every deal rather than guessing a side from the folder.
 
     ``corpus_suffixes``: lower-cased extensions across every version file in
     the corpus (``lint_corpus``'s per-doc-dir walk, done once and passed in
@@ -477,7 +492,7 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
         return
 
     try:
-        raw: Any = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        raw: Any = load_config_yaml(config_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         report.add(
             "error", "CONFIG_INVALID_YAML", f"Config file is not valid YAML: {exc}", config_path
@@ -544,7 +559,7 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
         # Resolve via the config loader's own resolver so the ``builtin:``
         # scheme (and relative paths) are honoured identically — a literal
         # join here rejected ``builtin:...`` as a bogus path (issue #182).
-        from playbook_engine.config import ConfigError, resolve_taxonomy_path
+        from playbook_engine.config import resolve_taxonomy_path
 
         try:
             tax_path = resolve_taxonomy_path(str(tax_val), config_path.parent)
@@ -586,6 +601,47 @@ def _lint_config(config_path: Path, report: LintReport, corpus_suffixes: set[str
             "An emergent playbook will be built from deal observations only; "
             "positions will not have an our_standard reference. "
             "Add baseline.template if you have a canonical template.",
+        )
+
+    # baseline.prior_templates (OPF 0.6 intake, #246): older versions of our
+    # own form. Validated with the loader's own parser so lint-corpus never
+    # says "OK" about a list ``mine`` will refuse to load. Absent or empty is
+    # valid -- but for a template-mode run over a real corpus it is worth a
+    # warning (never an error): without the older forms, our own former
+    # wording in past deals can only be reconstructed from the corpus.
+    prior_raw = bl.get("prior_templates") if isinstance(bl, dict) else None
+    prior_count = 0
+    if prior_raw is not None:
+        try:
+            tpl_abs = (
+                (config_path.parent / template_val).resolve()
+                if isinstance(template_val, str) and template_val
+                else None
+            )
+            prior_count = len(parse_prior_templates(prior_raw, config_path.parent, tpl_abs))
+        except ConfigError as exc:
+            report.add("error", "CONFIG_PRIOR_TEMPLATES_INVALID", str(exc), config_path)
+        else:
+            if prior_count:
+                report.add(
+                    "ok",
+                    "CONFIG_PRIOR_TEMPLATES",
+                    f"{prior_count} older version(s) of our form configured",
+                )
+    if (
+        template_val
+        and isinstance(template_val, str)
+        and prior_raw in (None, [])
+        and deal_count >= PRIOR_TEMPLATES_WARN_MIN_DEALS
+    ):
+        report.add(
+            "warning",
+            "CONFIG_NO_PRIOR_TEMPLATES",
+            f"No older versions of our form are configured (baseline.prior_templates) "
+            f"for a template-mode run over {deal_count} deals. Add every older version "
+            "you can find, with rough in-use dates, so the playbook can recognise our own "
+            "former wording in past deals; otherwise it is reconstructed from the corpus.",
+            config_path,
         )
 
     # provenance section (issue #56): the scaffold (staging.py) marks

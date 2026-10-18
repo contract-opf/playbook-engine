@@ -1564,6 +1564,25 @@ _SYMLINK_STAGING_NOTICE = (
 )
 
 
+def _scaffold_config_or_exit(src: Path, dest: Path, prior_templates: tuple[Path, ...]) -> None:
+    """Write the config skeleton (staging the older forms beside the template) or exit 1."""
+    from playbook_engine.staging import scaffold_config  # noqa: PLC0415
+
+    try:
+        skeleton = scaffold_config(src, dest, list(prior_templates))
+    except ValueError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    count = len(skeleton["baseline"].get("prior_templates", []))
+    if count:
+        click.echo(f"prior  : {count} older version(s) of our form staged beside the template")
+    else:
+        click.echo(
+            "prior  : no older versions of our form supplied "
+            "(pass --prior-template for each one you can find)"
+        )
+
+
 @cli.command(name="stage")
 @click.argument("src_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
@@ -1617,12 +1636,28 @@ _SYMLINK_STAGING_NOTICE = (
         "risk profiles on sibling subcommands)."
     ),
 )
+@click.option(
+    "--prior-template",
+    "prior_templates",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=(
+        "An older version of OUR form (repeatable — pass every one you can find). It is "
+        "copied beside the current template and listed under baseline.prior_templates, so "
+        "the playbook can recognise our own former wording in past deals. Files named "
+        "prior-template* at the root of SRC_DIR are picked up the same way. Add rough "
+        "in-use dates to the config afterwards. Taken by plain staging and by "
+        "--from-plan; refused with --plan-only (a plan is only a proposal), so pass it "
+        "on the --from-plan run."
+    ),
+)
 def stage_cmd(
     src_dir: Path,
     out_dir: Path | None,
     copy_files: bool,
     plan_only: bool,
     plan_path: Path | None,
+    prior_templates: tuple[Path, ...],
 ) -> None:
     """Stage SRC_DIR into the flat layout the engine walker expects.
 
@@ -1637,7 +1672,7 @@ def stage_cmd(
     ``--plan-only`` first to assemble a ``staging_plan.json`` proposal from
     file contents/metadata, review/edit it, then re-run with
     ``--from-plan staging_plan.json`` (``--plan`` also accepted, deprecated)
-    to execute it.
+    to execute it, passing any ``--prior-template`` options on that run.
 
     Writes only to the output directory (default:
     ~/.cache/playbook-engine/staging/<name>, a user-owned cache dir rather
@@ -1649,9 +1684,16 @@ def stage_cmd(
     from playbook_engine.staging import (  # noqa: PLC0415
         DEFAULT_STAGING_ROOT,
         ensure_staging_dest,
-        scaffold_config,
         stage,
     )
+
+    if plan_only and plan_path is None and prior_templates:
+        # A plan only proposes deals; the older forms are staged when it is
+        # executed. Refused rather than ignored, so they are never dropped.
+        raise click.UsageError(
+            "--prior-template is not used by --plan-only (a plan only proposes the "
+            "deals). Pass it on the `playbook stage --from-plan` run that executes the plan."
+        )
 
     resolved = src_dir.resolve()
     dest = (out_dir or DEFAULT_STAGING_ROOT / resolved.name).resolve()
@@ -1686,7 +1728,7 @@ def stage_cmd(
         if not copy_files:
             click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
         click.echo(f"plan   : {executed_plan_file} (preserved as the staging record)")
-        scaffold_config(resolved, dest)
+        _scaffold_config_or_exit(resolved, dest, prior_templates)
         click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
         click.secho(f"OK  {dest}", fg="green")
         return
@@ -1707,7 +1749,8 @@ def stage_cmd(
         )
         click.secho(
             f"OK  wrote {plan_file} — review/edit, then run "
-            f"`playbook stage --from-plan {plan_file}`",
+            f"`playbook stage --from-plan {plan_file}` "
+            "(add --prior-template FILE for each older version of our form)",
             fg="green",
         )
         return
@@ -1726,7 +1769,7 @@ def stage_cmd(
     if not copy_files:
         click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
 
-    scaffold_config(resolved, dest)
+    _scaffold_config_or_exit(resolved, dest, prior_templates)
     click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
 
     if result.missing:
