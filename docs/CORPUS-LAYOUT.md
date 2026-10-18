@@ -51,6 +51,11 @@ agreement_type:
   name: "Educational Affiliation Agreement"
 baseline:
   template: ./template/internship-template.rtf   # your standard paper, or null
+  prior_templates:                               # optional — every OLDER version of that form
+    - path: ./template/internship-2019.rtf       #   relative to this file; must exist
+      label: "2019 form"                         #   required, unique
+      in_use_from: 2019                          #   optional: ISO date, YYYY-MM, or a year
+      in_use_until: 2021-06                      #   optional; may not precede in_use_from
 taxonomy: ./spec/taxonomy/affiliation-agreement.yaml
 provenance:
   our_party_aliases: ["FixtureCorp", "FixtureCorp Holdings, LLC"]
@@ -58,6 +63,8 @@ perspective:                       # optional — whose "us" this playbook is
   party: "FixtureCorp"                    # reviewed as; an open-standard OPF
   counterparty_type: "Educational Institution"   # instance must say who "us" is
 ```
+
+**Older versions of your form.** Setup asks for every older version of your standard form you can find, with rough in-use dates, because it lets the playbook recognise your own former wording in past deals. Listing none is fine (the engine then reconstructs them from the corpus), and `lint-corpus` only warns, never fails, when a corpus of 10 or more deals has none listed. `playbook stage --prior-template FILE` (repeatable, or files named `prior-template*` at the corpus root) copies each one beside the current template and writes the `prior_templates` entries; add the dates by hand. For a corpus staged through a plan, pass `--prior-template` on the `--from-plan` run (`--plan-only` refuses it); `prior-template*` files at the root are left out of the plan's deals.
 
 If you don't have a canonical template, set `baseline.template: null` — the engine will build an *emergent* playbook from your signed deals (weaker, but still useful).
 

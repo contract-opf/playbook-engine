@@ -54,7 +54,8 @@ only ever read, never modified). Exported from a CLM or DMS in some other
 shape it can't recognize? `playbook stage` refuses and proposes a
 `staging_plan.json` from the files' contents and metadata instead — you
 review the plan, then `playbook stage <path-to-corpus> --from-plan
-staging_plan.json` to execute it. Nothing moves until you approve that
+staging_plan.json` to execute it (add `--prior-template FILE` there for each
+older version of your form). Nothing moves until you approve that
 plan. Want the same preview-then-approve step even on a shape `stage`
 would otherwise recognize? Pass `--plan-only` explicitly.
 
@@ -64,7 +65,10 @@ so it's visible under the Docker runtime's read-only mount too:
 
 ```yaml
 agreement_type: { id: msa, name: "Master Services Agreement" }
-baseline: { template: template/our-msa-template.docx }   # or null
+baseline:
+  template: template/our-msa-template.docx   # or null
+  prior_templates:                            # optional: every older version of that form
+    - { path: template/our-msa-2019.docx, label: "2019 form", in_use_from: 2019, in_use_until: 2021-06 }
 taxonomy: builtin:cuad-base.yaml       # or your own; see below
 provenance:
   our_party_aliases: ["YourCo", "YourCo Holdings, LLC"]  # every name variant you sign under

@@ -10,6 +10,21 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Setup asks for every older version of our form (issue #246, epic #245).**
+  `baseline.prior_templates` is a new optional config list of
+  `{path, label, in_use_from?, in_use_until?}` (dates are ISO, `YYYY-MM` or a
+  year). Paths must exist, labels must be unique and a date range may not run
+  backwards; a missing or empty list means none were supplied and is valid.
+  The `playbook-from-corpus` skill asks for them straight after the current
+  standard form ("I have older versions" / "I don't have any" / "Not sure"),
+  `playbook stage --prior-template` (repeatable, or `prior-template*` files at
+  the corpus root) copies them beside the current template and writes the
+  entries (for a loose corpus, on the `--from-plan` run: `--plan-only` refuses
+  the flag, and the plan leaves root `prior-template*` files out of the deals),
+  and `lint-corpus` reports invalid entries and warns, never fails,
+  when none are listed for a template-mode corpus of 10 or more deals. Nothing
+  reads the older forms yet; mining and the digest use them in a later ticket.
+
 - **`vs_standard` is judged part by part, and the label is derived (issue
   #243, epic #236).** One whole-text label left about three quarters of the
   acceptance corpus's judged texts `different_concept`: texts that keep some

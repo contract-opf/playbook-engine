@@ -55,6 +55,8 @@ and only what you cannot derive:
   (options: the template files you found, then "No standard form — build from
   the negotiated history") and the **agreement type** (the display name; offer
   the folder-name-derived guess first);
+- straight after it, when they gave a standard form: **older versions of our
+  form** (see "Interactive setup" below) — a normal setup step, not an extra;
 - third call, after you have read the recitals ("Derive party names
   automatically", below): the **perspective party** — "which party is us?",
   with the candidate names you derived as the options, the most frequent first.
@@ -177,6 +179,35 @@ recommended option first, "Other" always available:
 3. **What is the agreement type?** (it becomes the display name, e.g.
    "Educational Affiliation Agreement"). Options: your guess from the folder and
    file names first, then "Other".
+
+**Then, straight after the standard-form answer — skip only if they chose "No
+standard form" — ask for the older versions of our form**, as one more
+`AskUserQuestion` (same call if you can fit it, otherwise the very next one):
+
+> **Do you have older versions of our form?** Find every one you can — past
+> templates, superseded drafts of the standard paper, with a rough idea of when
+> each was in use. It lets the playbook recognise our own former wording in past
+> deals instead of treating it as a counterparty change.
+
+Options, recommended first: **"I have older versions"** / **"I don't have any"**
+/ **"Not sure"**. "None" is a perfectly normal answer — say so, and say the
+engine will then reconstruct the older forms from the corpus itself. Never
+press, and never block the run on it.
+
+- **"I have older versions"** → ask where they are (offer any `prior-template*`
+  files or other form-looking files you can see; "Other" takes a folder or
+  paths), and for each one a rough in-use period if they know it (a year, a
+  month or a date, both ends optional — a free-text answer is fine, "unknown" is
+  fine). Pass every file to staging with `--prior-template` (Step 1, or Step
+  1a's `--from-plan` run for a loose corpus), then write
+  the dates into `baseline.prior_templates` in `playbook.config.yaml`
+  (`{path, label, in_use_from?, in_use_until?}`; `lint-corpus` rejects a bad
+  date or a missing file).
+- **"Not sure"** → look for form-looking files near the standard form yourself;
+  if you find candidates ask once whether they are older versions of it,
+  otherwise treat it as "none".
+- **"I don't have any"** → leave `baseline.prior_templates` out. `lint-corpus`
+  will note, as a warning only, that none were supplied.
 
 Record the answers; they decide whether the run is template mode or emergent
 mode. Do **not** ask "who are your counterparties", and ask "which party is us"
@@ -439,8 +470,13 @@ succeed against a bind-mount root itself (`OSError: [Errno 16] Device or
 resource busy`):
 
 ```bash
-playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging
+playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging \
+  --prior-template ./old-forms/2019-form.docx --prior-template ./old-forms/2016-form.docx
 ```
+
+(`--prior-template` is repeatable — one per older version of our form you
+collected in setup; drop the flags when there are none. Staging copies each one
+beside the current template and lists it under `baseline.prior_templates`.)
 
 Staging writes **real file copies** by default, so the staged tree is
 self-contained and stays readable when it is bind-mounted read-only into a
@@ -482,6 +518,15 @@ as the LLM, arbitrates the low-confidence parts.
 
    Read the resulting `staging_plan.json`: `deals` (each with `deal_id`,
    `counterparty_guess`, `confidence`, `files`), `unassigned`, `warnings`.
+
+   No `--prior-template` here: `--plan-only` refuses it, because a plan only
+   proposes deals. The older versions of our form from setup are staged in
+   item 4, on the `--from-plan` run. Keep them out of deal assembly: files
+   named `prior-template*` at the corpus root are already left out of the
+   plan (`warnings` names each one), and any other older-form file you were
+   given that shows up in `deals` or `unassigned` is not a deal document —
+   take it out of the plan and pass it with `--prior-template` in item 4.
+   That is not dropping it.
 
 2. For each low-confidence cluster (`confidence` well below 1.0) or each
    `unassigned` file, read *that document's own text/metadata* and decide:
@@ -582,13 +627,19 @@ as the LLM, arbitrates the low-confidence parts.
 
    ```bash
    playbook stage ./raw-corpus --out ~/.cache/playbook-engine/staging \
-     --from-plan ~/.cache/playbook-engine/staging/staging_plan.json
+     --from-plan ~/.cache/playbook-engine/staging/staging_plan.json \
+     --prior-template ./old-forms/2019-form.docx --prior-template ./old-forms/2016-form.docx
    ```
+
+   (The same `--prior-template` flags as Step 1 — one per older version of our
+   form you collected in setup; drop them when there are none. Check the
+   `prior  :` line: it must count every older version you were given.)
 
 Hard rules for this stage:
 - **Never drop a file silently.** A file still unassigned after arbitration
   is not deleted — list it in your round summary and route it to a quarantine
-  folder so a human can look at it later.
+  folder so a human can look at it later. (An older version of our form is not
+  an unassigned file: it goes to `--prior-template`, never into a deal.)
 - **Never trust filenames over content.** An editor-initials filename
   ("...-Redline-MBM-...") or an email-forward folder name is never evidence
   of deal membership or counterparty on its own — only document text or

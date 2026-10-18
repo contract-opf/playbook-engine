@@ -362,7 +362,8 @@ def stage(
             "no Versions/ nesting, no <agreement>/<version-files> subfolders). "
             "Run `playbook stage --plan-only` to write a staging_plan.json "
             "proposal for review, then `playbook stage --from-plan staging_plan.json` "
-            "to execute it."
+            "to execute it (pass any --prior-template FILE options on that "
+            "--from-plan run; --plan-only does not take them)."
         )
 
     _recreate_out_dir(src_dir, out_dir)
@@ -603,7 +604,68 @@ def _stage_manifest(
 _CONFIG_FILENAME = "playbook.config.yaml"
 
 
-def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
+_PRIOR_TEMPLATE_PREFIX_RE = re.compile(r"^prior[-_ ]?templates?[-_ ]*", re.IGNORECASE)
+
+
+def _is_prior_template_name(path: Path) -> bool:
+    """True for a root file named ``prior-template...`` (any of ``-``/``_``/space)."""
+    return bool(_PRIOR_TEMPLATE_PREFIX_RE.match(path.stem))
+
+
+def discover_prior_templates(src_dir: Path) -> list[Path]:
+    """Older versions of our form dropped at *src_dir*'s root as ``prior-template*`` files.
+
+    Sorted by name; only supported formats. This is the filename convention
+    the setup step uses for "every older version you can find"; callers can
+    also pass explicit paths (``playbook stage --prior-template``).
+    """
+    return sorted(
+        c
+        for c in src_dir.iterdir()
+        if c.is_file() and c.suffix.lower() in _SUPPORTED and _is_prior_template_name(c)
+    )
+
+
+def _stage_prior_templates(prior_paths: list[Path], out_dir: Path) -> list[dict[str, str]]:
+    """Copy each older form into *out_dir*'s root and return its config entries.
+
+    The files sit beside the current template (as plain root files, never in a
+    sub-folder -- a folder would be mined as a deal). Labels come from the
+    file name (minus any ``prior-template`` prefix) and are made unique.
+    """
+    entries: list[dict[str, str]] = []
+    seen_labels: set[str] = set()
+    seen_dests: set[str] = set()
+    for src in prior_paths:
+        if not src.is_file():
+            raise ValueError(f"prior template not found (or is not a file): {src}")
+        if src.suffix.lower() not in _SUPPORTED:
+            raise ValueError(
+                f"prior template {src.name}: unsupported format "
+                f"(use one of {', '.join(sorted(_SUPPORTED))})"
+            )
+        label = _PRIOR_TEMPLATE_PREFIX_RE.sub("", src.stem).strip(" -_") or src.stem
+        base, n = label, 2
+        # Unique on the label AND on the destination name: labels that differ
+        # only in punctuation/spacing ("2019 form" / "2019_form") share a slug
+        # and would otherwise overwrite each other's copy.
+        while True:
+            slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "form"
+            dest_name = f"prior-template--{slug}{src.suffix.lower()}"
+            if label.casefold() not in seen_labels and dest_name not in seen_dests:
+                break
+            label = f"{base} ({n})"
+            n += 1
+        seen_labels.add(label.casefold())
+        seen_dests.add(dest_name)
+        shutil.copy2(src, out_dir / dest_name)
+        entries.append({"path": dest_name, "label": label})
+    return entries
+
+
+def scaffold_config(
+    src_dir: Path, out_dir: Path, prior_templates: list[Path] | None = None
+) -> dict[str, Any]:
     """Emit a ``playbook.config.yaml`` skeleton with required fields.
 
     Writes ``out_dir/playbook.config.yaml`` (the canonical config filename
@@ -629,6 +691,12 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
       carried, with nothing in the diff to say so.
     - ``baseline.template``   — relative path to first ``*template*`` file
       found at *src_dir* root, or ``null``.
+    - ``baseline.prior_templates`` — every older version of our form: the
+      explicit *prior_templates* paths plus any ``prior-template*`` file at
+      *src_dir* root. Each is copied into *out_dir* beside the current
+      template (which is copied too, so the config's relative paths resolve
+      in the staged tree) and listed as ``{path, label}``; in-use dates are
+      added by hand. Omitted when none were supplied.
     - ``taxonomy``            — placeholder string ``"FILL_IN_TAXONOMY_PATH"``.
       Replace with a corpus-specific relative path, or ``builtin:<name>``
       to reference one of the engine's bundled taxonomies (resolved
@@ -644,6 +712,7 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
     Args:
         src_dir: Source corpus root (used for name inference and template scan).
         out_dir: Destination directory where ``playbook.config.yaml`` is written.
+        prior_templates: Extra older versions of our form to stage (see above).
 
     Returns:
         The skeleton dict (same content as the written YAML).
@@ -666,18 +735,42 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
             candidate.is_file()
             and "template" in candidate.name.lower()
             and candidate.suffix.lower() in _SUPPORTED
+            and not _is_prior_template_name(candidate)
         ):
             template_rel = str(candidate.name)
             break
+
+    # Older versions of our form: explicit paths first, then the root-file
+    # convention, de-duplicated by resolved path.
+    prior_sources: list[Path] = []
+    for cand in prior_templates or []:
+        if template_rel is not None and cand.resolve() == (src_dir / template_rel).resolve():
+            raise ValueError(
+                f"prior template {cand.name} is the current standard form "
+                f"({template_rel}), not an older version of it"
+            )
+    for cand in [*(prior_templates or []), *discover_prior_templates(src_dir)]:
+        if all(cand.resolve() != existing.resolve() for existing in prior_sources):
+            prior_sources.append(cand)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if (
+        template_rel is not None
+        and (src_dir / template_rel).resolve() != (out_dir / template_rel).resolve()
+    ):
+        shutil.copy2(src_dir / template_rel, out_dir / template_rel)
+    prior_entries = _stage_prior_templates(prior_sources, out_dir)
+
+    baseline: dict[str, Any] = {"template": template_rel}
+    if prior_entries:
+        baseline["prior_templates"] = prior_entries
 
     skeleton: dict[str, Any] = {
         "agreement_type": {
             "id": slug,
             "name": title,
         },
-        "baseline": {
-            "template": template_rel,
-        },
+        "baseline": baseline,
         "taxonomy": "FILL_IN_TAXONOMY_PATH",
         "provenance": {
             "our_party_aliases": [],
@@ -744,6 +837,23 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         "  #   (e.g. 'The City University of New York' AND 'CUNY') — empty = NO\n"
         "  #   pseudonymization. Derive these from the corpus, not guesswork.",
     )
+    # Older versions of our form: always shown, as an in-file reminder that
+    # setup asks for them. A comment, not an empty `prior_templates: []`, so a
+    # regenerated config does not look like a deliberate "none".
+    if not prior_entries:
+        yaml_text += (
+            "\n"
+            "# Optional: baseline.prior_templates — EVERY older version of our form you\n"
+            "# can find, with rough in-use dates. It lets the playbook recognise our own\n"
+            "# former wording in past deals. None is fine: it is then reconstructed from\n"
+            "# the corpus. Put each file beside the current template.\n"
+            "# baseline:\n"
+            "#   prior_templates:\n"
+            "#     - path: prior-template--2019-form.docx\n"
+            '#       label: "2019 form"\n'
+            "#       in_use_from: 2019        # optional: ISO date, YYYY-MM or a year\n"
+            "#       in_use_until: 2021-06    # optional\n"
+        )
     # extraction — commented, for the same reason as perspective below: there
     # is no value that is right for both runtimes. Left unset, `extractor`
     # defaults to "auto", which uses docling when it is on PATH and quietly
@@ -784,7 +894,6 @@ def scaffold_config(src_dir: Path, out_dir: Path) -> dict[str, Any]:
         '#                          # e.g. "Customer"\n'
     )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / _CONFIG_FILENAME).write_text(yaml_text, encoding="utf-8")
 
     return skeleton
