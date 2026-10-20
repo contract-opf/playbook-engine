@@ -367,6 +367,8 @@ def _doc(doc_id: str) -> dict[str, Any]:
         "in_scope": True,
         "versions": 2,
         "signed_version": 2,
+        "signed_on": None,
+        "signed_on_basis": None,
         "version_order_basis": "edit_distance_chain",
     }
 

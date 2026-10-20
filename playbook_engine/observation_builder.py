@@ -38,7 +38,7 @@ Each observation captures:
     "conceded_before_signing" (our standard language removed before signing
     in a deal with a detected executed copy; engine-internal, never an OPF
     outcome), or "opening" (what a clause opened with when that differs from
-    what was signed, whatever its origin — OPF 0.5, engine-internal, never an
+    what was signed, whatever its origin — OPF 0.6, engine-internal, never an
     OPF outcome). A terminal row is "unsigned" when no version was detected as
     the executed copy — see build_observations' has_signed_copy
   - Source: document_id + version for traceability
@@ -273,7 +273,7 @@ class Observation:
         provenance:      The deal's paper side: ``"our_paper"``,
                          ``"counterparty_paper"``, or ``"unknown"`` when the
                          detection was ambiguous — never coerced to a side
-                         (issue #225). Metadata only in OPF 0.5.
+                         (issue #225). Metadata only in OPF 0.6.
         outcome:         ``"signed"``, ``"unsigned"``, ``"proposed_then_reversed"``,
                          or ``"conceded_before_signing"`` (issue #216: OUR
                          standard language removed before signing — our
@@ -850,7 +850,7 @@ DROPPED_REFUSED_UNSIGNED = "refused_ask_no_signed_copy"
 OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
 
 #: Outcome of the row that records what a clause type OPENED with (issue #233,
-#: OPF 0.5): the text of every first-draft node bound into an aligned row of
+#: OPF 0.6): the text of every first-draft node bound into an aligned row of
 #: the clause type, whatever its origin (our standard or not) and whatever
 #: paper the deal is on. Written once per (deal, clause type), only for a
 #: deal with a detected executed copy, and only when that first-draft text
@@ -864,7 +864,7 @@ OUTCOME_CONCEDED_BEFORE_SIGNING = "conceded_before_signing"
 #: text as the clause's ``opening_text``.
 OUTCOME_OPENING = "opening"
 
-#: ``Observation.opened_with`` values (OPF 0.5).
+#: ``Observation.opened_with`` values (OPF 0.6).
 OPENED_STANDARD = "standard"
 OPENED_NON_STANDARD = "non_standard"
 OPENED_ABSENT = "absent"
@@ -1139,7 +1139,7 @@ def build_observations(
     clause that survived to the terminal, whose signed text stays the
     (single) signed observation.
 
-    **What each clause type opened with (issue #233, OPF 0.5)** — only when
+    **What each clause type opened with (issue #233, OPF 0.6)** — only when
     *has_signed_copy*. The first draft is the net diff's before side (the
     signed copy itself for a single-version deal). The first-draft text of a
     clause type is every first-draft node bound into an aligned row of its
@@ -1534,7 +1534,7 @@ def build_observations(
             )
         )
 
-    # --- 2c. What each clause type opened with (issue #233, OPF 0.5) ---
+    # --- 2c. What each clause type opened with (issue #233, OPF 0.6) ---
     # A fact about the first draft, whatever its origin and whatever paper
     # the deal is on; only a deal with a detected executed copy has an
     # anchored version order to speak of an "opening" (issue #221).

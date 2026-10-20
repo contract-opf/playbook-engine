@@ -1,6 +1,6 @@
 """Tests for the x_* vendor-extension namespace (issue #180).
 
-The OPF 0.5 schema closes every object with ``additionalProperties: false``;
+The OPF 0.6 schema closes every object with ``additionalProperties: false``;
 the ``x_*`` namespace is the sanctioned escape hatch so adopters can attach
 vendor fields without forking the standard. Extensions are allowed at the
 document root, ``posture``, ``floor`` and its invariants

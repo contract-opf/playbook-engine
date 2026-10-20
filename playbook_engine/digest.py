@@ -1,6 +1,6 @@
 """Model-facing digest of an OPF playbook — the top-level `digest` section.
 
-**digest_version 4** (OPF 0.5, issues #223, #234, #240; the only digest the
+**digest_version 5** (OPF 0.6, issues #223, #234, #240; the only digest the
 engine builds — digest 2 was retired with OPF 0.3, issue #238, and digest 3
 was replaced in place by this one): the verdict-free projection of the
 per-deal precedent record. Per clause: our standard, how many deals signed
@@ -45,10 +45,10 @@ totals.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from playbook_engine.canonicalize import canonicalize
+from playbook_engine.deal_dates import signed_on_key
 from playbook_engine.equivalence import (
     LABEL_BY_OWNER,
     PART_MAP_LEGEND,
@@ -64,7 +64,7 @@ from playbook_engine.precedent import clause_counts
 
 #: Schema version of the digest section itself — bump on any shape change so
 #: consumers can dispatch (the digest is consumed outside this repo).
-DIGEST_VERSION_V4 = "4"
+DIGEST_VERSION_V5 = "5"
 
 #: Per-list cap (signed_variants, refused_asks, changed_openings, applied
 #: after the equivalent variants collapse): the default/loosest cap,
@@ -73,57 +73,47 @@ DIGEST_VERSION_V4 = "4"
 #: verdict and never reaches the consumer path.
 EXEMPLAR_TOP_N = 5
 
-#: build_digest_v4 never tightens the per-list cap below this.
+#: build_digest_v5 never tightens the per-list cap below this.
 _MIN_TOP_N = 1
 
-#: The hard size budget build_digest_v4 enforces (chars/4 rule of thumb).
+#: The hard size budget build_digest_v5 enforces (chars/4 rule of thumb).
 DIGEST_TOKEN_BUDGET = 40_000
 
 
 # ---------------------------------------------------------------------------
-# digest_version 4 — projection of the OPF 0.5 precedent record (issues #223, #234)
+# digest_version 5 — projection of the OPF 0.6 precedent record (issues #223, #234)
 # ---------------------------------------------------------------------------
 
-_QUARTER_RE = re.compile(r"^(\d{4})-Q([1-4])$")
-_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
+def _signed_on_key(value: Any) -> tuple[int, int, int] | None:
+    """Sortable key for a ``signed_on`` (``YYYY-MM-DD`` or ``YYYY-MM``); ``None`` if unknown.
 
-def _signed_at_key(value: Any) -> tuple[int, int, int] | None:
-    """Sortable key for a ``signed_at`` (``YYYY-MM-DD`` or ``YYYY-Qn``).
-
-    A quarter sorts at its first day, so a quarter-coarsened document
-    orders the same way its exact-date source did at quarter granularity. Anything else is ``None`` (unknown — sorts last).
+    A month sorts before every day in it. Anything else (a malformed value, a
+    date outside 1980-2099, ``None``) is ``None`` — unknown, sorts last.
     """
-    if not isinstance(value, str):
-        return None
-    m = _DATE_RE.match(value)
-    if m:
-        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    m = _QUARTER_RE.match(value)
-    if m:
-        return (int(m.group(1)), (int(m.group(2)) - 1) * 3 + 1, 1)
-    return None
+    return signed_on_key(value)
 
 
-def _latest(values: list[Any]) -> Any:
-    """The latest ``signed_at`` among *values* (``None`` when none is known)."""
-    keyed = [(k, v) for v in values for k in (_signed_at_key(v),) if k is not None]
-    return max(keyed)[1] if keyed else None
+def _latest(values: list[Any]) -> str | None:
+    """The latest signing month among *values* (``None`` when none is known)."""
+    keyed = [k for v in values for k in (_signed_on_key(v),) if k is not None]
+    return None if not keyed else f"{max(keyed)[0]:04d}-{max(keyed)[1]:02d}"
 
 
-def _earliest(values: list[Any]) -> Any:
-    keyed = [(k, v) for v in values for k in (_signed_at_key(v),) if k is not None]
-    return min(keyed)[1] if keyed else None
+def _earliest(values: list[Any]) -> str | None:
+    """The earliest signing month among *values* (``None`` when none is known)."""
+    keyed = [k for v in values for k in (_signed_on_key(v),) if k is not None]
+    return None if not keyed else f"{min(keyed)[0]:04d}-{min(keyed)[1]:02d}"
 
 
 def _latest_first_key(record: dict[str, Any]) -> tuple[bool, tuple[int, ...], str, str]:
-    """Sort key: latest ``signed_at`` first (unknown last), then document_id, then id.
+    """Sort key: latest ``signed_on`` first (unknown last), then document_id, then id.
 
     The id is the final tie-break, so the order is total even between two
     records of one deal (a deal has one record per clause type, so only a
     hand-built document has them).
     """
-    k = _signed_at_key(record.get("signed_at"))
+    k = _signed_on_key(record.get("signed_on"))
     return (
         k is None,
         tuple(-x for x in (k or (0, 0, 0))),
@@ -197,7 +187,7 @@ def clause_precedent_groups(
       group: ``{text, n_deals, last_signed, n_from_standard, n_unchanged,
       label, ref, precedent_ids}`` — ``text`` is the sentence-boundary summary
       (≤ 300 chars, ``summarize_clause_text``) of the group's representative
-      (latest ``signed_at``, then lowest ``document_id``), ``ref`` its
+      (latest ``signed_on``, then lowest ``document_id``), ``ref`` its
       citation and ``label`` the representative's ``vs_standard.label``
       (``None`` = not judged). ``n_from_standard`` counts the group's deals
       whose clause opened with our standard (a concession on record);
@@ -259,11 +249,13 @@ def clause_precedent_groups_with_members(
     for key, g in variants.items():
         members = g["members"]
         rep = sorted(members, key=_latest_first_key)[0]
-        last_signed = _latest([m.get("signed_at") for m in members])
+        signed_ons = [m.get("signed_on") for m in members]
+        last_signed = _latest(signed_ons)
         n = len({m.get("document_id") for m in members})
         entry = {
             "text": summarize_clause_text(rep["signed_text"]["text"]),
             "n_deals": n,
+            "first_signed": _earliest(signed_ons),
             "last_signed": last_signed,
             "n_from_standard": len(
                 {m.get("document_id") for m in members if m.get("opened_with") == "standard"}
@@ -280,7 +272,7 @@ def clause_precedent_groups_with_members(
             "ref": rep["signed_text"].get("ref"),
             "precedent_ids": sorted({str(m.get("id")) for m in members}),
         }
-        last_key = _signed_at_key(last_signed)
+        last_key = _signed_on_key(last_signed)
         sort_key = (
             -n,
             last_key is None,
@@ -314,9 +306,12 @@ def clause_precedent_groups_with_members(
             ),
         )[0]
         n = len(g["deals"])
+        ask_dates = [p.get("signed_on") for _ask, p in g["asks"]]
         entry = {
             "text": summarize_clause_text(rep_ask["text"]),
             "n_deals": n,
+            "first_signed": _earliest(ask_dates),
+            "last_signed": _latest(ask_dates),
             "label": _label_of(rep_ask),
             **part_map_fields(rep_ask),
             "ref": rep_ask.get("ref"),
@@ -422,6 +417,7 @@ def _arrange_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "n_texts": len(equivalent),
                 "n_from_standard": sum(v["n_from_standard"] for v in equivalent),
                 "n_unchanged": sum(v["n_unchanged"] for v in equivalent),
+                "first_signed": _earliest([v.get("first_signed") for v in equivalent]),
                 "last_signed": _latest([v.get("last_signed") for v in equivalent]),
                 "exemplars": [
                     {"text": v["text"], "ref": v["ref"]} for v in equivalent[:_EQUIVALENT_EXEMPLARS]
@@ -493,12 +489,12 @@ def _corpus_summary(playbook: dict[str, Any], precedent: list[dict[str, Any]]) -
             n_signed += d.get("signed_version") is not None
         else:
             n_signed += d.get("document_id") in signed_ids
-    signed_ats = [p.get("signed_at") for p in precedent if p.get("signed") is True]
+    signed_ons = [p.get("signed_on") for p in precedent if p.get("signed") is True]
     return {
         "n_deals": len(docs),
         "n_signed": n_signed,
-        "first_signed": _earliest(signed_ats),
-        "last_signed": _latest(signed_ats),
+        "first_signed": _earliest(signed_ons),
+        "last_signed": _latest(signed_ons),
     }
 
 
@@ -537,6 +533,12 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
                 "title": clause.get("title"),
                 "our_standard": digest_standard(clause),
                 "n_deals": clause.get("n_deals"),
+                "first_signed": _earliest(
+                    [p.get("signed_on") for p in precedent if p.get("taxonomy_id") == tid]
+                ),
+                "last_signed": _latest(
+                    [p.get("signed_on") for p in precedent if p.get("taxonomy_id") == tid]
+                ),
                 "n_signed_standard": clause.get("n_signed_standard"),
                 "n_opened_standard": counts["n_opened_standard"],
                 "n_kept_standard": counts["n_kept_standard"],
@@ -552,7 +554,7 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
     agreement_type = playbook.get("agreement_type")
     perspective = playbook.get("perspective")
     return {
-        "digest_version": DIGEST_VERSION_V4,
+        "digest_version": DIGEST_VERSION_V5,
         "perspective": perspective if isinstance(perspective, dict) else None,
         "agreement_type": (
             {k: agreement_type[k] for k in ("id", "name") if k in agreement_type}
@@ -566,10 +568,10 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
     }
 
 
-def build_digest_v4(
+def build_digest_v5(
     playbook: dict[str, Any], *, token_budget: int | None = DIGEST_TOKEN_BUDGET
 ) -> dict[str, Any]:
-    """Build the digest_version 4 digest of an OPF 0.5 document (issues #223, #234, #240).
+    """Build the digest_version 5 digest of an OPF 0.6 document (issues #223, #234, #240).
 
     Per clause, our standard, how many deals signed it, how many opened with
     it (``n_opened_standard``) and kept it (``n_kept_standard``), the

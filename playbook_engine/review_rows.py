@@ -26,7 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 from playbook_engine.digest import (
-    build_digest_v4,
+    build_digest_v5,
     clause_precedent_groups_with_members,
     playbook_precedent_records,
 )
@@ -117,7 +117,7 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
         return ReviewRows([], 0, 0)
     party = perspective_party(doc)
     raw_digest = doc.get("digest")
-    digest: dict[str, Any] = raw_digest if isinstance(raw_digest, dict) else build_digest_v4(doc)
+    digest: dict[str, Any] = raw_digest if isinstance(raw_digest, dict) else build_digest_v5(doc)
     precedent = playbook_precedent_records(doc)
 
     by_key: dict[str, dict[str, Any]] = {}

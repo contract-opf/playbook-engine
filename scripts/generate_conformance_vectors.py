@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Regenerate the frozen conformance vectors under ``spec/conformance/0.5/`` — issue #115.
+"""Regenerate the frozen conformance vectors under ``spec/conformance/0.6/`` — issue #115.
 
 DEV TOOL, NOT PART OF THE TEST SUITE OR THE RUNTIME PACKAGE. Run this only
 when deliberately re-stamping the conformance vectors for a new format
-version (a new ``opf_version`` or a new ``DIGEST_VERSION_V4``) — never as a
+version (a new ``opf_version`` or a new ``DIGEST_VERSION_V5``) — never as a
 routine "regenerate the golden files" step. The whole point of
 ``spec/conformance/`` is that its ``expected.*`` values are FROZEN,
 independently-computed-once numbers that ``tests/test_conformance_vectors.py``
@@ -16,8 +16,8 @@ Usage::
 
     .venv/bin/python scripts/generate_conformance_vectors.py
 
-Writes the OPF 0.5 / digest_version 4 set (issues #223, #233, #234, #240) under
-``spec/conformance/0.5/`` (``manifest.json`` + ``vectors/``); re-running it
+Writes the OPF 0.6 / digest_version 5 set (issues #223, #233, #234, #240) under
+``spec/conformance/0.6/`` (``manifest.json`` + ``vectors/``); re-running it
 must reproduce the committed files byte-for-byte. The OPF 0.3 / digest 2 set
 and the 0.4 set (the same documents without opening evidence) were retired
 with those formats (issues #238, #233) — git history has them. Review the resulting diff like any other spec change (it needs a
@@ -38,7 +38,7 @@ from playbook_engine.canonicalize import (
     content_hash,
     sha256_hex,
 )
-from playbook_engine.digest import DIGEST_VERSION_V4, build_digest_v4
+from playbook_engine.digest import DIGEST_VERSION_V5, build_digest_v5
 from playbook_engine.dossiers import build_derived_sections
 from playbook_engine.equivalence import iter_slots, stamp_standard_parts, standard_parts
 from playbook_engine.opf_accessors import perspective_party
@@ -59,7 +59,7 @@ def _expected(doc: dict[str, Any]) -> dict[str, Any]:
         "canonical": canonicalize_playbook(doc),
         "content_hash": content_hash(doc),
         "section_digests": compute_section_digests(doc),
-        "digest": build_digest_v4(doc),
+        "digest": build_digest_v5(doc),
         # Issue #228: the hard-rule manifest, critic dossiers and provenance
         # index are pure functions of the document too.
         **build_derived_sections(doc),
@@ -67,16 +67,16 @@ def _expected(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 / digest_version 4 set (issues #223, #233, #234, #240) — spec/conformance/0.5/
+# OPF 0.6 / digest_version 5 set (issues #223, #233, #234, #240) — spec/conformance/0.6/
 # ---------------------------------------------------------------------------
 
-OPF_VERSION_V05 = "0.5"
-CONFORMANCE_DIR_V05 = CONFORMANCE_DIR / "0.5"
-VECTORS_DIR_V05 = CONFORMANCE_DIR_V05 / "vectors"
+OPF_VERSION_V06 = "0.6"
+CONFORMANCE_DIR_V06 = CONFORMANCE_DIR / "0.6"
+VECTORS_DIR_V06 = CONFORMANCE_DIR_V06 / "vectors"
 _AGREEMENT_TYPE_ID = "conformance-fixture"
 
 
-def _base_v05(
+def _base_v06(
     *,
     clauses: list[dict[str, Any]] | None = None,
     precedent: list[dict[str, Any]] | None = None,
@@ -84,12 +84,12 @@ def _base_v05(
     perspective: dict[str, str] | None = None,
     floor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """A minimal OPF 0.5 document. Clause counts and precedent ids are
+    """A minimal OPF 0.6 document. Clause counts and precedent ids are
     stamped by the reference functions (``precedent.clause_counts`` /
     ``precedent.precedent_id``) so every input is self-consistent — a vector
     a validator would reject is not a useful conformance input."""
     doc: dict[str, Any] = {
-        "opf_version": OPF_VERSION_V05,
+        "opf_version": OPF_VERSION_V06,
         "agreement_type": {"id": _AGREEMENT_TYPE_ID, "name": "Conformance Fixture Agreement"},
         "baseline": {"has_canonical_template": True},
         "taxonomy": {"source": "custom", "entries": []},
@@ -115,7 +115,21 @@ def _base_v05(
     _stamp_judgment_parts(doc["evidence"])
     doc["posture"] = {}
     doc["floor"] = floor or {}
-    doc["corpus"] = {"documents": documents or [], "stats": {}}
+    dates_by_doc: dict[str, set[str]] = {}
+    for record in records:
+        if record.get("signed_on") is not None:
+            dates_by_doc.setdefault(record["document_id"], set()).add(record["signed_on"])
+    corpus_documents = []
+    for deal in documents or []:
+        deal = dict(deal)
+        dates = dates_by_doc.get(deal["document_id"], set())
+        assert len(dates) <= 1, (deal["document_id"], dates)
+        if "signed_on" not in deal:
+            deal["signed_on"] = next(iter(dates)) if dates else None
+            deal["signed_on_basis"] = "document_text" if dates else None
+        assert not dates or dates == {deal["signed_on"]}, (deal, dates)
+        corpus_documents.append(deal)
+    doc["corpus"] = {"documents": corpus_documents, "stats": {}}
     doc["compiler"] = {
         "name": "playbook-engine",
         "version": ENGINE_VERSION,
@@ -134,21 +148,35 @@ def _ref(document_id: str, version: int, clause_path: str = "1") -> dict[str, An
     }
 
 
-def _deal(document_id: str, *, signed_version: int | None, provenance: str) -> dict[str, Any]:
-    return {
+def _deal(
+    document_id: str,
+    *,
+    signed_version: int | None,
+    provenance: str,
+    signed_on: str | None = None,
+    basis: str | None = None,
+) -> dict[str, Any]:
+    """A corpus document. ``signed_on`` / ``basis`` are left out (and derived by
+    ``_base_v06`` from the deal's precedent records, basis ``document_text``)
+    unless given."""
+    doc: dict[str, Any] = {
         "document_id": document_id,
         "provenance": provenance,
         "in_scope": True,
         "versions": 3,
         "signed_version": signed_version,
     }
+    if signed_on is not None:
+        doc["signed_on"] = signed_on
+        doc["signed_on_basis"] = basis or "document_text"
+    return doc
 
 
 #: Sentinel: ``_prec`` derives ``opened_with`` from the other arguments.
 _DEFAULT: object = object()
 
 
-#: Stands for the one part of a one-part fixture standard until ``_base_v05``
+#: Stands for the one part of a one-part fixture standard until ``_base_v06``
 #: stamps the real ``part_id``; ``_part(n)`` stands for the n-th part of a
 #: standard of several (vector 009).
 _PART = "__part__"
@@ -259,7 +287,7 @@ def _prec(
     signed_text: str | None,
     standard: bool = False,
     signed: bool = True,
-    signed_at: str | None = None,
+    signed_on: str | None = None,
     opening_text: str | None = None,
     opened_with: str | None | object = _DEFAULT,
     refused: list[tuple[str, int]] | None = None,
@@ -306,10 +334,9 @@ def _prec(
             "signed": signed,
         }
     )
-    if signed_at is not None:
-        record["signed_at"] = signed_at
     record.update(
         {
+            "signed_on": signed_on,
             "rounds": rounds,
             "signed_text": (
                 {
@@ -338,13 +365,13 @@ def _prec(
     return record
 
 
-def _vector_v05(name: str, description: str, doc: dict[str, Any]) -> dict[str, Any]:
+def _vector_v06(name: str, description: str, doc: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
-        "opf_version": OPF_VERSION_V05,
+        "opf_version": OPF_VERSION_V06,
         "engine_version": ENGINE_VERSION,
-        "digest_version": DIGEST_VERSION_V4,
+        "digest_version": DIGEST_VERSION_V5,
         "input": doc,
         "expected": _expected(doc),
     }
@@ -355,23 +382,23 @@ _STANDARD_TEXT = (
 )
 
 
-def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
-    """The OPF 0.5 / digest 4 vector set. Synthetic inputs only."""
+def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
+    """The OPF 0.6 / digest 5 vector set. Synthetic inputs only."""
     vectors: list[tuple[str, dict[str, Any]]] = []
 
-    # 001 — smallest 0.5 document: no clauses, no perspective.
-    doc_001 = _base_v05()
-    digest_001 = build_digest_v4(doc_001)
+    # 001 — smallest 0.6 document: no clauses, no perspective.
+    doc_001 = _base_v06()
+    digest_001 = build_digest_v5(doc_001)
     assert digest_001["perspective"] is None
     assert digest_001["clauses"] == []
     vectors.append(
         (
             "001-minimal-no-perspective",
-            _vector_v05(
+            _vector_v06(
                 "minimal-no-perspective",
-                "Smallest well-formed OPF 0.5 document: evidence {clauses: [], "
+                "Smallest well-formed OPF 0.6 document: evidence {clauses: [], "
                 "precedent: []}, no top-level perspective. expected.digest pins "
-                "the digest_version 4 skeleton — perspective is PRESENT and null "
+                "the digest_version 5 skeleton — perspective is PRESENT and null "
                 "(never omitted), agreement_type is {id, name}, corpus counts are "
                 "0 and first_signed/last_signed are null, uncovered_clause_types is an "
                 "empty list.",
@@ -394,17 +421,17 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         _deal("deal-h", signed_version=3, provenance="counterparty_paper"),
     ]
     precedent_002 = [
-        _prec("deal-a", tid, signed_text=_STANDARD_TEXT, standard=True, signed_at="2025-01-10"),
-        _prec("deal-b", tid, signed_text=_STANDARD_TEXT, standard=True, signed_at="2025-02-10"),
+        _prec("deal-a", tid, signed_text=_STANDARD_TEXT, standard=True, signed_on="2025-01-10"),
+        _prec("deal-b", tid, signed_text=_STANDARD_TEXT, standard=True, signed_on="2025-02-10"),
         # Variant A, three deals; deal-d spells it with different case and
-        # punctuation (same group), and carries the latest signed_at as a
-        # publish-coarsened quarter.
-        _prec("deal-c", tid, signed_text=variant_a, signed_at="2025-03-01", paper="theirs"),
+        # punctuation (same group), and carries the latest signing date, known
+        # to the month only.
+        _prec("deal-c", tid, signed_text=variant_a, signed_on="2025-03-01", paper="theirs"),
         _prec(
             "deal-d",
             tid,
             signed_text="EITHER party may assign this Agreement to an affiliate, without consent",
-            signed_at="2025-Q4",
+            signed_on="2025-11",
             paper="theirs",
             refused=[("Either party may assign this Agreement freely.", 2)],
             rounds=1,
@@ -416,7 +443,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             "deal-g",
             tid,
             signed_text="Either party may not assign this Agreement to an affiliate without consent.",
-            signed_at="2024-06-30",
+            signed_on="2024-06-30",
         ),
         # An unsigned deal's last-draft text is never a signed variant.
         _prec(
@@ -438,7 +465,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             paper="theirs",
         ),
     ]
-    doc_002 = _base_v05(
+    doc_002 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid}",
@@ -458,23 +485,25 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         documents=documents_002,
         perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
     )
-    entry_002 = build_digest_v4(doc_002)["clauses"][0]
+    entry_002 = build_digest_v5(doc_002)["clauses"][0]
     assert [v["n_deals"] for v in entry_002["signed_variants"]] == [3, 1]
-    assert entry_002["signed_variants"][0]["last_signed"] == "2025-Q4"
+    assert entry_002["signed_variants"][0]["first_signed"] == "2025-03"
+    assert entry_002["signed_variants"][0]["last_signed"] == "2025-11"
     assert entry_002["refused_asks"][0]["n_deals"] == 3
     assert entry_002["n_signed_standard"] == 2 and entry_002["n_deals"] == 8
     vectors.append(
         (
             "002-variants-refused-and-exclusions",
-            _vector_v05(
+            _vector_v06(
                 "variants-refused-and-exclusions",
-                "One clause, eight deals, pinning digest_version 4 grouping and "
+                "One clause, eight deals, pinning digest_version 5 grouping and "
                 "every exclusion rule: two deals signed our standard "
                 "(n_signed_standard 2, never a variant); variant A signed in "
                 "three deals, one spelled with different case/punctuation (exact "
                 "normalization merges it) — its representative is the deal with "
-                "the latest signed_at, a YYYY-Qn quarter that sorts at the "
-                "quarter's first day; variant B differs from A by the negator "
+                "the latest signed_on, a YYYY-MM month that sorts before every day "
+                "in it (and whose digest first_signed / last_signed are 2025-03 "
+                "and 2025-11); variant B differs from A by the negator "
                 "'not' only and stays a separate group; an unsigned deal's text "
                 "is never a signed variant; a deal whose standard was struck "
                 "(signed_text null, opening_text set) contributes no variant. "
@@ -502,8 +531,8 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         for i in range(1, 7)
     ]
     precedent_003.append(_prec("deal-7", tid_003, signed_text=long_text))
-    precedent_003.append(_prec("deal-8", tid_003, signed_text=long_text, signed_at="2025-05-05"))
-    doc_003 = _base_v05(
+    precedent_003.append(_prec("deal-8", tid_003, signed_text=long_text, signed_on="2025-05-05"))
+    doc_003 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_003}",
@@ -517,14 +546,14 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             _deal(f"deal-{i}", signed_version=3, provenance="our_paper") for i in range(1, 9)
         ],
     )
-    entry_003 = build_digest_v4(doc_003)["clauses"][0]
+    entry_003 = build_digest_v5(doc_003)["clauses"][0]
     assert entry_003["n_variants_total"] == 7
     assert len(entry_003["signed_variants"]) == 5
     assert len(entry_003["signed_variants"][0]["text"]) <= 300
     vectors.append(
         (
             "003-cap-totals-and-summary",
-            _vector_v05(
+            _vector_v06(
                 "cap-totals-and-summary",
                 "One clause with seven distinct signed variants: the digest lists "
                 "the top 5 (n_deals desc, last_signed desc with unknown last, then "
@@ -577,7 +606,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             signed_text=f"Notice of termination given to {party_004} is effective on receipt.",
         ),
     ]
-    doc_004 = _base_v05(
+    doc_004 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_004}",
@@ -597,7 +626,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         documents=[_deal(f"deal-{c}", signed_version=3, provenance="our_paper") for c in "abcd"],
         perspective={"party": party_004, "counterparty_type": "Fixture Counterparty"},
     )
-    entry_004 = build_digest_v4(doc_004)["clauses"][0]
+    entry_004 = build_digest_v5(doc_004)["clauses"][0]
     assert [(v["n_deals"], v["ref"]["document_id"]) for v in entry_004["signed_variants"]] == [
         (2, "deal-a"),
         (1, "deal-d"),
@@ -609,7 +638,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "004-party-alias-grouping",
-            _vector_v05(
+            _vector_v06(
                 "party-alias-grouping",
                 "The grouping key's party neutralization (OPF-SPEC §3.5.4): "
                 "every entity-registry alias (Counterparty-<n>, case-insensitive, "
@@ -674,7 +703,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             opened_with="non_standard",
         ),
     ]
-    doc_005 = _base_v05(
+    doc_005 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_005}",
@@ -708,7 +737,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "005-opening-evidence",
-            _vector_v05(
+            _vector_v06(
                 "opening-evidence",
                 "Opening evidence (OPF-SPEC §3.5.5): opened_with and opening_text "
                 "for seven deals of one clause. deal-a opened with our standard "
@@ -731,7 +760,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             ),
         )
     )
-    # 006 — the opening rules of digest 4 (issue #234): every branch of
+    # 006 — the opening rules of digest 5 (issue #234): every branch of
     # n_opened_standard / n_kept_standard, n_from_standard / n_unchanged and
     # changed_openings on one clause.
     tid_006 = "venue"
@@ -798,7 +827,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             paper="theirs",
         ),
     ]
-    doc_006 = _base_v05(
+    doc_006 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_006}",
@@ -829,7 +858,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         ],
         perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
     )
-    entry_006 = build_digest_v4(doc_006)["clauses"][0]
+    entry_006 = build_digest_v5(doc_006)["clauses"][0]
     assert (entry_006["n_opened_standard"], entry_006["n_kept_standard"]) == (3, 1)
     assert [e["n_deals"] for e in entry_006["changed_openings"]] == [2, 1]
     assert [e["n_struck"] for e in entry_006["changed_openings"]] == [0, 1]
@@ -838,9 +867,9 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "006-opening-rules",
-            _vector_v05(
+            _vector_v06(
                 "opening-rules",
-                "The digest 4 opening rules (OPF-SPEC §3.12.2) on one clause with "
+                "The digest 5 opening rules (OPF-SPEC §3.12.2) on one clause with "
                 "ten deals. n_opened_standard counts signed deals whose opened_with "
                 "is standard (deal-a's edited standard, deal-b's struck standard, "
                 "deal-i's kept one) and n_kept_standard those that signed our "
@@ -912,7 +941,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         _prec("deal-h", tid_007, signed_text=texts_007["more"], signed_vs="more_protective"),
         _prec("deal-i", tid_007, signed_text=texts_007["none"]),
     ]
-    doc_007 = _base_v05(
+    doc_007 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_007}",
@@ -948,7 +977,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             {"id": "retired_clause", "label": "Retired Clause", "status": "inactive"},
         ],
     }
-    digest_007 = build_digest_v4(doc_007)
+    digest_007 = build_digest_v5(doc_007)
     entry_007 = digest_007["clauses"][0]
     assert [v["label"] for v in entry_007["signed_variants"]] == [
         "less_protective",
@@ -965,7 +994,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "007-equivalence-label-and-coverage",
-            _vector_v05(
+            _vector_v06(
                 "equivalence-label-and-coverage",
                 "The vs_standard label in the digest (OPF-SPEC §3.5.6, §3.12.2) and "
                 "uncovered_clause_types. Signed variants labelled equivalent (three "
@@ -1016,7 +1045,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     v1_c = "Either party may assign this Agreement to an affiliate without consent."
     r1_c = "Either party may assign this Agreement freely without consent."
     # One signing date per deal, on every record of it (a producer that records them).
-    signed_at_008 = {"deal-c": "2025-01-15", "deal-d": "2025-06-30", "deal-f": "2025-06-30"}
+    signed_on_008 = {"deal-c": "2025-01-15", "deal-d": "2025-06-30", "deal-f": "2025-06-30"}
     precedent_008 = [
         _prec("deal-a", tid_a, signed_text=v1_a, opening_text=std_a, rounds=1),
         _prec("deal-b", tid_a, signed_text=v2_a, opened_with="non_standard", paper="theirs"),
@@ -1056,8 +1085,8 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
         ),
     ]
     for record in precedent_008:
-        if record["document_id"] in signed_at_008:
-            record["signed_at"] = signed_at_008[record["document_id"]]
+        if record["document_id"] in signed_on_008:
+            record["signed_on"] = signed_on_008[record["document_id"]]
     floor_008 = {
         "invariants": [
             {
@@ -1123,7 +1152,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             },
         ]
     }
-    doc_008 = _base_v05(
+    doc_008 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_a}",
@@ -1285,7 +1314,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "008-hard-rules-and-dossiers",
-            _vector_v05(
+            _vector_v06(
                 "hard-rules-and-dossiers",
                 "The hard-rule manifest, the critic dossiers and the provenance index "
                 "(OPF-SPEC §3.12.3). The Floor has seven invariants and the manifest seven "
@@ -1321,7 +1350,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
                 "and precedent id (step 1 takes only members that opened with our "
                 "standard); then, with no changed opening and the variant's group already "
                 "chosen, the refused ask made in deal-c, deal-d and deal-f: deal-d and "
-                "deal-f share the latest signed_at and deal-f has the lower precedent_id "
+                "deal-f share the latest signed_on and deal-f has the lower precedent_id "
                 "(deal-c has the lowest, but signed earlier; deal-d is the lower "
                 "document), so the excerpt is deal-f's ask with what it signed instead "
                 "(outcome ask_refused). Every deal but deal-f records source-file hashes "
@@ -1482,7 +1511,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             paper="theirs",
         ),
     ]
-    doc_009 = _base_v05(
+    doc_009 = _base_v06(
         clauses=[
             {
                 "id": f"clause.{tid_009}",
@@ -1512,7 +1541,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     )
     pids_009 = [p["part_id"] for p in doc_009["evidence"]["clauses"][0]["our_standard"]["parts"]]
     assert pids_009[3] == f"{pids_009[1]}-2", pids_009
-    digest_009 = build_digest_v4(doc_009)
+    digest_009 = build_digest_v5(doc_009)
     entry_009 = digest_009["clauses"][0]
     assert [p["part_id"] for p in entry_009["our_standard"]["parts"]] == pids_009
     mixed_009 = entry_009["signed_variants"][0]
@@ -1538,7 +1567,7 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(
         (
             "009-standard-parts-and-owner-label",
-            _vector_v05(
+            _vector_v06(
                 "standard-parts-and-owner-label",
                 "A standard of four parts whose second and fourth parts are the same "
                 "passage (OPF-SPEC §3.5, §3.5.6, §3.12.2, §3.12.3, issue #243). The "
@@ -1565,15 +1594,160 @@ def build_vectors_v05() -> list[tuple[str, dict[str, Any]]]:
             ),
         )
     )
+
+    # 010 - signing dates: signed_on / signed_on_basis on documents and
+    # precedent, first_signed / last_signed on groups and clauses.
+    vectors.append(build_vector_010())
     return vectors
 
 
-def main_v05() -> None:
-    VECTORS_DIR_V05.mkdir(parents=True, exist_ok=True)
-    vectors = build_vectors_v05()
+def build_vector_010() -> tuple[str, dict[str, Any]]:
+    tid = "assignment"
+    variant_a = "Either party may assign this Agreement to an affiliate without consent."
+    variant_b = "Either party may assign this Agreement on written notice to the other."
+    ask = "Either party may assign this Agreement freely."
+    standard_text = _STANDARD_TEXT
+    # (deal, signed_on, basis): every basis, both precisions, an unsigned deal
+    # and a signed deal whose date no source states (null, never guessed).
+    dated = {
+        "deal-a": ("2022-03-14", "document_text"),
+        "deal-b": ("2023-07", "filename"),
+        "deal-c": ("2023-09-30", "signature_block"),
+        "deal-d": ("2024-01-05", "file_metadata"),
+        "deal-e": ("2024-11-20", "document_text"),
+    }
+    precedent = [
+        _prec(
+            "deal-a", tid, signed_text=variant_a, signed_on="2022-03-14", opened_with="non_standard"
+        ),
+        _prec(
+            "deal-b",
+            tid,
+            signed_text=variant_a,
+            signed_on="2023-07",
+            opening_text=standard_text,
+            rounds=1,
+            paper="theirs",
+        ),
+        _prec(
+            "deal-c",
+            tid,
+            signed_text=standard_text,
+            standard=True,
+            signed_on="2023-09-30",
+            refused=[(ask, 2)],
+            rounds=1,
+        ),
+        _prec(
+            "deal-d",
+            tid,
+            signed_text=variant_b,
+            signed_on="2024-01-05",
+            opened_with="non_standard",
+            paper="theirs",
+        ),
+        _prec(
+            "deal-e",
+            tid,
+            signed_text=standard_text,
+            standard=True,
+            signed_on="2024-11-20",
+            refused=[(ask, 2)],
+            rounds=1,
+        ),
+        # Signed, but no source states when: null, with a null basis. Its
+        # refused ask is the undated one a producer can record (an unsigned
+        # deal records none, issue #221).
+        _prec(
+            "deal-f",
+            tid,
+            signed_text=variant_b,
+            opened_with="non_standard",
+            paper="theirs",
+            refused=[(ask, 2)],
+            rounds=1,
+        ),
+        # No detected executed copy: no signing date (and no refused asks).
+        _prec("deal-g", tid, signed_text=variant_a, signed=False, paper="unknown"),
+    ]
+    documents = [
+        _deal(
+            deal,
+            signed_version=3,
+            provenance="our_paper"
+            if deal in ("deal-a", "deal-c", "deal-e")
+            else "counterparty_paper",
+            signed_on=on,
+            basis=basis,
+        )
+        for deal, (on, basis) in dated.items()
+    ] + [
+        _deal("deal-f", signed_version=3, provenance="counterparty_paper"),
+        _deal("deal-g", signed_version=None, provenance="counterparty_paper"),
+    ]
+    doc = _base_v06(
+        clauses=[
+            {
+                "id": f"clause.{tid}",
+                "taxonomy_id": tid,
+                "title": "Assignment",
+                "our_standard": {
+                    "text": standard_text,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "9",
+                    },
+                },
+            }
+        ],
+        precedent=precedent,
+        documents=documents,
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+    )
+    digest = build_digest_v5(doc)
+    clause = digest["clauses"][0]
+    assert (clause["first_signed"], clause["last_signed"]) == ("2022-03", "2024-11")
+    by_text = {v["n_deals"]: v for v in clause["signed_variants"]}
+    assert (by_text[2]["first_signed"], by_text[2]["last_signed"]) == ("2022-03", "2023-07")
+    refused = clause["refused_asks"][0]
+    assert refused["n_deals"] == 3
+    assert (refused["first_signed"], refused["last_signed"]) == ("2023-09", "2024-11")
+    assert digest["corpus"] == {
+        "n_deals": 7,
+        "n_signed": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2024-11",
+    }
+    return (
+        "010-signing-dates",
+        _vector_v06(
+            "signing-dates",
+            "When each deal was signed, as a fact (OPF-SPEC §3.8, §3.12.2, issue #247). "
+            "corpus.documents[].signed_on is an ISO date or, when only the month is "
+            "known, a YYYY-MM; signed_on_basis says where it was read (document_text, "
+            "signature_block, filename, file_metadata) and is null exactly when signed_on "
+            "is. Deal-f is signed but no source states a date (null, null); deal-g has no "
+            "executed copy (signed_version null) and so no date. Every precedent record "
+            "carries its document's signed_on. Digest 5 reports first_signed / last_signed "
+            "as YYYY-MM: on the corpus (2022-03, 2024-11), on the clause (the same span "
+            "over its precedent records), on each signed variant (variant A, two deals, "
+            "2022-03 to 2023-07 - a month-only date sorts before every day in it), on the "
+            "collapsed equivalent entry when there is one, and on each refused ask group "
+            "(the ask refused in deals c and e is dated by those deals' records: 2023-09 "
+            "to 2024-11, and deal-f's refused ask, from a signed deal with no date, adds "
+            "none).",
+            doc,
+        ),
+    )
+
+
+def main_v06() -> None:
+    VECTORS_DIR_V06.mkdir(parents=True, exist_ok=True)
+    vectors = build_vectors_v06()
     manifest_entries = []
     for filename, vector in vectors:
-        path = VECTORS_DIR_V05 / f"{filename}.json"
+        path = VECTORS_DIR_V06 / f"{filename}.json"
         path.write_text(
             json.dumps(vector, indent=2, sort_keys=False, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -1587,18 +1761,18 @@ def main_v05() -> None:
         )
     manifest = {
         "format_version": {
-            "opf_version": OPF_VERSION_V05,
+            "opf_version": OPF_VERSION_V06,
             "engine_version": ENGINE_VERSION,
-            "digest_version": DIGEST_VERSION_V4,
+            "digest_version": DIGEST_VERSION_V5,
         },
         # The stamp text of the 0.4 manifest, carried over with the version
         # updated. "../manifest.json" was the retired 0.3 set's manifest;
         # spec/conformance/README.md carries the algorithm it described.
         "algorithm": (
             "canonical / content_hash / section_digests: exactly as the 0.3 set "
-            "(../manifest.json). digest: playbook_engine.digest.build_digest_v4(input) "
-            "with the default token_budget, which for opf_version 0.5 is "
-            "build_digest_v4 (OPF-SPEC.md §3.12.2): signed variants, refused asks and "
+            "(../manifest.json). digest: playbook_engine.digest.build_digest_v5(input) "
+            "with the default token_budget, which for opf_version 0.6 is "
+            "build_digest_v5 (OPF-SPEC.md §3.12.2): signed variants, refused asks and "
             "changed openings grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent."
             "normalize_variant_text: every Counterparty-<n> alias -> 'counterparty', "
             "then deviation_classifier.normalize_for_standard with the document's "
@@ -1610,11 +1784,11 @@ def main_v05() -> None:
         ),
         "vectors": manifest_entries,
     }
-    (CONFORMANCE_DIR_V05 / "manifest.json").write_text(
+    (CONFORMANCE_DIR_V06 / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"Wrote {len(vectors)} vectors + manifest.json to {CONFORMANCE_DIR_V05}")
+    print(f"Wrote {len(vectors)} vectors + manifest.json to {CONFORMANCE_DIR_V06}")
 
 
 if __name__ == "__main__":
-    main_v05()
+    main_v06()

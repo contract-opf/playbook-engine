@@ -2282,7 +2282,7 @@ def test_appended_carve_out_stays_modified_and_keeps_tracked_attribution() -> No
 
 
 # ---------------------------------------------------------------------------
-# Opening evidence (issue #233, OPF 0.5): what every clause opened with
+# Opening evidence (issue #233, OPF 0.6): what every clause opened with
 #
 # Every fixture below is a shape the pipeline's net diff produces: a modified
 # or unchanged row carries both sides (`_terminal_cd`), a clause inserted

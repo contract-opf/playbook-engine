@@ -1,12 +1,12 @@
 """Conformance vector suite for canonicalize.py + digest.py — issue #115.
 
-``spec/conformance/0.5/`` is the frozen, standalone-consumable (plain JSON,
+``spec/conformance/0.6/`` is the frozen, standalone-consumable (plain JSON,
 no Python import required) normative definition of canonicalization,
-content hashing, and digest construction for OPF 0.5 / digest_version 4 —
+content hashing, and digest construction for OPF 0.6 / digest_version 5 —
 the one format the engine reads and writes (issue #238; the OPF 0.3 /
 digest 2 set was retired with that format). This suite is the reference
 check: for every vector, recompute ``canonicalize_playbook``/
-``content_hash``/``compute_section_digests``/``build_digest_v4`` from the
+``content_hash``/``compute_section_digests``/``build_digest_v5`` from the
 vector's ``input`` using THIS engine and assert the result equals the
 vector's FROZEN ``expected.*`` values byte-for-byte.
 
@@ -18,7 +18,7 @@ caught here, not just asserted "self-consistent" against itself.
 The ``test_mutated_*`` tests below prove that directly (in-memory
 tampering, never touching the fixture file on disk).
 
-See ``spec/conformance/0.5/README.md`` for the vector-by-vector rationale.
+See ``spec/conformance/0.6/README.md`` for the vector-by-vector rationale.
 
 SECURITY NOTE: every vector's ``input`` is a synthetic, hand-built minimal
 document — no real agreement content.
@@ -38,7 +38,7 @@ from playbook_engine.canonicalize import (
     compute_section_digests,
     content_hash,
 )
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.dossiers import (
     build_derived_sections,
     dossier_budget,
@@ -48,8 +48,8 @@ from playbook_engine.dossiers import (
 
 ROOT = Path(__file__).parent.parent
 CONFORMANCE_DIR = ROOT / "spec" / "conformance"
-#: The OPF 0.5 / digest_version 4 set (issues #223, #234).
-CONFORMANCE_DIR_V05 = CONFORMANCE_DIR / "0.5"
+#: The OPF 0.6 / digest_version 5 set (issues #223, #234).
+CONFORMANCE_DIR_V06 = CONFORMANCE_DIR / "0.6"
 
 
 def test_retired_0_3_vector_set_is_gone() -> None:
@@ -59,63 +59,63 @@ def test_retired_0_3_vector_set_is_gone() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 / digest_version 4 set (issues #223, #234) — spec/conformance/0.5/
+# OPF 0.6 / digest_version 5 set (issues #223, #234) — spec/conformance/0.6/
 # ---------------------------------------------------------------------------
 
 
-def _load_manifest_v05() -> dict[str, Any]:
-    return json.loads((CONFORMANCE_DIR_V05 / "manifest.json").read_text(encoding="utf-8"))
+def _load_manifest_v06() -> dict[str, Any]:
+    return json.loads((CONFORMANCE_DIR_V06 / "manifest.json").read_text(encoding="utf-8"))
 
 
-def _vector_files_v05() -> list[str]:
-    files = [entry["file"] for entry in _load_manifest_v05()["vectors"]]
+def _vector_files_v06() -> list[str]:
+    files = [entry["file"] for entry in _load_manifest_v06()["vectors"]]
     assert files, "0.5/manifest.json lists no vectors"
     return files
 
 
-def _load_vector_v05(relative_file: str) -> dict[str, Any]:
-    return json.loads((CONFORMANCE_DIR_V05 / relative_file).read_text(encoding="utf-8"))
+def _load_vector_v06(relative_file: str) -> dict[str, Any]:
+    return json.loads((CONFORMANCE_DIR_V06 / relative_file).read_text(encoding="utf-8"))
 
 
-def test_v05_manifest_lists_every_vector_file_on_disk() -> None:
-    manifest_files = {entry["file"] for entry in _load_manifest_v05()["vectors"]}
-    on_disk = {f"vectors/{p.name}" for p in (CONFORMANCE_DIR_V05 / "vectors").glob("*.json")}
+def test_v06_manifest_lists_every_vector_file_on_disk() -> None:
+    manifest_files = {entry["file"] for entry in _load_manifest_v06()["vectors"]}
+    on_disk = {f"vectors/{p.name}" for p in (CONFORMANCE_DIR_V06 / "vectors").glob("*.json")}
     assert manifest_files == on_disk
 
 
-def test_v05_manifest_is_stamped_0_5_digest_4() -> None:
-    fv = _load_manifest_v05()["format_version"]
-    assert fv["opf_version"] == "0.5"
-    assert fv["digest_version"] == "4"
+def test_v06_manifest_is_stamped_0_6_digest_5() -> None:
+    fv = _load_manifest_v06()["format_version"]
+    assert fv["opf_version"] == "0.6"
+    assert fv["digest_version"] == "5"
     assert fv["engine_version"]
 
 
-@pytest.mark.parametrize("filename", _vector_files_v05())
-def test_v05_vector_reproduces_exactly(filename: str) -> None:
-    vector = _load_vector_v05(filename)
+@pytest.mark.parametrize("filename", _vector_files_v06())
+def test_v06_vector_reproduces_exactly(filename: str) -> None:
+    vector = _load_vector_v06(filename)
     doc = vector["input"]
     expected = vector["expected"]
-    assert vector["opf_version"] == "0.5" and doc["opf_version"] == "0.5"
+    assert vector["opf_version"] == "0.6" and doc["opf_version"] == "0.6"
     assert canonicalize_playbook(doc) == expected["canonical"], filename
     assert content_hash(doc) == expected["content_hash"], filename
     assert compute_section_digests(doc) == expected["section_digests"], filename
-    assert build_digest_v4(doc) == expected["digest"], filename
+    assert build_digest_v5(doc) == expected["digest"], filename
     # Issue #228: the manifest, dossiers and provenance index are pinned too.
     derived = build_derived_sections(doc)
     for name in ("manifest", "dossiers", "provenance_index"):
         assert derived[name] == expected[name], (filename, name)
-    assert expected["digest"]["digest_version"] == "4"
-    assert vector["digest_version"] == "4"
+    assert expected["digest"]["digest_version"] == "5"
+    assert vector["digest_version"] == "5"
     assert "full_text" not in json.dumps(expected["digest"])
 
 
-@pytest.mark.parametrize("filename", _vector_files_v05())
-def test_v05_vector_inputs_are_valid_0_5_documents(filename: str) -> None:
-    """Every 0.5 input is a self-consistent document the validator accepts —
+@pytest.mark.parametrize("filename", _vector_files_v06())
+def test_v06_vector_inputs_are_valid_0_6_documents(filename: str) -> None:
+    """Every 0.6 input is a self-consistent document the validator accepts —
     precedent ids, clause counts, and (once embedded) the digest all agree."""
     from playbook_engine.validator import validate_document
 
-    vector = _load_vector_v05(filename)
+    vector = _load_vector_v06(filename)
     doc = copy.deepcopy(vector["input"])
     doc["digest"] = vector["expected"]["digest"]
     for name in ("manifest", "dossiers", "provenance_index"):
@@ -124,20 +124,20 @@ def test_v05_vector_inputs_are_valid_0_5_documents(filename: str) -> None:
     assert result.ok, [str(e) for e in result.errors if e.blocking]
 
 
-def test_v05_mutated_digest_is_detected() -> None:
+def test_v06_mutated_digest_is_detected() -> None:
     """A tampered expected digest (one deal count off) must not match."""
-    vector = _load_vector_v05("vectors/002-variants-refused-and-exclusions.json")
+    vector = _load_vector_v06("vectors/002-variants-refused-and-exclusions.json")
     tampered = copy.deepcopy(vector["expected"]["digest"])
     tampered["clauses"][0]["signed_variants"][0]["n_deals"] += 1
-    recomputed = build_digest_v4(vector["input"])
+    recomputed = build_digest_v5(vector["input"])
     assert recomputed != tampered
     assert recomputed == vector["expected"]["digest"]
 
 
-def test_v05_negator_is_never_merged_into_a_variant() -> None:
+def test_v06_negator_is_never_merged_into_a_variant() -> None:
     """002 pins exact normalization: 'may not assign' is its own group, and the
     case/punctuation respelling of variant A is merged into A (3 deals)."""
-    digest = _load_vector_v05("vectors/002-variants-refused-and-exclusions.json")["expected"][
+    digest = _load_vector_v06("vectors/002-variants-refused-and-exclusions.json")["expected"][
         "digest"
     ]
     variants = digest["clauses"][0]["signed_variants"]
@@ -146,13 +146,13 @@ def test_v05_negator_is_never_merged_into_a_variant() -> None:
     assert digest["clauses"][0]["refused_asks"][0]["n_deals"] == 3
 
 
-def test_v05_counterparty_alias_never_splits_a_variant() -> None:
+def test_v06_counterparty_alias_never_splits_a_variant() -> None:
     """004 pins the grouping key's party neutralization (OPF-SPEC §3.5.4):
     texts differing only by the counterparty's Counterparty-<n> alias are one
     group with n_deals 2 (signed variants and refused asks alike), the
     parties' places swapped stays its own group, and the one-deal variants'
     order shows perspective.party was rewritten to 'party'."""
-    vector = _load_vector_v05("vectors/004-party-alias-grouping.json")
+    vector = _load_vector_v06("vectors/004-party-alias-grouping.json")
     entry = vector["expected"]["digest"]["clauses"][0]
     assert [(v["n_deals"], v["ref"]["document_id"]) for v in entry["signed_variants"]] == [
         (2, "deal-a"),
@@ -164,12 +164,12 @@ def test_v05_counterparty_alias_never_splits_a_variant() -> None:
     assert (clause["n_variants"], clause["n_refused"]) == (3, 1)
 
 
-def test_v05_opening_rules_vector_pins_every_branch() -> None:
+def test_v06_opening_rules_vector_pins_every_branch() -> None:
     """006 (issue #234): edited standard, struck standard, non-standard changed
     to standard, non-standard unchanged, struck + own refused ask (excluded
     from changed_openings), struck with no refused ask (included, n_struck 1),
     "absent" and an unsigned deal (ignored)."""
-    digest = _load_vector_v05("vectors/006-opening-rules.json")["expected"]["digest"]
+    digest = _load_vector_v06("vectors/006-opening-rules.json")["expected"]["digest"]
     clause = digest["clauses"][0]
     assert (clause["n_opened_standard"], clause["n_kept_standard"]) == (3, 1)
     by_text = {v["text"]: v for v in clause["signed_variants"]}
@@ -191,11 +191,11 @@ def test_v05_opening_rules_vector_pins_every_branch() -> None:
     }
 
 
-def test_v05_label_vector_collapses_equivalent_variants_and_lists_uncovered() -> None:
+def test_v06_label_vector_collapses_equivalent_variants_and_lists_uncovered() -> None:
     """007 (issues #240, #234): equivalent variants are ONE entry, the rest
     keep the tier order, and the uncovered list is the eligible taxonomy
     entries with no evidence clause."""
-    digest = _load_vector_v05("vectors/007-equivalence-label-and-coverage.json")["expected"][
+    digest = _load_vector_v06("vectors/007-equivalence-label-and-coverage.json")["expected"][
         "digest"
     ]
     listed = digest["clauses"][0]["signed_variants"]
@@ -213,12 +213,12 @@ def test_v05_label_vector_collapses_equivalent_variants_and_lists_uncovered() ->
     assert digest["clauses"][0]["n_variants_total"] == 6
 
 
-def test_v05_standard_parts_and_owner_label_vector_pins_the_part_rules() -> None:
+def test_v06_standard_parts_and_owner_label_vector_pins_the_part_rules() -> None:
     """009 (issue #243): a several-part standard with a repeated passage
     (``-2``), part maps of several tokens with omissions and additions, part
     reasons naming parts other than the first, and an owner label carried
     with the owner's reason and ``label_by: "owner"``."""
-    vector = _load_vector_v05("vectors/009-standard-parts-and-owner-label.json")
+    vector = _load_vector_v06("vectors/009-standard-parts-and-owner-label.json")
     doc, expected = vector["input"], vector["expected"]
     pids = [p["part_id"] for p in doc["evidence"]["clauses"][0]["our_standard"]["parts"]]
     assert len(pids) == 4 and pids[3] == f"{pids[1]}-2"
@@ -258,9 +258,9 @@ def _flip_last_hex_char(sha: str) -> str:
     return f"{prefix}:{hexdigest[:-1]}{flipped}"
 
 
-@pytest.mark.parametrize("filename", _vector_files_v05())
+@pytest.mark.parametrize("filename", _vector_files_v06())
 def test_mutated_content_hash_is_detected(filename: str) -> None:
-    vector = _load_vector_v05(filename)
+    vector = _load_vector_v06(filename)
     tampered_expected = _flip_last_hex_char(vector["expected"]["content_hash"])
     recomputed = content_hash(vector["input"])
     assert recomputed != tampered_expected
@@ -268,23 +268,23 @@ def test_mutated_content_hash_is_detected(filename: str) -> None:
 
 
 def test_mutated_canonical_bytes_are_detected() -> None:
-    vector = _load_vector_v05("vectors/001-minimal-no-perspective.json")
+    vector = _load_vector_v06("vectors/001-minimal-no-perspective.json")
     tampered_expected = vector["expected"]["canonical"].replace(
-        '"opf_version":"0.5"', '"opf_version":"9.9"'
+        '"opf_version":"0.6"', '"opf_version":"9.9"'
     )
     assert tampered_expected != vector["expected"]["canonical"]
     assert canonicalize_playbook(vector["input"]) != tampered_expected
     assert canonicalize_playbook(vector["input"]) == vector["expected"]["canonical"]
 
 
-def test_v05_hard_rules_and_dossiers_vector_pins_selection_and_the_bound() -> None:
+def test_v06_hard_rules_and_dossiers_vector_pins_selection_and_the_bound() -> None:
     """008 (issue #228): rules in Floor order with their defaults, the
     concession-then-changed-opening excerpt order over more groups than the
     cap, a rule that demands presence or carries a predicate naming its clause,
     a dossier over its budget that drops its second excerpt WHOLE (never a cut)
     and then its Floor rule, and a dossier with no excerpt that drops its last
     Floor rule whole to fit."""
-    vector = _load_vector_v05("vectors/008-hard-rules-and-dossiers.json")
+    vector = _load_vector_v06("vectors/008-hard-rules-and-dossiers.json")
     expected = vector["expected"]
     rules = {r["rule_id"]: r for r in expected["manifest"]["hard_rules"]}
     assert list(rules) == [i["id"] for i in vector["input"]["floor"]["invariants"]]

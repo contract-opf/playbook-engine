@@ -22,7 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playbook_engine.agent_judge import PendingQueue, StoreBackedEquivalenceJudge, VerdictStore
+from playbook_engine import deal_dates
+from playbook_engine.agent_judge import (
+    PendingQueue,
+    StoreBackedDealDateJudge,
+    StoreBackedEquivalenceJudge,
+    VerdictStore,
+)
 from playbook_engine.artifact_store import (
     ArtifactStore,
     _sha256_file,
@@ -146,6 +152,7 @@ from playbook_engine.signed_detector import (
     SignedJudge,
     SignedStatus,
     detect_signed,
+    signing_texts,
     strip_signature_block,
 )
 from playbook_engine.taxonomy import Taxonomy
@@ -254,7 +261,7 @@ _MEDIA_TYPES: dict[str, str] = {
 # v11 (issue #225): an ambiguous provenance detection is recorded "unknown"
 # instead of being coerced to counterparty_paper — the trail's and every
 # observation's provenance become "unknown" for such a deal, observations
-# gained "paper_basis"/"paper_confidence" (the detection signal the OPF 0.5
+# gained "paper_basis"/"paper_confidence" (the detection signal the OPF 0.6
 # precedent record's paper side rests on), the alias_first_party confidence
 # dropped to 0.70, template similarity now compares node fingerprints, and
 # corpus_doc provenance is written through two_valued_side. A warm cache
@@ -318,7 +325,12 @@ _MEDIA_TYPES: dict[str, str] = {
 # signed (observation_builder.OUTCOME_OPENING). L4 output changes for
 # identical inputs; a warm cache would otherwise replay observations with no
 # opening evidence forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 19
+#
+# v20 (issue #247): corpus_doc gained "deal_date_evidence" — what mining read
+# about the executed copy's signing date (document text, signature block, file
+# name, file metadata, and the date passages a deal_date judge is shown). A
+# warm cache would otherwise replay documents with no date evidence forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 20
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1938,6 +1950,22 @@ def _pseudonymize_corpus_documents(
             new_doc["signed_version"] = _alias_version_field(
                 new_doc["signed_version"], known_entities, registry, version_alias_map
             )
+        # Issue #247: the date passages a deal_date judge is shown are document
+        # text (a recital can name the parties), so they are born safe too.
+        evidence = new_doc.get("deal_date_evidence")
+        if isinstance(evidence, dict) and isinstance(evidence.get("passages"), dict):
+            new_doc["deal_date_evidence"] = {
+                **evidence,
+                "passages": {
+                    source: [
+                        pseudonymize_text(passage, known_entities, registry)
+                        for passage in passages
+                        if isinstance(passage, str)
+                    ]
+                    for source, passages in evidence["passages"].items()
+                    if isinstance(passages, list)
+                },
+            }
         out.append(new_doc)
     return out, version_alias_by_doc
 
@@ -2038,7 +2066,7 @@ def _build_quarantine_corpus_doc(
       ``version_ingest``) — keeping it a fixed string is one less place that
       would need auditing for leaked content.
     - ``x_quarantined=True`` — the sanctioned ``x_`` extension point
-      (spec/playbook.schema-0.5.json's ``corpus.documents.items``; NOT
+      (spec/playbook.schema-0.6.json's ``corpus.documents.items``; NOT
       stripped by ``playbook_assembler._sanitize_corpus_documents_for_schema``,
       which only rewrites ``version_ingest`` entries) gives a downstream
       consumer an explicit, unambiguous way to recognize "quarantined
@@ -2360,7 +2388,7 @@ def _collect_l1(
                 # as ClauseNode.char_span), or None when no block was found
                 # (or its offsets could not be related to the tree). Engine-
                 # internal: corpus_manifest.json carries it; the frozen
-                # OPF 0.5 schema's version_ingest (additionalProperties:
+                # OPF 0.6 schema's version_ingest (additionalProperties:
                 # false) does not, so playbook_assembler's
                 # _VERSION_INGEST_SCHEMA_KEYS strips it from the published
                 # playbook.
@@ -2898,7 +2926,7 @@ def _compute_doc_from_l1(
     # Issue #225: an ambiguous detection is "unknown" — never coerced to a
     # side. (The coercion this replaces flipped e.g. an alias_present
     # our_paper lean to counterparty_paper.) Paper side is deal metadata
-    # only; it gates nothing in OPF 0.5.
+    # only; it gates nothing in OPF 0.6.
     provenance = PROVENANCE_UNKNOWN if prov_result.is_ambiguous else prov_result.provenance
 
     # has_signed_copy: whether order_versions actually anchored a signed
@@ -3145,6 +3173,21 @@ def _compute_doc_from_l1(
     # observation (outcome="unsigned") all deny. Schema allows null.
     corpus_doc["signed_version"] = signed_ordinal if has_signed_copy else None
     corpus_doc["version_order_basis"] = version_order.basis
+    # Issue #247: what the executed copy says about when the deal was signed —
+    # facts recorded once here (a deal with no detected executed copy has
+    # none); `project` derives signed_on / signed_on_basis from them and the
+    # deal_date verdict store.
+    if version_order.signed_id is not None:
+        signed_file = next((vf for vf in version_files if vf.stem == version_order.signed_id), None)
+        document_text, signature_block_text = signing_texts(
+            unstripped_trees[version_order.signed_id]
+        )
+        corpus_doc["deal_date_evidence"] = deal_dates.extract_evidence(
+            document_text=document_text,
+            signature_block_text=signature_block_text,
+            filename=signed_file.name if signed_file is not None else None,
+            file_timestamp=timestamp_by_vid.get(version_order.signed_id),
+        ).to_dict()
     # version_files (issue #185): one entry per MINED version, keyed by the
     # same negotiation ordinal citations use (ordered_ids position, 1-based).
     # Failed-ingest versions have no ordinal and are visible in
@@ -4758,6 +4801,23 @@ def queue_equivalence(
     return len(subjects), unjudged
 
 
+def queue_deal_dates(out_dir: Path, judge: StoreBackedDealDateJudge) -> tuple[int, int]:
+    """Ask *judge* about every date question of *out_dir*; return ``(subjects, unjudged)``.
+
+    Issue #247. A subject is the date passages of an executed copy that no
+    deterministic reader could date; one with no replayable stored verdict is
+    queued on the judge's pending queue (deduplicated by key). ``(0, 0)`` when
+    *out_dir* holds no corpus manifest yet.
+    """
+    try:
+        store = _read_projection_store(out_dir)
+    except PipelineError:
+        return 0, 0
+    subjects = deal_dates.subjects_of(store.corpus_documents)
+    unjudged = sum(1 for subject in subjects if judge.judge(subject) is None)
+    return len(subjects), unjudged
+
+
 def project_playbook(
     out_dir: Path,
     config: EngineConfig,
@@ -4791,7 +4851,7 @@ def project_playbook(
         taxonomy:        Loaded taxonomy object.
         progress:        Callable receiving progress message strings.
 
-    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.5, the one format the
+    Writes ``{out_dir}/playbook.opf.json`` (OPF 0.6, the one format the
     engine emits — issue #238), ``{out_dir}/coherence_flags.json`` (the
     fragment-quarantine warnings) and ``{out_dir}/precedent.jsonl`` — one
     ``evidence.precedent`` record per line, sorted by id, whose sha256 the
@@ -4810,7 +4870,21 @@ def project_playbook(
     # L5: Compile playbook (deterministic given the store)
     # -----------------------------------------------------------------------
     progress("L5: compiling clause types + precedent…")
-    corpus_documents = store.corpus_documents
+    # Issue #247: each deal's signed_on / signed_on_basis, derived from the
+    # evidence mining recorded and the deal_date verdict store (read-only: no
+    # queue, so `project` never writes a pending item; an unjudged question
+    # falls through to the file name and metadata).
+    deal_date_judge: StoreBackedDealDateJudge | None = None
+    deal_date_verdicts = out_dir / "judge" / "verdicts.jsonl"
+    if deal_date_verdicts.is_file():
+        deal_date_judge = StoreBackedDealDateJudge(store=VerdictStore(deal_date_verdicts))
+    corpus_documents = deal_dates.resolve_corpus_documents(store.corpus_documents, deal_date_judge)
+    date_coverage = deal_dates.coverage(corpus_documents)
+    progress(
+        f"  signed_on: {date_coverage.dated}/{date_coverage.signed} signed deal(s) dated "
+        f"({', '.join(f'{b} {n}' for b, n in date_coverage.by_basis.items()) or 'none'}), "
+        f"{date_coverage.null_dates} null"
+    )
     all_observations = store.observations
     t_observations = store.template_observations
     round_moves = store.round_moves

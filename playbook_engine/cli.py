@@ -46,7 +46,7 @@ from playbook_engine.segmentation_qa import SegmentationQAError
 from playbook_engine.taxonomy import Taxonomy, TaxonomyError, load_taxonomy, merge_taxonomy
 from playbook_engine.validator import SUPPORTED_OPF_VERSIONS, load_opf_file, validate_document
 
-# e.g. "0.5" — engine version and OPF version drift independently, so
+# e.g. "0.6" — engine version and OPF version drift independently, so
 # `--version` reports both
 # to keep bug reports unambiguous about which OPF schema a given engine
 # build validates against (issue #176).
@@ -57,7 +57,7 @@ def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
     """Exit 1 when *doc* does not claim a supported opf_version (issue #238).
 
     The engine reads exactly one format. A command that reads a playbook
-    (view bundle) must refuse a retired 0.1-0.4
+    (view bundle) must refuse a retired 0.1-0.5
     document loudly rather than render it as an empty or stale artifact —
     the same silent empty render opf_accessors exists to prevent (#154).
     The message mirrors the validator's "unsupported opf_version" error.
@@ -68,8 +68,8 @@ def _refuse_unsupported_opf_version(doc: Any, source: Path) -> None:
         return
     click.secho(
         f"ERROR: {source}: unsupported opf_version {version!r} (supported: "
-        f"{_OPF_VERSIONS_STR}) — the engine reads and writes only OPF 0.5; the "
-        "0.1-0.4 formats were retired (spec/CHANGELOG.md)",
+        f"{_OPF_VERSIONS_STR}) — the engine reads and writes only OPF 0.6; the "
+        "0.1-0.5 formats were retired (spec/CHANGELOG.md)",
         fg="red",
         err=True,
     )
@@ -688,7 +688,7 @@ def resolve_citation_cmd(
 ) -> None:
     """Resolve one observation's citation to a hash-verified source file (OPF §4).
 
-    Address the citation either by --clause and --obs, or (OPF 0.5) by
+    Address the citation either by --clause and --obs, or (OPF 0.6) by
     --precedent-id. Looks up the cited (document_id, version) in
     corpus.documents[].version_files, finds the file under CORPUS-DIR whose
     sha256 matches, and prints the path plus clause_path/char_span. Exits 1 on
@@ -756,7 +756,7 @@ def _precedent_table(rows: list[dict[str, Any]], *, refused: bool) -> str:
             "id",
             "document_id",
             "signed",
-            "signed_at",
+            "signed_on",
             "standard",
             "moved",
             "refused",
@@ -772,7 +772,7 @@ def _precedent_table(rows: list[dict[str, Any]], *, refused: bool) -> str:
                 str(r.get("id")),
                 str(r.get("document_id")),
                 "yes" if r.get("signed") else "no",
-                str(r.get("signed_at") or "-"),
+                str(r.get("signed_on") or "-"),
                 "yes" if r.get("standard") else "no",
                 "yes" if r.get("moved") else "no",
                 str(len(r.get("refused_asks") or [])),
@@ -830,7 +830,7 @@ def precedent_cmd(
     limit: int | None,
     fmt: str,
 ) -> None:
-    """Query an OPF 0.5 playbook's precedent records.
+    """Query an OPF 0.6 playbook's precedent records.
 
     --clause returns one clause's records, ranked by how many distinct deals
     signed the same text, then by most recent signing, with unsigned deals'
@@ -858,14 +858,14 @@ def precedent_cmd(
         click.secho(f"ERROR: could not parse {playbook_file}: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
 
-    # One format (issues #238, #233): a retired OPF 0.4 playbook has the same
-    # evidence.precedent shape but not the opening evidence, so it is refused
-    # by version rather than read as a 0.5 document with `opened_with` missing.
+    # One format (issues #238, #233): a retired OPF 0.5 playbook has the same
+    # evidence.precedent shape but not the signing date, so it is refused
+    # by version rather than read as a 0.6 document with `signed_on` missing.
     _refuse_unsupported_opf_version(doc, playbook_file)
     if not is_precedent_shape(doc):
         click.secho(
             f"ERROR: {playbook_file.name} carries no evidence.precedent (OPF "
-            f"{doc.get('opf_version')!s}); precedent queries need an OPF 0.5 playbook",
+            f"{doc.get('opf_version')!s}); precedent queries need an OPF 0.6 playbook",
             fg="red",
             err=True,
         )
@@ -1338,7 +1338,7 @@ def project_cmd(out_dir: Path, config_path: Path) -> None:
 
     Reads ``observations.jsonl`` and ``corpus_manifest.json`` from OUT_DIR
     (written by ``playbook mine``) and compiles them into a schema-valid
-    OPF 0.5 ``playbook.opf.json`` (the one format the engine emits) plus its
+    OPF 0.6 ``playbook.opf.json`` (the one format the engine emits) plus its
     ``precedent.jsonl`` sidecar, using purely deterministic logic — zero
     ingest work, zero LLM calls.
 
@@ -1799,6 +1799,24 @@ def _queue_equivalence_round(mined_dir: Path, cfg: Any, taxonomy: Any, judge: An
     )
 
 
+def _queue_deal_date_round(mined_dir: Path, judge: Any) -> None:
+    """Queue the ``deal_date`` questions of the store just mined into *mined_dir* (issue #247).
+
+    A question is the date passages of an executed copy no deterministic reader
+    could date. Runs after mining because the evidence is recorded in the corpus
+    manifest, not asked inside ``mine_corpus``; reports nothing when there is
+    nothing to ask.
+    """
+    from playbook_engine.pipeline import queue_deal_dates  # noqa: PLC0415
+
+    subjects, unjudged = queue_deal_dates(mined_dir, judge)
+    if subjects:
+        click.echo(
+            f"  deal_date: {subjects} executed copy passage set(s) with no deterministic "
+            f"signing date, {unjudged} unjudged"
+        )
+
+
 def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api: bool) -> None:
     """``playbook judge --check equivalence OUT``: emit (and with --api, answer) the check queues."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
@@ -2001,8 +2019,11 @@ def judge_cmd(
     once a canonical template is configured an ``equivalence``
     item for every distinct non-standard text of the precedent record — a
     deal's signed text, a non-standard opening, a refused ask — that has no
-    verdict against our standard yet. Every deviation is the deterministic
-    standard check, so nothing is judged for it.
+    verdict against our standard yet. A ``deal_date`` item is queued for every
+    executed copy whose signing date no deterministic reader (document text,
+    signature block) could establish but whose text has date passages for the
+    agent to read. Every deviation is the deterministic standard
+    check, so nothing is judged for it.
 
     ``--check equivalence OUT`` skips mining and queues the independent blind
     check (and adjudication) of the verdicts already drafted into OUT; see the
@@ -2031,6 +2052,7 @@ def judge_cmd(
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
         StoreBackedClassificationJudge,
+        StoreBackedDealDateJudge,
         StoreBackedEquivalenceJudge,
         StoreBackedProvenanceJudge,
         StoreBackedScopeJudge,
@@ -2183,6 +2205,12 @@ def judge_cmd(
                         store=store, pending=plan_pending, rubric=rubric_policy
                     ),
                 )
+                _queue_deal_date_round(
+                    Path(_tmp) / "mine_out",
+                    StoreBackedDealDateJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
+                )
             except PipelineError as exc:
                 click.secho(f"ERROR: {exc}", fg="red", err=True)
                 raise SystemExit(1) from exc
@@ -2278,6 +2306,10 @@ def judge_cmd(
             cfg,
             taxonomy,
             StoreBackedEquivalenceJudge(store=store, pending=pending_queue, rubric=rubric_policy),
+        )
+        _queue_deal_date_round(
+            out_dir,
+            StoreBackedDealDateJudge(store=store, pending=pending_queue, rubric=rubric_policy),
         )
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
@@ -2511,6 +2543,8 @@ def judge_apply_cmd(
     pending_rubrics: dict[str, str] = {}
     # Equivalence items: the part ids of our standard the answer must cover.
     pending_part_ids: dict[str, list[str]] = {}
+    # deal_date items: the passages the answer's quote must occur in (issue #247).
+    pending_payloads: dict[str, dict[str, Any]] = {}
     pending_path = out_dir_resolved / "judge" / "pending.jsonl"
     if pending_path.is_file():
         for pline in pending_path.read_text(encoding="utf-8").splitlines():
@@ -2532,6 +2566,8 @@ def judge_apply_cmd(
                     pending_part_ids[pitem["key"]] = [
                         str(p.get("part_id")) for p in std_parts if isinstance(p, dict)
                     ]
+                if pitem["kind"] == "deal_date" and isinstance(payload, dict):
+                    pending_payloads[pitem["key"]] = payload
 
     # Validate all lines first before touching the store.
     raw_lines = verdicts_path.read_text(encoding="utf-8").splitlines()
@@ -2591,6 +2627,11 @@ def judge_apply_cmd(
                 record["verdict"] = validate_draft_verdict(
                     record["verdict"], pending_part_ids.get(record["key"])
                 )
+            elif kind == "deal_date":
+                # Issue #247: the quote must occur in the passages the item showed.
+                from playbook_engine import deal_dates  # noqa: PLC0415
+
+                deal_dates.validate_verdict(record["verdict"], pending_payloads.get(record["key"]))
         except (ValueError, TypeError) as exc:
             # TypeError is a defensive backstop: validate_verdict type-checks
             # confidence fields up front (issue #161) so a malformed verdict

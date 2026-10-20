@@ -13,7 +13,7 @@ pipeline writes today:
   classification basis, a paper side, an OPF version). Production never
   writes these; the test exists to prove a corrupted or hand-edited out-dir
   still cannot leak them through the scorecard.
-- the *OPF 0.5* case adds ``opened_with`` to precedent records (issue #233)
+- the *OPF 0.6* case adds ``opened_with`` to precedent records (issue #233)
   and a ``dossiers`` map (issue #228) to a copy of the real NDA playbook.
   Nothing in the engine emits either yet; the case pins that the scorecard
   counts them once they exist, and reports ``null`` until then. It follows
@@ -43,7 +43,7 @@ from playbook_engine.agent_segmenter import (
 )
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.cli import cli
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.pipeline import _observation_classification_basis
@@ -155,6 +155,10 @@ _FIELD_NAMES = frozenset(
         "adjudicated",
         "disputed",
         "unchecked",
+        # Issue #247: signed deals dated, by basis.
+        "signed_on",
+        "dated",
+        "null_dates",
     }
 )
 
@@ -165,6 +169,7 @@ _TOP_LEVEL = {
     "template",
     "classification",
     "precedent",
+    "signed_on",
     "template_drift",
     "opening_drift",
     "dropped_observations",
@@ -296,6 +301,13 @@ _NDA_FLAT_KEYS = frozenset(
         "queues.judge_pending_by_kind",
         "queues.segment_pending",
         "scorecard_version",
+        # Issue #247: the NDA example's executed copies carry dates in their
+        # signature blocks (one ambiguous, one absent: null).
+        "signed_on.by_basis.signature_block",
+        "signed_on.dated",
+        "signed_on.in_scope",
+        "signed_on.null_dates",
+        "signed_on.signed",
         "template.clauses",
         "template.clauses_with_our_standard",
         "template.has_canonical_template",
@@ -389,8 +401,8 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 7
-    assert card["opf_version"] == "0.5"
+    assert card["scorecard_version"] == 8
+    assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,
         "versions": 17,
@@ -427,7 +439,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
         card["dropped_observations"]["count"]
         == (playbook["corpus"]["stats"]["dropped_observations"]["count"])
     )
-    assert card["digest"]["digest_version"] == "4"
+    assert card["digest"]["digest_version"] == "5"
     assert card["digest"]["token_estimate"] > 0
     assert card["digest"]["clauses"] == len(playbook["digest"]["clauses"])
     digest_clauses = playbook["digest"]["clauses"]
@@ -474,7 +486,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     assert per_deal["n"] == cls["deals"]
     assert per_deal["min"] <= per_deal["median"] <= per_deal["max"]
 
-    # OPF 0.5 carries opened_with (#233) and the critic dossiers (#228).
+    # OPF 0.6 carries opened_with (#233) and the critic dossiers (#228).
     assert sum(precedent["records_by_opened_with"].values()) == precedent["records"]
     assert sum(precedent["openings_by_opened_with"].values()) == precedent["openings"] > 0
     assert set(precedent["openings_by_opened_with"]) <= {"standard", "non_standard"}
@@ -643,7 +655,7 @@ def test_corpus_stats_fallback_without_a_manifest_passes_only_counts(
     out = tmp_path / "out"
     out.mkdir()
     playbook = {
-        "opf_version": "0.5",
+        "opf_version": "0.6",
         "corpus": {
             "stats": {
                 "documents_total": documents_total,
@@ -802,7 +814,7 @@ def test_digest_capped_clauses_count_lists_shorter_than_their_totals(
     # The real digest builder under a budget it cannot meet tightens every
     # list to its floor of one entry, so clauses with more groups than that
     # show fewer than their uncapped *_total.
-    doc["digest"] = build_digest_v4(doc, token_budget=1)
+    doc["digest"] = build_digest_v5(doc, token_budget=1)
     path.write_text(json.dumps(doc), encoding="utf-8")
     clauses = doc["digest"]["clauses"]
     capped = [

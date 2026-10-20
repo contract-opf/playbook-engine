@@ -1,5 +1,5 @@
 {
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "agreement_type": {
     "id": "nda",
     "name": "Mutual Non-Disclosure Agreement",
@@ -1105,6 +1105,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -1133,6 +1134,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -1161,6 +1163,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -1189,6 +1192,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -1217,6 +1221,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -1245,6 +1250,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -1299,6 +1305,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -1327,6 +1334,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 2,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -1384,6 +1392,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -1412,6 +1421,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -1466,6 +1476,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -1494,6 +1505,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -1522,6 +1534,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -1550,6 +1563,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -1578,6 +1592,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -1606,6 +1621,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -1634,6 +1650,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -1675,6 +1692,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -1703,6 +1721,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -1731,6 +1750,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -1759,6 +1779,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -1787,6 +1808,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
@@ -1841,6 +1863,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 2,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -1869,6 +1892,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -1897,6 +1921,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -1925,6 +1950,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -1953,6 +1979,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -1981,6 +2008,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -2009,6 +2037,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -2037,6 +2066,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 1,
         "signed_text": {
           "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -2091,6 +2121,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -2119,6 +2150,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -2147,6 +2179,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -2175,6 +2208,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -2229,6 +2263,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -2257,6 +2292,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -2285,6 +2321,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -2313,6 +2350,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -2341,6 +2379,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -2369,6 +2408,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -2397,6 +2437,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -2438,6 +2479,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -2466,6 +2508,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -2494,6 +2537,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -2522,6 +2566,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -2550,6 +2595,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -2578,6 +2624,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -2606,6 +2653,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -2634,6 +2682,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -2662,6 +2711,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 1,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -2716,6 +2766,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -2744,6 +2795,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -2772,6 +2824,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -2800,6 +2853,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -2828,6 +2882,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -2856,6 +2911,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -2884,6 +2940,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -2912,6 +2969,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
@@ -2940,6 +2998,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -2968,6 +3027,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 2,
         "signed_text": {
           "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -3008,6 +3068,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -3036,6 +3097,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -3064,6 +3126,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -3092,6 +3155,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -3120,6 +3184,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -3148,6 +3213,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -3189,6 +3255,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -3217,6 +3284,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -3245,6 +3313,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -3273,6 +3342,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -3301,6 +3371,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -3329,6 +3400,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -3357,6 +3429,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -3385,6 +3458,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -3413,6 +3487,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -3441,6 +3516,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 1,
         "signed_text": {
           "text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -3495,6 +3571,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -3523,6 +3600,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -3551,6 +3629,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -3579,6 +3658,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -3607,6 +3687,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -3635,6 +3716,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -3663,6 +3745,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
@@ -3691,6 +3774,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -3719,6 +3803,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -3747,6 +3832,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -3775,6 +3861,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -3803,6 +3890,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 1,
         "signed_text": {
           "text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -3862,6 +3950,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -3890,6 +3979,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -3931,6 +4021,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -3959,6 +4050,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -3987,6 +4079,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -4015,6 +4108,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -4043,6 +4137,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -4071,6 +4166,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 2,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -4099,6 +4195,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -4127,6 +4224,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
@@ -4169,6 +4267,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
@@ -4210,6 +4309,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
@@ -4251,6 +4351,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
@@ -4293,6 +4394,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
@@ -4335,6 +4437,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
@@ -4403,6 +4506,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of California.",
@@ -4445,6 +4549,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
@@ -4487,6 +4592,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": null,
         "opened_with": "non_standard",
@@ -4515,6 +4621,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
@@ -4556,6 +4663,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
@@ -4598,6 +4706,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "If any provision is held invalid, the remaining provisions remain in effect.",
@@ -4640,6 +4749,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
@@ -4682,6 +4792,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
@@ -4750,6 +4861,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
@@ -4792,6 +4904,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
@@ -4834,6 +4947,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
@@ -4875,6 +4989,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
@@ -4916,6 +5031,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
@@ -4958,6 +5074,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
@@ -5000,6 +5117,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
@@ -5068,6 +5186,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of California.",
@@ -5110,6 +5229,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
@@ -5152,6 +5272,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -5192,6 +5313,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
@@ -5233,6 +5355,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
@@ -5275,6 +5398,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 2,
         "signed_text": null,
         "opened_with": "absent",
@@ -5306,6 +5430,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "If any provision is held invalid, the remaining provisions remain in effect.",
@@ -5348,6 +5473,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
@@ -5390,6 +5516,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
@@ -5432,6 +5559,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
@@ -5473,7 +5601,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-10T18:44:15+00:00",
+      "generated_at": "2026-10-18T17:44:25+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5506,7 +5634,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab"
+      "grounded_in": "evidence@sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7"
     }
   },
   "floor": {
@@ -5526,7 +5654,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-10T18:44:16+00:00",
+        "x_signed_at": "2026-10-18T17:44:25+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -5588,10 +5716,12 @@
           },
           {
             "version": 4,
-            "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c",
+            "sha256": "sha256:d2ea9f375f10e6f2f951ef00153183a19acee7c8495da415d3dca0f5dcf07dc1",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-03-16",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5627,10 +5757,12 @@
           },
           {
             "version": 2,
-            "sha256": "sha256:78b60f1c67bfa02587eba740f15251d67e47b051ee64624781a34804f98a505b",
+            "sha256": "sha256:664a24ae369b91a9fb7abdf7f17296764ca7325eb92fa1ce2390a517348ee24e",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-06-02",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5677,10 +5809,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7",
+            "sha256": "sha256:9229e31579922b07a6e3bbfdbdcdef1c75dfdf5719fae8dab6d12e8833f61564",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-09-12",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5727,10 +5861,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef",
+            "sha256": "sha256:c670dbcc4058e7dd7ae773d9cf9ffebb54f1e3441dcfbc4892474d81de451d8c",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-11-30",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5770,6 +5906,8 @@
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": null,
+        "signed_on_basis": null,
         "x_mixed_extractors": false
       },
       {
@@ -5816,10 +5954,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d",
+            "sha256": "sha256:a4a91d6c3b0e1d48fb53eb2506feb2ff5218aaec91df127eae0462191ccaf675",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": null,
+        "signed_on_basis": null,
         "x_mixed_extractors": false
       }
     ],
@@ -5899,23 +6039,23 @@
       }
     },
     "snapshot": {
-      "manifest_hash": "sha256:c284938b666b9e9ce227a50be6e0fc261b2bdb45ee9505c190b3d78907a4c183"
+      "manifest_hash": "sha256:44b0f13a0ce91dc7fc939deffc4ec0898b50c29132e693196f0ead4f5cb31e6b"
     }
   },
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-10T18:44:13+00:00",
+    "generated_at": "2026-10-18T17:44:24+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:e91aa1a5429fc683b04e6d6c193b847c83679b8faf9a8045f73971f740755769",
+      "sha256": "sha256:0c687b63a227a61351b13a33f0dd1e4f1a22dd4d6a974f8478a16c897f8691a3",
       "records": 128
     }
   },
   "digest": {
-    "digest_version": "4",
+    "digest_version": "5",
     "perspective": {
       "party": "AlphaCorp Holdings, Inc.",
       "counterparty_type": "Prospective Commercial Counterparty"
@@ -5927,8 +6067,8 @@
     "corpus": {
       "n_deals": 6,
       "n_signed": 6,
-      "first_signed": null,
-      "last_signed": null
+      "first_signed": "2022-03",
+      "last_signed": "2022-11"
     },
     "part_map_legend": {
       "part_map": {
@@ -5972,6 +6112,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -5988,6 +6130,7 @@
           {
             "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6040,6 +6183,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 3,
         "n_kept_standard": 3,
@@ -6059,6 +6204,7 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 0,
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -6133,6 +6279,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
@@ -6149,7 +6297,8 @@
           {
             "text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-11",
+            "last_signed": "2022-11",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "less_protective",
@@ -6200,6 +6349,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6219,6 +6370,7 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -6268,6 +6420,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6309,6 +6463,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
@@ -6323,8 +6479,36 @@
         },
         "signed_variants": [
           {
+            "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+            "n_deals": 2,
+            "first_signed": "2022-03",
+            "last_signed": "2022-06",
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "ref": {
+              "document_id": "delta-ventures",
+              "version": 2,
+              "clause_path": "22",
+              "char_span": [
+                5738,
+                5957
+              ]
+            },
+            "precedent_ids": [
+              "prec.6afc0a36d68064d1",
+              "prec.a9a443dd9fbd9de3"
+            ]
+          },
+          {
             "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6346,32 +6530,6 @@
             "precedent_ids": [
               "prec.48aa9562d17197c1",
               "prec.f376c7ceca80794f"
-            ]
-          },
-          {
-            "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n_deals": 2,
-            "last_signed": null,
-            "n_from_standard": 2,
-            "n_unchanged": 0,
-            "label": "less_protective",
-            "part_map": [
-              "-"
-            ],
-            "additions": [],
-            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
-            "ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "22",
-              "char_span": [
-                5862,
-                6081
-              ]
-            },
-            "precedent_ids": [
-              "prec.6afc0a36d68064d1",
-              "prec.a9a443dd9fbd9de3"
             ]
           }
         ],
@@ -6403,6 +6561,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6419,6 +6579,7 @@
           {
             "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6471,6 +6632,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6487,6 +6650,7 @@
           {
             "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 0,
@@ -6515,6 +6679,8 @@
           {
             "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
             "n_deals": 1,
+            "first_signed": "2022-03",
+            "last_signed": "2022-03",
             "label": "less_protective",
             "part_map": [
               "-"
@@ -6588,6 +6754,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6629,6 +6797,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
@@ -6643,8 +6813,36 @@
         },
         "signed_variants": [
           {
+            "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
+            "n_deals": 2,
+            "first_signed": "2022-03",
+            "last_signed": "2022-06",
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Substitutes New York law for our chosen Delaware law.",
+            "ref": {
+              "document_id": "delta-ventures",
+              "version": 2,
+              "clause_path": "21",
+              "char_span": [
+                5604,
+                5737
+              ]
+            },
+            "precedent_ids": [
+              "prec.7377a6430df64a98",
+              "prec.c4140ebf91bb980b"
+            ]
+          },
+          {
             "text": "This Agreement is governed by the laws of the State of California.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6666,32 +6864,6 @@
             "precedent_ids": [
               "prec.95daf3a231f7a092",
               "prec.f4efbee84462b782"
-            ]
-          },
-          {
-            "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-            "n_deals": 2,
-            "last_signed": null,
-            "n_from_standard": 2,
-            "n_unchanged": 0,
-            "label": "less_protective",
-            "part_map": [
-              "-"
-            ],
-            "additions": [],
-            "reason": "Substitutes New York law for our chosen Delaware law.",
-            "ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "21",
-              "char_span": [
-                5728,
-                5861
-              ]
-            },
-            "precedent_ids": [
-              "prec.7377a6430df64a98",
-              "prec.c4140ebf91bb980b"
             ]
           }
         ],
@@ -6723,6 +6895,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6739,6 +6913,7 @@
           {
             "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6775,6 +6950,8 @@
         "title": "Limitation of Liability",
         "our_standard": null,
         "n_deals": 3,
+        "first_signed": "2022-09",
+        "last_signed": "2022-09",
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
@@ -6791,7 +6968,8 @@
           {
             "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "n_deals": 2,
-            "last_signed": null,
+            "first_signed": "2022-09",
+            "last_signed": "2022-09",
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": null,
@@ -6866,6 +7044,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6907,6 +7087,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6948,6 +7130,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -6967,6 +7151,7 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -7016,6 +7201,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
@@ -7032,7 +7219,8 @@
           {
             "text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-11",
+            "last_signed": "2022-11",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "mixed",
@@ -7085,6 +7273,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7101,6 +7291,7 @@
           {
             "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7153,6 +7344,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
@@ -7172,29 +7365,30 @@
             "n_texts": 4,
             "n_from_standard": 0,
             "n_unchanged": 4,
-            "last_signed": null,
+            "first_signed": "2022-03",
+            "last_signed": "2022-11",
             "exemplars": [
               {
-                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\").",
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\").",
                 "ref": {
-                  "document_id": "beta-industries",
-                  "version": 4,
+                  "document_id": "gamma-holdings",
+                  "version": 3,
                   "clause_path": "1",
                   "char_span": [
                     59,
-                    425
+                    426
                   ]
                 }
               },
               {
-                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\").",
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\").",
                 "ref": {
-                  "document_id": "delta-ventures",
-                  "version": 2,
+                  "document_id": "epsilon-systems",
+                  "version": 3,
                   "clause_path": "1",
                   "char_span": [
                     59,
-                    423
+                    429
                   ]
                 }
               }
@@ -7235,6 +7429,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7276,6 +7472,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7301,6 +7499,8 @@
         "title": "Residuals",
         "our_standard": null,
         "n_deals": 1,
+        "first_signed": null,
+        "last_signed": null,
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
@@ -7318,6 +7518,8 @@
           {
             "text": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
             "n_deals": 1,
+            "first_signed": null,
+            "last_signed": null,
             "label": null,
             "part_map": null,
             "additions": null,
@@ -7363,6 +7565,8 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7404,6 +7608,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7420,6 +7626,7 @@
           {
             "text": "If any provision is held invalid, the remaining provisions remain in effect.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7472,6 +7679,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
@@ -7488,6 +7697,7 @@
           {
             "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7514,7 +7724,8 @@
           {
             "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-03",
+            "last_signed": "2022-03",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "more_protective",
@@ -7565,6 +7776,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7581,6 +7794,7 @@
           {
             "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
             "n_deals": 1,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 0,
@@ -7606,6 +7820,7 @@
           {
             "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
             "n_deals": 1,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 1,
@@ -7682,6 +7897,8 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
@@ -7698,6 +7915,7 @@
           {
             "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7989,7 +8207,7 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.6afc0a36d68064d1",
+          "precedent_id": "prec.a9a443dd9fbd9de3",
           "kind": "signed_variant",
           "opening": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
           "signed": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -8174,7 +8392,7 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.7377a6430df64a98",
+          "precedent_id": "prec.c4140ebf91bb980b",
           "kind": "signed_variant",
           "opening": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
           "signed": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -8277,7 +8495,7 @@
       ],
       "excerpts": [
         {
-          "precedent_id": "prec.20c4e3248b6371c9",
+          "precedent_id": "prec.6e17fb71a752c28a",
           "kind": "changed_opening",
           "opening": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
           "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -8463,10 +8681,10 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.1073f6d32012245b",
+          "precedent_id": "prec.22bd3a0c133a8b5b",
           "kind": "signed_variant",
           "opening": null,
-          "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
+          "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
           "outcome": "signed",
           "vs_standard": {
             "label": "equivalent",
@@ -8771,11 +8989,11 @@
       "name": "playbook-engine",
       "version": "1.0.1"
     },
-    "corpus_manifest_hash": "sha256:c284938b666b9e9ce227a50be6e0fc261b2bdb45ee9505c190b3d78907a4c183",
+    "corpus_manifest_hash": "sha256:44b0f13a0ce91dc7fc939deffc4ec0898b50c29132e693196f0ead4f5cb31e6b",
     "documents": [
       {
         "document_id": "beta-industries",
-        "signed_at": null,
+        "signed_on": "2022-03-16",
         "version_files": [
           {
             "version": 1,
@@ -8791,13 +9009,27 @@
           },
           {
             "version": 4,
-            "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c"
+            "sha256": "sha256:d2ea9f375f10e6f2f951ef00153183a19acee7c8495da415d3dca0f5dcf07dc1"
+          }
+        ]
+      },
+      {
+        "document_id": "delta-ventures",
+        "signed_on": "2022-06-02",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:c30a35fa32d93ce2916ef18b1d6d357eae7f40fc917baaca82157f2b4416c183"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:664a24ae369b91a9fb7abdf7f17296764ca7325eb92fa1ce2390a517348ee24e"
           }
         ]
       },
       {
         "document_id": "epsilon-systems",
-        "signed_at": null,
+        "signed_on": "2022-09-12",
         "version_files": [
           {
             "version": 1,
@@ -8809,13 +9041,13 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7"
+            "sha256": "sha256:9229e31579922b07a6e3bbfdbdcdef1c75dfdf5719fae8dab6d12e8833f61564"
           }
         ]
       },
       {
         "document_id": "gamma-holdings",
-        "signed_at": null,
+        "signed_on": "2022-11-30",
         "version_files": [
           {
             "version": 1,
@@ -8827,13 +9059,13 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef"
+            "sha256": "sha256:c670dbcc4058e7dd7ae773d9cf9ffebb54f1e3441dcfbc4892474d81de451d8c"
           }
         ]
       },
       {
         "document_id": "theta-logistics",
-        "signed_at": null,
+        "signed_on": null,
         "version_files": [
           {
             "version": 1,
@@ -8847,7 +9079,7 @@
       },
       {
         "document_id": "zeta-diagnostics",
-        "signed_at": null,
+        "signed_on": null,
         "version_files": [
           {
             "version": 1,
@@ -8859,7 +9091,7 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d"
+            "sha256": "sha256:a4a91d6c3b0e1d48fb53eb2506feb2ff5218aaec91df127eae0462191ccaf675"
           }
         ]
       }
@@ -8906,8 +9138,8 @@
       "clause.definition_confidential_info": [],
       "clause.dispute_resolution_venue": [
         {
-          "precedent_id": "prec.6afc0a36d68064d1",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.a9a443dd9fbd9de3",
+          "document_id": "delta-ventures",
           "kind": "signed_variant",
           "omitted": false
         },
@@ -8943,8 +9175,8 @@
       "clause.export_control": [],
       "clause.governing_law": [
         {
-          "precedent_id": "prec.7377a6430df64a98",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.c4140ebf91bb980b",
+          "document_id": "delta-ventures",
           "kind": "signed_variant",
           "omitted": false
         },
@@ -8965,8 +9197,8 @@
       ],
       "clause.limitation_of_liability": [
         {
-          "precedent_id": "prec.20c4e3248b6371c9",
-          "document_id": "zeta-diagnostics",
+          "precedent_id": "prec.6e17fb71a752c28a",
+          "document_id": "epsilon-systems",
           "kind": "changed_opening",
           "omitted": false
         }
@@ -8999,8 +9231,8 @@
       ],
       "clause.parties_and_recitals": [
         {
-          "precedent_id": "prec.1073f6d32012245b",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.22bd3a0c133a8b5b",
+          "document_id": "gamma-holdings",
           "kind": "signed_variant",
           "omitted": false
         }
@@ -9063,11 +9295,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:fa5afcee13d94f52815d2f883f1f27d4de76002ca6089e404999cc6069e7ce6e",
+    "content_hash": "sha256:7718da1f4007e106291e4c2fe1cc8ab7a92b0af326f016288a5be779ccd1950a",
     "section_digests": {
-      "evidence": "sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab",
-      "posture": "sha256:a41f9c21ab78b03977101836a82eee2c6e224d75ef3627d10072b717276a5698",
-      "floor": "sha256:1e068514c00a1c56cf9e7b97ed09b8f78ffe254449f5713c553fe36c361d2f51"
+      "evidence": "sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7",
+      "posture": "sha256:68d521c23ad9a1723494d9d594e6bafdc19dbc66bee6c0171ec62525267017cb",
+      "floor": "sha256:e82aafd549a0f0809a738e025f84f4c986265cd7420565826dca174c0fdc81cf"
     }
   }
 }

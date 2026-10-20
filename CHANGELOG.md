@@ -10,6 +10,43 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **OPF 0.6 / digest 5: when each deal was signed, recorded as a fact (issue
+  #247, epic #245).** The toaster can weigh recency, and the engine can tell
+  which of our forms was current, only if every deal carries the date it was
+  signed. `corpus.documents[].signed_on` is an ISO date (`YYYY-MM-DD`) or
+  `YYYY-MM` when only the month is known, or `null`; `signed_on_basis` says
+  where it was read, tried in this order of trust: `document_text` (the date
+  the document states for itself: "dated as of", "made and entered into on",
+  "Effective Date", "this 3rd day of March, 2021"), `signature_block`
+  (the latest date when signatories dated their signatures apart),
+  `filename`, `file_metadata` (DOCX core properties, PDF info dictionary).
+  A source that finds two different dates, a numeric date that reads two ways
+  (`03/04/2021`), an impossible date or a year outside 1980-2099 says nothing;
+  a date is never invented, and only a deal with a detected executed copy has
+  one. When the text says nothing the new store-backed judge kind `deal_date`
+  (`playbook judge`, `judge-apply`) is asked, with only the passages that hold
+  a date (no signatory names), and must answer with the source and the words it
+  read, which `judge-apply` checks against the passages it was shown; a pending
+  question never blocks, the date just falls through to the file name and the
+  metadata. Mining records the evidence once per deal (`deal_date_evidence` in
+  the corpus manifest, stage cache v20); `project` derives the date from it and
+  the verdict store. Every precedent record carries the document's `signed_on`
+  (required; it replaces the optional `signed_at`, and the `YYYY-Qn` quarter
+  form is gone), and `find_precedent()` ranks by it. Digest 5 adds
+  `first_signed` / `last_signed` months (`YYYY-MM`) to every signed-variant
+  group, the collapsed equivalent entry, every refused-ask group and every
+  clause; the corpus span is to the month too. New validator MUSTs: well-formed
+  real date, a basis exactly when there is a date, no date without an executed
+  copy, a precedent's date equal to its document's. `playbook scorecard` (v8)
+  reports signed deals dated by basis and the null count. **One format,
+  converted in place:** `spec/playbook.schema-0.6.json` replaces 0.5 and
+  `spec/conformance/0.6/` (new vector 010) replaces `0.5/`; the emitter,
+  validator, `playbook precedent` and `find_precedent()` support 0.6 only and
+  a 0.5 playbook is rejected as an unsupported version. A store mined before
+  this change carries no date evidence: re-mine it. The synthetic NDA example's
+  executed copies now carry signature-block dates (one ambiguous and one
+  absent, so null) and its playbook is regenerated.
+
 - **Setup asks for every older version of our form (issue #246, epic #245).**
   `baseline.prior_templates` is a new optional config list of
   `{path, label, in_use_from?, in_use_until?}` (dates are ISO, `YYYY-MM` or a
@@ -262,12 +299,12 @@ changes` heading in the release it ships under.
 
 ### Normative rule changes
 
-- Digest 4 (issue #234): a present `digest` MUST equal `build_digest_v4`
-  over the document (the digest-3 construction no longer validates), and each
-  `evidence.clauses[]` entry's `n_opened_standard`, `n_kept_standard` and
-  `n_changed_openings` MUST equal what `evidence.precedent` implies.
+- Digest 5 (issues #247, #234): a present `digest` MUST equal `build_digest_v5`
+  over the document (the digest-3 and digest-4 constructions no longer
+  validate), and each `evidence.clauses[]` entry's `n_opened_standard`,
+  `n_kept_standard` and `n_changed_openings` MUST equal what `evidence.precedent` implies.
 
-- OPF 0.5 (`spec/playbook.schema-0.5.json`, still unfrozen): a non-null
+- OPF 0.6 (`spec/playbook.schema-0.6.json`, still unfrozen): a non-null
   `vs_standard` MUST NOT sit on a signed text whose `standard` is true or on
   a text of a clause with a null `our_standard`; `vs_standard.check.adjudicated`
   true implies `check.agreed` false; and, when the run's verdict store is
@@ -822,29 +859,39 @@ adding warnings after the fact.
 
 ### Normative rule changes
 
-A conformant validator MUST reject every `opf_version` other than "0.5"
-(issues #238, #233): 0.1, 0.2, 0.3 and 0.4 documents are no longer accepted.
+A conformant validator MUST reject every `opf_version` other than "0.6"
+(issues #247, #238, #233): 0.1, 0.2, 0.3, 0.4 and 0.5 documents are no longer
+accepted.
 
-For `opf_version` "0.5" a conformant validator MUST also reject a document
+For `opf_version` "0.6" a conformant validator MUST also reject a document
 that carries a top-level `curation` section or an
-`identity.section_digests.curation` entry (issue #233): OPF 0.5 has neither.
+`identity.section_digests.curation` entry (issue #233): OPF 0.6 has neither.
 
-For `opf_version` "0.5" a conformant validator MUST also reject (issue #233,
+For `opf_version` "0.6" a conformant validator MUST also reject (issue #233,
 OPF-SPEC §3.5.5): a precedent with `signed` false whose `opened_with` or
 `opening_text` is not null; a precedent whose `opened_with` is `"absent"` or
 null but whose `opening_text` is set; and a precedent whose `opening_text`
 has the same section 3.5.4 grouping key as its `signed_text`, or whose
 `moved` is not true.
 
-For `opf_version` "0.5" a conformant validator MUST reject: a precedent id
+For `opf_version` "0.6" a conformant validator MUST reject: a precedent id
 that is duplicated or differs from its recomputation; more than one
 precedent per (document_id, taxonomy_id); a precedent whose taxonomy_id
 names no clause or whose document_id is not in `corpus.documents`; a
 precedent whose `signed` disagrees with its document's `signed_version`;
 `standard: true` with no `signed_text`; clause `n_*` counts that differ
-from what `precedent` implies; a `signed_at` that is not a date or
-quarter; and a digest that differs from `build_digest(document)`
-(OPF-SPEC §3.5.4, §3.12.1).
+from what `precedent` implies; and a digest that differs from
+`build_digest(document)` (OPF-SPEC §3.5.4, §3.12.1).
+
+For `opf_version` "0.6" a conformant validator MUST also reject (issue #247,
+OPF-SPEC §3.8): an in-scope `corpus.documents[]` entry that lacks either
+`signed_on` or `signed_on_basis`; a `signed_on` that is not a real `YYYY-MM-DD` or `YYYY-MM`
+date in 1980-2099; a `signed_on_basis` that is present when `signed_on` is null,
+or absent (or not one of `document_text`, `signature_block`, `filename`,
+`file_metadata`) when `signed_on` is set; a `signed_on` on a document whose
+`signed_version` is null (a deal with no detected executed copy has no date);
+and a precedent whose `signed_on` differs from its document's `signed_on`
+(the optional `signed_at` and its `YYYY-Qn` quarter form no longer exist).
 
 ## [1.0.1] - 2026-08-22
 

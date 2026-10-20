@@ -33,7 +33,7 @@ import pytest
 
 from playbook_engine.agent_judge import StoreBackedEquivalenceJudge, VerdictStore
 from playbook_engine.clause_position_compiler import compile_clause_positions
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.dossiers import build_derived_sections, excerpt_vs_standard
 from playbook_engine.equivalence import (
     PART_MAP_LEGEND,
@@ -271,6 +271,8 @@ def _doc(doc_id: str, provenance: str) -> dict[str, Any]:
         "in_scope": True,
         "versions": 2,
         "signed_version": 2,
+        "signed_on": None,
+        "signed_on_basis": None,
         "version_order_basis": "edit_distance_chain",
     }
 
@@ -418,7 +420,7 @@ def test_digest_carries_the_compact_part_map_and_lists_mixed_and_less_first(
     tmp_path: Path,
 ) -> None:
     playbook, _ = _judged(tmp_path)
-    digest = build_digest_v4(playbook)
+    digest = build_digest_v5(playbook)
     assert digest["part_map_legend"] == PART_MAP_LEGEND
     (clause,) = digest["clauses"]
     assert clause["our_standard"]["parts"] == [
@@ -645,7 +647,7 @@ def test_a_part_edit_that_changes_the_label_drops_the_models_reason(tmp_path: Pa
     assert (vs["label"], part_map(vs), vs["basis"]) == ("less_protective", ["=", "-"], "owner")
     assert vs["reason"] == "Set by the owner."
 
-    digest = build_digest_v4(edited)
+    digest = build_digest_v5(edited)
     assert edited["digest"] == digest
     (variant,) = [v for v in digest["clauses"][0]["signed_variants"] if v["part_map"] == ["=", "-"]]
     assert variant["label"] == "less_protective" and "label_by" not in variant
@@ -676,7 +678,7 @@ def test_a_part_edit_carries_the_owners_reason_to_the_model(tmp_path: Path) -> N
     playbook, key = _judged_equivalent(tmp_path)
     why = "The shorter duty leaves our information exposed."
     edited, _ = fold_overrides(playbook, _set_part_two(key, L, why), tmp_path)
-    digest = build_digest_v4(edited)
+    digest = build_digest_v5(edited)
     (variant,) = [v for v in digest["clauses"][0]["signed_variants"] if v["part_map"] == ["=", "-"]]
     assert variant["reason"] == why
     excerpt = excerpt_vs_standard(_deal_b(edited))
@@ -772,7 +774,7 @@ def test_an_owner_label_reaches_the_digest_dossier_and_review_rows_with_its_reas
     edited, _ = fold_overrides(playbook, entries, tmp_path)
     model_reason = "A longer duty but disclosure to advisers is allowed."
 
-    digest = build_digest_v4(edited)
+    digest = build_digest_v5(edited)
     assert edited["digest"] == digest
     variants = {v["label"]: v for v in digest["clauses"][0]["signed_variants"]}
     owned = variants["more_protective"]

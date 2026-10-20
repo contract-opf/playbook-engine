@@ -4,7 +4,7 @@ Every consumer that needs a playbook's clauses or precedent records MUST go
 through these accessors rather than reaching into ``doc["evidence"]``
 directly, so a future OPF version only needs to change one file.
 
-The engine reads and writes exactly one format, OPF 0.5 (issue #238; the
+The engine reads and writes exactly one format, OPF 0.6 (issue #238; the
 0.1-0.3 shapes and their accessors were retired — git history has them):
 ``evidence.clauses`` holds one entry per clause type (with counts) and
 ``evidence.precedent`` one verdict-free record per (deal, clause type)
@@ -49,7 +49,7 @@ def is_precedent_shape(doc: dict[str, Any]) -> bool:
     """True when *doc* carries an ``evidence.precedent`` list (issue #223).
 
     A structural guard for callers that need the record before reading it
-    (``playbook precedent``); a document without one is not a valid OPF 0.5
+    (``playbook precedent``); a document without one is not a valid OPF 0.6
     document.
     """
     evidence = doc.get("evidence")
@@ -104,18 +104,20 @@ PRECEDENT_SIDECAR = "precedent.jsonl"
 SIDECARS_KEY = "x_sidecars"
 
 
-def _signed_at_sort(value: Any) -> tuple[bool, tuple[int, ...]]:
-    """Sort key putting the latest ``signed_at`` first and unknown last."""
-    from playbook_engine.digest import _signed_at_key  # noqa: PLC0415
+def _signed_on_sort(value: Any) -> tuple[bool, tuple[int, ...]]:
+    """Sort key putting the latest ``signed_on`` first and unknown last."""
+    from playbook_engine.digest import _signed_on_key  # noqa: PLC0415
 
-    key = _signed_at_key(value)
+    key = _signed_on_key(value)
     return (key is None, tuple(-x for x in (key or (0, 0, 0))))
 
 
 def _latest_signed(values: list[Any]) -> Any:
-    from playbook_engine.digest import _latest  # noqa: PLC0415
+    """The latest ``signed_on`` among *values* as recorded (day precision kept), else ``None``."""
+    from playbook_engine.digest import _signed_on_key  # noqa: PLC0415
 
-    return _latest(values)
+    keyed = [(k, v) for v in values for k in (_signed_on_key(v),) if k is not None]
+    return max(keyed)[1] if keyed else None
 
 
 def _group_key(text: Any, party: str | None) -> str:
@@ -132,11 +134,11 @@ def _rank(
     order: tuple[str, ...],
     tiebreak: Any,
 ) -> list[tuple[dict[str, Any], int]]:
-    """Rank ``(group_key, item, signed_at, counts)`` tuples by their group's stats.
+    """Rank ``(group_key, item, signed_on, counts)`` tuples by their group's stats.
 
     A group is every counting item (``counts`` true) sharing a grouping key;
     its ``n_deals`` is the number of distinct deals (``document_id``) in it
-    and its ``last_signed`` the latest ``signed_at`` among them. Counting
+    and its ``last_signed`` the latest ``signed_on`` among them. Counting
     items are ordered by *order* (each key descending, unknown dates last),
     then by grouping key, so a group stays contiguous, then by *tiebreak*.
     Non-counting items never enter a group's stats and rank after every
@@ -145,11 +147,11 @@ def _rank(
     """
     deals: dict[str, set[Any]] = {}
     dates: dict[str, list[Any]] = {}
-    for key, item, signed_at, counts in items:
+    for key, item, signed_on, counts in items:
         if not counts:
             continue
         deals.setdefault(key, set()).add(item.get("document_id"))
-        dates.setdefault(key, []).append(signed_at)
+        dates.setdefault(key, []).append(signed_on)
     n_deals = {k: len(v) for k, v in deals.items()}
     last = {k: _latest_signed(v) for k, v in dates.items()}
 
@@ -162,7 +164,7 @@ def _rank(
             if name == "n_deals":
                 parts.append(-n_deals[key])
             else:
-                parts.append(_signed_at_sort(last[key]))
+                parts.append(_signed_on_sort(last[key]))
         return (False, *parts, key, tiebreak(item))
 
     return [
@@ -197,9 +199,9 @@ def find_precedent(
     with the document's ``perspective.party``; a clause struck before
     signing groups under no text), and ranked by *order*: ``"n_deals"`` —
     distinct signed deals in the record's group, most first — and
-    ``"last_signed"`` — the group's latest ``signed_at``, newest first,
+    ``"last_signed"`` — the group's latest ``signed_on``, newest first,
     unknown last. Ties fall to the grouping key, then the record's own
-    ``signed_at`` (newest first), ``document_id`` and ``id``, so the result
+    ``signed_on`` (newest first), ``document_id`` and ``id``, so the result
     is deterministic. An unsigned deal's ``signed_text`` is its last draft,
     not signed precedent, so its records never count toward a group (as in
     ``digest.clause_precedent_groups``) and come after every signed record,
@@ -210,7 +212,7 @@ def find_precedent(
     each ask's own fields (``text``, ``round``, ``ref``) plus the
     ``precedent_id``, ``document_id`` and ``taxonomy_id`` of the record that
     carries it, grouped by the ask text the same way (``last_signed`` is the
-    latest ``signed_at`` of the deals that refused it); ties fall to the
+    latest ``signed_on`` of the deals that refused it); ties fall to the
     earliest round, then ``document_id``.
 
     Precedent records are returned as the document's own dicts — the same
@@ -257,7 +259,7 @@ def find_precedent(
                 (
                     _group_key(text, party),
                     record,
-                    record.get("signed_at"),
+                    record.get("signed_on"),
                     record.get("signed") is True,
                 )
             )
@@ -265,7 +267,7 @@ def find_precedent(
             items,
             order,
             lambda r: (
-                _signed_at_sort(r.get("signed_at")),
+                _signed_on_sort(r.get("signed_on")),
                 str(r.get("document_id")),
                 str(r.get("id")),
             ),
@@ -284,7 +286,7 @@ def find_precedent(
                     **ask,
                 }
                 asks.append(
-                    (_group_key(ask.get("text"), party), entry, record.get("signed_at"), True)
+                    (_group_key(ask.get("text"), party), entry, record.get("signed_on"), True)
                 )
         ranked = _rank(
             asks,

@@ -1,4 +1,4 @@
-"""OPF accessors (issue #154; OPF 0.5 precedent, issue #223).
+"""OPF accessors (issue #154; OPF 0.6 precedent, issue #223).
 
 The cases read the real compiled NDA example
 (``examples/nda/playbook.opf.json``, produced by ``playbook project``). The
@@ -7,13 +7,12 @@ one of those documents (unsigned drafts, flipped paper side), the mutated
 document is re-stamped with the test-local ``_restamp`` helper and asserted to pass
 ``validator.validate_document`` -- never a shape the engine itself rejects.
 
-The query surface (issue #224) is also exercised on the frozen OPF 0.5
-conformance vector 002 (``spec/conformance/0.5/vectors/``), read-only: the
-reference compiler never sets ``signed_at`` (OPF-SPEC §3.5.4), so that
-vector — which models a third-party producer recording signing dates, with
+The query surface (issue #224) is also exercised on the frozen OPF 0.6
+conformance vector 002 (``spec/conformance/0.6/vectors/``), read-only: the
+NDA example dates only some of its deals, so that vector — with dated
 multi-deal variant groups, a struck clause and a refused ask shared by
-three deals — is the only committed 0.5 document on which recency and
-group ranking can be observed.
+three deals — is the committed 0.6 document on which recency and group
+ranking are best observed.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from typing import Any
 import pytest
 
 from playbook_engine.canonicalize import canonicalize, file_sha256
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
     SIDECARS_KEY,
@@ -48,7 +47,7 @@ _ROOT = Path(__file__).parent.parent
 _NDA = _ROOT / "examples" / "nda" / "playbook.opf.json"
 _NDA_SIDECAR = _ROOT / "examples" / "nda" / "precedent.jsonl"
 _VECTOR_002 = (
-    _ROOT / "spec" / "conformance" / "0.5" / "vectors" / "002-variants-refused-and-exclusions.json"
+    _ROOT / "spec" / "conformance" / "0.6" / "vectors" / "002-variants-refused-and-exclusions.json"
 )
 
 
@@ -62,14 +61,14 @@ def _restamp(doc: dict[str, Any]) -> None:
     restamp_evidence(
         doc["evidence"], str(doc["agreement_type"]["id"]), party=perspective_party(doc)
     )
-    doc["digest"] = build_digest_v4(doc)
+    doc["digest"] = build_digest_v5(doc)
     if isinstance(doc.get(SIDECARS_KEY), dict) and PRECEDENT_SIDECAR in doc[SIDECARS_KEY]:
         doc[SIDECARS_KEY].update(precedent_sidecar_manifest(doc))
 
 
 def test_precedent_accessors_read_a_compiled_0_5_document() -> None:
     doc = _load(_NDA)
-    assert doc["opf_version"] == "0.5"
+    assert doc["opf_version"] == "0.6"
     assert is_precedent_shape(doc)
     records = playbook_precedent(doc)
     assert records == doc["evidence"]["precedent"]
@@ -97,7 +96,7 @@ def test_retired_0_3_accessors_are_gone() -> None:
 
 def test_accessors_are_empty_on_a_document_without_evidence() -> None:
     """A top-level ``clauses`` list (the retired 0.1 shape) is not read."""
-    doc = {"opf_version": "0.5", "clauses": [{"id": "clause.x", "taxonomy_id": "x"}]}
+    doc = {"opf_version": "0.6", "clauses": [{"id": "clause.x", "taxonomy_id": "x"}]}
     assert not is_precedent_shape(doc)
     assert playbook_clauses(doc) == []
     assert playbook_precedent(doc) == []
@@ -121,7 +120,7 @@ def _vector_002() -> dict[str, Any]:
 
 def test_find_precedent_ranks_by_deal_count_then_recency() -> None:
     """Vector 002's assignment clause: the 3-deal affiliate-assignment group
-    (signed 2025-03-01, 2025-Q4 and undated) outranks the 2-deal standard
+    (signed 2025-03-01, 2025-11 and undated) outranks the 2-deal standard
     group, which outranks the 1-deal groups ordered newest first with the
     undated struck clause after the dated one. The unsigned deal-f's
     on-notice draft is not signed precedent, so it comes last. Inside a
@@ -138,7 +137,7 @@ def test_find_precedent_ranks_by_deal_count_then_recency() -> None:
         "deal-h",
         "deal-f",
     ]
-    # Recency alone: groups by their latest signing date (2025-Q4 group,
+    # Recency alone: groups by their latest signing date (2025-11 group,
     # then the 2025-02-10 standard group, then 2024-06-30), undated last.
     by_date = [p["document_id"] for p in find_precedent(doc, "assignment", order=("last_signed",))]
     assert by_date == [
@@ -172,7 +171,7 @@ def test_find_precedent_group_order_matches_the_digest() -> None:
     from playbook_engine.digest import clause_precedent_groups
 
     for doc in (_vector_002(), _load(_NDA)):
-        digest = build_digest_v4(doc)
+        digest = build_digest_v5(doc)
         for clause in digest["clauses"]:
             groups = clause_precedent_groups(
                 clause["taxonomy_id"],
@@ -209,8 +208,8 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
     drafts = [f"deal-u{i}" for i in range(4)]
     for deal_id in drafts:
         # Built as the reference compiler writes an unsigned deal: a
-        # corpus.documents entry with no signed version, signed_at omitted
-        # (never null, OPF-SPEC §3.5.4), the paper of an unsigned deal, and
+        # corpus.documents entry with no signed version and so no signing
+        # date (null, OPF-SPEC §3.8), the paper of an unsigned deal, and
         # ids/counts/digest re-stamped below so the validator accepts it.
         entry = copy.deepcopy(deal_f_doc)
         entry["document_id"] = deal_id
@@ -221,7 +220,7 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
         draft["signed_text"]["ref"]["document_id"] = deal_id
         draft["signed"] = False
         draft["opened_with"] = None  # an unsigned deal has no anchored opening (#233)
-        draft.pop("signed_at", None)
+        draft["signed_on"] = None
         for key in ("paper", "paper_basis", "paper_confidence"):
             draft[key] = deal_f[key]
         precedent.append(draft)
@@ -236,7 +235,7 @@ def test_find_precedent_never_counts_unsigned_drafts() -> None:
     assert signed == sorted(signed, reverse=True)
     assert set(ranked[-5:]) == {"deal-f", *drafts}
 
-    digest = build_digest_v4(doc)
+    digest = build_digest_v5(doc)
     clause = next(c for c in digest["clauses"] if c["taxonomy_id"] == "assignment")
     variant_of = {
         pid: i for i, v in enumerate(clause["signed_variants"]) for pid in v["precedent_ids"]
@@ -309,7 +308,7 @@ def test_precedent_by_id_round_trips_every_record() -> None:
     for record in playbook_precedent(doc):
         assert precedent_by_id(doc, record["id"]) is record
     assert precedent_by_id(doc, "prec.0000000000000000") is None
-    assert precedent_by_id({"opf_version": "0.5", "evidence": {"clauses": []}}, "prec.x") is None
+    assert precedent_by_id({"opf_version": "0.6", "evidence": {"clauses": []}}, "prec.x") is None
 
 
 def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
@@ -322,7 +321,7 @@ def test_precedent_jsonl_is_the_records_sorted_by_id() -> None:
     for line, record in zip(lines, parsed, strict=True):
         assert record == precedent_by_id(doc, record["id"])
         assert line == canonicalize(precedent_by_id(doc, record["id"]))
-    assert precedent_jsonl({"opf_version": "0.5", "evidence": {"clauses": []}}) == ""
+    assert precedent_jsonl({"opf_version": "0.6", "evidence": {"clauses": []}}) == ""
 
 
 def test_committed_nda_sidecar_belongs_to_its_playbook() -> None:

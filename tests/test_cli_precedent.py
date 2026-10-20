@@ -165,20 +165,21 @@ def test_precedent_refuses_a_document_without_a_precedent_record(tmp_path: Path)
     )
     result = _invoke(["precedent", str(doc_path), "--clause", "x"])
     assert result.exit_code == 1
-    assert "OPF 0.5" in result.output
+    assert "OPF 0.6" in result.output
 
 
-def test_precedent_refuses_a_retired_0_4_document_by_version(tmp_path: Path) -> None:
-    """OPF 0.5 replaced 0.4 in place (issue #233): a 0.4 playbook has the same
-    evidence.precedent shape but no opening evidence, so it is refused by
-    version, not read as a 0.5 document with `opened_with` missing."""
+@pytest.mark.parametrize("version", ["0.4", "0.5"])
+def test_precedent_refuses_a_retired_document_by_version(tmp_path: Path, version: str) -> None:
+    """OPF 0.6 replaced 0.5 in place (issue #247): a 0.5 playbook has the same
+    evidence.precedent shape but no signing dates, so it is refused by
+    version, not read as a 0.6 document with `signed_on` missing."""
     doc = json.loads(_NDA.read_text(encoding="utf-8"))
-    doc["opf_version"] = "0.4"
+    doc["opf_version"] = version
     doc_path = tmp_path / "old.json"
     doc_path.write_text(json.dumps(doc), encoding="utf-8")
     result = _invoke(["precedent", str(doc_path), "--clause", "governing_law"])
     assert result.exit_code == 1
-    assert "unsupported opf_version '0.4'" in result.output
+    assert f"unsupported opf_version '{version}'" in result.output
 
 
 # ---------------------------------------------------------------------------

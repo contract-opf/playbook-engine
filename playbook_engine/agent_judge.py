@@ -29,6 +29,9 @@ Components:
 - ``StoreBackedEquivalenceJudge``    — the ``equivalence`` kind (issue #240):
   one verdict per distinct text against our standard, queued after mining
   (it needs the precedent record, not a seam inside ``mine_corpus``).
+- ``StoreBackedDealDateJudge``       — the ``deal_date`` kind (issue #247):
+  one verdict per distinct set of date passages of an executed copy, queued
+  after mining when the deterministic readers found no date.
 
 These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, provenance_judge=…)``.
@@ -76,6 +79,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from playbook_engine import deal_dates
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
@@ -533,6 +537,10 @@ def _validate_equivalence(verdict: dict[str, Any]) -> None:
     validate_draft_verdict(verdict)
 
 
+def _validate_deal_date(verdict: dict[str, Any]) -> None:
+    deal_dates.validate_verdict(verdict)
+
+
 def _validate_scope(verdict: dict[str, Any]) -> None:
     if not isinstance(verdict.get("in_scope"), bool):
         raise ValueError("'in_scope' must be a JSON boolean")
@@ -557,6 +565,7 @@ _VERDICT_KINDS: dict[
     "scope": (_validate_scope, lambda v: "in_scope" in v),
     "classify": (_validate_classify, lambda v: "taxonomy_id" in v),
     EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "parts" in v),
+    deal_dates.DEAL_DATE_KIND: (_validate_deal_date, lambda v: "signed_on" in v),
 }
 
 
@@ -998,4 +1007,54 @@ class StoreBackedEquivalenceJudge:
                 )
         if self.pending is not None:
             self.pending.add(subject.key, EQUIVALENCE_KIND, subject.payload, current_rubric)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedDealDateJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedDealDateJudge:
+    """Replays stored ``deal_date`` verdicts or queues new date-passage payloads.
+
+    The ``deal_date`` kind (issue #247). Like the equivalence judge it has no
+    seam inside ``mine_corpus``: the question (the date passages of an executed
+    copy that no deterministic reader could date) is recorded in the corpus
+    manifest at mining, so ``playbook judge`` asks it after mining and
+    ``playbook project`` reads it with ``pending=None``.
+
+    A hit whose rubric moved, or whose stored record does not validate against
+    the payload (a quote that does not occur in the passages shown, a bad
+    date), is not replayed: it is re-queued (when a queue is attached) and the
+    deal's date falls through to the file name / metadata. A miss is queued,
+    never guessed.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: deal_dates.DealDateSubject) -> deal_dates.DealDate | None:
+        """The stored answer for *subject*, or ``None`` when it is unjudged."""
+        current_rubric = rubric_version(deal_dates.DEAL_DATE_KIND)
+        key = _payload_key(subject.payload)
+        record = self.store.get_record_by_key(key)
+        if (
+            record is not None
+            and self.rubric.evaluate(
+                deal_dates.DEAL_DATE_KIND, record.rubric_version, current_rubric
+            ).replay
+        ):
+            answer = deal_dates.verdict_of(record.verdict, subject.payload)
+            if answer is not None:
+                return answer
+            _log.warning(
+                "StoreBackedDealDateJudge: malformed stored verdict for key %s; "
+                "treating as unjudged",
+                key,
+            )
+        if self.pending is not None:
+            self.pending.add(key, deal_dates.DEAL_DATE_KIND, subject.payload, current_rubric)
         return None

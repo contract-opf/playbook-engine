@@ -88,6 +88,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from playbook_engine.deal_dates import DEAL_DATE_KIND, TEXT_BASES
 from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELATIONS, STATUSES
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
@@ -97,7 +98,13 @@ from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 
 #: The pending-item kinds a store-backed judge can produce. Grows through
 #: :func:`register_judge_kind`.
-JUDGE_KINDS: tuple[str, ...] = ("classify", "provenance", "scope", EQUIVALENCE_KIND)
+JUDGE_KINDS: tuple[str, ...] = (
+    "classify",
+    "provenance",
+    "scope",
+    EQUIVALENCE_KIND,
+    DEAL_DATE_KIND,
+)
 
 # ---------------------------------------------------------------------------
 # Manual half — bump by hand when the PROSE rubric changes semantically
@@ -132,6 +139,12 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # v2 (issue #243): the judgment is part by part (present/omitted with a
     # relation or effect, plus additions) and the label is derived from it.
     EQUIVALENCE_KIND: "v2",
+    # Issue #247: the signing date of an executed copy, read from the date
+    # passages the deterministic readers could not resolve. The prose rubric is
+    # the skill's deal_date step (a date only when the passages state when the
+    # deal was signed, with the quoted words and which source); the source
+    # vocabulary is the derived half.
+    DEAL_DATE_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -263,6 +276,9 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
         "statuses": list(STATUSES),
         "relations": list(RELATIONS),
         "effects": list(EFFECTS),
+    },
+    DEAL_DATE_KIND: lambda *, taxonomy, agreement_type: {
+        "bases": list(TEXT_BASES),
     },
 }
 

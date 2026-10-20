@@ -108,7 +108,7 @@ counterparty's paper.
   engine treats any stored provenance verdict with confidence below 0.70 as
   ambiguous at mine time (`pipeline.py` ambiguity rule) and records the
   deal's paper side as `"unknown"` — the trail and every observation say
-  `"unknown"`, the OPF 0.5 precedent records say `paper: "unknown"`, and
+  `"unknown"`, the OPF 0.6 precedent records say `paper: "unknown"`, and
   `corpus.documents[]` flags it `provenance_is_ambiguous: true` (issue #225).
   The side you named is not used and the verdict is not re-queued, so a
   correct `our_paper` verdict at 0.55 leaves that deal's paper side unknown.
@@ -252,6 +252,47 @@ The drafter never answers its own check. `playbook judge --check equivalence
 fallback model). An unchecked draft still reaches the playbook (`check:
 null`): nothing blocks.
 
+### Signing date (`kind: deal_date`)
+
+Queued by `playbook judge` AFTER mining, for an executed copy whose signing
+date no deterministic reader could establish: the document's preamble ("dated
+as of …", "Effective Date: …") and its signature block were read first, and
+either said nothing, said two different things, or gave a numeric date that
+reads two ways (`03/04/2021`). Only such deals are queued, and only when the
+text holds something date-like to read. The payload shows just the passages
+holding a date, never the rest of the document or the signatories' names:
+
+```json
+{"stage": "deal_date",
+ "document_text": ["... made as of the third of March, 2021 between ..."],
+ "signature_block": ["Date: 03/04/2021"]}
+```
+
+Say when the deal was signed, from those passages alone. Answer with a date
+ONLY when the passages state it: the document's own date or the date the
+parties signed. Do not infer a date from anything else (the year of a statute, a
+term length, a date a clause refers to). If the passages do not say, or say it
+in a way you cannot read one way, answer `null`: a recorded `null` is a real
+answer (the file name and file metadata are tried next), and an invented date
+is the one wrong answer. Two shapes:
+
+```json
+{"signed_on": "2021-03-03", "basis": "document_text",
+ "quote": "made as of the third of March, 2021"}
+{"signed_on": null, "basis": null, "quote": null}
+```
+
+- `signed_on` is `YYYY-MM-DD`, or `YYYY-MM` when only the month is stated;
+  a real date, in 1980-2099.
+- `basis` is `document_text` or `signature_block`: the passages it came from.
+- `quote` is the words you read the date from, copied EXACTLY from that
+  source's passages (whitespace aside). `playbook judge-apply` rejects an
+  answer whose quote does not occur in the passages the item showed, so a date
+  you cannot point to is never recorded.
+- When signatories dated their signatures differently, the deal was signed on
+  the last of them.
+- The same passages in several deals are one item and one shared verdict.
+
 ---
 
 ## Verdict format
@@ -299,6 +340,9 @@ shown for each kind below:
 - Equivalence — `basis` is REQUIRED and is one of `"agent"` (you),
   `"judge"` (the store-backed judge) or `"owner"` (an owner correction);
   anything else is rejected.
+- Signing date (`deal_date`) — `basis` is the SOURCE of the date
+  (`"document_text"` or `"signature_block"`, or `null` with a `null` date),
+  not a judge type.
 
 **Classification verdict:**
 ```json
@@ -358,6 +402,12 @@ derived one):
 `relation` is `equivalent`, `more_protective` or `less_protective`; `effect`
 is `more_protective`, `less_protective` or `neutral`; both relative to
 `perspective_party`. The example derives `less_protective`.
+
+**Signing-date verdict** (`kind: deal_date`) — one per distinct set of
+passages; `signed_on`, `basis` and `quote` (see "Signing date" above):
+```json
+{"signed_on": "2021-03-03", "basis": "signature_block", "quote": "Date: March 3rd, 2021"}
+```
 
 ### SegNode (agent segmentation — `segment` / `segment-apply`, issue #191)
 
@@ -428,7 +478,8 @@ restate existing rules — that would discard thousands of sound verdicts.
 machine-readable rubric moves: the classifier-eligible taxonomy entries
 (id + label + description) for `classify`, the agreement-type definition for
 `scope`, the answer vocabulary for `provenance`, the label, status,
-relation and effect vocabularies for `equivalence`. Editing
+relation and effect vocabularies for `equivalence`, the source vocabulary
+(`document_text`, `signature_block`) for `deal_date`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is

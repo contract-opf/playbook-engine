@@ -1,4 +1,4 @@
-"""Hard-rule manifest, critic dossiers and provenance index (OPF 0.5, issue #228).
+"""Hard-rule manifest, critic dossiers and provenance index (OPF 0.6, issue #228).
 
 Every document here is built by the real producer: Observation rows (the
 shapes ``observation_builder`` emits) through ``compile_clause_positions`` and
@@ -36,7 +36,7 @@ from playbook_engine.dossiers import (
 )
 from playbook_engine.floor_candidates import FloorCandidateError, sign_floor_invariant
 from playbook_engine.validator import validate_document
-from tests.test_digest import _LABEL_TEXTS, _STD, _V_A, _V_B, _labelled_playbook, _v05_obs
+from tests.test_digest import _LABEL_TEXTS, _STD, _V_A, _V_B, _labelled_playbook, _v06_obs
 
 ROOT = Path(__file__).parent.parent
 NDA_PLAYBOOK = ROOT / "examples" / "nda" / "playbook.opf.json"
@@ -97,6 +97,8 @@ def _playbook(
             "in_scope": True,
             "versions": 3,
             "signed_version": 3 if is_signed else None,
+            "signed_on": None,
+            "signed_on_basis": None,
         }
         for doc_id, is_signed in sorted(signed.items())
     ]
@@ -115,7 +117,7 @@ def _playbook(
     return pb
 
 
-_O = _v05_obs
+_O = _v06_obs
 
 
 def _selection_rows() -> tuple[list, dict[str, bool]]:
@@ -509,7 +511,7 @@ def test_without_a_concession_or_opening_the_digest_order_fills_the_excerpts() -
     pb = _playbook(rows, signed={f"d{i}": True for i in range(1, 5)})
     (dossier,) = pb["dossiers"].values()
     assert [e["kind"] for e in dossier["excerpts"]] == ["signed_variant", "signed_variant"]
-    # Two-deal variant first (digest order). No signed_at is recorded, so the
+    # Two-deal variant first (digest order). No signed_on is recorded, so the
     # lowest precedent_id picks its record: d2's, although d1 is the lower
     # document (the record the digest cites).
     d1, d2 = _record(pb, "d1"), _record(pb, "d2")
@@ -532,12 +534,12 @@ def test_without_a_concession_or_opening_the_digest_order_fills_the_excerpts() -
     )
 
 
-def test_the_latest_signed_at_picks_a_groups_record_before_the_precedent_id() -> None:
-    """OPF-SPEC §3.12.3: latest ``signed_at`` first, then the lowest ``precedent_id``.
+def test_the_latest_signed_on_picks_a_groups_record_before_the_precedent_id() -> None:
+    """OPF-SPEC §3.12.3: latest ``signed_on`` first, then the lowest ``precedent_id``.
 
-    The reference compiler records no ``signed_at``, so this test sets one on
-    a built document on purpose (a producer that does record signing dates)
-    and reads the dossiers' reference construction directly.
+    The built document records no signing date (its fixtures state none), so
+    this test sets one on a built document on purpose and reads the dossiers'
+    reference construction directly.
     """
     rows = [
         _O("d1", _V_B, opened_with="non_standard"),
@@ -552,10 +554,15 @@ def test_the_latest_signed_at_picks_a_groups_record_before_the_precedent_id() ->
     assert dossier["excerpts"][0]["precedent_id"] == lowest["id"]
 
     dated = copy.deepcopy(pb)
+    signed_on = {"d1": "2025-03-01", "d2": "2025-01-01", "d3": "2025-03-01"}
+    # A precedent's date is its document's (the validator requires it), so both carry it.
+    for corpus_doc in dated["corpus"]["documents"]:
+        corpus_doc["signed_on"] = signed_on[corpus_doc["document_id"]]
+        corpus_doc["signed_on_basis"] = "document_text"
     for p in dated["evidence"]["precedent"]:
-        p["signed_at"] = {"d1": "2025-03-01", "d2": "2025-01-01", "d3": "2025-03-01"}[
-            p["document_id"]
-        ]
+        p["signed_on"] = signed_on[p["document_id"]]
+    # The dated document breaks no signing-date rule (the digest is not rebuilt here).
+    assert not [e for e in validate_document(dated).errors if "signed_on" in str(e)]
     # d1 and d3 tie on the latest date; the lower precedent_id of the two wins.
     tied = sorted((by_doc["d1"]["id"], by_doc["d3"]["id"]))
     (dossier,) = build_dossiers(dated).values()
@@ -1029,7 +1036,7 @@ def test_provenance_index_names_each_selected_excerpt_and_its_source_documents()
     assert all(d["version_files"] == [] for d in index["documents"])
 
 
-VECTOR_008 = ROOT / "spec" / "conformance" / "0.5" / "vectors" / "008-hard-rules-and-dossiers.json"
+VECTOR_008 = ROOT / "spec" / "conformance" / "0.6" / "vectors" / "008-hard-rules-and-dossiers.json"
 
 
 def _assert_omitted_ids_resolve(

@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine.digest import (
-    build_digest_v4,
+    build_digest_v5,
     clause_precedent_groups,
     digest_token_estimate,
 )
@@ -483,14 +483,14 @@ _OPENED = {
 def _render_deal_trail(records: list[dict[str, Any]]) -> str:
     """One row per deal: how its draft opened and what was signed.
 
-    The Signed column is dropped when no deal carries a ``signed_at`` (a corpus
+    The Signed column is dropped when no deal carries a ``signed_on`` (a corpus
     whose dates were coarsened away would otherwise show a column of dashes).
     """
-    dated = any(r.get("signed_at") for r in records)
+    dated = any(r.get("signed_on") for r in records)
     rows = "".join(
         "<tr>"
         f"<td>{_esc(r.get('document_id', ''))}</td>"
-        + (f"<td>{_esc(r.get('signed_at') or '—')}</td>" if dated else "")
+        + (f"<td>{_esc(r.get('signed_on') or '—')}</td>" if dated else "")
         + f"<td>{_esc(_OPENED.get(str(r.get('opened_with')), '—'))}</td>"
         f"<td>{_esc(_outcome(r))}</td>"
         f'<td class="num">{len(r.get("refused_asks") or [])}</td>'
@@ -787,7 +787,7 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
         FileNotFoundError: ``playbook.opf.json`` missing from *out_dir*.
     """
     raw, doc = _read_opf(out_dir)
-    digest = doc.get("digest") or build_digest_v4(doc)
+    digest = doc.get("digest") or build_digest_v5(doc)
     agreement = doc.get("agreement_type", {})
     name = agreement.get("name", agreement.get("id", "Playbook"))
     identity = doc.get("identity", {})

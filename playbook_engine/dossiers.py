@@ -1,6 +1,6 @@
 """Hard-rule manifest, critic dossiers and provenance index of an OPF playbook.
 
-OPF 0.5 (issue #228, epic #236): three top-level sections the engine derives
+OPF 0.6 (issue #228, epic #236): three top-level sections the engine derives
 from the document, alongside ``digest``. Like the digest, each is a pure
 function of the document, the validator recomputes them, and they are covered
 by ``identity.content_hash``. None of them holds a judged verdict: the model
@@ -50,7 +50,7 @@ from typing import Any
 
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.digest import (
-    _signed_at_key,
+    _signed_on_key,
     arrange_variant_slots,
     clause_precedent_groups_with_members,
     playbook_precedent_records,
@@ -303,12 +303,12 @@ def build_manifest(playbook: dict[str, Any]) -> dict[str, Any]:
 def _excerpt_order_key(record: dict[str, Any]) -> tuple[bool, tuple[int, ...], str]:
     """Which record of a group an excerpt shows (OPF-SPEC §3.12.3).
 
-    Latest ``signed_at`` first (unknown last), ties broken on the lowest
+    Latest ``signed_on`` first (unknown last), ties broken on the lowest
     ``precedent_id``. Not the digest's representative (which breaks ties on
-    ``document_id``): the reference compiler records no ``signed_at``, so the
-    lowest ``precedent_id`` decides.
+    ``document_id``): among deals signed in the same month or day, or with no
+    known date, the lowest ``precedent_id`` decides.
     """
-    k = _signed_at_key(record.get("signed_at"))
+    k = _signed_on_key(record.get("signed_on"))
     return (k is None, tuple(-x for x in (k or (0, 0, 0))), str(record.get("id")))
 
 
@@ -350,7 +350,7 @@ def select_excerpts(
     The collapsed ``equivalent`` entry of the digest stands for its groups in
     group order: rule 1 takes the first of them with ``n_from_standard`` > 0,
     rule 3 the first of them. A group's record is its (eligible) member with
-    the latest ``signed_at``, ties broken on the lowest ``precedent_id``
+    the latest ``signed_on``, ties broken on the lowest ``precedent_id``
     (:func:`_excerpt_order_key`); a refused-ask group's record is chosen the
     same way among the deals that made the ask, showing that record's
     earliest-round ask in the group.
@@ -627,7 +627,7 @@ def build_provenance_index(
     order: the kept excerpts (``omitted`` false, in dossier order), then the
     ones dropped whole to fit the budget (``omitted`` true), so every id in a
     dossier's ``omitted_precedent_ids`` resolves here to its deal and kind.
-    ``documents`` holds one ``{document_id, signed_at, version_files}`` per
+    ``documents`` holds one ``{document_id, signed_on, version_files}`` per
     deal a selected excerpt was taken from, kept or omitted (sorted by id;
     ``version_files`` the ``{version, sha256}`` of its source files, empty
     when the corpus recorded none).
@@ -645,7 +645,7 @@ def build_provenance_index(
     snapshot = corpus.get("snapshot") if isinstance(corpus, dict) else None
     compiler = playbook.get("compiler")
     selected: dict[str, list[dict[str, Any]]] = {}
-    signed_at_of: dict[str, Any] = {}
+    signed_on_of: dict[str, Any] = {}
     for clause_id, dossier in dossiers.items():
         omitted_ids = set(dossier.get("omitted_precedent_ids") or [])
         # The dropped excerpts are the tail of the selection: recompute it for
@@ -665,7 +665,7 @@ def build_provenance_index(
         ]:
             record = by_id.get(ex["precedent_id"], {})
             doc_id = str(record.get("document_id"))
-            signed_at_of.setdefault(doc_id, record.get("signed_at"))
+            signed_on_of.setdefault(doc_id, record.get("signed_on"))
             rows.append(
                 {
                     "precedent_id": ex["precedent_id"],
@@ -676,12 +676,12 @@ def build_provenance_index(
             )
         selected[clause_id] = rows
     documents = []
-    for doc_id in sorted(signed_at_of):
+    for doc_id in sorted(signed_on_of):
         files = corpus_docs.get(doc_id, {}).get("version_files")
         documents.append(
             {
                 "document_id": doc_id,
-                "signed_at": signed_at_of[doc_id],
+                "signed_on": signed_on_of[doc_id],
                 "version_files": [
                     {"version": f.get("version"), "sha256": f.get("sha256")}
                     for f in (files if isinstance(files, list) else [])

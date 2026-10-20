@@ -72,6 +72,7 @@ Signature sections that never became their own node:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
@@ -412,6 +413,63 @@ def _full_text(tree: ClauseTree) -> str:
         if node.text:
             parts.append(node.text)
     return "\n".join(parts)
+
+
+def signing_texts(tree: ClauseTree) -> tuple[str, str]:
+    """``(document_text, signature_block_text)`` of an UNSTRIPPED executed-copy tree.
+
+    The date readers (:mod:`playbook_engine.deal_dates`, issue #247) need the
+    document's own words and the block where it was executed, and each reader
+    must see only its own region: ``signature_block_text`` is the text
+    :func:`strip_signature_block` cuts (from the trailer or field group to the
+    end of that clause's own text) plus every signature-headed section whole
+    (``""`` when the tree has none), and ``document_text`` is the rest, with
+    those regions removed. A clause that absorbed "IN WITNESS WHEREOF" gives
+    the block only its text from the trailer on: the clause body before it is
+    the document's, so a date in that body ("extended through …") is never
+    read as a signing date. So too a short executed copy whose block starts
+    inside the preamble window is never read as "the document states its own
+    date", and the judge passages of the document never carry signatory
+    names. Deterministic, no LLM.
+    """
+    nodes = list(tree.all_nodes())
+    # Each region is decided once and read by exactly one side: a
+    # signature-headed subtree whole, and a trailer-carrying (or located
+    # block's) node from its trailer or block start to the end of its text.
+    excluded: set[int] = set()
+    cut_at: dict[int, int] = {}
+    for node, provenance in _signature_nodes(tree):
+        if provenance == "heading":
+            excluded.update(id(n) for n in _iter_subtree(node))
+        else:
+            m = _SIG_TRAILER.search(node.text or "")
+            if m is not None:
+                cut_at[id(node)] = m.start()
+    located = _locate_signature_block(nodes)
+    if located is not None:
+        idx, offset, _basis = located
+        cut_at[id(nodes[idx])] = min(offset, cut_at.get(id(nodes[idx]), offset))
+    body: list[str] = []
+    block: list[str] = []
+    for node in nodes:
+        if id(node) in excluded:
+            block.extend(part for part in (node.heading, node.text) if part)
+            continue
+        if node.heading:
+            body.append(node.heading)
+        text = node.text or ""
+        cut = cut_at.get(id(node), len(text))
+        if text[:cut]:
+            body.append(text[:cut])
+        if text[cut:].strip():
+            block.append(text[cut:])
+    return "\n".join(body), "\n".join(block)
+
+
+def _iter_subtree(node: ClauseNode) -> Iterator[ClauseNode]:
+    yield node
+    for child in node.children:
+        yield from _iter_subtree(child)
 
 
 def _node_subtree_text(node: ClauseNode) -> str:

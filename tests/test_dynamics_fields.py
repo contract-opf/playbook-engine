@@ -2,7 +2,7 @@
 
 Covers the observation-store side of the dynamics (the OPF 0.2/0.3
 ``stance_detail`` / ``negotiation_trail`` surfaces were retired with those
-formats, issue #238; OPF 0.5 derives each precedent's ``rounds`` from the
+formats, issue #238; OPF 0.6 derives each precedent's ``rounds`` from the
 round moves built here):
   1. proposed_by derived from a DOCX tracked insertion's author, mapped
      through our_party_aliases/our_authors — "us" on a match, "unknown"

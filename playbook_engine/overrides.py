@@ -66,7 +66,7 @@ from typing import Any
 
 from playbook_engine.agent_judge import StoredVerdict, VerdictStore
 from playbook_engine.canonicalize import compute_section_digests, content_hash
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.dossiers import refresh_derived_sections
 from playbook_engine.equivalence import (
     BASIS_OWNER,
@@ -598,7 +598,7 @@ def refresh_after_edit(playbook: dict[str, Any]) -> None:
     if SIDECARS_KEY in playbook:
         playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
     if "digest" in playbook:
-        playbook["digest"] = build_digest_v4(playbook)
+        playbook["digest"] = build_digest_v5(playbook)
     refresh_derived_sections(playbook)
     if isinstance(playbook.get("identity"), dict):
         playbook["identity"]["content_hash"] = content_hash(playbook)
