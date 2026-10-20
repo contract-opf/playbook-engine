@@ -37,6 +37,7 @@ from playbook_engine.equivalence import (
     ROLE_SIGNED,
     ROLES,
     addition_map,
+    check_state,
     derive_label,
     equivalence_key,
     is_eligible,
@@ -88,17 +89,6 @@ def _cite(ref: Any) -> str:
     return (
         f"{ref.get('document_id', '')} · v{ref.get('version', '')} · §{ref.get('clause_path', '')}"
     )
-
-
-def _check_state(vs: dict[str, Any]) -> str:
-    if vs.get("basis") == "owner":
-        return "owner"
-    check = vs.get("check")
-    if not isinstance(check, dict):
-        return "unchecked"
-    if check.get("adjudicated") is True:
-        return "adjudicated"
-    return "agreed" if check.get("agreed") is True else "disputed"
 
 
 def _digest_entries(digest: dict[str, Any], tid: Any) -> dict[str, list[dict[str, Any]]]:
@@ -184,7 +174,7 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
                         "reason": (vs or {}).get("reason") or "",
                         "owner_reason": _owner_reason(vs or {}),
                         "basis": (vs or {}).get("basis") or "",
-                        "check": _check_state(vs or {}),
+                        "check": check_state(vs or {}),
                         **_part_rows(vs or {}),
                         "roles": [role],
                         "text": summarize_clause_text(text),

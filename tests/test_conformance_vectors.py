@@ -244,6 +244,36 @@ def test_v06_standard_parts_and_owner_label_vector_pins_the_part_rules() -> None
     assert [r["part_id"] for r in second["part_reasons"]] == [pids[0], pids[1], pids[3]]
 
 
+def test_v06_settled_vector_pins_all_four_outcomes() -> None:
+    """011 (issue #248): ``settled`` on each judged digest entry and dossier
+    excerpt, a disagreement awaiting adjudication read as ``unchecked``, an
+    unjudged ask with a null, and the collapsed entry's per-state counts."""
+    vector = _load_vector_v06("vectors/011-settled-outcomes.json")
+    expected = vector["expected"]
+    clause = expected["digest"]["clauses"][0]
+    singles = clause["signed_variants"][:-1]
+    assert [v["settled"] for v in singles] == ["adjudicated", "agreed", "unchecked", "owner"]
+    assert [a["settled"] for a in clause["refused_asks"]] == [None, "adjudicated"]
+    assert [o["settled"] for o in clause["changed_openings"]] == ["unchecked"]
+    collapsed = clause["signed_variants"][-1]
+    assert "settled" not in collapsed
+    assert collapsed["settled_counts"] == {
+        "agreed": 2,
+        "adjudicated": 1,
+        "unchecked": 0,
+        "owner": 1,
+    }
+    assert sum(collapsed["settled_counts"].values()) == collapsed["n_texts"]
+    assert set(expected["digest"]["part_map_legend"]["settled"]) == {
+        "agreed",
+        "adjudicated",
+        "unchecked",
+        "owner",
+    }
+    excerpts = expected["dossiers"]["clause.assignment"]["excerpts"]
+    assert [x["vs_standard"]["settled"] for x in excerpts] == ["adjudicated", "unchecked"]
+
+
 # ---------------------------------------------------------------------------
 # Proof the suite has teeth (issue #115 reviewer gate): a tampered expected
 # value must be DETECTED, not silently pass. These mutate only an in-memory

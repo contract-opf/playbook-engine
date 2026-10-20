@@ -62,6 +62,7 @@ from playbook_engine.equivalence import (
     label_by,
     label_reason,
     part_map,
+    settled_of,
     standard_parts,
 )
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
@@ -402,10 +403,11 @@ def _text_of(ref: Any) -> str | None:
 def excerpt_vs_standard(entry: Any) -> dict[str, Any] | None:
     """The judgment of an excerpt's text as a dossier carries it (issue #243).
 
-    ``{label, label_by, reason, part_map, part_reasons: [{part_id, reason}],
-    additions: [{effect, summary}]}`` — the digest's compact part map, who set
-    the label and its reason (the owner's when the owner overrode the derived
-    label, as in the digest) plus what the digest leaves out: the one-sentence
+    ``{label, label_by, reason, settled, part_map, part_reasons: [{part_id,
+    reason}], additions: [{effect, summary}]}`` — the digest's compact part
+    map, who set the label and its reason (the owner's when the owner
+    overrode the derived label, as in the digest), how settled the judgment
+    is (``settled``, issue #248, as in the digest) plus what the digest leaves out: the one-sentence
     reason of every part that is not equivalent (or an omission that is not
     neutral) and the summary of every addition, each with its token. ``None``
     when the text is not judged.
@@ -417,6 +419,7 @@ def excerpt_vs_standard(entry: Any) -> dict[str, Any] | None:
         "label": vs["label"],
         "label_by": label_by(vs),
         "reason": label_reason(vs),
+        "settled": settled_of(vs),
         "part_map": part_map(vs),
         "part_reasons": [
             {"part_id": p.get("part_id"), "reason": p["reason"]}

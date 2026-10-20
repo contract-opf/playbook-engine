@@ -294,6 +294,12 @@
         "label_by": {
           "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
           "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+        },
+        "settled": {
+          "agreed": "an independent blind check reached the same label and parts as the judgment",
+          "adjudicated": "the blind check disagreed and a fresh agent decided: the judgment shown is that decision, so this label was contested and deserves more scrutiny",
+          "unchecked": "no completed blind check (none yet, or a disagreement still awaiting adjudication): weaker evidence than agreed or adjudicated",
+          "owner": "the owner set or corrected the judgment; it is never blind-checked"
         }
       },
       "clauses": [
@@ -341,6 +347,7 @@
               "part_map": null,
               "additions": null,
               "reason": null,
+              "settled": null,
               "ref": {
                 "document_id": "deal-a",
                 "version": 3,
@@ -366,6 +373,7 @@
               "part_map": null,
               "additions": null,
               "reason": null,
+              "settled": null,
               "ref": {
                 "document_id": "deal-d",
                 "version": 3,
@@ -390,6 +398,7 @@
               "part_map": null,
               "additions": null,
               "reason": null,
+              "settled": null,
               "ref": {
                 "document_id": "deal-c",
                 "version": 3,
@@ -414,6 +423,7 @@
               "part_map": null,
               "additions": null,
               "reason": null,
+              "settled": null,
               "ref": {
                 "document_id": "deal-a",
                 "version": 2,

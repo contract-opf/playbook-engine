@@ -24,13 +24,40 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.6.json` | `03d9ea649485d25ef3983d56e7e34a5329ca28df5a4985ee987e1c6872352f8a` |
-| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `ec1fc084aa5ab6dc4683758233a49c7c6635ebb81a23994f7822b182022ccbd5` |
+| `playbook.schema-0.6.json` | `115fe336ad18c67bc122450a40a454e5dbfa978162c463ba2a4c1e354b661585` |
+| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `9f47774ac127443ec1e1f52b5db455b48b7b68c38031aa1292211b099a21663f` |
 
 Current `DIGEST_VERSION`: **5** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-20 — OPF 0.6 / digest 5: how settled each judgment is (issue #248)
+
+In-place change to the unfrozen `playbook.schema-0.6.json` (epic #245; 0.6 has
+no consumer yet); `digest_version` stays "5". No change to the evidence: the
+new value is derived from `vs_standard.basis` and `vs_standard.check`, never
+stored.
+
+- **`settled`** — `agreed` | `adjudicated` | `unchecked` | `owner`: `owner`
+  when `basis` is `owner` (whatever its `check` says), else `adjudicated`
+  when `check.adjudicated` is true, `agreed` when `check.agreed` is true,
+  `unchecked` otherwise (no check, or a disagreement awaiting adjudication).
+- **Digest**: required `settled` (the value, or null when the text is not
+  judged) on `digestVariant`, `digestRefusedAsk` and `digestChangedOpening`;
+  required `settled_counts` (`{agreed, adjudicated, unchecked, owner}`,
+  summing to `n_texts`) on the collapsed `digestEquivalentVariants` entry;
+  `part_map_legend` gains a required `settled` object stating the four
+  values.
+- **Dossiers**: a dossier excerpt's non-null `vs_standard` gains a required
+  `settled`.
+- **Validator**: the digest and the dossiers are already recomputed from the
+  document and compared whole, so a wrong or missing `settled` /
+  `settled_counts` is rejected with them.
+- Conformance vectors regenerated (every judged digest entry and excerpt now
+  carries `settled`); new vector 011 pins all four outcomes on each carrier, a
+  disagreement awaiting adjudication read as `unchecked`, an owner judgment
+  (which carries no check) read as `owner`, and the collapsed entry's counts.
 
 ### 2026-10-18 — OPF 0.6 / digest 5: signing dates (issue #247)
 

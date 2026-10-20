@@ -5601,7 +5601,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-18T17:44:25+00:00",
+      "generated_at": "2026-10-20T19:19:59+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5654,7 +5654,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-18T17:44:25+00:00",
+        "x_signed_at": "2026-10-20T19:20:01+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -6045,7 +6045,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-18T17:44:24+00:00",
+    "generated_at": "2026-10-20T19:19:58+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -6087,6 +6087,12 @@
       "label_by": {
         "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
         "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+      },
+      "settled": {
+        "agreed": "an independent blind check reached the same label and parts as the judgment",
+        "adjudicated": "the blind check disagreed and a fresh agent decided: the judgment shown is that decision, so this label was contested and deserves more scrutiny",
+        "unchecked": "no completed blind check (none yet, or a disagreement still awaiting adjudication): weaker evidence than agreed or adjudicated",
+        "owner": "the owner set or corrected the judgment; it is never blind-checked"
       }
     },
     "clauses": [
@@ -6140,6 +6146,7 @@
             ],
             "additions": [],
             "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6204,6 +6211,12 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 0,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
             "first_signed": null,
             "last_signed": null,
             "exemplars": [
@@ -6239,6 +6252,7 @@
             ],
             "additions": [],
             "reason": "No notice before a compelled disclosure.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -6307,6 +6321,7 @@
             ],
             "additions": [],
             "reason": "Only public announcements about the discussions are restricted.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -6370,6 +6385,12 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
             "first_signed": null,
             "last_signed": null,
             "exemplars": [
@@ -6491,6 +6512,7 @@
             ],
             "additions": [],
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "delta-ventures",
               "version": 2,
@@ -6518,6 +6540,7 @@
             ],
             "additions": [],
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6589,6 +6612,7 @@
             ],
             "additions": [],
             "reason": "Earlier understandings are not displaced.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6660,6 +6684,7 @@
             ],
             "additions": [],
             "reason": "The four exclusions are the same but the recipient no longer bears the burden of proving one.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6687,6 +6712,7 @@
             ],
             "additions": [],
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "beta-industries",
               "version": 2,
@@ -6713,6 +6739,7 @@
             ],
             "additions": [],
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -6825,6 +6852,7 @@
             ],
             "additions": [],
             "reason": "Substitutes New York law for our chosen Delaware law.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "delta-ventures",
               "version": 2,
@@ -6852,6 +6880,7 @@
             ],
             "additions": [],
             "reason": "Substitutes California law for our chosen Delaware law.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6923,6 +6952,7 @@
             ],
             "additions": [],
             "reason": "A weaker basis for injunctive relief.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6976,6 +7006,7 @@
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 3,
@@ -7002,6 +7033,7 @@
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -7151,6 +7183,12 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
             "first_signed": null,
             "last_signed": null,
             "exemplars": [
@@ -7231,6 +7269,7 @@
               "+"
             ],
             "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -7301,6 +7340,7 @@
             ],
             "additions": [],
             "reason": "When a notice takes effect is left undefined.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7365,6 +7405,12 @@
             "n_texts": 4,
             "n_from_standard": 0,
             "n_unchanged": 4,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 4,
+              "owner": 0
+            },
             "first_signed": "2022-03",
             "last_signed": "2022-11",
             "exemplars": [
@@ -7524,6 +7570,7 @@
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 2,
@@ -7636,6 +7683,7 @@
             ],
             "additions": [],
             "reason": "No reformation of an unenforceable provision.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7707,6 +7755,7 @@
             ],
             "additions": [],
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7734,6 +7783,7 @@
             ],
             "additions": [],
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -7804,6 +7854,7 @@
             ],
             "additions": [],
             "reason": "Survival after termination is implied rather than stated.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7830,6 +7881,7 @@
             ],
             "additions": [],
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 3,
@@ -7857,6 +7909,7 @@
             ],
             "additions": [],
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -7925,6 +7978,7 @@
             ],
             "additions": [],
             "reason": "No right to end the agreement early on notice.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -8022,6 +8076,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8063,6 +8118,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No notice before a compelled disclosure.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8085,6 +8141,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8121,6 +8178,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Only public announcements about the discussions are restricted.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8162,6 +8220,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8216,6 +8275,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8238,6 +8298,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8279,6 +8340,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Earlier understandings are not displaced.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8320,6 +8382,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8342,6 +8405,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8401,6 +8465,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes New York law for our chosen Delaware law.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8423,6 +8488,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes California law for our chosen Delaware law.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8464,6 +8530,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "A weaker basis for injunctive relief.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8567,6 +8634,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same disclaimer of any warranty of accuracy or completeness without the AS IS label.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8603,6 +8671,7 @@
             "label": "mixed",
             "label_by": "parts",
             "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8649,6 +8718,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "When a notice takes effect is left undefined.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8690,6 +8760,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8800,6 +8871,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No reformation of an unenforceable provision.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8841,6 +8913,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8863,6 +8936,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8904,6 +8978,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8926,6 +9001,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8967,6 +9043,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No right to end the agreement early on notice.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -9295,11 +9372,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:7718da1f4007e106291e4c2fe1cc8ab7a92b0af326f016288a5be779ccd1950a",
+    "content_hash": "sha256:69f9735ec53fe48bf8db07fd10236f36ef56daf5eed2311aa0abb6326f5cfe1a",
     "section_digests": {
       "evidence": "sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7",
-      "posture": "sha256:68d521c23ad9a1723494d9d594e6bafdc19dbc66bee6c0171ec62525267017cb",
-      "floor": "sha256:e82aafd549a0f0809a738e025f84f4c986265cd7420565826dca174c0fdc81cf"
+      "posture": "sha256:d6ad8df60e6976152aba5216a3e6bc0a261de23701d7c2382444ee557471e8fb",
+      "floor": "sha256:963cc8f529279fd6d46f4d542a3209ba5526c893fe050016ecdaf705629001ed"
     }
   }
 }

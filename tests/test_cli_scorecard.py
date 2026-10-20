@@ -155,6 +155,13 @@ _FIELD_NAMES = frozenset(
         "adjudicated",
         "disputed",
         "unchecked",
+        # Issue #248: how settled each judgment is (agreed / adjudicated /
+        # unchecked / owner), per equivalence row and over the uncapped digest.
+        "settled",
+        "settled_not_listed",
+        "settled_unreconciled",
+        "owner",
+        "total",
         # Issue #247: signed deals dated, by basis.
         "signed_on",
         "dated",
@@ -280,7 +287,23 @@ _NDA_FLAT_KEYS = frozenset(
                 "adjudicated",
                 "disputed",
                 "unchecked",
+                *(f"settled.{state}" for state in ("agreed", "adjudicated", "unchecked", "owner")),
             )
+        ),
+        *(
+            f"digest.settled.{group}.{state}"
+            for group in ("signed_variants", "refused_asks", "changed_openings", "total")
+            for state in ("agreed", "adjudicated", "unchecked", "owner")
+        ),
+        *(
+            f"digest.settled_not_listed.{group}.{state}"
+            for group in ("signed_variants", "refused_asks", "changed_openings")
+            for state in ("agreed", "adjudicated", "unchecked", "owner")
+        ),
+        *(
+            f"digest.settled_unreconciled.{group}.{state}"
+            for group in ("signed_variants", "refused_asks", "changed_openings")
+            for state in ("agreed", "adjudicated", "unchecked", "owner")
         ),
         "dropped_observations.by_reason.survives_in_terminal",
         "dropped_observations.count",
@@ -401,7 +424,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 8
+    assert card["scorecard_version"] == 9
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,

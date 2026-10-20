@@ -1502,7 +1502,7 @@ with how many were conceded from our standard and how many signed as proposed;
 the variants judged equivalent to our standard collapse into one entry), the
 refused asks and the openings not signed as proposed, grouped by exact
 normalization with distinct-deal counts and citations, plus the clause types
-with no evidence at all; verdict-free except the one judged `vs_standard` judgment on each text, carried as its label plus a compact part map (one token per part of our standard, one per addition) and a one-sentence reason; target ~40K tokens). There is no standalone digest file.
+with no evidence at all; verdict-free except the one judged `vs_standard` judgment on each text, carried as its label plus a compact part map (one token per part of our standard, one per addition) a one-sentence reason and `settled`, how settled the judgment is (`agreed`, `adjudicated`, `unchecked` or `owner`, derived from its basis and blind check; the collapsed equivalent entry carries `settled_counts`); target ~40K tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on
 disk** — the page contains it, never replaces it. A consumer extracts the
