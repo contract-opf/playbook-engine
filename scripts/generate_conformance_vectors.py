@@ -1598,6 +1598,9 @@ def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
     # 010 - signing dates: signed_on / signed_on_basis on documents and
     # precedent, first_signed / last_signed on groups and clauses.
     vectors.append(build_vector_010())
+
+    # 011 - how settled each judgment is (issue #248).
+    vectors.append(build_vector_011())
     return vectors
 
 
@@ -1737,6 +1740,190 @@ def build_vector_010() -> tuple[str, dict[str, Any]]:
             "(the ask refused in deals c and e is dated by those deals' records: 2023-09 "
             "to 2024-11, and deal-f's refused ask, from a signed deal with no date, adds "
             "none).",
+            doc,
+        ),
+    )
+
+
+def _settled_vs(label: str, *, basis: str = "agent", check: str | None = None) -> dict[str, Any]:
+    """A judgment of *label* in one of the states a producer reaches (issue #248).
+
+    ``check``: ``None`` (never checked), ``"agreed"`` (the blind check reached the
+    same label and parts), ``"adjudicated"`` (it disagreed on the label and a
+    fresh agent decided) or ``"disputed"`` (it disagreed and awaits
+    adjudication). ``basis="owner"`` is what ``playbook project`` writes for an
+    owner's correction: it carries no check.
+    """
+    checks: dict[str, dict[str, Any]] = {
+        "agreed": {"agreed": True, "label_agreed": True, "parts_agreed": True},
+        "adjudicated": {"agreed": False, "label_agreed": False, "parts_agreed": True},
+        "disputed": {"agreed": False, "label_agreed": False, "parts_agreed": True},
+    }
+    vs = _vs(label)
+    assert vs is not None
+    vs["basis"] = basis
+    vs["check"] = (
+        None
+        if check is None
+        else {**checks[check], "by": "claude-opus-5-5", "adjudicated": check == "adjudicated"}
+    )
+    return vs
+
+
+def build_vector_011() -> tuple[str, dict[str, Any]]:
+    tid = "assignment"
+    t = {
+        "less": "Either party may assign this Agreement to anyone at any time.",
+        "mixed": "Either party may assign this Agreement to an affiliate on notice.",
+        "diff": "Assignment requires a payment of one million dollars.",
+        "more": "Neither party may assign this Agreement even with consent.",
+        "eq1": "Either party may assign this Agreement to an affiliate.",
+        "eq2": "An affiliate assignment by either party is permitted.",
+        "eq3": "Assignment to an affiliate by either party is allowed.",
+        "eq4": "Either party may transfer this Agreement to an affiliate.",
+        "ask1": "Either party may assign this Agreement freely.",
+        "ask2": "Assignment is governed by the parties' later written agreement.",
+        "open": "Neither party may assign this Agreement to anyone.",
+    }
+    precedent = [
+        _prec("deal-a", tid, signed_text=_STANDARD_TEXT, standard=True),
+        _prec(
+            "deal-b",
+            tid,
+            signed_text=t["less"],
+            signed_vs=_settled_vs("less_protective", check="agreed"),
+        ),
+        _prec(
+            "deal-c",
+            tid,
+            signed_text=t["mixed"],
+            signed_vs=_settled_vs("mixed", check="adjudicated"),
+            opening_text=_STANDARD_TEXT,
+            rounds=1,
+        ),
+        _prec(
+            "deal-d",
+            tid,
+            signed_text=t["diff"],
+            signed_vs=_settled_vs("different_concept", check="disputed"),
+            paper="theirs",
+        ),
+        _prec(
+            "deal-e",
+            tid,
+            signed_text=t["more"],
+            signed_vs=_settled_vs("more_protective", basis="owner"),
+            paper="theirs",
+        ),
+        _prec(
+            "deal-f",
+            tid,
+            signed_text=t["eq1"],
+            signed_vs=_settled_vs("equivalent", check="agreed"),
+            refused=[(t["ask1"], 2)],
+            refused_vs=_settled_vs("more_protective", check="adjudicated"),
+            rounds=1,
+        ),
+        _prec(
+            "deal-g",
+            tid,
+            signed_text=t["eq2"],
+            signed_vs=_settled_vs("equivalent", check="agreed"),
+            opening_text=t["open"],
+            opening_vs=_settled_vs("mixed"),
+            opened_with="non_standard",
+            rounds=1,
+            paper="theirs",
+        ),
+        _prec(
+            "deal-h",
+            tid,
+            signed_text=t["eq3"],
+            signed_vs=_settled_vs("equivalent", check="adjudicated"),
+            refused=[(t["ask2"], 2)],
+            rounds=1,
+        ),
+        _prec(
+            "deal-i",
+            tid,
+            signed_text=t["eq4"],
+            signed_vs=_settled_vs("equivalent", basis="owner"),
+        ),
+    ]
+    doc = _base_v06(
+        clauses=[
+            {
+                "id": f"clause.{tid}",
+                "taxonomy_id": tid,
+                "title": "Assignment",
+                "our_standard": {
+                    "text": _STANDARD_TEXT,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "9",
+                    },
+                },
+            }
+        ],
+        precedent=precedent,
+        documents=[
+            _deal(
+                f"deal-{c}",
+                signed_version=3,
+                provenance="counterparty_paper" if c in "deg" else "our_paper",
+            )
+            for c in "abcdefghi"
+        ],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+    )
+    digest = build_digest_v5(doc)
+    entry = digest["clauses"][0]
+    # Independent expectations, written down from the fixture and not read from
+    # the engine: the order is the label tiers (less/mixed in grouping-key order,
+    # different_concept, more_protective, the collapsed equivalent entry last).
+    settled = [v.get("settled", "collapsed") for v in entry["signed_variants"]]
+    assert settled == ["adjudicated", "agreed", "unchecked", "owner", "collapsed"], settled
+    assert entry["signed_variants"][-1]["settled_counts"] == {
+        "agreed": 2,
+        "adjudicated": 1,
+        "unchecked": 0,
+        "owner": 1,
+    }
+    assert [a["settled"] for a in entry["refused_asks"]] == [None, "adjudicated"]
+    assert [o["settled"] for o in entry["changed_openings"]] == ["unchecked"]
+    assert set(digest["part_map_legend"]["settled"]) == {
+        "agreed",
+        "adjudicated",
+        "unchecked",
+        "owner",
+    }
+    dossier = build_derived_sections(doc)["dossiers"][f"clause.{tid}"]
+    assert [x["vs_standard"]["settled"] for x in dossier["excerpts"]] == [
+        "adjudicated",
+        "unchecked",
+    ]
+    return (
+        "011-settled-outcomes",
+        _vector_v06(
+            "settled-outcomes",
+            "How settled each judged text's vs_standard is (OPF-SPEC §3.5.6, §3.12.2, "
+            "§3.12.3, issue #248): derived from the judgment's basis and blind check, "
+            "never stored on the evidence. Four signed variants and the collapsed "
+            "equivalent entry, in tier order: a mixed text the check disagreed on and a "
+            "fresh agent decided (settled adjudicated), a less_protective text whose "
+            "check agreed (agreed), a different_concept text whose check disagreed and "
+            "still awaits adjudication (read as unchecked: nothing is settled yet), a "
+            "more_protective text the owner set (owner; basis owner carries no check). "
+            "The four equivalent texts collapse into one entry whose settled_counts is "
+            "2 agreed, 1 adjudicated, 0 unchecked, 1 owner, summing to n_texts 4; it "
+            "carries no settled of its own. Of the two refused asks one is adjudicated "
+            "and one is not judged (settled null); the one changed opening was never "
+            "checked (unchecked). Each judged digest entry carries settled beside its "
+            "label and part map, part_map_legend.settled states the four values, and "
+            "the dossier's two excerpts (the concession whose judgment was adjudicated, "
+            "the changed opening that was unchecked) carry settled in their "
+            "vs_standard.",
             doc,
         ),
     )

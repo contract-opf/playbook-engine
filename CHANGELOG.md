@@ -10,6 +10,30 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **OPF 0.6 / digest 5: how settled each judgment is (issue #248, epic
+  #245).** A contested label deserves more scrutiny at review time, so the
+  model-facing projections now say how settled each `vs_standard` judgment
+  is. `settled` is `agreed` (the independent blind check reached the same
+  label and parts), `adjudicated` (the check disagreed and a fresh agent
+  decided), `unchecked` (no completed check, including a disagreement still
+  awaiting adjudication) or `owner` (the owner set or corrected it; an owner
+  judgment is never checked, and wins over any check on file). It is derived
+  from the basis and the check, never stored on the evidence. Every
+  non-equivalent signed variant, refused ask and changed opening in the digest
+  carries it (null when the text is unjudged), the collapsed equivalent entry
+  carries `settled_counts` (how many of its texts are in each state), each
+  dossier excerpt's `vs_standard` carries it, and `part_map_legend.settled`
+  says what the values mean. `playbook scorecard` (v9) reports the judged
+  texts by outcome per role (`equivalence.*.settled`), the same outcomes
+  counted over the uncapped digest (`digest.settled`) and, per list, the
+  judged texts the digest leaves out for a named reason, counted directly from
+  the precedent records (`digest.settled_not_listed`: the last draft of an
+  unsigned deal, and an opening that repeats one of its own deal's refused
+  asks, which the digest lists as a refused ask). What remains after those
+  (`digest.settled_unreconciled`, equivalence minus digest minus not listed)
+  must be 0 in every cell; a nonzero or negative value is a bug. Converted in place:
+  `spec/playbook.schema-0.6.json` and `spec/conformance/0.6/` (new vector 011).
+
 - **OPF 0.6 / digest 5: when each deal was signed, recorded as a fact (issue
   #247, epic #245).** The toaster can weigh recency, and the engine can tell
   which of our forms was current, only if every deal carries the date it was

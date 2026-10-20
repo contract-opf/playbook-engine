@@ -75,7 +75,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,6 +94,7 @@ __all__ = [
     "ROLE_REFUSED",
     "ROLE_SIGNED",
     "STANDARD_PART_SEPARATOR",
+    "SETTLED",
     "STATUSES",
     "LABEL_BY_OWNER",
     "LABEL_BY_PARTS",
@@ -103,6 +104,7 @@ __all__ = [
     "agreement_signature",
     "canonical_judgment",
     "check_owner_label",
+    "check_state",
     "collect_subjects",
     "derive_label",
     "equivalence_key",
@@ -114,6 +116,8 @@ __all__ = [
     "part_id_of",
     "part_ids_of",
     "part_map",
+    "settled_counts",
+    "settled_of",
     "slot_key",
     "standard_part_texts",
     "standard_parts",
@@ -181,7 +185,27 @@ PART_MAP_LEGEND: dict[str, dict[str, str]] = {
         "owner": "the owner set the label over the judged part map and additions, which may "
         "imply another label; reason is the owner's and wins",
     },
+    "settled": {
+        "agreed": "an independent blind check reached the same label and parts as the judgment",
+        "adjudicated": "the blind check disagreed and a fresh agent decided: the judgment shown "
+        "is that decision, so this label was contested and deserves more scrutiny",
+        "unchecked": "no completed blind check (none yet, or a disagreement still awaiting "
+        "adjudication): weaker evidence than agreed or adjudicated",
+        "owner": "the owner set or corrected the judgment; it is never blind-checked",
+    },
 }
+
+#: How settled a judgment is, derived (never stored) from ``basis`` and
+#: ``check`` and carried by every model-facing projection (digest, dossiers):
+#: ``owner`` (an owner's correction wins over any check), ``adjudicated`` (the
+#: blind check disagreed and a fresh agent decided), ``agreed`` (the blind
+#: check reached the same label and parts) or ``unchecked`` (no completed
+#: check: none recorded yet, or a disagreement still awaiting adjudication).
+SETTLED_OWNER = "owner"
+SETTLED_ADJUDICATED = "adjudicated"
+SETTLED_AGREED = "agreed"
+SETTLED_UNCHECKED = "unchecked"
+SETTLED = (SETTLED_AGREED, SETTLED_ADJUDICATED, SETTLED_UNCHECKED, SETTLED_OWNER)
 
 #: ``label_by`` of a judged text: the label is derived from its parts, or the
 #: owner set it over them (``owner_label``).
@@ -353,6 +377,46 @@ def label_reason(vs: Mapping[str, Any]) -> Any:
     if owner is not None and isinstance(owner.get("reason"), str):
         return owner["reason"]
     return vs.get("reason")
+
+
+def check_state(vs: Mapping[str, Any]) -> str:
+    """The check state of judgment *vs*: one of :data:`SETTLED` or ``"disputed"``.
+
+    ``disputed`` is a judgment whose blind check disagreed and that still
+    awaits adjudication; the digest and the dossiers read it as ``unchecked``
+    (:func:`settled_of`), the Review tab shows it as its own state.
+    """
+    if vs.get("basis") == BASIS_OWNER:
+        return SETTLED_OWNER
+    check = vs.get("check")
+    if not isinstance(check, Mapping):
+        return SETTLED_UNCHECKED
+    if check.get("adjudicated") is True:
+        return SETTLED_ADJUDICATED
+    return SETTLED_AGREED if check.get("agreed") is True else "disputed"
+
+
+def settled_of(vs: Mapping[str, Any]) -> str:
+    """How settled judgment *vs* is: one of :data:`SETTLED` (see there).
+
+    A pure function of ``basis`` and ``check`` (a fact is recorded once, its
+    meaning derived): an owner-basis judgment is ``owner`` whatever its check
+    says, a disputed one (``agreed`` false, not yet adjudicated) is
+    ``unchecked``.
+    """
+    state = check_state(vs)
+    return SETTLED_UNCHECKED if state == "disputed" else state
+
+
+def settled_counts(states: Iterable[Any]) -> dict[str, int]:
+    """How many of *states* (``settled_of`` values) are each :data:`SETTLED`
+    state — every state present, in :data:`SETTLED` order; anything else
+    (an unjudged ``None``) is not counted."""
+    counts = dict.fromkeys(SETTLED, 0)
+    for state in states:
+        if state in counts:
+            counts[state] += 1
+    return counts
 
 
 def agreement_signature(judgment: Mapping[str, Any]) -> frozenset[tuple[str, str, str]]:
@@ -811,7 +875,10 @@ def summarize(
     two roles counts once in each), ``unjudged``, and the verdict-state counts
     ``drafted`` (every judgment), ``checked`` (a check is recorded),
     ``agreed``, ``adjudicated``, ``unchecked`` and — for a verdict that
-    disagreed with its check and still awaits adjudication — ``disputed``.
+    disagreed with its check and still awaits adjudication — ``disputed``;
+    ``settled`` counts the same texts by the ``settled`` outcome the digest
+    and the dossiers carry (:func:`settled_of`: ``agreed``, ``adjudicated``,
+    ``unchecked`` including disputed, ``owner``; the four sum to ``drafted``).
     ``totals`` counts distinct texts across roles; ``by_label`` is the label
     histogram of those; ``agreement_rate`` is agreed / checked, ``None`` when
     nothing is checked, and ``label_agreement_rate`` / ``parts_agreement_rate``
@@ -828,6 +895,7 @@ def summarize(
             "agreed": set(),
             "adjudicated": set(),
             "disputed": set(),
+            **{f"settled_{state}": set() for state in SETTLED},
         }
         for r in ROLES
     }
@@ -845,6 +913,7 @@ def summarize(
             continue
         bucket["labelled"].add(key)
         judgments[key] = vs
+        bucket[f"settled_{settled_of(vs)}"].add(key)
         check = vs.get("check")
         if isinstance(check, dict):
             bucket["checked"].add(key)
@@ -855,7 +924,7 @@ def summarize(
             else:
                 bucket["disputed"].add(key)
 
-    def _row(sets: dict[str, set[str]]) -> dict[str, int]:
+    def _row(sets: dict[str, set[str]]) -> dict[str, Any]:
         eligible, labelled, checked = (
             len(sets["eligible"]),
             len(sets["labelled"]),
@@ -870,6 +939,10 @@ def summarize(
             "adjudicated": len(sets["adjudicated"]),
             "disputed": len(sets["disputed"]),
             "unchecked": labelled - checked,
+            # The digest's and the dossiers' ``settled`` outcome (an owner's
+            # judgment first, a disputed one counted unchecked); the four sum
+            # to ``drafted``.
+            "settled": {state: len(sets[f"settled_{state}"]) for state in SETTLED},
         }
 
     union: dict[str, set[str]] = {

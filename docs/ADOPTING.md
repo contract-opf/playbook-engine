@@ -165,7 +165,7 @@ the consuming model is shown a compact part map, so it does not redo the
 comparison on every review. It lets "the same concept phrased five ways"
 read as one thing instead of five. An independent model (`claude-opus-5-5`
 at `xhigh` effort) checks every drafted judgment blind, label and parts, and
-settles disagreements; nothing waits for you. Start from the labels that
+settles disagreements; nothing waits for you. The consuming model is told how settled each judgment is (`agreed`, `adjudicated` when the checker disagreed and a fresh agent decided, `unchecked`, or `owner`), so it can look harder at a contested label. Start from the labels that
 matter: `less_protective` and `mixed`. The Review tab of `index.html` lists
 exactly the judgments the consuming model is shown, worst first, each with
 its part map, Confirm / Change label / change one part (each change with a

@@ -52,10 +52,13 @@ from playbook_engine.deal_dates import signed_on_key
 from playbook_engine.equivalence import (
     LABEL_BY_OWNER,
     PART_MAP_LEGEND,
+    SETTLED,
     addition_map,
     label_by,
     label_reason,
     part_map,
+    settled_counts,
+    settled_of,
     standard_parts,
 )
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
@@ -148,11 +151,14 @@ def _judged(entry: Any) -> dict[str, Any] | None:
 
 def part_map_fields(entry: Any) -> dict[str, Any]:
     """The compact part map of a judged text (issue #243): ``{part_map,
-    additions, reason[, label_by]}`` — one token per part of our standard, one
-    token per addition (:data:`~playbook_engine.equivalence.PART_TOKENS`,
-    :data:`~playbook_engine.equivalence.ADDITION_TOKENS`) and the one-sentence
+    additions, reason, settled[, label_by]}`` — one token per part of our
+    standard, one token per addition
+    (:data:`~playbook_engine.equivalence.PART_TOKENS`,
+    :data:`~playbook_engine.equivalence.ADDITION_TOKENS`), the one-sentence
     reason — the owner's when the owner set the label, else the most important
-    difference; all ``None`` when the text is not judged. ``label_by: "owner"``
+    difference — and how settled the judgment is (issue #248:
+    ``agreed``, ``adjudicated``, ``unchecked`` or ``owner``, derived from its
+    basis and blind check); all ``None`` when the text is not judged. ``label_by: "owner"``
     is present only when the owner overrode the derived label
     (``owner_label``); absent, the label is derived from the parts (``parts``,
     the default the legend states), which saves a key on every other entry of
@@ -160,11 +166,12 @@ def part_map_fields(entry: Any) -> dict[str, Any]:
     dossiers."""
     vs = _judged(entry)
     if vs is None:
-        return {"part_map": None, "additions": None, "reason": None}
+        return {"part_map": None, "additions": None, "reason": None, "settled": None}
     out: dict[str, Any] = {
         "part_map": part_map(vs),
         "additions": addition_map(vs),
         "reason": label_reason(vs),
+        "settled": settled_of(vs),
     }
     if label_by(vs) == LABEL_BY_OWNER:
         out["label_by"] = LABEL_BY_OWNER
@@ -397,9 +404,10 @@ def _arrange_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     The slots of :func:`arrange_variant_slots`: the equivalent slot becomes
     ONE entry, ``{label: "equivalent", n_deals, n_texts, n_from_standard,
-    n_unchanged, last_signed, exemplars, precedent_ids}``: ``n_deals`` the
-    distinct deals across the groups, ``n_texts`` how many distinct texts
-    collapsed into it, ``exemplars`` the first :data:`_EQUIVALENT_EXEMPLARS`
+    n_unchanged, settled_counts, last_signed, exemplars, precedent_ids}``:
+    ``n_deals`` the distinct deals across the groups, ``n_texts`` how many
+    distinct texts collapsed into it, ``settled_counts`` how many of those
+    texts are in each ``settled`` state (issue #248, they sum to ``n_texts``), ``exemplars`` the first :data:`_EQUIVALENT_EXEMPLARS`
     groups' ``{text, ref}`` in group order. The digest cap applies to the
     result.
     """
@@ -417,6 +425,7 @@ def _arrange_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "n_texts": len(equivalent),
                 "n_from_standard": sum(v["n_from_standard"] for v in equivalent),
                 "n_unchanged": sum(v["n_unchanged"] for v in equivalent),
+                "settled_counts": settled_counts(v.get("settled") for v in equivalent),
                 "first_signed": _earliest([v.get("first_signed") for v in equivalent]),
                 "last_signed": _latest([v.get("last_signed") for v in equivalent]),
                 "exemplars": [
@@ -610,6 +619,40 @@ def build_digest_uncapped(playbook: dict[str, Any]) -> dict[str, Any]:
     (``playbook scorecard``) read it to total entries the cap may have dropped.
     """
     return _build_digest_at(playbook, None)
+
+
+def digest_settled_counts(digest: dict[str, Any]) -> dict[str, dict[str, int]]:
+    """Counts-only: judged texts of *digest* by ``settled`` outcome (issue #248).
+
+    ``{signed_variants, refused_asks, changed_openings, total}``, each
+    ``{agreed, adjudicated, unchecked, owner}`` over the digest's entries: an
+    entry counts once under its own ``settled``, a collapsed equivalent entry
+    once per text under its ``settled_counts``, and an unjudged entry
+    (``settled`` null) not at all. Pass the uncapped digest
+    (:func:`build_digest_uncapped`) to count what the cap may have dropped
+    too. Over a whole playbook, each list's counts equal the scorecard's
+    ``equivalence`` counts of the same role (``settled``) for the texts the
+    list holds.
+    """
+    out: dict[str, dict[str, int]] = {
+        name: dict.fromkeys(SETTLED, 0)
+        for name in ("signed_variants", "refused_asks", "changed_openings")
+    }
+    for clause in digest.get("clauses") or []:
+        if not isinstance(clause, dict):
+            continue
+        for name, counts in out.items():
+            for entry in clause.get(name) or []:
+                if not isinstance(entry, dict):
+                    continue
+                collapsed = entry.get("settled_counts")
+                if isinstance(collapsed, dict):
+                    for state in SETTLED:
+                        counts[state] += int(collapsed.get(state) or 0)
+                elif entry.get("settled") in counts:
+                    counts[entry["settled"]] += 1
+    out["total"] = {state: sum(out[name][state] for name in tuple(out)) for state in SETTLED}
+    return out
 
 
 def digest_token_estimate(digest: dict[str, Any]) -> int:

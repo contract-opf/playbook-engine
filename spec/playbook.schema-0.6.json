@@ -632,7 +632,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "digest_version 5 \u2014 the compact model-facing projection of the 0.6 evidence (playbook_engine/digest.py build_digest_v5): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v5(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map and one-sentence reason (issue #243) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
+      "description": "digest_version 5 \u2014 the compact model-facing projection of the 0.6 evidence (playbook_engine/digest.py build_digest_v5): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v5(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map, one-sentence reason (issue #243) and how settled it is (`settled`, issue #248) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
       "required": [
         "digest_version",
         "perspective",
@@ -736,10 +736,11 @@
           "required": [
             "part_map",
             "additions",
-            "label_by"
+            "label_by",
+            "settled"
           ],
           "additionalProperties": false,
-          "description": "What each part-map and addition token and each `label_by` value means (a constant, OPF-SPEC \u00a73.5.6, \u00a73.12.2).",
+          "description": "What each part-map and addition token, each `label_by` value and each `settled` value means (a constant, OPF-SPEC \u00a73.5.6, \u00a73.12.2).",
           "properties": {
             "part_map": {
               "type": "object",
@@ -754,6 +755,12 @@
               }
             },
             "label_by": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "settled": {
               "type": "object",
               "additionalProperties": {
                 "type": "string"
@@ -1285,6 +1292,7 @@
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1385,6 +1393,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -1399,6 +1423,7 @@
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1488,6 +1513,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -1815,6 +1856,7 @@
         "n_texts",
         "n_from_standard",
         "n_unchanged",
+        "settled_counts",
         "first_signed",
         "last_signed",
         "exemplars",
@@ -1878,6 +1920,35 @@
             "type": "string"
           },
           "minItems": 1
+        },
+        "settled_counts": {
+          "type": "object",
+          "required": [
+            "agreed",
+            "adjudicated",
+            "unchecked",
+            "owner"
+          ],
+          "additionalProperties": false,
+          "description": "How many of the `n_texts` collapsed texts are in each `settled` state (OPF-SPEC \u00a73.5.6, issue #248); the four counts sum to `n_texts`.",
+          "properties": {
+            "agreed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "adjudicated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unchecked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "owner": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -1893,6 +1964,7 @@
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1987,6 +2059,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -2255,12 +2343,13 @@
                 "label",
                 "label_by",
                 "reason",
+                "settled",
                 "part_map",
                 "part_reasons",
                 "additions"
               ],
               "additionalProperties": false,
-              "description": "The judgment of the text the excerpt's group stands for (the signed text of a signed variant, the opening of a changed opening, the ask of a refused ask): its label, who set it (`label_by`), its reason (the owner's when the owner set the label), part map, the reason of every part that is not equivalent or not a neutral omission, and every addition with its token (issue #243). Null when that text is not judged.",
+              "description": "The judgment of the text the excerpt's group stands for (the signed text of a signed variant, the opening of a changed opening, the ask of a refused ask): its label, who set it (`label_by`), its reason (the owner's when the owner set the label), how settled it is (`settled`), part map, the reason of every part that is not equivalent or not a neutral omission, and every addition with its token (issue #243). Null when that text is not judged.",
               "properties": {
                 "label": {
                   "enum": [
@@ -2336,6 +2425,15 @@
                       }
                     }
                   }
+                },
+                "settled": {
+                  "enum": [
+                    "agreed",
+                    "adjudicated",
+                    "unchecked",
+                    "owner"
+                  ],
+                  "description": "How settled the judgment is (`agreed`, `adjudicated`, `unchecked` or `owner`; as in the digest, issue #248). A dossier carries it only for a judged text."
                 }
               }
             }

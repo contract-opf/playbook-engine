@@ -52,7 +52,17 @@ from playbook_engine.canonicalize import canonicalize
 from playbook_engine.deal_dates import BASES as SIGNED_ON_BASES
 from playbook_engine.deal_dates import DEAL_DATE_KIND, coverage
 from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget, dossier_standard_text
-from playbook_engine.equivalence import ADDITION_TOKENS, PART_TOKENS
+from playbook_engine.equivalence import (
+    ADDITION_TOKENS,
+    PART_TOKENS,
+    ROLE_OPENING,
+    ROLE_SIGNED,
+    SETTLED,
+    is_eligible,
+    iter_slots,
+    settled_of,
+    slot_key,
+)
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
 from playbook_engine.equivalence import ROLES as EQUIVALENCE_ROLES
 from playbook_engine.equivalence import summarize as summarize_equivalence
@@ -66,6 +76,7 @@ from playbook_engine.observation_builder import (
     OUTCOME_OPENING,
 )
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
+from playbook_engine.precedent import normalize_variant_text
 
 __all__ = [
     "SCORECARD_FILENAME",
@@ -113,7 +124,14 @@ __all__ = [
 #:
 #: v8 (issue #247): the ``signed_on`` section (in-scope signed deals dated, by
 #: basis, and how many have no date).
-SCORECARD_VERSION = 8
+#:
+#: v9 (issue #248): ``equivalence`` rows gain ``settled`` (the judged texts by
+#: outcome: agreed, adjudicated, unchecked, owner) and the ``digest`` section
+#: gains ``settled`` (the same outcomes counted over the uncapped digest, per
+#: list and in total), ``settled_not_listed`` (per list, the judged texts of
+#: that role the digest leaves out for a named reason, counted directly) and
+#: ``settled_unreconciled`` (what is left after that; must be 0).
+SCORECARD_VERSION = 9
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -516,6 +534,7 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     from playbook_engine.digest import (  # noqa: PLC0415
         build_digest_uncapped,
+        digest_settled_counts,
         digest_token_estimate,
     )
 
@@ -557,8 +576,11 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
     # cap cannot hide a deal. Every deal sits in exactly one variant group.
     from_standard: int | None = 0
     unchanged: int | None = 0
+    settled: dict[str, dict[str, int]] | None
     try:
-        for c in build_digest_uncapped(playbook)["clauses"]:
+        uncapped = build_digest_uncapped(playbook)
+        settled = digest_settled_counts(uncapped)
+        for c in uncapped["clauses"]:
             for v in c["signed_variants"]:
                 from_standard = (from_standard or 0) + (_count(v.get("n_from_standard")) or 0)
                 unchanged = (unchanged or 0) + (_count(v.get("n_unchanged")) or 0)
@@ -566,6 +588,7 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         # A playbook too malformed to rebuild its digest: report nothing
         # rather than a half-total (the validator names the real problem).
         from_standard = unchanged = None
+        settled = None
     uncovered = digest.get("uncovered_clause_types")
     return {
         "digest_version": _label(digest.get("digest_version"), DIGEST_VERSIONS),
@@ -579,6 +602,7 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         "signed_variants_n_from_standard": from_standard,
         "signed_variants_n_unchanged": unchanged,
         "changed_openings": changed_openings,
+        "settled": settled,
         "uncovered_clause_types": len(uncovered) if isinstance(uncovered, list) else None,
     }
 
@@ -686,7 +710,8 @@ def _equivalence_section(playbook: dict[str, Any] | None, out_dir: Path) -> dict
     """The ``vs_standard`` verdicts of the playbook, by role (issue #240).
 
     Distinct texts, counts only: how many are eligible, drafted, checked,
-    agreed, adjudicated, still disputed and unchecked, per role and in total;
+    agreed, adjudicated, still disputed and unchecked, per role and in total,
+    plus the same texts by the ``settled`` outcome the digest carries (issue #248);
     the label histogram; the agreement rate (agreed over checked); and the
     checker model id(s) recorded in the verdict store.
     """
@@ -705,6 +730,119 @@ def _equivalence_section(playbook: dict[str, Any] | None, out_dir: Path) -> dict
             models[_label(check["by"], CHECKER_MODELS)] += 1
     summary["checker_models"] = _sorted_counts(models)
     return summary
+
+
+#: The digest list that holds the texts of each equivalence role.
+_DIGEST_LIST_OF_ROLE = {
+    "signed": "signed_variants",
+    "refused": "refused_asks",
+    "opening": "changed_openings",
+}
+
+
+def _unlisted_settled(
+    playbook: dict[str, Any], agreement_type_id: str, party: str | None
+) -> dict[str, dict[str, int]]:
+    """Judged texts the digest leaves out for the two named reasons, by list and outcome.
+
+    Counted straight from the precedent records by the producers' own rules,
+    never as a difference of counts. A text is counted only if no listed slot
+    of the same role carries it, since the scorecard counts distinct texts.
+
+    - ``signed_variants``: a signed-role text on a record that is not a
+      signed deal (the last draft of an unsigned deal).
+    - ``changed_openings``: an opening text that repeats one of its own
+      record's refused asks (``precedent.changed_opening_members`` drops it;
+      the digest lists the text as a refused ask).
+    """
+    evidence = playbook.get("evidence")
+    out: dict[str, dict[str, int]] = {
+        name: dict.fromkeys(SETTLED, 0) for name in _DIGEST_LIST_OF_ROLE.values()
+    }
+    if not isinstance(evidence, dict):
+        return out
+    excluded: dict[str, dict[str, set[str]]] = {
+        role: {state: set() for state in SETTLED} for role in _DIGEST_LIST_OF_ROLE
+    }
+    listed: dict[str, set[str]] = {role: set() for role in _DIGEST_LIST_OF_ROLE}
+    for slot in iter_slots(evidence):
+        if not is_eligible(slot, party):
+            continue
+        key = slot_key(slot, agreement_type_id, party)
+        vs = slot.entry.get("vs_standard")
+        if key is None or not isinstance(vs, dict):
+            continue
+        if slot.role == ROLE_SIGNED:
+            is_excluded = slot.record.get("signed") is not True
+        elif slot.role == ROLE_OPENING:
+            asks = slot.record.get("refused_asks")
+            own_asks = {
+                normalize_variant_text(a["text"], party=party)
+                for a in (asks if isinstance(asks, list) else [])
+                if isinstance(a, dict) and isinstance(a.get("text"), str)
+            }
+            text = slot.entry.get("text")
+            is_excluded = isinstance(text, str) and (
+                normalize_variant_text(text, party=party) in own_asks
+            )
+        else:
+            is_excluded = False
+        if is_excluded:
+            excluded[slot.role][settled_of(vs)].add(key)
+        else:
+            listed[slot.role].add(key)
+    for role, name in _DIGEST_LIST_OF_ROLE.items():
+        for state in SETTLED:
+            out[name][state] = len(excluded[role][state] - listed[role])
+    return out
+
+
+def _add_settled_not_listed(
+    playbook: dict[str, Any] | None,
+    digest: dict[str, Any] | None,
+    equivalence: dict[str, Any] | None,
+) -> None:
+    """Reconcile ``digest.settled`` with ``equivalence.by_role[*].settled`` (issue #248).
+
+    The digest lists a judged text only as a signed variant of a signed deal,
+    a refused ask, or a changed opening, so a role's judged texts are the
+    digest list's plus the ones it leaves out for a named reason:
+    ``settled_not_listed`` counts those directly (:func:`_unlisted_settled`):
+    the last draft of an unsigned deal, and an opening that repeats one of its
+    own deal's refused asks (the digest lists it as a refused ask).
+    ``settled_unreconciled`` is what is left, per list and outcome: the
+    equivalence count minus the digest count minus ``settled_not_listed``. It
+    must be 0 everywhere; a nonzero or negative value is a grouping or
+    projection bug, not a design choice.
+    """
+    if playbook is None or digest is None or equivalence is None:
+        return
+    settled = digest.get("settled")
+    by_role = equivalence.get("by_role")
+    agreement_type = playbook.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    if (
+        not isinstance(settled, dict)
+        or not isinstance(by_role, dict)
+        or not isinstance(agreement_type_id, str)
+    ):
+        return
+    not_listed = _unlisted_settled(playbook, agreement_type_id, perspective_party(playbook))
+    unreconciled: dict[str, dict[str, int]] = {}
+    for role, name in _DIGEST_LIST_OF_ROLE.items():
+        row = by_role.get(role)
+        row_settled = row.get("settled") if isinstance(row, dict) else None
+        listed = settled.get(name)
+        if not isinstance(row_settled, dict) or not isinstance(listed, dict):
+            return
+        unreconciled[name] = {
+            state: (_count(row_settled.get(state)) or 0)
+            - (_count(listed.get(state)) or 0)
+            - not_listed[name][state]
+            for state in listed
+        }
+    digest["settled_not_listed"] = not_listed
+    digest["settled_unreconciled"] = unreconciled
 
 
 def _record_texts(playbook: dict[str, Any]) -> set[str]:
@@ -786,6 +924,9 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
     observations = _read_jsonl(out_dir / "observations.jsonl")
     template_obs = _read_jsonl(out_dir / "template_observations.jsonl")
     quarantine = _read_json(out_dir / "quarantine.json")
+    digest_section = _digest_section(playbook)
+    equivalence_section = _equivalence_section(playbook, out_dir)
+    _add_settled_not_listed(playbook, digest_section, equivalence_section)
     return {
         "scorecard_version": SCORECARD_VERSION,
         "opf_version": (
@@ -804,8 +945,8 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         # ``over_one_third_below_half``.
         "opening_drift": _template_drift_section(playbook, field="opened_with", value="standard"),
         "dropped_observations": _dropped_section(playbook, manifest),
-        "digest": _digest_section(playbook),
-        "equivalence": _equivalence_section(playbook, out_dir),
+        "digest": digest_section,
+        "equivalence": equivalence_section,
         "queues": _queues_section(out_dir),
         "dossiers": _dossiers_section(playbook),
     }
