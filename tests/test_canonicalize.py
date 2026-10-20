@@ -39,7 +39,7 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.5",
+        "opf_version": "0.6",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
@@ -258,7 +258,7 @@ def test_section_digest_stable_across_key_order() -> None:
 
 def test_compute_section_digests_returns_all_three() -> None:
     digests = compute_section_digests(_minimal_doc())
-    # OPF 0.5 has no curation section (issue #233), so no fourth digest.
+    # OPF 0.6 has no curation section (issue #233), so no fourth digest.
     assert set(digests.keys()) == {"evidence", "posture", "floor"}
     for h in digests.values():
         assert _HASH_RE.match(h)

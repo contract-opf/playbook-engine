@@ -250,7 +250,7 @@ populate the config yourself:**
    block (issue #212) so the assembled playbook actually carries whose "us"
    it's reviewed as — a downstream consumer that renders a "from OUR
    perspective" affordance has nothing to key off of otherwise. `party` alone
-   is not enough: `spec/playbook.schema-0.5.json` requires `party` AND
+   is not enough: `spec/playbook.schema-0.6.json` requires `party` AND
    `counterparty_type` together or the whole `perspective` object is dropped
    (see `playbook_engine/config.py`'s `PerspectiveConfig`).
    - `perspective.party`: your own name — normally the same value as
@@ -1004,7 +1004,7 @@ make docker-run CORPUS=./corpus OUT=./out \
   playbook supplies precedent. Every clause's deviation is the deterministic
   standard check (its text matches our template clause → `none`, otherwise
   `substantive`), and `project` reads no stance, tolerance or fallback out of
-  it. `project` emits OPF 0.5, the one format the engine reads and writes (no
+  it. `project` emits OPF 0.6, the one format the engine reads and writes (no
   version flag): no stance at all — `evidence.precedent` holds one
   verdict-free record per (deal, clause) (what the deal signed, whether that
   is our standard, whether the clause moved, the asks refused before
@@ -1030,6 +1030,17 @@ make docker-run CORPUS=./corpus OUT=./out \
   looping until `pending.jsonl` is empty. See REFERENCE.md § "Equivalence".
   Each text is judged ONCE, however many deals and roles carry it, and
   never by deal or paper side.
+- **Signing date** (`kind: deal_date`): for an executed copy whose preamble
+  and signature block the engine could not date on its own (two dates, or a
+  numeric date that reads two ways such as `03/04/2021`), say when the deal
+  was signed from the date passages the item shows, or `null` when they do
+  not say. Answer `{"signed_on": "YYYY-MM-DD" | "YYYY-MM" | null, "basis":
+  "document_text" | "signature_block" | null, "quote": "<the words, copied
+  exactly from that source's passages>" | null}`. A date you cannot quote
+  from the passages is refused by `judge-apply`, and an invented date is the
+  one wrong answer: `null` sends the engine on to the file name and the file's
+  own metadata. These are queued by `judge` after mining, in the same round
+  as the others. See REFERENCE.md § "Signing date".
 
 **The blind check (Step 6b).** Every drafted equivalence verdict is then
 checked by a separate agent pinned to `claude-opus-5-5` at `xhigh` effort
@@ -1485,7 +1496,7 @@ Writes exactly **one** human-readable artifact, self-contained, no network
   treat anything leaving the org as needing its own review.
 
 The digest — the model-facing projection — is the `digest` section inside
-`playbook.opf.json` (for a 0.5 playbook, `digest_version` 4: per clause our
+`playbook.opf.json` (for a 0.6 playbook, `digest_version` 5: per clause our
 standard, how many deals opened with it and kept it, the signed variants (each
 with how many were conceded from our standard and how many signed as proposed;
 the variants judged equivalent to our standard collapse into one entry), the

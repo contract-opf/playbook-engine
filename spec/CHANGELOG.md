@@ -24,13 +24,47 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.5.json` | `f09c1b7abc08c14b80f7f2b8d572fd5cf26d9491a0566e27311387af960e6657` |
-| `spec/conformance/0.5/` (manifest.json + vectors/*.json, concatenated) | `79cb9f0b4b01b4dc914258ff530a5a5aa22d1b9bf17dd54e4663a16a796fb308` |
+| `playbook.schema-0.6.json` | `03d9ea649485d25ef3983d56e7e34a5329ca28df5a4985ee987e1c6872352f8a` |
+| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `ec1fc084aa5ab6dc4683758233a49c7c6635ebb81a23994f7822b182022ccbd5` |
 
-Current `DIGEST_VERSION`: **4** (`playbook_engine/digest.py`) — the only
+Current `DIGEST_VERSION`: **5** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-18 — OPF 0.6 / digest 5: signing dates (issue #247)
+
+New schema file `playbook.schema-0.6.json` replaces `playbook.schema-0.5.json`
+(deleted) and `spec/conformance/0.6/` replaces `0.5/`, following the 0.5
+pattern; the reference engine, validator, `playbook precedent` and
+`find_precedent()` support 0.6 only, and a 0.5 document is rejected as an
+unsupported `opf_version`. `digest_version` is "5".
+
+- **`corpus.documents[].signed_on`** (`YYYY-MM-DD`, `YYYY-MM` or null) and
+  **`signed_on_basis`** (`document_text` | `signature_block` | `filename` |
+  `file_metadata` | null; non-null exactly when `signed_on` is), both required
+  on every in-scope document (null when the date is unknown, so "never
+  recorded" is distinguishable from "unknown") and absent on an out-of-scope
+  document. `$defs.signedOn` /
+  `signedOnOrNull` (pattern `^\d{4}-\d{2}(-\d{2})?$`).
+- **`evidence.precedent[].signed_on`** is required (nullable) and replaces the
+  optional `signed_at`; the `YYYY-Qn` quarter form is removed.
+  `provenance_index.documents[].signed_at` is now `signed_on`.
+- **Digest 5**: `first_signed` and `last_signed` (`YYYY-MM`,
+  `$defs.digestMonth` / `digestMonthOrNull`) on every signed variant, the
+  collapsed equivalent entry, every refused-ask group and every clause;
+  `digest.corpus.first_signed` / `last_signed` are months too. Ordering keys
+  that used `signed_at` use `signed_on` (a month sorts before every day in it).
+- **New validator MUSTs**: both keys are present on every in-scope document
+  (null when unknown); `signed_on` is a real calendar date or month with a
+  year in 1980-2099; `signed_on_basis` is present exactly when `signed_on` is
+  non-null and is one of the four bases; a document with `signed_version` null
+  has no `signed_on`; a precedent's `signed_on` equals its document's and is
+  null when `signed` is false.
+- Conformance vectors regenerated (dates in 002, 003 and 008 are `signed_on`;
+  vector 002's quarter becomes a month); new vector 010 pins every basis, both
+  precisions, a signed deal with no date, an unsigned deal and the months of
+  the corpus, a clause, a signed variant and a refused ask.
 
 ### 2026-10-10 — OPF 0.5: `vs_standard` part by part, derived label (issue #243)
 

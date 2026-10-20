@@ -1,11 +1,12 @@
-# OPF 0.5 conformance vectors — canonicalization + digest_version 4 + manifest and dossiers
+# OPF 0.6 conformance vectors — canonicalization + digest_version 5 + manifest and dossiers
 
-The separately stamped vector set for `opf_version` "0.5" / `digest_version`
-"4" (issues #223, #233, #234, #240, #243). It replaces the 0.4 set, which the 0.5
-conversion retired (the same four documents with the opening evidence of
-OPF-SPEC §3.5.5 added, plus vector 005), and the digest 3 expectations, which
-digest 4 (OPF-SPEC §3.12.2) replaced in place: vectors 001-005 now expect the
-digest 4 shape, and vectors 006, 007 and 009 are new. The contract (see `../README.md`): every
+The separately stamped vector set for `opf_version` "0.6" / `digest_version`
+"5" (issues #223, #233, #234, #240, #243, #247). It replaces the 0.5 set (the
+same ten-vector shape, regenerated): every precedent record carries `signed_on`,
+every corpus document `signed_on` and `signed_on_basis` (OPF-SPEC §3.8), and
+digest 5 reports `first_signed` / `last_signed` months on the corpus, every
+clause, every signed variant and every refused ask (OPF-SPEC §3.12.2); vector
+010 is new. The contract (see `../README.md`): every
 `vectors/*.json` is a plain-JSON `{input, expected}` pair, and an independent implementation that reproduces each vector's
 `expected.canonical` / `content_hash` / `section_digests` / `digest` (and, since
 issue #228, `manifest` / `dossiers` / `provenance_index`) from its
@@ -14,23 +15,23 @@ format version and indexes the vectors.
 
 | Vector | Isolates |
 |---|---|
-| `001-minimal-no-perspective` | The digest 4 skeleton: `perspective` present and `null`, `agreement_type` `{id, name}`, zero corpus counts, null signing dates, an empty `uncovered_clause_types`. |
-| `002-variants-refused-and-exclusions` | Grouping by exact normalization (case/punctuation merge, a negator does not), the `last_signed` ordering with a `YYYY-Qn` quarter, representatives, refused asks grouped across deals, and every exclusion (standard text, unsigned deals, struck clauses). |
+| `001-minimal-no-perspective` | The digest 5 skeleton: `perspective` present and `null`, `agreement_type` `{id, name}`, zero corpus counts, null signing dates, an empty `uncovered_clause_types`. |
+| `002-variants-refused-and-exclusions` | Grouping by exact normalization (case/punctuation merge, a negator does not), the `last_signed` ordering with a month-only `YYYY-MM` date (it sorts before every day in the month), `first_signed` / `last_signed` on the variants, representatives, refused asks grouped across deals, and every exclusion (standard text, unsigned deals, struck clauses). |
 | `003-cap-totals-and-summary` | The top-5 cap with uncapped `n_variants_total`, the full ordering key, and the ≤ 300-char sentence-boundary summary. |
 | `004-party-alias-grouping` | The grouping key's party neutralization (OPF-SPEC §3.5.4): two deals whose texts differ only by the counterparty's `Counterparty-<n>` alias group to `n_deals` 2 (signed variants and refused asks alike); the parties' places swapped stays a separate variant (`counterparty` and `party` are distinct tokens); and the order of two one-deal variants pins the `perspective.party` rewrite. |
-| `005-opening-evidence` | The 0.5 precedent record's opening evidence (OPF-SPEC §3.5.5): `opened_with` and `opening_text` for an edited standard, a non-standard opening changed to our standard, a non-standard opening signed unchanged, a clause added in round 2 (`absent`), an unsigned deal (both null), a case-only edit (no distinct opening under the grouping key) and a struck non-standard opening (`signed_text` null, no refused ask). Digest 4 projects it: two deals opened with our standard and one kept it, one signed variant (three deals) with `n_from_standard` 1 and `n_unchanged` 1, and two changed openings (one ended at our standard, one struck). |
-| `006-opening-rules` | The digest 4 opening rules on one clause of ten deals: `n_opened_standard` / `n_kept_standard`, `n_from_standard` and `n_unchanged` on each signed variant, and `changed_openings` — a non-standard opening that ended at our standard grouped with its respelling in another deal (`n_deals` 2, `n_to_standard` 1), a struck one with no refused ask (`n_struck` 1), one excluded because the same words are its own deal's refused ask, plus `absent` and an unsigned deal that count nowhere. |
+| `005-opening-evidence` | The precedent record's opening evidence (OPF-SPEC §3.5.5): `opened_with` and `opening_text` for an edited standard, a non-standard opening changed to our standard, a non-standard opening signed unchanged, a clause added in round 2 (`absent`), an unsigned deal (both null), a case-only edit (no distinct opening under the grouping key) and a struck non-standard opening (`signed_text` null, no refused ask). Digest 4 projects it: two deals opened with our standard and one kept it, one signed variant (three deals) with `n_from_standard` 1 and `n_unchanged` 1, and two changed openings (one ended at our standard, one struck). |
+| `006-opening-rules` | The digest 5 opening rules on one clause of ten deals: `n_opened_standard` / `n_kept_standard`, `n_from_standard` and `n_unchanged` on each signed variant, and `changed_openings` — a non-standard opening that ended at our standard grouped with its respelling in another deal (`n_deals` 2, `n_to_standard` 1), a struck one with no refused ask (`n_struck` 1), one excluded because the same words are its own deal's refused ask, plus `absent` and an unsigned deal that count nowhere. |
 | `007-equivalence-label-and-coverage` | The `vs_standard` label in the digest (OPF-SPEC §3.5.6, §3.12.2): equivalent variants collapse into one entry (`n_deals`, `n_texts`, two exemplars), the others keep the tier order (less protective and mixed, different concept, unjudged, more protective) and carry their part maps (issue #243), `positions` counts signed deals by label, the refused ask and the changed opening (mixed) carry their labels, and `uncovered_clause_types` lists the active and custom taxonomy entries with no evidence (an inactive one never appears). |
 | `008-hard-rules-and-dossiers` | The hard-rule manifest, the critic dossiers and the provenance index (OPF-SPEC §3.12.3, issue #228): seven Floor invariants become seven rules in Floor order with their defaults (`required_presence` false, `judged`, no proof) and the three predicate specs; the venue dossier takes a concession on record first although another variant has more deals, then the first changed opening, from five candidate groups, and lists both Floor rules; a rule that demands presence or carries a predicate names its clause (the cross-reference rule names `clause.survival`); no text is ever cut part-way: the term dossier (no standard, so a 1,000-token budget) keeps its long first excerpt whole although it alone exceeds the budget, drops the second whole, naming it (`n_omitted`, `omitted_precedent_ids`), then drops its Floor rule whole (`n_floor_rules` 1, none listed), the one case where a dossier may exceed its budget; the survival dossier has no excerpt and three Floor rules over its budget, so the last listed is dropped whole and it fits (`n_floor_rules` 3, two listed); the assignment dossier pins how a group's record is chosen: the concession's own record (not the deal that signed the same variant as proposed, although that deal is the lower document and precedent id), then a `refused_ask` excerpt (the ask as `opening`, what was signed instead as `signed`, outcome `ask_refused`) from the latest-signed deals' lower `precedent_id`, not the lowest document; every deal but one records source-file hashes, so the provenance index carries the corpus snapshot hash and each excerpt deal's `version_files` (empty for the one without); the provenance index names each selected record and its source deal in selection order, marked `omitted` when the dossier dropped it: the term dossier's dropped excerpt resolves to deal-e, which no kept excerpt cites and which `documents` lists for that row. Every vector's `expected` now carries `manifest`, `dossiers` and `provenance_index` as well (empty rules, one dossier per clause for 001-007). |
 | `009-standard-parts-and-owner-label` | The part-by-part judgment over a standard of several parts (OPF-SPEC §3.5, §3.5.6, §3.12.2, §3.12.3, issue #243): four parts, the second and fourth the same passage, so the fourth's `part_id` is the second's hash with `-2`; the digest's `our_standard` carries all four in order; part maps of four tokens in standard order with neutral and non-neutral omissions and additions (a mixed concession, an equivalent text that only drops the repeated passage and so collapses, a less protective refused ask); a changed opening whose parts derive mixed but whose label the owner set to more protective (`owner_label`): the digest and the dossier carry the owner's label, `label_by` `owner` and the owner's reason beside the judged part map; every other judged entry carries no `label_by` (its label is derived from its parts, the default the legend states). The dossier's excerpts carry part reasons for the third part, and for the first, second and fourth (`-2`) parts. |
 
-**`signed_at` is producer-supplied, not reference-compiler output.** The
-reference compiler never emits `signed_at` (it extracts no signing date and
-never fabricates one — OPF-SPEC §3.5.4), so in reference output every
-`first_signed` / `last_signed` is `null`. Vector 002's hand-set `signed_at`
-values (including the `YYYY-Qn` representative) model a third-party producer
-that does record signing dates; they pin how a conformant digest orders and
-picks representatives when the field is present.
+| `010-signing-dates` | When each deal was signed (OPF-SPEC §3.8, §3.12.2, issue #247): `signed_on` as a full date and as a month, every `signed_on_basis` (`document_text`, `signature_block`, `filename`, `file_metadata`), a signed deal no source dates (both null) and an unsigned deal (null); every precedent record carrying its document's date; digest 5's `first_signed` / `last_signed` months on the corpus (2022-03 to 2024-11), the clause, a signed variant (a month-only date sorts before every day in it) and a refused ask whose deals include one with no date (it adds none). |
+
+**Signing dates are facts read off the executed copy.** `signed_on` is an ISO
+date or a `YYYY-MM` month, or `null` (never guessed), and `signed_on_basis` says
+where it was read (OPF-SPEC §3.8). The vectors' dates are synthetic; they pin
+how a conformant digest orders by date, picks representatives and reports
+months.
 
 Every input is self-consistent (it passes `playbook validate`): precedent ids
 and clause counts are stamped with the reference functions. All content is

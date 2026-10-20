@@ -1,9 +1,9 @@
 """Playbook assembler — final L5 stage.
 
-Assembles the full OPF 0.5 playbook document (issue #223) — the only format
+Assembles the full OPF 0.6 playbook document (issue #223) — the only format
 the engine emits or validates (issue #238): the verdict-free per-deal
 precedent record as ``evidence`` (``playbook_engine/precedent.py``) plus a
-digest_version 4 digest, empty-but-present ``posture``/``floor``, and an
+digest_version 5 digest, empty-but-present ``posture``/``floor``, and an
 ``identity`` block carrying ``content_hash`` + per-section digests
 (issue #143) — and ``write_playbook`` writes
 ``playbook.opf.json``.  The assembled document is self-validated via the
@@ -39,7 +39,7 @@ from playbook_engine.clause_position_compiler import (
     ClausePosition,
     UnclassifiedCoverage,
 )
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.dossiers import build_derived_sections
 from playbook_engine.equivalence import collect_subjects, label_evidence
 from playbook_engine.observation_builder import Observation, RoundMove
@@ -60,10 +60,10 @@ if TYPE_CHECKING:
     from playbook_engine.agent_judge import StoreBackedEquivalenceJudge
 
 #: The one OPF version the engine emits and validates (issue #238): the
-#: verdict-free per-deal precedent record (issue #223) plus a digest_version 4
+#: verdict-free per-deal precedent record (issue #223) plus a digest_version 5
 #: digest. Older formats were retired; git history and contract-opf/opf keep
 #: them.
-OPF_VERSION = "0.5"
+OPF_VERSION = "0.6"
 _COMPILER_NAME = "playbook-engine"
 
 # Zero-width and bidirectional-control characters (ZWSP/ZWNJ/ZWJ/BOM and the
@@ -87,7 +87,7 @@ def _strip_invisible(value: Any) -> Any:
 
 
 # Keys corpus.documents[].version_ingest[] may carry into the PUBLISHED
-# playbook — mirrors spec/playbook.schema-0.5.json's
+# playbook — mirrors spec/playbook.schema-0.6.json's
 # corpus.documents.items.properties.version_ingest.items.properties exactly, whose additionalProperties:false rejects anything
 # else. corpus_documents (as read from corpus_manifest.json) can carry
 # richer, engine-internal-only keys not in this set — e.g. "reason"
@@ -106,8 +106,10 @@ _VERSION_INGEST_SCHEMA_KEYS = frozenset({"version", "status", "error", "extracto
 # ``corpus.documents[]`` (additionalProperties:false). "dropped_observations"
 # (issue #216) is the per-document count of net-diff rows that produced no
 # observation, by reason — assemble_playbook sums it into
-# ``corpus.stats.dropped_observations`` instead.
-_CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset({"dropped_observations"})
+# ``corpus.stats.dropped_observations`` instead. "deal_date_evidence"
+# (issue #247) is what mining read about the executed copy's signing date;
+# project derives ``signed_on`` / ``signed_on_basis`` from it.
+_CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset({"dropped_observations", "deal_date_evidence"})
 
 
 def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -282,7 +284,7 @@ def assemble_playbook(
     round_moves: list[RoundMove] | None = None,
     equivalence_judge: StoreBackedEquivalenceJudge | None = None,
 ) -> dict[str, Any]:
-    """Assemble and validate a complete OPF 0.5 playbook document.
+    """Assemble and validate a complete OPF 0.6 playbook document.
 
     Args:
         agreement_type:    Top-level ``{id, name}`` (``description``/``aliases``
@@ -368,8 +370,8 @@ def assemble_playbook(
                           ``vs_standard`` is ``null`` (not yet judged).
 
     Returns:
-        A validated OPF 0.5 playbook dict (precedent-record ``evidence``,
-        empty-but-present ``posture``/``floor``, a digest_version 4
+        A validated OPF 0.6 playbook dict (precedent-record ``evidence``,
+        empty-but-present ``posture``/``floor``, a digest_version 5
         ``digest``, and an ``identity`` block carrying
         ``content_hash``/``section_digests`` — see issue #143).
 
@@ -430,7 +432,7 @@ def assemble_playbook(
         compiler["run_id"] = run_id
 
     # --- assemble ---
-    # Field order mirrors spec/playbook.schema-0.5.json's property order.
+    # Field order mirrors spec/playbook.schema-0.6.json's property order.
     playbook: dict[str, Any] = {
         "opf_version": OPF_VERSION,
         "agreement_type": agreement_type,
@@ -490,7 +492,7 @@ def assemble_playbook(
     # BEFORE the digest is built, so the digest groups texts by their
     # post-strip form (issue #35) — otherwise an intra-word ZWSP
     # splits what should be one dedupe group into two, and the embedded
-    # digest diverges from build_digest_v4() recomputed over the shipped
+    # digest diverges from build_digest_v5() recomputed over the shipped
     # (stripped) playbook, breaking the "digest is a pure function of the
     # evidence section" invariant that content_hash lineage relies on.
     playbook = _strip_invisible(playbook)
@@ -524,12 +526,12 @@ def assemble_playbook(
     # `compiler` is closed to extensions (OPF-SPEC §10.1).
     playbook[SIDECARS_KEY] = precedent_sidecar_manifest(playbook)
 
-    # --- digest (digest_version 4) ---
+    # --- digest (digest_version 5) ---
     # The compact model-facing projection of the evidence section. Computed
     # after stripping (above) and before identity so it is covered by
     # content_hash like every other content section (it is a pure function of
     # evidence — two compiles of identical evidence carry identical digests).
-    playbook["digest"] = build_digest_v4(playbook)
+    playbook["digest"] = build_digest_v5(playbook)
 
     # --- hard-rule manifest, critic dossiers, provenance index (issue #228) ---
     # Pure functions of the document (the Floor it carries, the clause

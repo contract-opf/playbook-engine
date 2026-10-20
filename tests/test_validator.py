@@ -1,6 +1,6 @@
 """Tests for the OPF validator (schema + normative rules).
 
-The engine reads and writes exactly one format, OPF 0.5 (issue #238): every
+The engine reads and writes exactly one format, OPF 0.6 (issue #238): every
 other ``opf_version`` — the retired 0.1, 0.2 and 0.3 included — is rejected
 as unsupported. Valid baselines are produced by the real producer: the
 compiled NDA example (``examples/nda/playbook.opf.json``, ``playbook
@@ -18,7 +18,7 @@ import pytest
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.clause_position_compiler import compile_clause_positions
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.playbook_assembler import assemble_playbook
 from playbook_engine.validator import ValidationResult, load_opf_file, validate_document
@@ -41,7 +41,7 @@ _STANDARD = "This Agreement is governed by the laws of the State of New York."
 
 
 def _minimal() -> dict[str, Any]:
-    """A small valid OPF 0.5 document, built by the real producer: one
+    """A small valid OPF 0.6 document, built by the real producer: one
     template clause (so ``our_standard`` cites the template) and one in-scope
     corpus document. ``identity`` is dropped so a mutation trips only the
     rule under test (identity is optional; ``_refresh`` re-derives the
@@ -71,6 +71,8 @@ def _minimal() -> dict[str, Any]:
                 "in_scope": True,
                 "versions": 2,
                 "signed_version": 2,
+                "signed_on": None,
+                "signed_on_basis": None,
             }
         ],
         generated_at="2026-01-01T00:00:00Z",
@@ -82,7 +84,7 @@ def _minimal() -> dict[str, Any]:
 
 def _refresh(doc: dict[str, Any]) -> dict[str, Any]:
     """Re-derive the digest (and identity, when present) after a mutation."""
-    doc["digest"] = build_digest_v4(doc)
+    doc["digest"] = build_digest_v5(doc)
     if "identity" in doc:
         doc["identity"]["content_hash"] = content_hash(doc)
         doc["identity"]["section_digests"] = compute_section_digests(doc)
@@ -108,7 +110,7 @@ def test_minimal_valid_passes() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("version", ["0.1", "0.2", "0.3"])
+@pytest.mark.parametrize("version", ["0.1", "0.2", "0.3", "0.4", "0.5"])
 def test_retired_opf_version_is_rejected_as_unsupported(version: str) -> None:
     """Acceptance (issue #238): a document claiming a retired version gets one
     clear, blocking "unsupported opf_version" error — no schema noise."""
@@ -121,10 +123,10 @@ def test_retired_opf_version_is_rejected_as_unsupported(version: str) -> None:
     assert error.blocking
     assert error.path == "opf_version"
     assert f"unsupported opf_version {version!r}" in error.message
-    assert "supported: 0.5" in error.message
+    assert "supported: 0.6" in error.message
 
 
-@pytest.mark.parametrize("version", [None, 0.5, ["0.5"], {"v": "0.5"}])
+@pytest.mark.parametrize("version", [None, 0.6, ["0.6"], {"v": "0.6"}])
 def test_non_string_opf_version_is_unsupported_not_a_crash(version: Any) -> None:
     doc = _minimal()
     doc["opf_version"] = version
@@ -300,7 +302,7 @@ def test_identity_stale_section_digest_fails_blocking() -> None:
 
 
 def test_curation_section_is_rejected_in_opf_05() -> None:
-    """OPF 0.5 has no `curation` section (issue #233): a document carrying a
+    """OPF 0.6 has no `curation` section (issue #233): a document carrying a
     top-level `curation` key, or an `identity.section_digests.curation`
     entry, is invalid."""
     doc = _nda()
@@ -569,7 +571,7 @@ def test_validate_tolerates_malformed_containers(mutation: dict[str, Any]) -> No
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 (issue #223) — the verdict-free per-deal precedent record. Every
+# OPF 0.6 (issue #223) — the verdict-free per-deal precedent record. Every
 # case mutates the REAL compiled NDA example (examples/nda/playbook.opf.json,
 # produced by `playbook project`), so the valid baseline is a shape the
 # compiler actually emits; each mutation is one a hand edit or a buggy
@@ -581,7 +583,7 @@ _NDA_PLAYBOOK = Path(__file__).parent.parent / "examples" / "nda" / "playbook.op
 
 def _nda_04() -> dict[str, Any]:
     doc: dict[str, Any] = json.loads(_NDA_PLAYBOOK.read_text(encoding="utf-8"))
-    assert doc["opf_version"] == "0.5"
+    assert doc["opf_version"] == "0.6"
     return doc
 
 
@@ -597,18 +599,18 @@ def _blocking(doc: dict[str, Any]) -> list[str]:
     return [str(e) for e in validate_document(doc).errors if e.blocking]
 
 
-def test_v05_compiled_example_validates() -> None:
+def test_v06_compiled_example_validates() -> None:
     assert _blocking(_nda_04()) == []
 
 
-def test_v05_rejects_a_0_3_evidence_shape() -> None:
+def test_v06_rejects_a_0_3_evidence_shape() -> None:
     doc = _nda_04()
     doc["evidence"]["clause_library"] = []
     errors = _blocking(_restamp_identity(doc))
     assert any("clause_library" in e for e in errors), errors
 
 
-def test_v05_rejects_a_judged_field_on_a_precedent() -> None:
+def test_v06_rejects_a_judged_field_on_a_precedent() -> None:
     """Judged verdicts never enter evidence.precedent (closed records)."""
     doc = _nda_04()
     doc["evidence"]["precedent"][0]["x_deviation"] = "substantive"
@@ -616,14 +618,14 @@ def test_v05_rejects_a_judged_field_on_a_precedent() -> None:
     assert any("x_deviation" in e for e in errors), errors
 
 
-def test_v05_rejects_tampered_precedent_id() -> None:
+def test_v06_rejects_tampered_precedent_id() -> None:
     doc = _nda_04()
     doc["evidence"]["precedent"][0]["id"] = "prec.0000000000000000"
     errors = _blocking(_restamp_identity(doc))
     assert any("does not match the id recomputed" in e for e in errors), errors
 
 
-def test_v05_rejects_signed_text_edit_without_restamp() -> None:
+def test_v06_rejects_signed_text_edit_without_restamp() -> None:
     """Editing a signed text changes what the id hashes, the digest, and
     possibly the counts — the id check alone catches the edit."""
     doc = _nda_04()
@@ -633,7 +635,7 @@ def test_v05_rejects_signed_text_edit_without_restamp() -> None:
     assert any("does not match the id recomputed" in e for e in errors), errors
 
 
-def test_v05_rejects_two_precedents_for_one_deal_and_clause() -> None:
+def test_v06_rejects_two_precedents_for_one_deal_and_clause() -> None:
     from playbook_engine.opf_accessors import perspective_party
     from playbook_engine.precedent import restamp_evidence
 
@@ -648,14 +650,14 @@ def test_v05_rejects_two_precedents_for_one_deal_and_clause() -> None:
     assert any("more than one precedent" in e for e in errors), errors
 
 
-def test_v05_rejects_count_that_disagrees_with_precedent() -> None:
+def test_v06_rejects_count_that_disagrees_with_precedent() -> None:
     doc = _nda_04()
     doc["evidence"]["clauses"][0]["n_deals"] += 1
     errors = _blocking(_restamp_identity(doc))
     assert any("n_deals=" in e and "implies" in e for e in errors), errors
 
 
-def test_v05_rejects_dangling_deal_and_signed_mismatch() -> None:
+def test_v06_rejects_dangling_deal_and_signed_mismatch() -> None:
     doc = _nda_04()
     record = doc["evidence"]["precedent"][0]
     record["signed"] = not record["signed"]
@@ -672,7 +674,7 @@ def test_v05_rejects_dangling_deal_and_signed_mismatch() -> None:
     assert any("not in corpus.documents" in e for e in errors), errors
 
 
-def test_v05_rejects_standard_true_without_signed_text() -> None:
+def test_v06_rejects_standard_true_without_signed_text() -> None:
     doc = _nda_04()
     record = next(p for p in doc["evidence"]["precedent"] if p["standard"])
     record["signed_text"] = None
@@ -680,22 +682,22 @@ def test_v05_rejects_standard_true_without_signed_text() -> None:
     assert any("standard=true but signed_text is null" in e for e in errors), errors
 
 
-def test_v05_rejects_edited_digest() -> None:
+def test_v06_rejects_edited_digest() -> None:
     doc = _nda_04()
     clause = next(c for c in doc["digest"]["clauses"] if c["signed_variants"])
     clause["signed_variants"][0]["n_deals"] += 1
     errors = _blocking(_restamp_identity(doc))
-    assert any("digest does not equal build_digest_v4" in e for e in errors), errors
+    assert any("digest does not equal build_digest_v5" in e for e in errors), errors
 
 
-def test_v05_rejects_digest_without_perspective_key() -> None:
+def test_v06_rejects_digest_without_perspective_key() -> None:
     doc = _nda_04()
     del doc["digest"]["perspective"]
     errors = _blocking(_restamp_identity(doc))
     assert any("perspective" in e for e in errors), errors
 
 
-def test_v05_rejects_full_text_in_digest() -> None:
+def test_v06_rejects_full_text_in_digest() -> None:
     doc = _nda_04()
     doc["digest"]["clauses"][0]["signed_variants"].append(
         {
@@ -711,18 +713,18 @@ def test_v05_rejects_full_text_in_digest() -> None:
     assert any("full_text" in e for e in errors), errors
 
 
-def test_v05_rejects_impossible_signed_at() -> None:
+def test_v06_rejects_impossible_signed_on() -> None:
     doc = _nda_04()
-    from playbook_engine.digest import build_digest_v4
+    from playbook_engine.digest import build_digest_v5
 
-    doc["evidence"]["precedent"][0]["signed_at"] = "2025-13-45"
-    doc["digest"] = build_digest_v4(doc)
+    doc["evidence"]["precedent"][0]["signed_on"] = "2025-13-45"
+    doc["digest"] = build_digest_v5(doc)
     errors = _blocking(_restamp_identity(doc))
-    assert any("signed_at" in e for e in errors), errors
+    assert any("signed_on" in e for e in errors), errors
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 paper side (issue #225) — three-valued deal metadata that gates
+# OPF 0.6 paper side (issue #225) — three-valued deal metadata that gates
 # nothing; the validator only checks the document tells one consistent story
 # about it. Same real compiled NDA example as above.
 # ---------------------------------------------------------------------------
@@ -743,13 +745,13 @@ def _make_deal_ambiguous(doc: dict[str, Any], deal: str) -> None:
             record["paper_confidence"] = 0.65
 
 
-def test_v05_paper_accepts_an_ambiguous_deal_recorded_unknown() -> None:
+def test_v06_paper_accepts_an_ambiguous_deal_recorded_unknown() -> None:
     doc = _nda_04()
     _make_deal_ambiguous(doc, "beta-industries")
     assert _blocking(_restamp_identity(doc)) == []
 
 
-def test_v05_paper_rejects_a_side_on_an_ambiguous_deal() -> None:
+def test_v06_paper_rejects_a_side_on_an_ambiguous_deal() -> None:
     """An ambiguous detection is "unknown" — never coerced to a side."""
     doc = _nda_04()
     _make_deal_ambiguous(doc, "beta-industries")
@@ -762,7 +764,7 @@ def test_v05_paper_rejects_a_side_on_an_ambiguous_deal() -> None:
     )
 
 
-def test_v05_paper_rejects_a_side_that_contradicts_the_corpus_document() -> None:
+def test_v06_paper_rejects_a_side_that_contradicts_the_corpus_document() -> None:
     doc = _nda_04()
     for record in doc["evidence"]["precedent"]:
         if record["document_id"] == "zeta-diagnostics":  # counterparty_paper
@@ -773,9 +775,9 @@ def test_v05_paper_rejects_a_side_that_contradicts_the_corpus_document() -> None
     )
 
 
-def test_v05_paper_accepts_unknown_against_an_unflagged_corpus_document() -> None:
+def test_v06_paper_accepts_unknown_against_an_unflagged_corpus_document() -> None:
     """The two-valued corpus field cannot say "unknown"; a record may honestly
-    withhold a side (the 0.5 conformance vectors model this)."""
+    withhold a side (the 0.6 conformance vectors model this)."""
     doc = _nda_04()
     for record in doc["evidence"]["precedent"]:
         if record["document_id"] == "zeta-diagnostics":
@@ -783,7 +785,7 @@ def test_v05_paper_accepts_unknown_against_an_unflagged_corpus_document() -> Non
     assert _blocking(_restamp_identity(doc)) == []
 
 
-def test_v05_paper_rejects_confidence_that_disagrees_with_the_corpus_document() -> None:
+def test_v06_paper_rejects_confidence_that_disagrees_with_the_corpus_document() -> None:
     doc = _nda_04()
     record = next(p for p in doc["evidence"]["precedent"] if p["document_id"] == "beta-industries")
     record["paper_confidence"] = 0.5
@@ -791,7 +793,7 @@ def test_v05_paper_rejects_confidence_that_disagrees_with_the_corpus_document() 
     assert any("paper_confidence=0.5" in e for e in errors), errors
 
 
-def test_v05_paper_rejects_a_deal_whose_records_disagree() -> None:
+def test_v06_paper_rejects_a_deal_whose_records_disagree() -> None:
     """Paper side is a fact about the deal — every record of it agrees."""
     doc = _nda_04()
     records = [p for p in doc["evidence"]["precedent"] if p["document_id"] == "beta-industries"]
@@ -800,7 +802,7 @@ def test_v05_paper_rejects_a_deal_whose_records_disagree() -> None:
     assert any("paper side is a fact about the deal" in e for e in errors), errors
 
 
-def test_v05_paper_rejects_our_standard_from_an_unknown_paper_deal() -> None:
+def test_v06_paper_rejects_our_standard_from_an_unknown_paper_deal() -> None:
     doc = _nda_04()
     _make_deal_ambiguous(doc, "beta-industries")
     record = next(
@@ -815,12 +817,12 @@ def test_v05_paper_rejects_our_standard_from_an_unknown_paper_deal() -> None:
         "text": record["signed_text"]["text"],
         "source_ref": copy.deepcopy(record["signed_text"]["ref"]),
     }
-    doc["digest"] = build_digest_v4(doc)
+    doc["digest"] = build_digest_v5(doc)
     errors = _blocking(_restamp_identity(doc))
     assert any("an unknown-paper deal contributes no our_standard" in e for e in errors), errors
 
 
-def test_v05_paper_unknown_deal_standard_needs_a_template() -> None:
+def test_v06_paper_unknown_deal_standard_needs_a_template() -> None:
     """With a template, ``standard`` is the exact match against it and an
     unknown-paper deal counts in n_signed_standard; with no template there is
     no standard for it to match, so it must not be standard."""
@@ -837,7 +839,7 @@ def test_v05_paper_unknown_deal_standard_needs_a_template() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OPF 0.5 opening evidence (issue #233, OPF-SPEC §3.5.5): three normative
+# OPF 0.6 opening evidence (issue #233, OPF-SPEC §3.5.5): three normative
 # MUSTs the schema cannot express, plus the schema's own `opened_with` rule.
 # ---------------------------------------------------------------------------
 
@@ -851,7 +853,7 @@ def _nda_opening_record(doc: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def test_v05_opening_evidence_example_is_valid_and_exercises_every_branch() -> None:
+def test_v06_opening_evidence_example_is_valid_and_exercises_every_branch() -> None:
     doc = _nda_04()
     records = doc["evidence"]["precedent"]
     assert {r["opened_with"] for r in records} >= {"standard", "non_standard", "absent"}
@@ -859,7 +861,7 @@ def test_v05_opening_evidence_example_is_valid_and_exercises_every_branch() -> N
     assert _blocking(doc) == []
 
 
-def test_v05_opened_with_is_required_and_closed() -> None:
+def test_v06_opened_with_is_required_and_closed() -> None:
     doc = _nda_04()
     del doc["evidence"]["precedent"][0]["opened_with"]
     assert any("opened_with" in e for e in _blocking(_restamp_identity(doc)))
@@ -869,7 +871,7 @@ def test_v05_opened_with_is_required_and_closed() -> None:
     assert any("opened_with" in e for e in _blocking(_restamp_identity(doc)))
 
 
-def test_v05_rejects_an_unsigned_deal_with_an_opening() -> None:
+def test_v06_rejects_an_unsigned_deal_with_an_opening() -> None:
     doc = _nda_04()
     record = _nda_opening_record(doc)
     record["signed"] = False
@@ -886,14 +888,14 @@ def test_v05_rejects_an_unsigned_deal_with_an_opening() -> None:
 
 
 @pytest.mark.parametrize("opened_with", ["absent", None])
-def test_v05_rejects_an_opening_on_an_absent_or_undetermined_clause(opened_with: Any) -> None:
+def test_v06_rejects_an_opening_on_an_absent_or_undetermined_clause(opened_with: Any) -> None:
     doc = _nda_04()
     _nda_opening_record(doc)["opened_with"] = opened_with
     errors = _blocking(_restamp_identity(doc))
     assert any("opening is recorded only when opened_with is" in e for e in errors), errors
 
 
-def test_v05_rejects_an_opening_that_is_not_distinct_from_the_signed_text() -> None:
+def test_v06_rejects_an_opening_that_is_not_distinct_from_the_signed_text() -> None:
     doc = _nda_04()
     record = _nda_opening_record(doc)
     # Case, spacing and punctuation do not make a distinct opening (§3.5.4 key).
@@ -902,7 +904,7 @@ def test_v05_rejects_an_opening_that_is_not_distinct_from_the_signed_text() -> N
     assert any("same grouping key as signed_text" in e for e in errors), errors
 
 
-def test_v05_accepts_a_struck_opening_without_a_signed_text() -> None:
+def test_v06_accepts_a_struck_opening_without_a_signed_text() -> None:
     """signed_text null is always distinct: the clause was struck or relocated."""
     doc = _nda_04()
     struck = next(
@@ -916,7 +918,7 @@ def test_v05_accepts_a_struck_opening_without_a_signed_text() -> None:
     assert any("opening_text is set but moved is not true" in e for e in errors), errors
 
 
-def test_v05_rejects_an_opening_on_a_record_that_did_not_move() -> None:
+def test_v06_rejects_an_opening_on_a_record_that_did_not_move() -> None:
     doc = _nda_04()
     _nda_opening_record(doc)["moved"] = False
     errors = _blocking(_restamp_identity(doc))

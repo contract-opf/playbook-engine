@@ -69,7 +69,7 @@ _EVIDENCE_DIGEST = section_digest(_EMPTY_EVIDENCE_SECTION)
 
 def _minimal_doc(**overrides: Any) -> dict[str, Any]:
     doc: dict[str, Any] = {
-        "opf_version": "0.5",
+        "opf_version": "0.6",
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         # issue #212: carries a perspective so the "clean doc -> zero

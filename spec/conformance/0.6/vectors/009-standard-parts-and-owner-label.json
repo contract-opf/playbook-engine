@@ -1,11 +1,11 @@
 {
   "name": "standard-parts-and-owner-label",
   "description": "A standard of four parts whose second and fourth parts are the same passage (OPF-SPEC §3.5, §3.5.6, §3.12.2, §3.12.3, issue #243). The fourth part's part_id is the second's content hash with -2 appended, and the digest's our_standard carries all four parts in order. Every part map has one token per part, in standard order. Deal-a opened with our standard and signed a mixed variant (=, x0, -, = plus a more protective addition): a concession, the first signed variant, and the dossier's first excerpt, whose part_reasons name only the third part. Deal-b signed a variant that drops both copies of the repeated passage as neutral omissions: still equivalent, so it collapses (n_texts 1). Deal-c's refused ask keeps the first part, drops the rest (the third less protective) and adds a less protective sentence: less_protective. Deal-d opened with language whose parts derive mixed (-, x+, =, +) but the owner set the label to more_protective with a reason (owner_label): its changed opening in the digest carries label more_protective, label_by owner and the owner's reason, never the judgment's own reason, with the part map as judged; every other judged entry carries no label_by (its label is derived from its parts, the default the legend states) and the judgment's reason. The dossier's second excerpt is that changed opening, with label_by owner, the owner's reason and part reasons for the first, second and fourth (repeated, -2) parts.",
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "engine_version": "1.0.0",
-  "digest_version": "4",
+  "digest_version": "5",
   "input": {
-    "opf_version": "0.5",
+    "opf_version": "0.6",
     "agreement_type": {
       "id": "conformance-fixture",
       "name": "Conformance Fixture Agreement"
@@ -75,6 +75,7 @@
           "paper_basis": "provenance_detection",
           "paper_confidence": 0.9,
           "signed": true,
+          "signed_on": null,
           "rounds": 1,
           "signed_text": {
             "text": "The Recipient shall hold the Discloser's Confidential Information in confidence and shall notify the Discloser within thirty days of any unauthorized disclosure, and shall return or destroy it on request. This Section survives the end of this Agreement.",
@@ -148,6 +149,7 @@
           "paper_basis": "provenance_detection",
           "paper_confidence": 0.9,
           "signed": true,
+          "signed_on": null,
           "rounds": 0,
           "signed_text": {
             "text": "The Recipient keeps the Discloser's Confidential Information in confidence and notifies the Discloser promptly of any unauthorized disclosure.",
@@ -204,6 +206,7 @@
           "paper_basis": "provenance_detection",
           "paper_confidence": 0.9,
           "signed": true,
+          "signed_on": null,
           "rounds": 1,
           "signed_text": {
             "text": "The Recipient shall hold the Discloser's Confidential Information in confidence.\n\nThis Section survives the end of this Agreement.\n\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\n\nThis Section survives the end of this Agreement.",
@@ -280,6 +283,7 @@
           "paper_basis": "provenance_detection",
           "paper_confidence": 0.9,
           "signed": true,
+          "signed_on": null,
           "rounds": 1,
           "signed_text": {
             "text": "The Recipient shall hold the Discloser's Confidential Information in confidence.\n\nThis Section survives the end of this Agreement.\n\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\n\nThis Section survives the end of this Agreement.",
@@ -357,28 +361,36 @@
           "provenance": "our_paper",
           "in_scope": true,
           "versions": 3,
-          "signed_version": 3
+          "signed_version": 3,
+          "signed_on": null,
+          "signed_on_basis": null
         },
         {
           "document_id": "deal-b",
           "provenance": "counterparty_paper",
           "in_scope": true,
           "versions": 3,
-          "signed_version": 3
+          "signed_version": 3,
+          "signed_on": null,
+          "signed_on_basis": null
         },
         {
           "document_id": "deal-c",
           "provenance": "our_paper",
           "in_scope": true,
           "versions": 3,
-          "signed_version": 3
+          "signed_version": 3,
+          "signed_on": null,
+          "signed_on_basis": null
         },
         {
           "document_id": "deal-d",
           "provenance": "counterparty_paper",
           "in_scope": true,
           "versions": 3,
-          "signed_version": 3
+          "signed_version": 3,
+          "signed_on": null,
+          "signed_on_basis": null
         }
       ],
       "stats": {}
@@ -391,15 +403,15 @@
     }
   },
   "expected": {
-    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.confidentiality\",\"n_changed_openings\":1,\"n_deals\":4,\"n_kept_standard\":1,\"n_opened_standard\":2,\"n_refused\":1,\"n_signed_standard\":2,\"n_variants\":2,\"our_standard\":{\"parts\":[{\"order\":1,\"part_id\":\"4c365201\",\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\"},{\"order\":2,\"part_id\":\"e2ff9d8d\",\"text\":\"This Section survives the end of this Agreement.\"},{\"order\":3,\"part_id\":\"bd2d0584\",\"text\":\"The Recipient shall notify the Discloser promptly of any unauthorized disclosure.\"},{\"order\":4,\"part_id\":\"e2ff9d8d-2\",\"text\":\"This Section survives the end of this Agreement.\"}],\"source_ref\":{\"clause_path\":\"4\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"taxonomy_id\":\"confidentiality\",\"title\":\"Confidentiality\"}],\"precedent\":[{\"document_id\":\"deal-a\",\"id\":\"prec.4c7432e7c0acc949\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":1},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence and shall notify the Discloser within thirty days of any unauthorized disclosure, and shall return or destroy it on request. This Section survives the end of this Agreement.\",\"vs_standard\":{\"additions\":[{\"effect\":\"more_protective\",\"summary\":\"Synthetic fixture: return or destroy on request.\"}],\"basis\":\"agent\",\"check\":null,\"label\":\"mixed\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"reason\":\"Synthetic fixture: notice within thirty days.\",\"relation\":\"less_protective\",\"status\":\"present\"},{\"part_id\":\"e2ff9d8d-2\",\"relation\":\"equivalent\",\"status\":\"present\"}],\"reason\":\"Synthetic fixture reason: a later notice deadline.\"}},\"standard\":false,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-b\",\"id\":\"prec.4abfe83c335fde29\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"The Recipient keeps the Discloser's Confidential Information in confidence and notifies the Discloser promptly of any unauthorized disclosure.\",\"vs_standard\":{\"additions\":[],\"basis\":\"agent\",\"check\":null,\"label\":\"equivalent\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d-2\",\"status\":\"omitted\"}],\"reason\":\"Synthetic fixture reason: same duties, no survival sentence.\"}},\"standard\":false,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-c\",\"id\":\"prec.23520e0e9e936123\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":2},\"round\":1,\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence and may disclose it to its advisers.\",\"vs_standard\":{\"additions\":[{\"effect\":\"less_protective\",\"summary\":\"Synthetic fixture: disclosure to advisers.\"}],\"basis\":\"agent\",\"check\":null,\"label\":\"less_protective\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"effect\":\"less_protective\",\"part_id\":\"bd2d0584\",\"reason\":\"Synthetic fixture: the notice duty is gone.\",\"status\":\"omitted\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d-2\",\"status\":\"omitted\"}],\"reason\":\"Synthetic fixture reason: no notice duty.\"}}],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"standard\":true,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-d\",\"id\":\"prec.04b041793ff13ea0\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":1},\"text\":\"The Recipient shall use reasonable efforts to hold the Discloser's Confidential Information in confidence and shall notify the Discloser promptly of any unauthorized disclosure. This Section survives the end of this Agreement.\",\"vs_standard\":{\"additions\":[],\"basis\":\"owner\",\"check\":null,\"label\":\"more_protective\",\"owner_label\":{\"label\":\"more_protective\",\"reason\":\"Synthetic fixture owner reason: survival matters more here.\"},\"parts\":[{\"part_id\":\"4c365201\",\"reason\":\"Synthetic fixture: reasonable efforts only.\",\"relation\":\"less_protective\",\"status\":\"present\"},{\"effect\":\"more_protective\",\"part_id\":\"e2ff9d8d\",\"reason\":\"Synthetic fixture: the first survival sentence is gone.\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"part_id\":\"e2ff9d8d-2\",\"reason\":\"Synthetic fixture: survival kept once, narrower.\",\"relation\":\"more_protective\",\"status\":\"present\"}],\"reason\":\"Synthetic fixture reason: reasonable efforts only.\"}},\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"standard\":true,\"taxonomy_id\":\"confidentiality\"}]},\"floor\":{},\"opf_version\":\"0.5\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
-    "content_hash": "sha256:0854597904fe1cfe831d64d92228cabc94d1e4a926b590954041367e8ae13a43",
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[{\"document_id\":\"deal-a\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_on\":null,\"signed_on_basis\":null,\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-b\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_on\":null,\"signed_on_basis\":null,\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-c\",\"in_scope\":true,\"provenance\":\"our_paper\",\"signed_on\":null,\"signed_on_basis\":null,\"signed_version\":3,\"versions\":3},{\"document_id\":\"deal-d\",\"in_scope\":true,\"provenance\":\"counterparty_paper\",\"signed_on\":null,\"signed_on_basis\":null,\"signed_version\":3,\"versions\":3}],\"stats\":{}},\"evidence\":{\"clauses\":[{\"id\":\"clause.confidentiality\",\"n_changed_openings\":1,\"n_deals\":4,\"n_kept_standard\":1,\"n_opened_standard\":2,\"n_refused\":1,\"n_signed_standard\":2,\"n_variants\":2,\"our_standard\":{\"parts\":[{\"order\":1,\"part_id\":\"4c365201\",\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\"},{\"order\":2,\"part_id\":\"e2ff9d8d\",\"text\":\"This Section survives the end of this Agreement.\"},{\"order\":3,\"part_id\":\"bd2d0584\",\"text\":\"The Recipient shall notify the Discloser promptly of any unauthorized disclosure.\"},{\"order\":4,\"part_id\":\"e2ff9d8d-2\",\"text\":\"This Section survives the end of this Agreement.\"}],\"source_ref\":{\"clause_path\":\"4\",\"document_id\":\"template\",\"version\":\"template\"},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"taxonomy_id\":\"confidentiality\",\"title\":\"Confidentiality\"}],\"precedent\":[{\"document_id\":\"deal-a\",\"id\":\"prec.4c7432e7c0acc949\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":1},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_on\":null,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-a\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence and shall notify the Discloser within thirty days of any unauthorized disclosure, and shall return or destroy it on request. This Section survives the end of this Agreement.\",\"vs_standard\":{\"additions\":[{\"effect\":\"more_protective\",\"summary\":\"Synthetic fixture: return or destroy on request.\"}],\"basis\":\"agent\",\"check\":null,\"label\":\"mixed\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"reason\":\"Synthetic fixture: notice within thirty days.\",\"relation\":\"less_protective\",\"status\":\"present\"},{\"part_id\":\"e2ff9d8d-2\",\"relation\":\"equivalent\",\"status\":\"present\"}],\"reason\":\"Synthetic fixture reason: a later notice deadline.\"}},\"standard\":false,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-b\",\"id\":\"prec.4abfe83c335fde29\",\"moved\":false,\"opened_with\":\"non_standard\",\"opening_text\":null,\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":0,\"signed\":true,\"signed_on\":null,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-b\",\"version\":3},\"text\":\"The Recipient keeps the Discloser's Confidential Information in confidence and notifies the Discloser promptly of any unauthorized disclosure.\",\"vs_standard\":{\"additions\":[],\"basis\":\"agent\",\"check\":null,\"label\":\"equivalent\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d-2\",\"status\":\"omitted\"}],\"reason\":\"Synthetic fixture reason: same duties, no survival sentence.\"}},\"standard\":false,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-c\",\"id\":\"prec.23520e0e9e936123\",\"moved\":true,\"opened_with\":\"standard\",\"opening_text\":null,\"paper\":\"ours\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":2},\"round\":1,\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence and may disclose it to its advisers.\",\"vs_standard\":{\"additions\":[{\"effect\":\"less_protective\",\"summary\":\"Synthetic fixture: disclosure to advisers.\"}],\"basis\":\"agent\",\"check\":null,\"label\":\"less_protective\",\"parts\":[{\"part_id\":\"4c365201\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d\",\"status\":\"omitted\"},{\"effect\":\"less_protective\",\"part_id\":\"bd2d0584\",\"reason\":\"Synthetic fixture: the notice duty is gone.\",\"status\":\"omitted\"},{\"effect\":\"neutral\",\"part_id\":\"e2ff9d8d-2\",\"status\":\"omitted\"}],\"reason\":\"Synthetic fixture reason: no notice duty.\"}}],\"rounds\":1,\"signed\":true,\"signed_on\":null,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-c\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"standard\":true,\"taxonomy_id\":\"confidentiality\"},{\"document_id\":\"deal-d\",\"id\":\"prec.04b041793ff13ea0\",\"moved\":true,\"opened_with\":\"non_standard\",\"opening_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":1},\"text\":\"The Recipient shall use reasonable efforts to hold the Discloser's Confidential Information in confidence and shall notify the Discloser promptly of any unauthorized disclosure. This Section survives the end of this Agreement.\",\"vs_standard\":{\"additions\":[],\"basis\":\"owner\",\"check\":null,\"label\":\"more_protective\",\"owner_label\":{\"label\":\"more_protective\",\"reason\":\"Synthetic fixture owner reason: survival matters more here.\"},\"parts\":[{\"part_id\":\"4c365201\",\"reason\":\"Synthetic fixture: reasonable efforts only.\",\"relation\":\"less_protective\",\"status\":\"present\"},{\"effect\":\"more_protective\",\"part_id\":\"e2ff9d8d\",\"reason\":\"Synthetic fixture: the first survival sentence is gone.\",\"status\":\"omitted\"},{\"part_id\":\"bd2d0584\",\"relation\":\"equivalent\",\"status\":\"present\"},{\"part_id\":\"e2ff9d8d-2\",\"reason\":\"Synthetic fixture: survival kept once, narrower.\",\"relation\":\"more_protective\",\"status\":\"present\"}],\"reason\":\"Synthetic fixture reason: reasonable efforts only.\"}},\"paper\":\"theirs\",\"paper_basis\":\"provenance_detection\",\"paper_confidence\":0.9,\"refused_asks\":[],\"rounds\":1,\"signed\":true,\"signed_on\":null,\"signed_text\":{\"ref\":{\"char_span\":[0,40],\"clause_path\":\"1\",\"document_id\":\"deal-d\",\"version\":3},\"text\":\"The Recipient shall hold the Discloser's Confidential Information in confidence.\\n\\nThis Section survives the end of this Agreement.\\n\\nThe Recipient shall notify the Discloser promptly of any unauthorized disclosure.\\n\\nThis Section survives the end of this Agreement.\"},\"standard\":true,\"taxonomy_id\":\"confidentiality\"}]},\"floor\":{},\"opf_version\":\"0.6\",\"perspective\":{\"counterparty_type\":\"Fixture Counterparty\",\"party\":\"Fixture Co\"},\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:23c45b9104b1a06c2f35716d1cbb0d515f4f76ff3d7198db3c547597eef1ce8f",
     "section_digests": {
-      "evidence": "sha256:3b7a1b7ad96c449202ebc55081037c4a7aa94eb3ebeec18116ed64e9148778c1",
+      "evidence": "sha256:4ad8c6acf37b60a2c12c8862fbb89599699b95ed512abcc23b5575e1fc270ad8",
       "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
       "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     },
     "digest": {
-      "digest_version": "4",
+      "digest_version": "5",
       "perspective": {
         "party": "Fixture Co",
         "counterparty_type": "Fixture Counterparty"
@@ -464,6 +476,8 @@
             }
           },
           "n_deals": 4,
+          "first_signed": null,
+          "last_signed": null,
           "n_signed_standard": 2,
           "n_opened_standard": 2,
           "n_kept_standard": 1,
@@ -480,6 +494,7 @@
             {
               "text": "The Recipient shall hold the Discloser's Confidential Information in confidence and shall notify the Discloser within thirty days of any unauthorized disclosure, and shall return or destroy it on request. This Section survives the end of this Agreement.",
               "n_deals": 1,
+              "first_signed": null,
               "last_signed": null,
               "n_from_standard": 1,
               "n_unchanged": 0,
@@ -513,6 +528,7 @@
               "n_texts": 1,
               "n_from_standard": 0,
               "n_unchanged": 1,
+              "first_signed": null,
               "last_signed": null,
               "exemplars": [
                 {
@@ -537,6 +553,8 @@
             {
               "text": "The Recipient shall hold the Discloser's Confidential Information in confidence and may disclose it to its advisers.",
               "n_deals": 1,
+              "first_signed": null,
+              "last_signed": null,
               "label": "less_protective",
               "part_map": [
                 "=",
@@ -707,12 +725,12 @@
       "documents": [
         {
           "document_id": "deal-a",
-          "signed_at": null,
+          "signed_on": null,
           "version_files": []
         },
         {
           "document_id": "deal-d",
-          "signed_at": null,
+          "signed_on": null,
           "version_files": []
         }
       ],

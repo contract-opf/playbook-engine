@@ -28,7 +28,7 @@ from click.testing import Result as CliResult
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.canonicalize import content_hash
 from playbook_engine.cli import cli
-from playbook_engine.digest import build_digest_v4
+from playbook_engine.digest import build_digest_v5
 from playbook_engine.equivalence import LABELS, iter_slots, slot_key
 from playbook_engine.opf_accessors import (
     PRECEDENT_SIDECAR,
@@ -235,7 +235,7 @@ def test_a_vs_standard_and_a_posture_override_change_the_playbook_and_restamp_ow
     # everything derived was recomputed by the engine, never hand-edited
     assert after["identity"]["content_hash"] != old_hash
     assert after["identity"]["content_hash"] == content_hash(after)
-    assert after["digest"] == build_digest_v4(after)
+    assert after["digest"] == build_digest_v5(after)
     assert verify_precedent_sidecar(after, out_dir / PRECEDENT_SIDECAR)
     # and the result validates, against the verdict store that now holds the owner verdict
     assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0

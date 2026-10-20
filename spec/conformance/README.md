@@ -1,7 +1,7 @@
 # OPF conformance vectors — canonicalization + digest
 
-The vectors under [`0.5/`](0.5/README.md) are the **normative definition**
-of two things for OPF 0.5 / `digest_version` 4 — the one format the
+The vectors under [`0.6/`](0.6/README.md) are the **normative definition**
+of two things for OPF 0.6 / `digest_version` 5 — the one format the
 reference engine reads and writes:
 
 1. **Canonicalization and content addressing** (`playbook_engine/canonicalize.py`)
@@ -12,7 +12,7 @@ reference engine reads and writes:
 
 An independent implementation (a different language, or a hand-maintained
 port like the ones this suite exists to catch drift in — see issue #115)
-that reproduces every `expected.*` value in `0.5/vectors/*.json` from that
+that reproduces every `expected.*` value in `0.6/vectors/*.json` from that
 vector's `input` **is conformant** with canonicalization and digest
 construction for this format version. It needs no dependency on this repo
 or on Python — every vector is plain JSON.
@@ -28,10 +28,10 @@ passes.
 
 ## Canonicalization algorithm
 
-`0.5/manifest.json`'s `algorithm` text says canonicalization is "exactly as
+`0.6/manifest.json`'s `algorithm` text says canonicalization is "exactly as
 the 0.3 set (../manifest.json)". That manifest belonged to the OPF 0.3 /
 digest 2 vector set, retired with that format (issue #238; git history
-keeps it). The algorithm it stated, which the 0.5 vectors use unchanged:
+keeps it). The algorithm it stated, which the 0.6 vectors use unchanged:
 
 - **canonical:** `json.dumps(value, sort_keys=True, separators=(',', ':'),
   ensure_ascii=False)` over the whole document after removing the top-level
@@ -51,5 +51,5 @@ Per the OPF-SPEC.md §11 immutability rule, these vectors are never edited in
 place for the same format-version stamp. A format-version bump (a new
 `opf_version` or a new `DIGEST_VERSION`) gets a **new, separately-stamped**
 vector set, not an overwrite — exactly like a schema file itself. See
-[`0.5/README.md`](0.5/README.md) for the vector-by-vector rationale and file
+[`0.6/README.md`](0.6/README.md) for the vector-by-vector rationale and file
 layout.

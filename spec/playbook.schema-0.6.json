@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json",
-  "title": "Open Playbook Format (OPF) v0.5",
-  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 4 model-facing projection, a hard-rule `manifest`, per-clause critic `dossiers` and a `provenance_index` (issue #228). OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.6.json",
+  "title": "Open Playbook Format (OPF) v0.6",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 5 model-facing projection, a hard-rule `manifest`, per-clause critic `dossiers` and a `provenance_index` (issue #228). OPF 0.6 = the 0.5 document plus the date each deal was signed as a fact (issue #247): `corpus.documents[].signed_on` and `signed_on_basis`, `signed_on` on every precedent record (replacing the optional `signed_at`), and `first_signed` / `last_signed` year-month spans in digest 5. It replaces 0.5 in place and 0.5 is no longer a supported format. Every precedent record carries `opened_with` and `opening_text` (issue #233). Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged part by part against our standard and blind-checked by an independent model (issues #240, #243). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
   "type": "object",
   "required": [
     "opf_version",
@@ -22,7 +22,7 @@
   "properties": {
     "opf_version": {
       "type": "string",
-      "const": "0.5"
+      "const": "0.6"
     },
     "agreement_type": {
       "type": "object",
@@ -179,7 +179,7 @@
     },
     "evidence": {
       "type": "object",
-      "description": "\u00a73.5 (OPF 0.5) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
+      "description": "\u00a73.5 (OPF 0.6) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
       "required": [
         "clauses",
         "precedent"
@@ -426,6 +426,20 @@
               "version_order_basis": {
                 "type": "string"
               },
+              "signed_on": {
+                "$ref": "#/$defs/signedOnOrNull",
+                "description": "When the deal was signed (OPF 0.6, \u00a73.8): a date from the executed copy, never invented. null when the deal has no detected executed copy (`signed_version` null) or no source states a date; absent on an out-of-scope document."
+              },
+              "signed_on_basis": {
+                "enum": [
+                  "document_text",
+                  "signature_block",
+                  "filename",
+                  "file_metadata",
+                  null
+                ],
+                "description": "Where `signed_on` was read, tried in this order of trust: the date the document states for itself (`document_text`), a date in its signature block (`signature_block`), a date in the executed copy's file name (`filename`) or its file metadata (`file_metadata`). null exactly when `signed_on` is null."
+              },
               "version_files": {
                 "type": "array",
                 "description": "Per-version content addresses (\u00a74, issue #185): sha256 of each SOURCE file's bytes, keyed by the same inferred ordinal citations use \u2014 a consumer holding the corpus verifies 'I have the cited document' by hashing its copy. Hashes of confidential files leak nothing; source_uri does and is stripped by the public export profile.",
@@ -467,6 +481,46 @@
                 "then": {
                   "required": [
                     "scope_rationale"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "signed_on"
+                  ],
+                  "properties": {
+                    "signed_on": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "signed_on_basis"
+                  ],
+                  "properties": {
+                    "signed_on_basis": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "in_scope"
+                  ],
+                  "properties": {
+                    "in_scope": {
+                      "const": false
+                    }
+                  }
+                },
+                "else": {
+                  "required": [
+                    "signed_on",
+                    "signed_on_basis"
                   ]
                 }
               }
@@ -578,7 +632,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "digest_version 4 \u2014 the compact model-facing projection of the 0.5 evidence (playbook_engine/digest.py build_digest_v4): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v4(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map and one-sentence reason (issue #243) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
+      "description": "digest_version 5 \u2014 the compact model-facing projection of the 0.6 evidence (playbook_engine/digest.py build_digest_v5): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v5(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map and one-sentence reason (issue #243) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
       "required": [
         "digest_version",
         "perspective",
@@ -595,7 +649,7 @@
       "properties": {
         "digest_version": {
           "type": "string",
-          "const": "4"
+          "const": "5"
         },
         "perspective": {
           "description": "Copy of the document's top-level `perspective` (null when absent) \u2014 the digest always says who 'us' is.",
@@ -644,10 +698,10 @@
               "description": "In-scope deals with a detected executed copy."
             },
             "first_signed": {
-              "$ref": "#/$defs/signedAtOrNull"
+              "$ref": "#/$defs/digestMonthOrNull"
             },
             "last_signed": {
-              "$ref": "#/$defs/signedAtOrNull"
+              "$ref": "#/$defs/digestMonthOrNull"
             }
           }
         },
@@ -711,7 +765,7 @@
     },
     "manifest": {
       "type": "object",
-      "description": "The hard-rule manifest (OPF 0.5, issue #228): one rule per `floor.invariants[]` entry whose deletion or absence is a hard rejection, so a consumer can enforce hard-rejection recall outside both models. Derived only from the signed Floor (never from precedent counts) and MUST equal build_manifest(document) (validator-enforced). No judged verdict. Covered by identity.content_hash. Optional in the schema; the reference engine always emits it (about 2,000 tokens on a real Floor).",
+      "description": "The hard-rule manifest (OPF 0.6, issue #228): one rule per `floor.invariants[]` entry whose deletion or absence is a hard rejection, so a consumer can enforce hard-rejection recall outside both models. Derived only from the signed Floor (never from precedent counts) and MUST equal build_manifest(document) (validator-enforced). No judged verdict. Covered by identity.content_hash. Optional in the schema; the reference engine always emits it (about 2,000 tokens on a real Floor).",
       "required": [
         "hard_rules"
       ],
@@ -730,14 +784,14 @@
     },
     "dossiers": {
       "type": "object",
-      "description": "Critic dossiers (OPF 0.5, issue #228): one bounded dossier per `evidence.clauses[]` entry, keyed by clause id, each with at most two precedent excerpts chosen by a fixed order and a budget of `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4); over budget, whole parts are dropped (never cut): listed Floor rules, last first, while the dossier holding only its first excerpt is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. A dossier always keeps one complete excerpt (when the clause has any), even if that alone puts it over budget: that is the only case where a dossier may exceed its budget. Adding precedents changes which excerpts appear, never adds to a dossier (a dossier carries no count). MUST equal build_dossiers(document) (validator-enforced). Covered by identity.content_hash. Optional in the schema; the reference engine always emits it.",
+      "description": "Critic dossiers (OPF 0.6, issue #228): one bounded dossier per `evidence.clauses[]` entry, keyed by clause id, each with at most two precedent excerpts chosen by a fixed order and a budget of `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4); over budget, whole parts are dropped (never cut): listed Floor rules, last first, while the dossier holding only its first excerpt is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. A dossier always keeps one complete excerpt (when the clause has any), even if that alone puts it over budget: that is the only case where a dossier may exceed its budget. Adding precedents changes which excerpts appear, never adds to a dossier (a dossier carries no count). MUST equal build_dossiers(document) (validator-enforced). Covered by identity.content_hash. Optional in the schema; the reference engine always emits it.",
       "additionalProperties": {
         "$ref": "#/$defs/dossier"
       }
     },
     "provenance_index": {
       "type": "object",
-      "description": "Where every dossier excerpt came from, kept or dropped for size (OPF 0.5, issue #228). Not sent to a model. `dossiers` maps a clause id to each excerpt the dossier selected, in selection order: the kept excerpts (`omitted` false), then the ones dropped whole to fit the budget (`omitted` true), so every `omitted_precedent_ids` entry resolves here to its deal; `documents` lists every deal behind those rows. MUST equal build_provenance_index(document) (validator-enforced). Covered by identity.content_hash.",
+      "description": "Where every dossier excerpt came from, kept or dropped for size (OPF 0.6, issue #228). Not sent to a model. `dossiers` maps a clause id to each excerpt the dossier selected, in selection order: the kept excerpts (`omitted` false), then the ones dropped whole to fit the budget (`omitted` true), so every `omitted_precedent_ids` entry resolves here to its deal; `documents` lists every deal behind those rows. MUST equal build_provenance_index(document) (validator-enforced). Covered by identity.content_hash.",
       "required": [
         "compiler",
         "corpus_manifest_hash",
@@ -784,16 +838,13 @@
             "type": "object",
             "required": [
               "document_id",
-              "signed_at",
+              "signed_on",
               "version_files"
             ],
             "additionalProperties": false,
             "properties": {
               "document_id": {
                 "type": "string"
-              },
-              "signed_at": {
-                "$ref": "#/$defs/signedAtOrNull"
               },
               "version_files": {
                 "type": "array",
@@ -819,6 +870,9 @@
                     }
                   }
                 }
+              },
+              "signed_on": {
+                "$ref": "#/$defs/signedOnOrNull"
               }
             }
           },
@@ -914,21 +968,6 @@
         }
       }
     },
-    "signedAt": {
-      "type": "string",
-      "pattern": "^\\d{4}-(\\d{2}-\\d{2}|Q[1-4])$",
-      "description": "An ISO-8601 date, or the YYYY-Qn quarter `playbook publish` coarsens it to."
-    },
-    "signedAtOrNull": {
-      "oneOf": [
-        {
-          "type": "null"
-        },
-        {
-          "$ref": "#/$defs/signedAt"
-        }
-      ]
-    },
     "ourStandard": {
       "type": [
         "object",
@@ -1001,13 +1040,13 @@
               "$ref": "#/$defs/vsStandardVerdict"
             }
           ],
-          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.5, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
+          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.6, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
         }
       }
     },
     "precedentClause": {
       "type": "object",
-      "description": "One clause type (OPF 0.5). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
+      "description": "One clause type (OPF 0.6). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
       "required": [
         "id",
         "taxonomy_id",
@@ -1102,13 +1141,13 @@
               "$ref": "#/$defs/vsStandardVerdict"
             }
           ],
-          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.5, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
+          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.6, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
         }
       }
     },
     "precedent": {
       "type": "object",
-      "description": "One deal's record for one clause type (OPF 0.5) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
+      "description": "One deal's record for one clause type (OPF 0.6) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
       "required": [
         "id",
         "taxonomy_id",
@@ -1117,6 +1156,7 @@
         "paper_basis",
         "paper_confidence",
         "signed",
+        "signed_on",
         "rounds",
         "signed_text",
         "opened_with",
@@ -1175,8 +1215,9 @@
           "type": "boolean",
           "description": "The deal has a detected executed copy; MUST agree with corpus.documents[].signed_version."
         },
-        "signed_at": {
-          "$ref": "#/$defs/signedAt"
+        "signed_on": {
+          "$ref": "#/$defs/signedOnOrNull",
+          "description": "When the deal was signed: the deal's `corpus.documents[].signed_on`, which it MUST equal. null when the deal has no detected executed copy (`signed` false) or no date could be established \u2014 never guessed."
         },
         "rounds": {
           "type": "integer",
@@ -1236,6 +1277,7 @@
       "required": [
         "text",
         "n_deals",
+        "first_signed",
         "last_signed",
         "n_from_standard",
         "n_unchanged",
@@ -1257,8 +1299,11 @@
           "type": "integer",
           "minimum": 1
         },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
         "last_signed": {
-          "$ref": "#/$defs/signedAtOrNull"
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "n_from_standard": {
           "type": "integer",
@@ -1348,6 +1393,8 @@
       "required": [
         "text",
         "n_deals",
+        "first_signed",
+        "last_signed",
         "label",
         "part_map",
         "additions",
@@ -1364,6 +1411,12 @@
         "n_deals": {
           "type": "integer",
           "minimum": 1
+        },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
+        "last_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "label": {
           "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
@@ -1446,6 +1499,8 @@
         "title",
         "our_standard",
         "n_deals",
+        "first_signed",
+        "last_signed",
         "n_signed_standard",
         "n_opened_standard",
         "n_kept_standard",
@@ -1474,6 +1529,14 @@
         "n_deals": {
           "type": "integer",
           "minimum": 0
+        },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull",
+          "description": "Earliest signing month among the deals with a precedent record for the clause (null when none is dated)."
+        },
+        "last_signed": {
+          "$ref": "#/$defs/digestMonthOrNull",
+          "description": "Latest signing month among the same deals."
         },
         "n_signed_standard": {
           "type": "integer",
@@ -1752,6 +1815,7 @@
         "n_texts",
         "n_from_standard",
         "n_unchanged",
+        "first_signed",
         "last_signed",
         "exemplars",
         "precedent_ids"
@@ -1779,8 +1843,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
         "last_signed": {
-          "$ref": "#/$defs/signedAtOrNull"
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "exemplars": {
           "type": "array",
@@ -2046,7 +2113,7 @@
     },
     "hardRule": {
       "type": "object",
-      "description": "One hard rule (OPF 0.5, issue #228), derived from one `floor.invariants[]` entry and never from precedent counts. `clause_id` / `taxonomy_id` come from the invariant's `x_taxonomy_id` (null when it names none or the corpus has no evidence for it); `required_presence`, `condition` and `permissible_proof` from its `x_required_presence`, `x_condition` and `x_permissible_proof` (defaults: false, \"judged\", []); `fallback_language` is the clause's `our_standard.text` (null when there is none). A rule that demands presence (`required_presence` true) or carries a predicate (`condition` other than \"judged\") MUST name its clause: `taxonomy_id` is then a string, because a predicate is checked against the text of the clause it names and a presence rule rejects that clause's absence (OPF-SPEC \u00a73.12.3).",
+      "description": "One hard rule (OPF 0.6, issue #228), derived from one `floor.invariants[]` entry and never from precedent counts. `clause_id` / `taxonomy_id` come from the invariant's `x_taxonomy_id` (null when it names none or the corpus has no evidence for it); `required_presence`, `condition` and `permissible_proof` from its `x_required_presence`, `x_condition` and `x_permissible_proof` (defaults: false, \"judged\", []); `fallback_language` is the clause's `our_standard.text` (null when there is none). A rule that demands presence (`required_presence` true) or carries a predicate (`condition` other than \"judged\") MUST name its clause: `taxonomy_id` is then a string, because a predicate is checked against the text of the clause it names and a presence rule rejects that clause's absence (OPF-SPEC \u00a73.12.3).",
       "required": [
         "rule_id",
         "clause_id",
@@ -2278,7 +2345,7 @@
     },
     "dossier": {
       "type": "object",
-      "description": "A bounded critic dossier for one clause (OPF 0.5, issue #228): at most two excerpts, every text WHOLE (nothing is cut part-way: a cut-off clause can drop its operative carve-out or cap and so plant a false fact). Its budget is `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4; 1,000 when there is no our standard); over budget, WHOLE parts are dropped: the listed Floor rules, last first, while the dossier holding only its first excerpt (none, when the clause has none) is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. Our standard and the identifiers are never dropped. A dossier keeps at least one complete excerpt (when the clause has any), even if that one alone puts it over budget: a dossier holding its single kept excerpt is the only one that may exceed its budget, and a dossier with no excerpt over its budget is invalid. Facts only: our standard, the signed Floor's own statements and rationale for the clause, and the selected excerpts. `n_floor_rules` is the uncapped number of Floor rules for the clause (at most three are listed, fewer when rules are dropped for size; the manifest states every one).",
+      "description": "A bounded critic dossier for one clause (OPF 0.6, issue #228): at most two excerpts, every text WHOLE (nothing is cut part-way: a cut-off clause can drop its operative carve-out or cap and so plant a false fact). Its budget is `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4; 1,000 when there is no our standard); over budget, WHOLE parts are dropped: the listed Floor rules, last first, while the dossier holding only its first excerpt (none, when the clause has none) is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. Our standard and the identifiers are never dropped. A dossier keeps at least one complete excerpt (when the clause has any), even if that one alone puts it over budget: a dossier holding its single kept excerpt is the only one that may exceed its budget, and a dossier with no excerpt over its budget is invalid. Facts only: our standard, the signed Floor's own statements and rationale for the clause, and the selected excerpts. `n_floor_rules` is the uncapped number of Floor rules for the clause (at most three are listed, fewer when rules are dropped for size; the manifest states every one).",
       "required": [
         "clause_id",
         "taxonomy_id",
@@ -2424,6 +2491,36 @@
           "$ref": "#/$defs/citation"
         }
       }
+    },
+    "signedOn": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}(-\\d{2})?$",
+      "description": "When a deal was signed: an ISO-8601 date (YYYY-MM-DD) or, when only the month is known, YYYY-MM. A real calendar date with a year in 1980-2099 (OPF-SPEC \u00a73.8)."
+    },
+    "signedOnOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/signedOn"
+        }
+      ]
+    },
+    "digestMonth": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}$",
+      "description": "A year-month (YYYY-MM): the digest reports signing dates to the month."
+    },
+    "digestMonthOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digestMonth"
+        }
+      ]
     }
   }
 }

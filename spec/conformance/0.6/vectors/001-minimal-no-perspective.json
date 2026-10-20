@@ -1,11 +1,11 @@
 {
   "name": "minimal-no-perspective",
-  "description": "Smallest well-formed OPF 0.5 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 4 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null, uncovered_clause_types is an empty list.",
-  "opf_version": "0.5",
+  "description": "Smallest well-formed OPF 0.6 document: evidence {clauses: [], precedent: []}, no top-level perspective. expected.digest pins the digest_version 5 skeleton — perspective is PRESENT and null (never omitted), agreement_type is {id, name}, corpus counts are 0 and first_signed/last_signed are null, uncovered_clause_types is an empty list.",
+  "opf_version": "0.6",
   "engine_version": "1.0.0",
-  "digest_version": "4",
+  "digest_version": "5",
   "input": {
-    "opf_version": "0.5",
+    "opf_version": "0.6",
     "agreement_type": {
       "id": "conformance-fixture",
       "name": "Conformance Fixture Agreement"
@@ -35,15 +35,15 @@
     }
   },
   "expected": {
-    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clauses\":[],\"precedent\":[]},\"floor\":{},\"opf_version\":\"0.5\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
-    "content_hash": "sha256:8b136f5469e372f3991d934c1be8ef363d612db4783f314e1cf6310b676bbf86",
+    "canonical": "{\"agreement_type\":{\"id\":\"conformance-fixture\",\"name\":\"Conformance Fixture Agreement\"},\"baseline\":{\"has_canonical_template\":true},\"compiler\":{\"name\":\"playbook-engine\",\"version\":\"1.0.0\"},\"corpus\":{\"documents\":[],\"stats\":{}},\"evidence\":{\"clauses\":[],\"precedent\":[]},\"floor\":{},\"opf_version\":\"0.6\",\"posture\":{},\"taxonomy\":{\"entries\":[],\"source\":\"custom\"}}",
+    "content_hash": "sha256:19eb6c7ac1b77be9818e8296383b3a1dc015fd143ea467d76a20c3323c831f0c",
     "section_digests": {
       "evidence": "sha256:c9b0d9988d2d3c85da7f8ebf4092a729cf801cdd6cd9151ce0b71140d8b12029",
       "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
       "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     },
     "digest": {
-      "digest_version": "4",
+      "digest_version": "5",
       "perspective": null,
       "agreement_type": {
         "id": "conformance-fixture",

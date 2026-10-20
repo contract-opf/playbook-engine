@@ -1,4 +1,4 @@
-"""The ``vs_standard`` equivalence judgment — OPF 0.5 (issues #240, #243).
+"""The ``vs_standard`` equivalence judgment — OPF 0.6 (issues #240, #243).
 
 The question a legal reviewer asks of every precedent is how the signed
 language differs from our standard, and whether that is more or less risky for

@@ -3665,7 +3665,7 @@ def test_mixed_extractor_trail_and_timeout_reason_reach_the_playbook(
     assert doc["x_mixed_extractors"] is True
     assert doc["x_ingest_reason"] == [None, "timeout", "backend-error"]
     # The per-version reason still never enters version_ingest itself — the
-    # 0.5 schema's additionalProperties:false there has no x_ escape hatch.
+    # 0.6 schema's additionalProperties:false there has no x_ escape hatch.
     assert all("reason" not in vi for vi in doc["version_ingest"])
 
 

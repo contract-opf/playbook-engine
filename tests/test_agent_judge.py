@@ -1016,7 +1016,13 @@ class TestJudgeKindSeam:
         from playbook_engine import rubric
 
         # Issue #240: the equivalence label is the one verdict kind added back.
-        assert set(rubric.JUDGE_KINDS) == {"classify", "provenance", "scope", "equivalence"}
+        assert set(rubric.JUDGE_KINDS) == {
+            "classify",
+            "provenance",
+            "scope",
+            "equivalence",
+            "deal_date",
+        }
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:
         from playbook_engine.agent_judge import infer_verdict_kind

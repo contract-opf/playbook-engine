@@ -1,10 +1,10 @@
-"""OPF 0.5 evidence — the verdict-free per-deal precedent record (issues #223, #233).
+"""OPF 0.6 evidence — the verdict-free per-deal precedent record (issues #223, #233).
 
 The evidence shapes of OPF 0.1-0.3 described categories the engine could no
 longer honestly fill once judged deviation verdicts left the consumer path
 (issue #220, and the judge itself was retired in issue #239) and the deal
 became the unit of precedent (issue #216); they were retired (issue #238 —
-git history has them). OPF 0.5's evidence is two
+git history has them). OPF 0.6's evidence is two
 lists:
 
 ``evidence.clauses[]``
@@ -67,7 +67,7 @@ __all__ = [
     "restamp_evidence",
 ]
 
-#: Every precedent id starts with this prefix (OPF-SPEC §3.5, OPF 0.5).
+#: Every precedent id starts with this prefix (OPF-SPEC §3.5, OPF 0.6).
 PRECEDENT_ID_PREFIX = "prec."
 
 #: Hex characters of the sha256 kept in a precedent id. 64 bits is far beyond
@@ -121,7 +121,7 @@ _COUNTERPARTY_TOKEN = "counterparty"
 
 
 def normalize_variant_text(text: str, *, party: str | None) -> str:
-    """Grouping key for signed variants, refused asks and openings (OPF 0.5 / digest 4).
+    """Grouping key for signed variants, refused asks and openings (OPF 0.6 / digest 5).
 
     Normative as OPF-SPEC §3.5.4 "Grouping key". The standard check's
     exact-after-normalization rule
@@ -179,7 +179,7 @@ def _paper(
     """Three-valued paper side for one deal: ``(paper, paper_basis, confidence)``.
 
     An ambiguous provenance detection is ``"unknown"`` — never coerced to a
-    side. Metadata only: nothing in OPF 0.5 partitions, gates or weights by
+    side. Metadata only: nothing in OPF 0.6 partitions, gates or weights by
     paper side.
 
     ``paper_basis`` is the detection signal the deal's observations carry
@@ -258,7 +258,7 @@ def build_precedent_evidence(
     round_moves: list[RoundMove] | None = None,
     party: str | None,
 ) -> dict[str, Any]:
-    """Build the OPF 0.5 ``evidence`` section: ``{clauses, precedent}``.
+    """Build the OPF 0.6 ``evidence`` section: ``{clauses, precedent}``.
 
     One precedent per (document_id, taxonomy_id) carrying any classified
     observation of a compiled clause type:
@@ -292,12 +292,11 @@ def build_precedent_evidence(
       and then struck before signing — with its round and citation; always
       empty when ``signed`` is false (issue #221).
 
-    ``signed_at`` is never set: the reference compiler extracts no signing
-    date and never fabricates one (OPF-SPEC §3.5.4), so the digest's
-    ``first_signed`` / ``last_signed`` and every
-    ``signed_variants[].last_signed`` are always ``null`` in reference
-    output. The optional field exists for a third-party producer that
-    records signing dates; the 0.5 conformance vectors that set it model one.
+    ``signed_on`` is the deal's ``corpus.documents[].signed_on`` (OPF 0.6,
+    issue #247): the date read off the executed copy, ``null`` when the deal
+    has no detected executed copy or no source states a date — never guessed
+    (:mod:`playbook_engine.deal_dates`). The digest's ``first_signed`` /
+    ``last_signed`` are derived from it.
 
     Sub-sentence fragments are excluded exactly as the clause-type compiler
     excludes them (``MIN_OBSERVATION_TEXT_LEN``); unclassified observations
@@ -402,6 +401,7 @@ def build_precedent_evidence(
                 "paper_basis": paper_basis,
                 "paper_confidence": paper_confidence,
                 "signed": signed,
+                "signed_on": corpus_doc.get("signed_on") if corpus_doc is not None else None,
                 "rounds": n_rounds,
                 "signed_text": signed_text,
                 "opened_with": opened_with,
@@ -430,7 +430,7 @@ def build_precedent_evidence(
 def restamp_evidence(
     evidence: dict[str, Any], agreement_type_id: str, *, party: str | None
 ) -> None:
-    """(Re)compute every derived value of an OPF 0.5 ``evidence`` in place.
+    """(Re)compute every derived value of an OPF 0.6 ``evidence`` in place.
 
     Each precedent's ``id`` (:func:`precedent_id`) and each clause's
     ``n_*`` counts (:func:`clause_counts`, grouping by

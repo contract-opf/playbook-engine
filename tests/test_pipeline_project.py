@@ -1491,7 +1491,7 @@ def test_unsigned_deal_striking_our_standard_is_never_a_concession(tmp_path: Pat
 
 
 def test_unsigned_deal_striking_our_standard_opf_04_precedent(tmp_path: Path) -> None:
-    """Issue #223: the same three corpora projected as OPF 0.5. An unsigned
+    """Issue #223: the same three corpora projected as OPF 0.6. An unsigned
     deal that struck our standard produces no precedent for the clause; the
     same strike in a signed deal is a precedent with no signed text, our
     standard as its opening text, ``standard: false``, ``moved: true`` — and
@@ -1603,7 +1603,7 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
     assert not [o for o in observations if o["outcome"] == "proposed_then_reversed"]
     assert derive_reversal_candidates(observations, min_deals=2) == []
 
-    # OPF 0.5 (issues #223, #233): each deal opened with our whole two-node
+    # OPF 0.6 (issues #223, #233): each deal opened with our whole two-node
     # standard (the opening is ALL first-draft nodes of the clause type, not
     # only the struck one), signed only the first node, and neither deal
     # signed our standard or refused anything.
@@ -1633,7 +1633,7 @@ def test_struck_later_node_of_multi_node_standard_is_our_concession(tmp_path: Pa
 
 # Issue #223 fix round 1: one conceded_before_signing row is written per
 # struck node, so a deal that strikes TWO nodes of a multi-node standard has
-# two rows for the (deal, clause) — the 0.5 precedent must carry both.
+# two rows for the (deal, clause) — the 0.6 precedent must carry both.
 _MULTI_NODE_INSURANCE_C = "Alpha Corp shall deliver certificates of insurance on request."
 _THREE_NODE_TEMPLATE_BODY = (
     r"1. Indemnification\par "
@@ -1655,7 +1655,7 @@ def test_two_struck_nodes_of_multi_node_standard_both_reach_opening_text(
 ) -> None:
     """Our template's Insurance standard spans three nodes (A, B, C); two
     deals start from it and sign keeping only A. Each deal's store has a
-    conceded_before_signing row for B and one for C, and its OPF 0.5
+    conceded_before_signing row for B and one for C, and its OPF 0.6
     precedent's opening_text is the first-draft text of the whole clause type:
     A, B and C joined in clause order, never only the first struck row."""
     from playbook_engine.observation_builder import OUTCOME_CONCEDED_BEFORE_SIGNING
@@ -1801,7 +1801,7 @@ def test_unsigned_deal_striking_their_language_records_no_refused_ask(
     is struck in v2. In a deal with a detected executed copy that is their
     refused ask; with no signed copy, v2 is only the later draft, so no
     proposed_then_reversed observation is written (counted instead) and the
-    OPF 0.5 precedent carries no refused_asks for the unsigned deal."""
+    OPF 0.6 precedent carries no refused_asks for the unsigned deal."""
     corpus_dir = tmp_path / "corpus"
     deal_dir = corpus_dir / "deal-001"
     deal_dir.mkdir(parents=True)
@@ -2014,7 +2014,7 @@ def test_project_drops_refused_asks_of_unsigned_deal_from_pre_221_store(tmp_path
 
 
 # ---------------------------------------------------------------------------
-# Issue #233 (OPF 0.5): what every clause opened with, mined and projected
+# Issue #233 (OPF 0.6): what every clause opened with, mined and projected
 # through the real pipeline. Each deal is a two-version negotiation whose
 # first draft is v1 and whose executed copy is v2 (hints.yaml), except where
 # stated.
@@ -2111,7 +2111,7 @@ def _precedent_by_deal(playbook: dict[str, Any], taxonomy_id: str) -> dict[str, 
 def test_precedent_records_what_every_clause_opened_with(tmp_path: Path) -> None:
     out_dir, config, taxonomy = _mine_openings(tmp_path)
     playbook = project_playbook(out_dir=out_dir, config=config, taxonomy=taxonomy)
-    assert playbook["opf_version"] == "0.5"
+    assert playbook["opf_version"] == "0.6"
     assert validate_document(playbook).ok
     gl = _precedent_by_deal(playbook, "governing_law")
     assert set(gl) == {

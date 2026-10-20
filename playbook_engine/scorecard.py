@@ -49,6 +49,8 @@ from typing import Any
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
+from playbook_engine.deal_dates import BASES as SIGNED_ON_BASES
+from playbook_engine.deal_dates import DEAL_DATE_KIND, coverage
 from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget, dossier_standard_text
 from playbook_engine.equivalence import ADDITION_TOKENS, PART_TOKENS
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
@@ -108,7 +110,10 @@ __all__ = [
 #: rates (agreement on the label and on the parts, reported separately),
 #: ``part_tokens`` / ``addition_tokens`` (part-map token counts) and
 #: ``standard_parts`` (parts per standard).
-SCORECARD_VERSION = 7
+#:
+#: v8 (issue #247): the ``signed_on`` section (in-scope signed deals dated, by
+#: basis, and how many have no date).
+SCORECARD_VERSION = 8
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -148,7 +153,9 @@ DROPPED_REASONS = frozenset(
 #: ``PendingQueue`` record kinds (agent_judge / agent_segmenter). A kind added
 #: through ``agent_judge.register_verdict_kind`` must be added here too, or its
 #: pending items are counted under ``other``.
-PENDING_KINDS = frozenset({"classify", "provenance", "scope", "segment", "equivalence"})
+PENDING_KINDS = frozenset(
+    {"classify", "provenance", "scope", "segment", "equivalence", DEAL_DATE_KIND}
+)
 
 #: Checker model ids the scorecard names (the pinned one); any other recorded
 #: id is written as ``other`` — a model id from the store is still data from
@@ -167,13 +174,13 @@ EQUIVALENCE_VOCABULARY = (
 #: Observation ``provenance`` values — the paper-side diagnostic split.
 PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
 
-#: ``opened_with`` (OPF 0.5, issue #233); a null value is ``undetermined``.
+#: ``opened_with`` (OPF 0.6, issue #233); a null value is ``undetermined``.
 OPENED_WITH = frozenset({"standard", "non_standard", "absent", "undetermined"})
 
 #: The engine's one format; any other version a playbook claims is labelled
 #: ``other``.
-OPF_VERSIONS = frozenset({"0.5"})
-DIGEST_VERSIONS = frozenset({"4"})
+OPF_VERSIONS = frozenset({"0.6"})
+DIGEST_VERSIONS = frozenset({"5"})
 
 #: Every string the scorecard may carry as a value or a data-derived key.
 ENUM_LABELS = frozenset(
@@ -183,6 +190,7 @@ ENUM_LABELS = frozenset(
     | PENDING_KINDS
     | PAPER_SIDES
     | OPENED_WITH
+    | frozenset(SIGNED_ON_BASES)
     | OPF_VERSIONS
     | DIGEST_VERSIONS
     | CHECKER_MODELS
@@ -421,6 +429,29 @@ def _precedent_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None
         "openings_by_opened_with": openings_by,
         "records_by_opened_with": records_by,
         "signed_opened_with_undetermined": signed_undetermined,
+    }
+
+
+def _signed_on_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Counts of signed deals by how their signing date was established (issue #247).
+
+    Read from the playbook's own ``corpus.documents[]``. ``null_dates`` are
+    signed deals with no date; ``unsigned`` in-scope deals have none by
+    definition. Counts only: no date value leaves the playbook.
+    """
+    if playbook is None:
+        return None
+    corpus = playbook.get("corpus")
+    docs = corpus.get("documents") if isinstance(corpus, dict) else None
+    if not isinstance(docs, list):
+        return None
+    cov = coverage([d for d in docs if isinstance(d, dict)])
+    return {
+        "in_scope": cov.in_scope,
+        "signed": cov.signed,
+        "dated": cov.dated,
+        "null_dates": cov.null_dates,
+        "by_basis": {_label(b, frozenset(SIGNED_ON_BASES)): n for b, n in cov.by_basis.items()},
     }
 
 
@@ -695,7 +726,7 @@ def _record_texts(playbook: dict[str, Any]) -> set[str]:
 
 
 def _dossiers_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Critic dossier counts and sizes (OPF 0.5, issue #228) — ``null`` when not carried.
+    """Critic dossier counts and sizes (OPF 0.6, issue #228) — ``null`` when not carried.
 
     ``cut_texts`` counts excerpt texts that are NOT a precedent record's own
     text whole (it must be 0: no text is ever cut part-way);
@@ -764,6 +795,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "template": _template_section(template_obs, playbook),
         "classification": _classification_section(observations),
         "precedent": _precedent_section(playbook),
+        "signed_on": _signed_on_section(playbook),
         "template_drift": _template_drift_section(playbook),
         # Issue #233: the drift of what each clause OPENED with — per clause
         # with our_standard, our-paper signed deals opening with our standard

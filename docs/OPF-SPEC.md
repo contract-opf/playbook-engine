@@ -1,7 +1,7 @@
 # Open Playbook Format (OPF) — Specification
 
 **Version:** 1.0
-**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler emits and validates exactly one document shape, `opf_version` "0.5" (the verdict-free per-deal precedent record, §3.5.4, with the opening evidence of §3.5.5 and a `digest_version` "4" digest, §3.12.2). The 0.1–0.4 shapes and digest 2 were retired (owner decision 2026-10-06: no installed consumer needs them); their schemas and text stay in git history and in contract-opf/opf.
+**Status:** Stable — the first non-beta release. 1.0 is a stability commitment, not a shape change. Format changes from here are governed by the stability policy in §11 (a breaking shape or normative-rule change requires 2.0). The reference compiler emits and validates exactly one document shape, `opf_version` "0.6" (the verdict-free per-deal precedent record, §3.5.4, with the opening evidence of §3.5.5 and a `digest_version` "5" digest, §3.12.2). The 0.1–0.4 shapes and digest 2 were retired (owner decision 2026-10-06: no installed consumer needs them); their schemas and text stay in git history and in contract-opf/opf.
 **Serialization:** JSON (canonical). YAML permitted for authoring; tools MUST accept both and treat them as equivalent.
 **Issue references:** #NNN citations throughout are design provenance from the project's original development tracker.
 **License:** This file is specification text and is additionally licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0), per the repository `LICENSE` — alongside the Apache-2.0 license covering this repository.
@@ -101,7 +101,7 @@ A playbook is a single JSON object:
 
 ```jsonc
 {
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "agreement_type": { "id": "...", "name": "...", "description": "...", "aliases": ["..."] },
   "baseline": { ... },          // §3.2
   "taxonomy": { ... },          // §3.3
@@ -125,7 +125,7 @@ A playbook is a single JSON object:
 ```
 
 ### 3.1 Top-level fields
-- `opf_version` (string, required) — `"0.5"`, the one supported version.
+- `opf_version` (string, required) — `"0.6"`, the one supported version.
 - `agreement_type` (object, required) — `id` (slug), `name`, `description`, `aliases[]`.
 - `perspective` (object, OPTIONAL) — whose side this playbook is reviewed *as*: `party` (our legal entity/party name) and `counterparty_type` (what the other side typically is, e.g. `"Educational Institution"`). An open-standard OPF instance must say who "us" is — negotiation knowledge is meaningless without it. Owned by OPF (see `OPF-BUNDLE-BOUNDARY.md`).
 - `de_minimis` (array of strings, OPTIONAL) — categories of change accepted even when technically novel (e.g. `"typo fixes"`, `"renumbering with no substantive change"`). This is negotiation knowledge, not a runtime policy, so it lives in OPF rather than the consumer's bundle.
@@ -213,10 +213,10 @@ per-deal precedent record.
 > carries, and the engine no longer reads or writes them. Their text and
 > schemas are in this repository's git history and in contract-opf/opf.
 
-#### 3.5.4 The verdict-free per-deal precedent record (OPF 0.4, issue #223; carried by 0.5)
+#### 3.5.4 The verdict-free per-deal precedent record (OPF 0.4, issue #223; carried by 0.5 and 0.6)
 
-In `opf_version` "0.5" (`spec/playbook.schema-0.5.json`; the record is 0.4's
-plus the opening evidence of §3.5.5) judged
+In `opf_version` "0.6" (`spec/playbook.schema-0.6.json`; the record is 0.4's
+plus the opening evidence of §3.5.5 and, since 0.6, the signing date) judged
 deviation/risk verdicts are off the consumer path (the consuming model does
 the judging) and the deal is the unit of precedent, so `evidence` carries
 facts only:
@@ -241,7 +241,7 @@ facts only:
     "counterparty_ref": { "alias": "Counterparty-2" },        // OPTIONAL
     "paper": "ours" | "theirs" | "unknown", "paper_basis": "provenance_detection",
     "paper_confidence": 0.93 | null,
-    "signed": true, "signed_at": "2025-03-14" | "2025-Q1",     // signed_at OPTIONAL
+    "signed": true, "signed_on": "2025-03-14" | "2025-03" | null,   // §3.8
     "rounds": 1,
     "signed_text":  { "text": "...", "ref": Citation } | null,
     "opened_with": "standard" | "non_standard" | "absent" | null,   // §3.5.5
@@ -264,7 +264,7 @@ Field semantics:
   standard joined from several template clauses cites them all
   (`source_ref.clause_path` lists their paths, comma separated) and carries no
   `char_span`; a single-clause standard cites that clause and its span.
-  `parts` (OPF 0.5, issue #243) are those template passages in order, one part
+  `parts` (OPF 0.6, issue #243) are those template passages in order, one part
   each (a one-passage standard is one part): `text` is the parts' texts joined
   with a blank line (`"\n\n"`), `order` counts from 1, and `part_id` is the
   first 8 hex characters of `sha256` over the part's §3.5.4 grouping key (with
@@ -292,14 +292,14 @@ Field semantics:
   (round `r` is the version transition `r → r+1`); `moved` — the clause
   changed, was struck, or carried a refused ask (always true when
   `opening_text` is non-null).
-- `signed_at` — OPTIONAL: when the deal was signed (`YYYY-MM-DD`, or
-  `YYYY-Qn` once coarsened for publication). **The reference compiler never
-  emits `signed_at`:** it extracts no signing date and never fabricates one,
-  so in reference output the field is absent from every precedent and
-  §3.12.2's `first_signed`/`last_signed` are always `null`. The field (and
-  the `last_signed` ordering it feeds) exists for a third-party producer
-  that does record signing dates; the 0.5 conformance vectors that set it
-  model such a producer.
+- `signed_on` — when the deal was signed (OPF 0.6, issue #247): an ISO-8601
+  date (`YYYY-MM-DD`) or, when only the month is known, `YYYY-MM`; `null`
+  when the deal has no detected executed copy (`signed` false) or no source
+  states a date. It is the deal's `corpus.documents[].signed_on` (§3.8) and a
+  validator MUST reject a record whose value differs from its document's, is
+  not a real calendar date or lies outside 1980-2099, or is set on a record
+  with `signed` false. A date is a **fact** read off the executed copy and
+  never invented; its basis is on the document.
 - `refused_asks[]` — text proposed during the negotiation and struck before
   signing; `round` is the cited draft's version ordinal − 1 (0 = the
   opening draft).
@@ -342,7 +342,7 @@ Two texts group together only when their keys are equal: word order,
 negators, modals and numerals all survive, and our party (`party`) and the
 counterparty (`counterparty`) stay distinct tokens, so the same words with
 the parties' places swapped are a separate group. The reference
-implementation is `precedent.normalize_variant_text`; 0.5 conformance
+implementation is `precedent.normalize_variant_text`; 0.6 conformance
 vector 004 pins it. The same key decides whether an opening is distinct
 (§3.5.5).
 
@@ -364,19 +364,19 @@ cannot express them):
 - Every citation in `evidence` resolves (§4).
 - The opening-evidence rules of §3.5.5.
 
-No stance, band, risk or deviation verdict appears anywhere in a 0.5
+No stance, band, risk or deviation verdict appears anywhere in a 0.6
 `evidence` or `digest`. A producer that ran a judged pass MAY carry its
 verdicts under the root vendor extension `x_judgments` (`[{precedent_id,
 ...}]`, §10.1) — never inside `evidence.precedent`, whose records are
 closed (`additionalProperties: false`, no `x_*`). The reference producer
 (`playbook-engine`) runs no such pass and emits none.
 
-#### 3.5.5 OPF 0.5 — what each clause opened with (issue #233)
+#### 3.5.5 OPF 0.6 — what each clause opened with (issue #233)
 
 A signed variant means much more when the record says where the deal
 started: "we opened with our standard and signed X" makes X a concession on
 record, and "they opened with Y and we signed our standard" means Y did not
-survive. 0.5 therefore records, for every precedent, what the clause opened
+survive. 0.5 and 0.6 therefore record, for every precedent, what the clause opened
 with — as a **fact**, never a meaning. Whether an opening was held,
 conceded or moved to standard is derived by the consumer (or the digest) from
 `opened_with`, `opening_text` and `signed_text`; the record classifies none of
@@ -433,12 +433,12 @@ origin-gated definition (`refused_asks[]`, §3.5.4). A first-draft node whose
 text is relocated, not struck (it occurs verbatim in the signed copy under
 another clause), produces no opening and no struck record.
 
-#### 3.5.6 OPF 0.5 — `vs_standard`, the equivalence judgment (issues #240, #243)
+#### 3.5.6 OPF 0.6 — `vs_standard`, the equivalence judgment (issues #240, #243)
 
 The exact-match `standard` fact answers only "did they sign our words
 unchanged". On counterparty paper that is almost always false even where the
 concept is the same, and grouping signed variants by exact text turns one
-concept phrased five ways into five one-deal variants. 0.5 therefore lets a
+concept phrased five ways into five one-deal variants. 0.5 and 0.6 therefore let a
 producer judge each DISTINCT text once against our standard and carry the
 answer as an index the consumer's model can check against the cited text. It
 is an index, never an instruction, and it is the one place a judged verdict
@@ -630,6 +630,7 @@ Anything that fails (a) is **Posture** (intent the model weighs). Anything that 
     { "document_id": "…", "title": "…", "provenance": "our_paper",
       "in_scope": true, "scope_rationale": "…", "scope_confidence": 0.93,
       "versions": 5, "signed_version": 5, "version_order_basis": "edit_distance_chain+signed_anchor",
+      "signed_on": "2025-03-14", "signed_on_basis": "signature_block",   // OPF 0.6: both null when unknown
       "version_files": [                         // per-version content addresses (§4.1)
         { "version": 1, "sha256": "sha256:…", "media_type": "application/pdf" },
         { "version": 2, "sha256": "sha256:…", "media_type": "application/pdf",
@@ -644,6 +645,28 @@ Anything that fails (a) is **Posture** (intent the model weighs). Anything that 
 ```
 Out-of-scope documents MUST be retained here with `in_scope: false` and a `scope_rationale` — never silently dropped.
 
+- `signed_on` / `signed_on_basis` (OPF 0.6, issue #247) — when the deal was
+  signed, and where that was read. `signed_on` is a real `YYYY-MM-DD` date or a
+  `YYYY-MM` month in 1980-2099, or `null`; `signed_on_basis` is one of
+  `document_text`, `signature_block`, `filename`, `file_metadata` and is
+  present exactly when `signed_on` is non-null. The bases are tried in that
+  order of trust: the date the document states for itself in its preamble
+  ("dated as of", "made and entered into on", "Effective Date", "this 3rd day
+  of March, 2021"); a date in its signature block (the latest, when
+  signatories dated their signatures differently); a date in the executed
+  copy's file name; the executed copy's own authorship timestamp (DOCX core
+  properties, PDF info dictionary). When the text says nothing the reference
+  compiler asks the `deal_date` judge to read the date passages (it names which
+  of the two text sources it used and quotes the words, which must occur in the
+  passages it was shown); a source that finds two different dates, a numeric
+  date that reads two ways (`03/04/2021`) or an impossible one yields nothing.
+  When the preamble states only a month and the signature block
+  gives a day in that same month, the day is recorded, with the block as its
+  basis. Only a deal with a detected executed copy has a date: `signed_version`
+  null means `signed_on` null. A date is never guessed. Both keys are REQUIRED
+  on every in-scope document (`null` / `null` when the date is unknown, so a
+  producer that never recorded dates cannot be mistaken for one that found none)
+  and absent on an out-of-scope document.
 - `version_files[].sha256` addresses the **original source file bytes**
   (the staged input, pre-extraction), keyed by the same inferred ordinal
   citations use. One entry per mined version; failed-ingest versions stay
@@ -707,7 +730,7 @@ governed which document and lineage is reconstructible end to end (§8).
 ### 3.11 (removed)
 
 OPF 0.4 and earlier carried an optional top-level `curation` section of
-attorney-pinned clause positions. OPF 0.5 has no `curation` section (issue
+attorney-pinned clause positions. OPF 0.6 has no `curation` section (issue
 #233; the review loop that produced pins was retired in issue #239). The
 0.5 schema rejects a document that carries a top-level `curation` key, and
 `identity.section_digests` has no `curation` digest. Section number 3.11 is
@@ -733,7 +756,7 @@ Normative rules:
 - OPTIONAL in the schema; the reference compiler always emits it. Producers
   targeting ~40K tokens (chars/4) satisfy the intent.
 
-An OPF 0.5 document carries `digest_version` "4" (§3.12.2).
+An OPF 0.6 document carries `digest_version` "5" (§3.12.2).
 
 > **History (retired 2026-10-07, issue #238).** `digest_version` "2" was the
 > digest of an OPF 0.3 document (stances, preferred variations, frequency-
@@ -751,17 +774,17 @@ An OPF 0.5 document carries `digest_version` "4" (§3.12.2).
 Replaced in place by digest 4 (§3.12.2, issue #234). Section number left
 unassigned so the numbering of §3.12.2 is stable.
 
-#### 3.12.2 `digest_version` "4" (OPF 0.5, issues #223, #234, #240, #243)
+#### 3.12.2 `digest_version` "5" (OPF 0.6, issues #223, #234, #240, #243, #247)
 
 The verdict-free projection of §3.5.4's precedent record, plus the one judged
 index of §3.5.6 (`vs_standard`: its label and compact part map):
 
 ```jsonc
 "digest": {
-  "digest_version": "4",
+  "digest_version": "5",
   "perspective": { "party": "...", "counterparty_type": "..." } | null,  // copy of §3.1
   "agreement_type": { "id": "...", "name": "..." },
-  "corpus": { "n_deals": 6, "n_signed": 6, "first_signed": null, "last_signed": null },
+  "corpus": { "n_deals": 6, "n_signed": 6, "first_signed": "2022-03", "last_signed": "2024-11" },
   "part_map_legend": { "part_map": { "=": "...", "+": "...", "-": "...",
                                      "x+": "...", "x-": "...", "x0": "..." },
                        "additions": { "+": "...", "-": "...", "0": "..." },
@@ -770,23 +793,25 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
     "id": "...", "taxonomy_id": "...", "title": "...",
     "our_standard": { "parts": [ { "part_id": "...", "text": "..." } ],
                       "source_ref": Citation } | null,
-    "n_deals": 6, "n_signed_standard": 2,
+    "n_deals": 6, "first_signed": "2022-03", "last_signed": "2024-11",   // span of the clause's evidence
+    "n_signed_standard": 2,
     "n_opened_standard": 4, "n_kept_standard": 2,
     "positions": { "standard": 2, "equivalent": 0, "more_protective": 0,
                    "less_protective": 0, "mixed": 1, "different_concept": 1, "unjudged": 2 },
     "signed_variants": [
-      { "text": "...", "n_deals": 2, "last_signed": null,
+      { "text": "...", "n_deals": 2, "first_signed": "2022-03", "last_signed": "2023-07",
         "n_from_standard": 2, "n_unchanged": 0, "label": "mixed" | ... | null,
         "part_map": ["=", "-", "x0"] | null, "additions": ["+"] | null,
         "label_by": "owner",               // only when the owner set the label
         "reason": "..." | null,
         "ref": Citation, "precedent_ids": ["prec.…"] },
       { "label": "equivalent", "n_deals": 3, "n_texts": 2, "n_from_standard": 1,
-        "n_unchanged": 2, "last_signed": null,
+        "n_unchanged": 2, "first_signed": "2022-03", "last_signed": "2023-07",
         "exemplars": [ { "text": "...", "ref": Citation } ],       // at most two
         "precedent_ids": ["prec.…"] }                               // the collapsed entry
     ],
-    "refused_asks":    [ { "text": "...", "n_deals": 1, "label": ... | null,
+    "refused_asks":    [ { "text": "...", "n_deals": 1, "first_signed": "2023-09",
+                           "last_signed": "2024-11", "label": ... | null,
                            "part_map": [...] | null, "additions": [...] | null,
                            "label_by": "owner", "reason": "..." | null,
                            "ref": Citation, "precedent_ids": ["prec.…"] } ],
@@ -805,11 +830,12 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   consumer reading only the digest still knows which side it reviews for.
 - `corpus.n_deals` / `n_signed` count in-scope `corpus.documents` (signed:
   `signed_version` non-null); `first_signed`/`last_signed` are the
-  earliest/latest precedent `signed_at` (`null` when none is recorded —
-  always, in reference-compiler output, which never emits `signed_at`
-  (§3.5.4); likewise every `signed_variants[].last_signed`, so the
-  `last_signed` ordering key only applies to a producer that records
-  signing dates).
+  earliest/latest precedent `signed_on` of signed deals, **to the month**
+  (`YYYY-MM`, `null` when no deal is dated). Every digest date is a month:
+  a `signed_on` of `2025-03-14` and one of `2025-03` both read `2025-03`, and
+  a month sorts before every day in it when records are ordered.
+- `clauses[].first_signed` / `last_signed` — the same span over the clause's
+  own precedent records (`null` when none is dated).
 - Every count is distinct signed deals read from `evidence.precedent` with
   `signed: true`; paper side partitions nothing.
 - `n_opened_standard` — deals whose `opened_with` is `"standard"`;
@@ -827,9 +853,11 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   grouped by §3.5.4's grouping key (exact; counterparty aliases and
   `perspective.party` neutralized — not `standard`'s configured party
   names); `n_deals` distinct deals; `text` is the sentence-boundary summary
-  (≤ 300 chars) of the group's representative (latest `signed_at`, then
+  (≤ 300 chars) of the group's representative (latest `signed_on`, then
   lowest `document_id`) and `ref` its citation. Within a tier the order is
   `n_deals` desc, `last_signed` desc (unknown last), then grouping key.
+  `first_signed` / `last_signed` are the earliest / latest signing month
+  among the group's deals (`null` when none is dated).
   - `n_from_standard` — deals in the group whose `opened_with` is
     `"standard"`: the variant is a concession from our standard on record.
   - `n_unchanged` — deals in the group whose `opened_with` is
@@ -859,7 +887,7 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   - **Collapse.** Every group whose `label` is `equivalent` is replaced by ONE
     entry (always last): `{label: "equivalent", n_deals (distinct deals
     across the collapsed groups), n_texts (groups collapsed), n_from_standard,
-    n_unchanged (summed), last_signed (latest), exemplars (the first two
+    n_unchanged (summed), first_signed (earliest), last_signed (latest), exemplars (the first two
     groups in the order above, each {text, ref}), precedent_ids (all)}`. It
     has no `text` or `ref` of its own.
   - **Order.** Individual entries come in four tiers: `less_protective` and
@@ -869,6 +897,8 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
 - `refused_asks` — every refused ask, grouped the same way, representative
   the earliest-round ask (then lowest `document_id`), with the
   representative's `label`; ordered `n_deals` desc, then grouping key.
+  `first_signed` / `last_signed` are the earliest / latest signing month of
+  the deals whose records carry an ask in the group.
 - `changed_openings` — non-standard opening language that was not signed as
   proposed: precedents with `opened_with` `"non_standard"` and a non-null
   `opening_text`, excluding a precedent whose opening's grouping key equals
@@ -890,7 +920,7 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   recognised clause type with no precedent in this corpus", nothing more.
 - No `full_text`; no stance, band, risk or deviation field.
 - **When present, the digest MUST equal the reference construction over the
-  document** (`build_digest_v4`, defined by the 0.5 conformance vectors,
+  document** (`build_digest_v5`, defined by the 0.6 conformance vectors,
   §10.2) — a validator recomputes it and rejects any difference. A
   transform that edits evidence text (publication, residue redaction) MUST
   re-derive the digest, precedent ids and counts afterwards.
@@ -902,7 +932,7 @@ with every `<` escaped as `\u003c`; JSON parsing restores the value). The bare
 `playbook.opf.json` remains the canonical artifact — a consumer extracts the
 block and verifies `identity.content_hash` over the canonical serialization.
 
-#### 3.12.3 `manifest`, `dossiers`, `provenance_index` (OPF 0.5, issue #228)
+#### 3.12.3 `manifest`, `dossiers`, `provenance_index` (OPF 0.6, issue #228)
 
 Three more OPTIONAL top-level sections the reference compiler always emits
 beside the digest, so a consumer can enforce hard-rejection recall outside
@@ -991,7 +1021,7 @@ already chosen being skipped, until two are chosen:
    `refused_asks` groups (`kind` `refused_ask`: `opening` is the ask, `signed`
    what the deal signed instead, `outcome` `ask_refused`).
 
-A group's record is its (eligible) member with the latest `signed_at`
+A group's record is its (eligible) member with the latest `signed_on`
 (unknown last), **ties broken on the lowest `precedent_id`** (code-point
 order). This is not the record the digest cites (§3.12.2 breaks its ties on
 `document_id`). A `refused_asks` group's record is chosen the same way among
@@ -1040,7 +1070,7 @@ the `{precedent_id, document_id, kind, omitted}` of each excerpt the dossier
 selected, in selection order: first the excerpts it lists (`omitted` `false`,
 in dossier order), then the ones it dropped whole to fit its budget
 (`omitted` `true`), so every `omitted_precedent_ids` entry resolves here to
-its deal and kind. `documents` has one `{document_id, signed_at,
+its deal and kind. `documents` has one `{document_id, signed_on,
 version_files: [{version, sha256}]}` per deal behind those rows, kept or
 omitted (sorted by id).
 
@@ -1146,7 +1176,7 @@ Confidence is advisory, not statistical authority. It is a function of precedent
 
 ## 10. Conformance
 
-- A **conformant playbook** carries `opf_version` "0.5", validates against `spec/playbook.schema-0.5.json`, and obeys the normative rules in §2.3, §3.4, §3.5.4, §3.5.5, §3.6, §3.7, §3.8, §3.12, §3.13 and §5. A conformant validator rejects any other `opf_version` — including the retired "0.1" to "0.4" — as unsupported (`playbook_engine/validator.py`). The §2.2 evidence-depth rule capped a stance that 0.5 no longer carries, and paper side gates nothing.
+- A **conformant playbook** carries `opf_version` "0.6", validates against `spec/playbook.schema-0.6.json`, and obeys the normative rules in §2.3, §3.4, §3.5.4, §3.5.5, §3.6, §3.7, §3.8, §3.12, §3.13 and §5. A conformant validator rejects any other `opf_version` — including the retired "0.1" to "0.5" — as unsupported (`playbook_engine/validator.py`). The §2.2 evidence-depth rule capped a stance that 0.5 and 0.6 no longer carry, and paper side gates nothing.
 - A **conformant producer** emits conformant playbooks, records out-of-scope documents, drafts the Posture from a recorded interview, and only *proposes* (never auto-promotes) Floor candidates.
 - A **conformant consumer** honors the determinism boundary (§5), honors provenance (§2.3), surfaces confidence (§9) and citations (§4), loads only pinned+verified composed modules (§3.4), and records the lineage fields (§8).
 
@@ -1169,30 +1199,30 @@ closed shape (`identity`, citations, `agreement_type`, `taxonomy` entries,
 
 ### 10.2 Conformance vectors — canonicalization and digest (normative)
 
-`spec/conformance/0.5/` is the **normative definition** of the two
+`spec/conformance/0.6/` is the **normative definition** of the two
 mechanical algorithms everything in §3.10 (`identity`) and §3.12 (`digest`)
 rests on: canonical serialization + content hashing (reference
 implementation `playbook_engine/canonicalize.py`) and `digest` section
 construction (reference implementation `playbook_engine/digest.py`).
-`spec/conformance/0.5/manifest.json` stamps the exact `opf_version` /
+`spec/conformance/0.6/manifest.json` stamps the exact `opf_version` /
 `digest_version` / reference `engine_version` the vectors bind to, per the
 §11 immutability rule below — a format-version bump gets a new,
 separately-stamped vector set, never an in-place edit of an existing one.
 
-Each vector under `spec/conformance/0.5/vectors/` is a self-contained,
+Each vector under `spec/conformance/0.6/vectors/` is a self-contained,
 plain-JSON `{input, expected}` pair (`canonical`, `content_hash`,
 `section_digests`, `digest`, and, since issue #228, `manifest`, `dossiers`, `provenance_index`) — **an independent, non-Python implementation
 that reproduces every vector's `expected.*` from its `input` is conformant**
 with canonicalization and digest construction for that format version, with
 no dependency on this repo. `tests/test_conformance_vectors.py` is this
 engine's own check against the same frozen vectors; see
-`spec/conformance/0.5/README.md` for what each vector isolates: canonical
-serialization of 0.5-shaped documents and digest 4 construction — variant
+`spec/conformance/0.6/README.md` for what each vector isolates: canonical
+serialization of 0.6-shaped documents and digest 5 construction — variant
 grouping by §3.5.4's grouping key (including its counterparty-alias and
 `perspective.party` neutralization), the `n_deals`/`last_signed` ordering,
 the cap with uncapped totals, refused-ask grouping across deals, the
 sentence-boundary summary, and `perspective` carried as `null` when the
-document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order, the part maps (a mixed changed opening) and `uncovered_clause_types`; vector 008 pins the hard-rule manifest (a presence or predicate rule names its clause), the dossier excerpt order (the concession's own record, the `signed_at` then lowest-`precedent_id` record order and a refused-ask excerpt) and the budget (a whole excerpt dropped and named, a single over-budget excerpt kept whole with its Floor rule dropped, and the last Floor rule dropped whole from a dossier with no excerpt so that it fits), and the provenance index with its corpus snapshot hash, source-file hashes and the dropped excerpt indexed as `omitted` with its deal (§3.12.3); vector 009 pins the part rules on a standard of several parts (a repeated passage's `-2` `part_id`, multi-token part maps with omissions and additions, part reasons naming parts other than the first) and an owner label carried with `label_by` `owner` and the owner's reason (§3.5.6, §3.12.2, §3.12.3). The canonical-serialization algorithm itself is stated in
+document has none; vector 005 carries the opening evidence of §3.5.5; vector 006 pins the opening rules (`n_opened_standard`/`n_kept_standard`, `n_from_standard`/`n_unchanged`, `changed_openings` and its refused-ask exclusion); vector 007 pins the `vs_standard` collapse, tier order, the part maps (a mixed changed opening) and `uncovered_clause_types`; vector 008 pins the hard-rule manifest (a presence or predicate rule names its clause), the dossier excerpt order (the concession's own record, the `signed_on` then lowest-`precedent_id` record order and a refused-ask excerpt) and the budget (a whole excerpt dropped and named, a single over-budget excerpt kept whole with its Floor rule dropped, and the last Floor rule dropped whole from a dossier with no excerpt so that it fits), and the provenance index with its corpus snapshot hash, source-file hashes and the dropped excerpt indexed as `omitted` with its deal (§3.12.3); vector 009 pins the part rules on a standard of several parts (a repeated passage's `-2` `part_id`, multi-token part maps with omissions and additions, part reasons naming parts other than the first) and an owner label carried with `label_by` `owner` and the owner's reason (§3.5.6, §3.12.2, §3.12.3); vector 010 pins the signing dates (§3.8, §3.12.2): month-only and full dates, every `signed_on_basis`, a signed deal with no date, an unsigned deal, and the `first_signed` / `last_signed` months of the corpus, a clause, a signed variant and a refused ask. The canonical-serialization algorithm itself is stated in
 `spec/conformance/README.md`. (The OPF 0.3 / digest 2 vector set, which also
 pinned key ordering, Unicode emission and float/int formatting edge cases,
 was retired with that format, issue #238; those edge cases are unit-tested
@@ -1243,9 +1273,10 @@ pins are CI-enforced (`tests/test_spec_consistency.py`).
 
 **Retirement (2026-10-07, issue #238; 2026-10-08, issue #233).** With no
 installed consumer, the owner retired OPF 0.1–0.3 and `digest_version` 2,
-and 0.5 then replaced 0.4 in place (nothing consumed 0.4): the reference
-engine emits and validates only 0.5, and a conformant validator rejects any other
-`opf_version` as unsupported. Retirement removes a format from the
+and 0.5 then replaced 0.4 in place (nothing consumed 0.4), and 0.6 replaced
+0.5 the same way (issue #247): the reference engine emits and validates only
+0.6, and a conformant validator rejects any other `opf_version` as
+unsupported. Retirement removes a format from the
 reference implementation; it never edits one — the retired schemas and
 vectors are unchanged in git history and in contract-opf/opf.
 
@@ -1260,12 +1291,13 @@ unaffected by such a change; a consumer that wants the new field upgrades
 its pin to the new `opf_version`. "A published version is frozen" and "1.x
 is additive-only" are therefore both true without conflict.
 
-**Migrations.** The 0.1 → 0.2, 0.2 → 0.3, 0.3 → 0.4 and 0.4 → 0.5
+**Migrations.** The 0.1 → 0.2, 0.2 → 0.3, 0.3 → 0.4, 0.4 → 0.5 and 0.5 → 0.6
 migration notes described upgrade paths between formats the engine no longer
 reads (issues #238, #233); they are in git history. A document in a retired
 format is not converted: re-mine and re-project (`playbook mine`, then
-`playbook project`), which emits 0.5. A store mined before 0.5 carries no
-opening evidence, so it must be re-mined, not only re-projected.
+`playbook project`), which emits 0.6. A store mined before 0.6 carries no
+signing-date evidence (and one mined before 0.5 no opening evidence), so it
+must be re-mined, not only re-projected.
 
 ## Appendix A — Open questions (for review, not yet decided)
 
@@ -1274,10 +1306,11 @@ opening evidence, so it must be re-mined, not only re-projected.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 and 0.5 carry no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
-- **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set is regenerated for digest 4 with vectors 006 and 007.
+- **0.6 (issue #247)** — Signing dates (§3.5.4, §3.8, §3.12.2): `corpus.documents[].signed_on` (an ISO date, or `YYYY-MM` when only the month is known, or `null`) and `signed_on_basis` (`document_text` | `signature_block` | `filename` | `file_metadata`, present exactly when the date is); every precedent record gains a required `signed_on` equal to its document's, which replaces the optional `signed_at` (the `YYYY-Qn` quarter form is gone). `digest_version` "5": `first_signed` / `last_signed` (`YYYY-MM`) on every signed variant (and the collapsed equivalent entry), every refused ask and every clause, and the corpus span is to the month. New validator MUSTs: both keys present on every in-scope document (null when unknown), a well-formed real date in 1980-2099, a basis exactly when there is a date, no date without a detected executed copy, and a precedent's date equal to its document's. New schema file `playbook.schema-0.6.json` and conformance set `spec/conformance/0.6/` (vector 010); they replace 0.5 in the reference engine.
+- **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set was regenerated for digest 4 with vectors 006 and 007.
 - **0.5 (issue #240)** — Equivalence label (§3.5.6): an optional `vs_standard` `{label, reason, basis, check} | null` on `signed_text`, `opening_text` and each `refused_asks[]` entry, judged once per distinct text against our standard and blind-checked by an independent model; three new validator MUSTs.
 - **0.5 (issue #243)** — `vs_standard` is judged part by part (§3.5.6): `our_standard.parts[]` (ordered template passages with content-hash `part_id`s, §3.5); each judgment carries `parts` (present with a `relation` or omitted with an `effect`) and `additions`, and its `label` — gaining `mixed` — is DERIVED from them; `check` records `label_agreed` and `parts_agreed`; an owner may override the label (`owner_label`). The cache key covers the ordered parts. Digest 4 carries our standard as its parts, a `part_map_legend`, and on every judged variant, ask and opening a compact `part_map`, `additions` tokens and the `reason`, plus `label_by: "owner"` (and then the owner's reason) only when the owner set the label; `mixed` leads with `less_protective`; dossier excerpts carry their judgment's part map, `label_by`, reason and part reasons. The 0.5 conformance vectors are regenerated, and vector 009 pins a standard of several parts and an owner label. Replaced in place: nothing outside the engine had vendored 0.5.
-- **0.5** — Opening evidence (§3.5.5): every precedent record gains `opened_with` (`standard` | `non_standard` | `absent` | `null`) and `opening_text` is recorded for any distinct opening, whatever its origin (0.4 recorded it only for our standard struck before signing). Three new validator MUSTs. The optional top-level `curation` section (§3.11) and `identity.section_digests.curation` are removed: the 0.5 schema rejects them (issue #233, after the review loop that produced pins was retired in issue #239). New schema file `playbook.schema-0.5.json`; it replaces 0.4 in the reference engine (no consumer ever bound 0.4). `digest_version` "3" is unchanged until digest 4 lands (epic #236); 0.5 has no consumer until contract-opf/contract-toaster#128 vendors it.
+- **0.5** — Opening evidence (§3.5.5): every precedent record gains `opened_with` (`standard` | `non_standard` | `absent` | `null`) and `opening_text` is recorded for any distinct opening, whatever its origin (0.4 recorded it only for our standard struck before signing). Three new validator MUSTs. The optional top-level `curation` section (§3.11) and `identity.section_digests.curation` are removed: the 0.5 schema rejects them (issue #233, after the review loop that produced pins was retired in issue #239). New schema file `playbook.schema-0.5.json`; it replaced 0.4 in the reference engine (no consumer ever bound 0.4). `digest_version` "3" is unchanged until digest 4 lands (epic #236); 0.5 has no consumer until contract-opf/contract-toaster#128 vendors it.
 - **Retirement (issue #238)** — The reference engine reads and writes only 0.4 (now 0.5); OPF 0.1–0.3 and `digest_version` "2" are retired (validators reject them as unsupported). Not a new shape: 0.4 is unchanged. §3.5.1–§3.5.3 and §3.12's digest 2 rules are replaced by history notes.
 - **0.4** — Verdict-free per-deal precedent record as the evidence shape (§3.5.4): `evidence.{clauses, precedent}` with distinct-deal counts, deterministic `standard`, three-valued paper metadata that gates nothing, and recomputable precedent ids; `digest_version` "3" (§3.12.1) with `perspective`, grouped signed variants and refused asks, and a digest-equals-recomputation rule; judged verdicts only under `x_judgments`. New schema file `playbook.schema-0.4.json`; 0.3 frozen.
 - **1.0** — Stability commitment, not a shape change: the document shape (`opf_version` "0.3") is unchanged. New §11 stability policy (1.x changes are additive-only — new OPTIONAL fields and new `x_*` extensions permitted; no new REQUIRED field, no removing/retyping a field, no changing a normative MUST without a 2.0 release) and new §11 normative-rule-change policy (any new or changed MUST, whether or not it touches the schema, gets a `CHANGELOG.md` entry under a `### Normative rule changes` heading in the release it ships under).

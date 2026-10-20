@@ -503,7 +503,7 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
     through the SAME born-safe pseudonymization as text_summary/full_text —
     never the raw entity name, only the alias (modeled on
     test_compiled_artifact_carries_alias_not_raw_entity_name above). The
-    compiled playbook (OPF 0.5) carries the aliased text in its precedent
+    compiled playbook (OPF 0.6) carries the aliased text in its precedent
     record and the raw name nowhere.
 
     The known entity name below is deliberately positioned to straddle
@@ -597,7 +597,7 @@ def test_search_snippet_carries_alias_not_raw_entity_name_across_truncation_boun
     playbook_text = json.dumps(playbook)
     assert entity not in playbook_text
     assert "Wintermoor" not in playbook_text
-    # OPF 0.5 (issue #223): the precedent record carries the aliased text.
+    # OPF 0.6 (issue #223): the precedent record carries the aliased text.
     precedent_texts = [
         p["signed_text"]["text"] for p in playbook["evidence"]["precedent"] if p["signed_text"]
     ]

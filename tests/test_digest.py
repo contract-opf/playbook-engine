@@ -1,4 +1,4 @@
-"""Tests for the digest section (digest_version 4), `playbook digest`, and `view bundle`.
+"""Tests for the digest section (digest_version 5), `playbook digest`, and `view bundle`.
 
 The digest_version 2 builder was retired with OPF 0.3 (issue #238); digest 3 was
 replaced in place by digest 4 (issue #234).
@@ -18,9 +18,9 @@ from click.testing import CliRunner
 from playbook_engine.canonicalize import content_hash
 from playbook_engine.cli import cli
 from playbook_engine.digest import (
-    DIGEST_VERSION_V4,
+    DIGEST_VERSION_V5,
     EXEMPLAR_TOP_N,
-    build_digest_v4,
+    build_digest_v5,
     digest_token_estimate,
 )
 from playbook_engine.validator import validate_document
@@ -48,16 +48,16 @@ def _compiled_out_dir(tmp_path: Path) -> Path:
     return out_dir
 
 
-def test_compiled_playbook_is_v05_with_digest_v4(tmp_path: Path) -> None:
-    """Issue #223: the reference compiler emits OPF 0.5 with a digest_version 4
-    digest equal to build_digest_v4 over the shipped document."""
+def test_compiled_playbook_is_v06_with_digest_v5(tmp_path: Path) -> None:
+    """Issue #223: the reference compiler emits OPF 0.6 with a digest_version 5
+    digest equal to build_digest_v5 over the shipped document."""
     out_dir = _compiled_out_dir(tmp_path)
     pb = json.loads((out_dir / "playbook.opf.json").read_text())
-    assert pb["opf_version"] == "0.5"
-    assert pb["digest"]["digest_version"] == DIGEST_VERSION_V4 == "4"
+    assert pb["opf_version"] == "0.6"
+    assert pb["digest"]["digest_version"] == DIGEST_VERSION_V5 == "5"
     assert len(pb["digest"]["clauses"]) == len(pb["evidence"]["clauses"])
     assert "clause_count" not in pb["digest"]
-    assert pb["digest"] == build_digest_v4(pb)
+    assert pb["digest"] == build_digest_v5(pb)
     # digest participates in content_hash: recompute and compare
     assert pb["identity"]["content_hash"] == content_hash(pb)
     # The digest lives inside the OPF; there is no standalone sidecar (the
@@ -150,7 +150,7 @@ def test_view_bundle_escapes_script_closers(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# digest_version 4 (OPF 0.5, issues #223, #234). Every document here is built by
+# digest_version 5 (OPF 0.6, issues #223, #234). Every document here is built by
 # the real producer — Observation rows (the shapes observation_builder
 # writes: signed / unsigned / proposed_then_reversed /
 # conceded_before_signing / opening, with the deterministic `standard` fact
@@ -160,7 +160,7 @@ def test_view_bundle_escapes_script_closers(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _v05_obs(
+def _v06_obs(
     doc_id: str,
     text: str,
     *,
@@ -190,10 +190,10 @@ def _v05_obs(
     )
 
 
-_V05_STANDARD = "This Agreement is governed by the laws of the State of New York."
+_V06_STANDARD = "This Agreement is governed by the laws of the State of New York."
 
 
-def _v05_playbook(observations: list, *, signed: dict[str, bool], perspective=None) -> dict:
+def _v06_playbook(observations: list, *, signed: dict[str, bool], perspective=None) -> dict:
     from playbook_engine.clause_position_compiler import compile_clause_positions
     from playbook_engine.observation_builder import Observation, ObservationCitation
     from playbook_engine.playbook_assembler import assemble_playbook
@@ -201,7 +201,7 @@ def _v05_playbook(observations: list, *, signed: dict[str, bool], perspective=No
     template = Observation(
         observation_id="template/governing_law",
         taxonomy_id="governing_law",
-        text_summary=_V05_STANDARD,
+        text_summary=_V06_STANDARD,
         citation=ObservationCitation(
             document_id="template", version="template", clause_path="4", char_span=None
         ),
@@ -218,6 +218,8 @@ def _v05_playbook(observations: list, *, signed: dict[str, bool], perspective=No
             "in_scope": True,
             "versions": 3,
             "signed_version": 3 if is_signed else None,
+            "signed_on": None,
+            "signed_on_basis": None,
         }
         for doc_id, is_signed in sorted(signed.items())
     ]
@@ -238,13 +240,13 @@ def test_v4_digest_groups_variants_by_exact_normalization() -> None:
     text and an unsigned deal's text are never signed variants."""
     variant = "This Agreement is governed by the laws of the State of Delaware."
     observations = [
-        _v05_obs("d1", _V05_STANDARD, standard=True),
-        _v05_obs("d2", variant),
-        _v05_obs("d3", "THIS AGREEMENT is governed by the laws of the State of Delaware"),
-        _v05_obs("d4", "This Agreement is not governed by the laws of the State of Delaware."),
-        _v05_obs("d5", "This Agreement is governed by the laws of Texas.", outcome="unsigned"),
+        _v06_obs("d1", _V06_STANDARD, standard=True),
+        _v06_obs("d2", variant),
+        _v06_obs("d3", "THIS AGREEMENT is governed by the laws of the State of Delaware"),
+        _v06_obs("d4", "This Agreement is not governed by the laws of the State of Delaware."),
+        _v06_obs("d5", "This Agreement is governed by the laws of Texas.", outcome="unsigned"),
     ]
-    pb = _v05_playbook(
+    pb = _v06_playbook(
         observations, signed={"d1": True, "d2": True, "d3": True, "d4": True, "d5": False}
     )
     (clause,) = pb["digest"]["clauses"]
@@ -255,8 +257,8 @@ def test_v4_digest_groups_variants_by_exact_normalization() -> None:
     assert clause["n_variants_total"] == 2
     assert all("Texas" not in v["text"] for v in clause["signed_variants"])
     assert len(clause["signed_variants"][0]["precedent_ids"]) == 2
-    # The digest is exactly what build_digest_v4 recomputes over the document.
-    assert pb["digest"] == build_digest_v4(pb)
+    # The digest is exactly what build_digest_v5 recomputes over the document.
+    assert pb["digest"] == build_digest_v5(pb)
 
 
 def test_v4_grouping_neutralizes_counterparty_aliases_and_perspective_party() -> None:
@@ -275,22 +277,22 @@ def test_v4_grouping_neutralizes_counterparty_aliases_and_perspective_party() ->
     signed = "{} and AlphaCorp agree that the laws of Delaware govern this Agreement."
     ask = "The laws of the home state of {} govern this Agreement."
     observations = [
-        aliased(_v05_obs("d1", signed.format("Counterparty-2")), "Counterparty-2"),
+        aliased(_v06_obs("d1", signed.format("Counterparty-2")), "Counterparty-2"),
         aliased(
-            _v05_obs(
+            _v06_obs(
                 "d1", ask.format("Counterparty-2"), outcome="proposed_then_reversed", version=2
             ),
             "Counterparty-2",
         ),
-        aliased(_v05_obs("d2", signed.format("Counterparty-5")), "Counterparty-5"),
+        aliased(_v06_obs("d2", signed.format("Counterparty-5")), "Counterparty-5"),
         aliased(
-            _v05_obs(
+            _v06_obs(
                 "d2", ask.format("COUNTERPARTY-5"), outcome="proposed_then_reversed", version=2
             ),
             "Counterparty-5",
         ),
         aliased(
-            _v05_obs(
+            _v06_obs(
                 "d3",
                 "AlphaCorp and Counterparty-3 agree that the laws of Delaware govern "
                 "this Agreement.",
@@ -298,7 +300,7 @@ def test_v4_grouping_neutralizes_counterparty_aliases_and_perspective_party() ->
             "Counterparty-3",
         ),
     ]
-    pb = _v05_playbook(
+    pb = _v06_playbook(
         observations,
         signed={"d1": True, "d2": True, "d3": True},
         perspective={"party": "AlphaCorp", "counterparty_type": "Vendor"},
@@ -312,7 +314,7 @@ def test_v4_grouping_neutralizes_counterparty_aliases_and_perspective_party() ->
     ]
     assert [(a["n_deals"], len(a["precedent_ids"])) for a in entry["refused_asks"]] == [(2, 2)]
     assert (entry["n_variants_total"], entry["n_refused_total"]) == (2, 1)
-    assert pb["digest"] == build_digest_v4(pb)
+    assert pb["digest"] == build_digest_v5(pb)
     result = validate_document(pb)
     assert result.ok, [str(e) for e in result.errors if e.blocking]
 
@@ -355,42 +357,42 @@ def test_normalize_variant_text_party_tokens() -> None:
 def test_v4_digest_refused_asks_group_across_deals_and_conceded_is_not_refused() -> None:
     ask = "Either party may terminate this Agreement at any time without notice."
     observations = [
-        _v05_obs("d1", _V05_STANDARD, standard=True),
-        _v05_obs("d1", ask, outcome="proposed_then_reversed", version=2),
-        _v05_obs("d2", _V05_STANDARD, standard=True),
-        _v05_obs("d2", ask.upper(), outcome="proposed_then_reversed", version=3),
+        _v06_obs("d1", _V06_STANDARD, standard=True),
+        _v06_obs("d1", ask, outcome="proposed_then_reversed", version=2),
+        _v06_obs("d2", _V06_STANDARD, standard=True),
+        _v06_obs("d2", ask.upper(), outcome="proposed_then_reversed", version=3),
         # Our standard struck in d3: a concession and an opening (the two rows
         # observation_builder writes for it) — opening text, never refused.
-        _v05_obs("d3", _V05_STANDARD, standard=True, outcome="conceded_before_signing", version=1),
-        _v05_obs(
+        _v06_obs("d3", _V06_STANDARD, standard=True, outcome="conceded_before_signing", version=1),
+        _v06_obs(
             "d3",
-            _V05_STANDARD,
+            _V06_STANDARD,
             standard=True,
             outcome="opening",
             version=1,
             opened_with="standard",
         ),
     ]
-    pb = _v05_playbook(observations, signed={"d1": True, "d2": True, "d3": True})
+    pb = _v06_playbook(observations, signed={"d1": True, "d2": True, "d3": True})
     (clause,) = pb["digest"]["clauses"]
     assert [(a["n_deals"], len(a["precedent_ids"])) for a in clause["refused_asks"]] == [(2, 2)]
     # The representative is the earliest-round ask (d1's v2 → round 1).
     assert clause["refused_asks"][0]["ref"]["document_id"] == "d1"
     d3 = next(p for p in pb["evidence"]["precedent"] if p["document_id"] == "d3")
-    assert d3["signed_text"] is None and d3["opening_text"]["text"] == _V05_STANDARD
+    assert d3["signed_text"] is None and d3["opening_text"]["text"] == _V06_STANDARD
     assert d3["opened_with"] == "standard"
     assert d3["refused_asks"] == [] and d3["standard"] is False and d3["moved"] is True
     assert clause["n_signed_standard"] == 2
 
 
 def test_v4_digest_carries_perspective_or_null() -> None:
-    observations = [_v05_obs("d1", _V05_STANDARD, standard=True)]
-    with_p = _v05_playbook(
+    observations = [_v06_obs("d1", _V06_STANDARD, standard=True)]
+    with_p = _v06_playbook(
         observations,
         signed={"d1": True},
         perspective={"party": "Fixture Co", "counterparty_type": "Vendor"},
     )
-    without_p = _v05_playbook(observations, signed={"d1": True})
+    without_p = _v06_playbook(observations, signed={"d1": True})
     assert with_p["digest"]["perspective"] == with_p["perspective"]
     assert without_p["digest"]["perspective"] is None
     assert "perspective" in without_p["digest"]
@@ -398,12 +400,12 @@ def test_v4_digest_carries_perspective_or_null() -> None:
 
 def test_v4_digest_budget_tightens_cap_but_keeps_totals() -> None:
     observations = [
-        _v05_obs(f"d{i}", f"This Agreement is governed by the laws of jurisdiction {i}.")
+        _v06_obs(f"d{i}", f"This Agreement is governed by the laws of jurisdiction {i}.")
         for i in range(8)
     ]
-    pb = _v05_playbook(observations, signed={f"d{i}": True for i in range(8)})
-    loose = build_digest_v4(pb, token_budget=None)
-    tight = build_digest_v4(pb, token_budget=1)
+    pb = _v06_playbook(observations, signed={f"d{i}": True for i in range(8)})
+    loose = build_digest_v5(pb, token_budget=None)
+    tight = build_digest_v5(pb, token_budget=1)
     assert len(loose["clauses"][0]["signed_variants"]) == EXEMPLAR_TOP_N
     assert len(tight["clauses"][0]["signed_variants"]) == 1
     for d in (loose, tight):
@@ -414,7 +416,7 @@ def test_v4_digest_budget_tightens_cap_but_keeps_totals() -> None:
 
 def test_v4_digest_summaries_never_exceed_300_chars_and_no_judged_fields() -> None:
     long_text = ("This Agreement is governed by the laws of Delaware. " * 12).strip()
-    pb = _v05_playbook([_v05_obs("d1", long_text)], signed={"d1": True})
+    pb = _v06_playbook([_v06_obs("d1", long_text)], signed={"d1": True})
     (variant,) = pb["digest"]["clauses"][0]["signed_variants"]
     assert len(variant["text"]) <= 300 and long_text.startswith(variant["text"])
     serialized = json.dumps(pb["digest"])
@@ -423,26 +425,26 @@ def test_v4_digest_summaries_never_exceed_300_chars_and_no_judged_fields() -> No
 
 
 # ---------------------------------------------------------------------------
-# Validator: digest consistency on a 0.5 document
+# Validator: digest consistency on a 0.6 document
 # ---------------------------------------------------------------------------
 
 
-def _small_v05_playbook() -> dict:
+def _small_v06_playbook() -> dict:
     variant = "This Agreement is governed by the laws of the State of Delaware."
-    return _v05_playbook(
-        [_v05_obs("d1", _V05_STANDARD, standard=True), _v05_obs("d2", variant)],
+    return _v06_playbook(
+        [_v06_obs("d1", _V06_STANDARD, standard=True), _v06_obs("d2", variant)],
         signed={"d1": True, "d2": True},
     )
 
 
 def test_digest_never_contains_full_text_and_estimates_positive() -> None:
-    pb = _small_v05_playbook()
+    pb = _small_v06_playbook()
     assert "full_text" not in json.dumps(pb["digest"])
     assert digest_token_estimate(pb["digest"]) > 0
 
 
-def test_validator_accepts_v05_with_and_without_digest() -> None:
-    pb = _small_v05_playbook()
+def test_validator_accepts_v06_with_and_without_digest() -> None:
+    pb = _small_v06_playbook()
     assert validate_document(pb).ok
     del pb["digest"]
     del pb["identity"]
@@ -451,7 +453,7 @@ def test_validator_accepts_v05_with_and_without_digest() -> None:
 
 
 def test_validator_rejects_digest_id_mismatch() -> None:
-    pb = _small_v05_playbook()
+    pb = _small_v06_playbook()
     del pb["identity"]
     pb["digest"]["clauses"][0]["id"] = "clause.some_other_clause"
     result = validate_document(pb)
@@ -460,7 +462,7 @@ def test_validator_rejects_digest_id_mismatch() -> None:
 
 
 def test_validator_rejects_full_text_in_digest() -> None:
-    pb = _small_v05_playbook()
+    pb = _small_v06_playbook()
     del pb["identity"]
     pb["digest"]["clauses"][0]["x_extra"] = {"full_text": "leaked verbatim clause"}
     result = validate_document(pb)
@@ -469,14 +471,14 @@ def test_validator_rejects_full_text_in_digest() -> None:
 
 
 # ---------------------------------------------------------------------------
-# digest_version 4 (issue #234): held/conceded counts, variant provenance,
+# digest_version 5 (issue #234): held/conceded counts, variant provenance,
 # changed openings, uncovered clause types and the #240 label. The documents
 # are built by the real producer (``assemble_playbook`` over Observation rows
 # of the shapes observation_builder writes), never hand-edited records.
 # ---------------------------------------------------------------------------
 
 _ROOT = Path(__file__).resolve().parent.parent
-_STD = _V05_STANDARD
+_STD = _V06_STANDARD
 _V_A = "This Agreement is governed by the laws of the State of Delaware."
 _V_B = "This Agreement is governed by the laws of the State of Texas."
 _N_1 = "Disputes are governed by the laws of the State of Oregon."
@@ -487,7 +489,7 @@ _N_4 = "Disputes are governed by the laws of the State of Utah."
 
 def _opening_rows() -> tuple[list, dict[str, bool]]:
     """Nine deals, one per branch of the opening rules (ticket #234)."""
-    o = _v05_obs
+    o = _v06_obs
     rows = [
         # d1: opened with our standard, signed an edit of it (a concession).
         o("d1", _V_A, opened_with="standard"),
@@ -517,7 +519,7 @@ def _opening_rows() -> tuple[list, dict[str, bool]]:
 
 def test_v4_opening_counts_and_variant_provenance() -> None:
     rows, signed = _opening_rows()
-    pb = _v05_playbook(rows, signed=signed)
+    pb = _v06_playbook(rows, signed=signed)
     result = validate_document(pb)
     assert result.ok, [str(e) for e in result.errors if e.blocking]
     (clause,) = pb["digest"]["clauses"]
@@ -553,14 +555,14 @@ def test_v4_opening_counts_and_variant_provenance() -> None:
 
 
 def test_v4_changed_openings_group_across_deals_and_cite_the_lowest_document() -> None:
-    o = _v05_obs
+    o = _v06_obs
     rows = [
         o("d2", _N_1.upper(), outcome="opening", version=1, opened_with="non_standard"),
         o("d1", _N_1, outcome="opening", version=1, opened_with="non_standard"),
         o("d3", _STD, standard=True, opened_with="non_standard"),
         o("d3", _N_1, outcome="opening", version=1, opened_with="non_standard"),
     ]
-    pb = _v05_playbook(rows, signed={"d1": True, "d2": True, "d3": True})
+    pb = _v06_playbook(rows, signed={"d1": True, "d2": True, "d3": True})
     assert validate_document(pb).ok
     (entry,) = pb["digest"]["clauses"][0]["changed_openings"]
     assert (entry["n_deals"], entry["n_to_standard"], entry["n_struck"]) == (3, 1, 2)
@@ -575,7 +577,7 @@ def test_v4_budget_caps_changed_openings_and_the_scorecard_counts_the_clause(
     distinct changed openings and no signed variant or refused ask shows one
     opening under a budget it cannot meet, keeps the uncapped total, and
     ``playbook scorecard`` counts it as a capped clause."""
-    o = _v05_obs
+    o = _v06_obs
     rows = [
         # d1, d2: opened non-standard, ended at our standard.
         o("d1", _STD, standard=True, opened_with="non_standard"),
@@ -585,12 +587,12 @@ def test_v4_budget_caps_changed_openings_and_the_scorecard_counts_the_clause(
         # d3: opened non-standard and struck; no refused ask.
         o("d3", _N_3, outcome="opening", version=1, opened_with="non_standard"),
     ]
-    pb = _v05_playbook(rows, signed={"d1": True, "d2": True, "d3": True})
+    pb = _v06_playbook(rows, signed={"d1": True, "d2": True, "d3": True})
     result = validate_document(pb)
     assert result.ok, [str(e) for e in result.errors if e.blocking]
     ev = pb["evidence"]["clauses"][0]
-    loose = build_digest_v4(pb, token_budget=None)["clauses"][0]
-    tight = build_digest_v4(pb, token_budget=1)["clauses"][0]
+    loose = build_digest_v5(pb, token_budget=None)["clauses"][0]
+    tight = build_digest_v5(pb, token_budget=1)["clauses"][0]
     # Only the changed openings outnumber the floor of one entry per list.
     for clause in (loose, tight):
         assert (clause["n_variants_total"], clause["n_refused_total"]) == (0, 0)
@@ -613,7 +615,7 @@ def test_v4_budget_caps_changed_openings_and_the_scorecard_counts_the_clause(
     # The compiled digest fits the default budget, so nothing is capped.
     assert len(pb["digest"]["clauses"][0]["changed_openings"]) == 3
     assert _scorecard_digest(pb)["capped_clauses"] == 0
-    capped = _scorecard_digest({**pb, "digest": build_digest_v4(pb, token_budget=1)})
+    capped = _scorecard_digest({**pb, "digest": build_digest_v5(pb, token_budget=1)})
     assert capped["capped_clauses"] == 1
     assert capped["changed_openings"] == 3
 
@@ -649,7 +651,7 @@ def _labelled_playbook(tmp_path: Path, labels: dict[str, str]) -> dict:
     from playbook_engine.observation_builder import Observation, ObservationCitation
     from playbook_engine.playbook_assembler import assemble_playbook
 
-    o = _v05_obs
+    o = _v06_obs
     rows = [o("s1", _STD, standard=True, opened_with="standard")]
     deals = {"s1": True}
     n = 2
@@ -713,6 +715,8 @@ def _labelled_playbook(tmp_path: Path, labels: dict[str, str]) -> dict:
             "in_scope": True,
             "versions": 3,
             "signed_version": 3,
+            "signed_on": None,
+            "signed_on_basis": None,
         }
         for d in sorted(deals)
     ]
@@ -821,10 +825,10 @@ def test_v4_equivalent_variants_collapse_and_worse_ones_lead(tmp_path: Path) -> 
 
 def test_v4_the_cap_applies_after_collapsing(tmp_path: Path) -> None:
     pb = _labelled_playbook(tmp_path, _LABELS)
-    tight = build_digest_v4(pb, token_budget=1)["clauses"][0]
+    tight = build_digest_v5(pb, token_budget=1)["clauses"][0]
     assert [v["label"] for v in tight["signed_variants"]] == ["less_protective"]
     assert tight["n_variants_total"] == 6
-    loose = build_digest_v4(pb, token_budget=None)["clauses"][0]
+    loose = build_digest_v5(pb, token_budget=None)["clauses"][0]
     assert [v["label"] for v in loose["signed_variants"]][-1] == "equivalent"
     # An unjudged playbook collapses nothing and orders as digest 3 did.
     unjudged = _labelled_playbook(tmp_path / "none", {})
@@ -838,7 +842,7 @@ def test_v4_uncovered_clause_types_are_the_eligible_taxonomy_without_evidence() 
     from playbook_engine.digest import uncovered_clause_types
     from playbook_engine.taxonomy import load_taxonomy
 
-    pb = _small_v05_playbook()
+    pb = _small_v06_playbook()
     entries = [
         {"id": "governing_law", "label": "Governing Law", "status": "active"},
         {"id": "zeta", "label": "Zeta", "status": "custom"},
@@ -850,7 +854,7 @@ def test_v4_uncovered_clause_types_are_the_eligible_taxonomy_without_evidence() 
         {"taxonomy_id": "alpha", "label": "Alpha"},
         {"taxonomy_id": "zeta", "label": "Zeta"},
     ]
-    assert build_digest_v4(pb)["uncovered_clause_types"] == uncovered_clause_types(pb)
+    assert build_digest_v5(pb)["uncovered_clause_types"] == uncovered_clause_types(pb)
 
     # The NDA example: exactly the eligible entries of spec/taxonomy/nda.yaml
     # that no evidence clause covers.
@@ -868,8 +872,8 @@ def test_v4_uncovered_clause_types_are_the_eligible_taxonomy_without_evidence() 
 def test_v4_nda_example_acceptance() -> None:
     """The ticket's acceptance numbers, read off the committed worked example."""
     nda = json.loads((_ROOT / "examples" / "nda" / "playbook.opf.json").read_text())
-    assert nda["digest"]["digest_version"] == "4"
-    assert nda["digest"] == build_digest_v4(nda)
+    assert nda["digest"]["digest_version"] == "5"
+    assert nda["digest"] == build_digest_v5(nda)
     clauses = {c["taxonomy_id"]: c for c in nda["digest"]["clauses"]}
 
     def variant(clause: str, needle: str) -> dict:
@@ -901,7 +905,7 @@ def test_v4_nda_example_acceptance() -> None:
 
 def test_v4_validator_rejects_a_digest_that_disagrees_with_the_reference() -> None:
     rows, signed = _opening_rows()
-    base = _v05_playbook(rows, signed=signed)
+    base = _v06_playbook(rows, signed=signed)
     del base["identity"]
     for edit in (
         lambda c: c["signed_variants"][0].__setitem__("n_from_standard", 5),
@@ -913,16 +917,16 @@ def test_v4_validator_rejects_a_digest_that_disagrees_with_the_reference() -> No
         tampered = json.loads(json.dumps(base))
         edit(tampered["digest"]["clauses"][0])
         errors = [str(e) for e in validate_document(tampered).errors if e.blocking]
-        assert any("digest does not equal build_digest_v4" in e for e in errors), errors
+        assert any("digest does not equal build_digest_v5" in e for e in errors), errors
     tampered = json.loads(json.dumps(base))
     tampered["digest"]["uncovered_clause_types"].append({"taxonomy_id": "x", "label": "X"})
     errors = [str(e) for e in validate_document(tampered).errors if e.blocking]
-    assert any("digest does not equal build_digest_v4" in e for e in errors), errors
+    assert any("digest does not equal build_digest_v5" in e for e in errors), errors
 
 
 def test_v4_validator_recomputes_the_new_clause_counts() -> None:
     rows, signed = _opening_rows()
-    base = _v05_playbook(rows, signed=signed)
+    base = _v06_playbook(rows, signed=signed)
     del base["identity"]
     for key in ("n_opened_standard", "n_kept_standard", "n_changed_openings"):
         stale = json.loads(json.dumps(base))

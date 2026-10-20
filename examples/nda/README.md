@@ -39,9 +39,9 @@ precedent.jsonl          -- the sidecar `playbook project` writes beside
 
 ## The worked playbook
 
-`playbook.opf.json` is committed as an **OPF 0.5** document (`opf_version`
-"0.5", issues #223 and #233): the verdict-free per-deal precedent record with a
-`digest_version` "4" digest. 26 clauses across all six deals, 128
+`playbook.opf.json` is committed as an **OPF 0.6** document (`opf_version`
+"0.6", issues #223, #233 and #247): the verdict-free per-deal precedent record with a
+`digest_version` "5" digest. 26 clauses across all six deals, 128
 `evidence.precedent` records, one per (deal, clause): what each deal signed, whether
 that is our standard language (`standard` — an exact match after
 normalization, never a judged verdict), what the clause opened with
@@ -61,7 +61,7 @@ Information; survival of confidentiality obligations) and one hand-authored
 conditional hard line via `playbook floor sign` (limitation of liability, if
 present, must not reach a confidentiality breach -- responding to the
 $50,000 liability cap that appears in three of the six deals, introduced by
-the counterparty in two of them). OPF 0.5 is the only format the engine
+the counterparty in two of them). OPF 0.6 is the only format the engine
 emits (issues #238, #233).
 `corpus.stats.dropped_observations` counts removed rows that yield no
 concession or refused ask. Since #233 that is no longer "no precedent": a
@@ -114,7 +114,7 @@ real run adds with `playbook judge --check equivalence`. An exact match with
 the standard (`standard: true`) is never labelled, and `vs_standard` is
 `null` on it.
 
-**What the digest says about it (issue #234).** The `digest` is digest 4:
+**What the digest says about it (issues #234, #247).** The `digest` is digest 5:
 besides each clause's standard and deal counts it says how often we held our
 standard when we opened with it, whether a signed variant was a concession or
 the counterparty's own words signed unchanged, which non-standard openings
@@ -131,8 +131,22 @@ entries with no precedent (`data_protection_personal_data`,
 `non_solicitation_employees`, `trade_secret_carve_out`) are named in
 `uncovered_clause_types`. The seven texts judged equivalent to our standard
 collapse into one entry per clause (four entries; the four parties clauses
-become one). The digest grew from about 6,000 to
-about 8,100 tokens (chars/4), well under the 40,000-token budget.
+become one). Digest 5 adds the signing months: every clause, signed
+variant and refused ask carries `first_signed` / `last_signed` (see below).
+The digest is about 9,600 tokens (chars/4; digest 4 was about 9,100), well
+under the 40,000-token budget.
+
+**When each deal was signed (issue #247).** `corpus.documents[].signed_on`
+and `signed_on_basis` record the date read off each executed copy. Four of
+the six signed copies date their signature block (`signed_on_basis`
+`signature_block`; the latest signatory date is the date, so `beta-industries`
+is 2022-03-16 though its first signature is dated 2022-03-14). `zeta-diagnostics`
+dates its signatures `03/04/2023`, which reads two ways (March 4th or April
+3rd), so no deterministic reader takes it; the one `deal_date` question that
+leaves goes to the judge, whose canned answer is `null` (the passage does not
+say which), and the date stays `null`. `theta-logistics` states no date at all
+(`null`; RTF carries no file metadata, and its file name has none). Nothing is
+guessed. The digest's corpus span is 2022-03 to 2022-11.
 
 **The hard-rule manifest and the critic dossiers (issue #228).** Beside the
 digest the playbook carries `manifest`, `dossiers` and `provenance_index`

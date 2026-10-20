@@ -40,7 +40,7 @@ needing the whole document (OPF-SPEC.md §7's ``grounded_in:
 "evidence@<digest>"``).
 
 Hash format: ``"sha256:" + hexdigest``, matching the pattern already used by
-``composes[].integrity`` in ``spec/playbook.schema-0.5.json``
+``composes[].integrity`` in ``spec/playbook.schema-0.6.json``
 (``^sha256:[0-9a-f]{64}$``).
 """
 
