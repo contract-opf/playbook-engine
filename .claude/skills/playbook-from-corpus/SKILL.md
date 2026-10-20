@@ -392,8 +392,8 @@ once those files are removed.
 ## Pre-flight: estimate and confirm (do this BEFORE any expensive step)
 
 Extraction/OCR is by far the most expensive step — a scanned PDF can OCR
-5–10× slower than a born-digital one (docling RapidOCR on CPU, up to a 600s
-per-file timeout). **Before running `stage`/`segment`/`mine`, give the human a
+5–10× slower than a born-digital one (docling with tesseract OCR on CPU, about
+11 s a page; the per-file timeout grows with the page count). **Before running `stage`/`segment`/`mine`, give the human a
 concrete ETA** so a multi-hour run is never a surprise. When the estimate shows
 no scanned PDFs and an extraction ETA under about fifteen minutes, state it in
 one line and go on — nothing to decide. Otherwise ask for the go-ahead as one

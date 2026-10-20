@@ -397,12 +397,14 @@ class TestDockerfilePinsDoclingStack:
     the legacy reader. The runtime stack must be pinned and the pin enforced."""
 
     _REQUIRED = {
-        "docling": "2.113.0",
-        "docling-core": "2.87.0",
-        "docling-ibm-models": "3.13.3",
-        "docling-parse": "7.8.0",
-        "rapidocr": "3.9.1",
-        "torch": "2.13.0",
+        "docling": "2.140.0",
+        "docling-slim": "2.140.0",
+        "docling-core": "2.102.0",
+        "docling-ibm-models": "4.0.3",
+        "docling-parse": "7.22.3",
+        "rapidocr": "3.10.0",
+        "torch": "2.14.1",
+        "torchvision": "0.29.1",
     }
 
     @staticmethod

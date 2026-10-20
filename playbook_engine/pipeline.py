@@ -74,7 +74,9 @@ from playbook_engine.extraction import (
     document_timestamp,
     extract_blocks,
     extract_docx_units_and_tracked_changes,
+    extractor_stack,
     ocrmypdf_available,
+    thin_extraction_versions,
 )
 from playbook_engine.judgment import (
     BatchedClassificationJudge,
@@ -377,7 +379,15 @@ _DEVIATION_VS_TEMPLATE_VERSION = 20
 # timeout is no longer stage-cached. A warm entry from before this would
 # replay "backend-error" for an OCR-recovered scan and would keep replaying a
 # timeout-pinned legacy extraction, never retrying docling.
-_VERSION_INGEST_REASON_VERSION = 5
+#
+# v6 (issue #252): "ok" version_ingest entries gained "words" (the version's
+# extracted word count, for the thin-extraction guard) and
+# "docling_timed_out" (a fallback recovered the text after a docling
+# timeout), and the docling stack now extracts DOCX with XML comments, scans
+# with a thin text layer and long scans (page-scaled timeout, English OCR)
+# that it previously lost or garbled. A warm entry from before this carries
+# neither new key and replays the old, wrong extraction.
+_VERSION_INGEST_REASON_VERSION = 6
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_trees changes in a way that must invalidate a warm L1-L4 stage
@@ -413,7 +423,8 @@ _NORMALIZED_TREES_CACHE_VERSION = 2
 # and the other per-result versions above).
 _L1_STAGE = "l1"
 _L2_L4_STAGE = "l2-l4"
-_L1_RECORD_VERSION = 1
+# v2 (issue #252): the record gained "words" (the extracted word count).
+_L1_RECORD_VERSION = 2
 # Where a cached record keeps the store entries it was built from, as
 # ``{key: fingerprint}`` (issue #219) — an L1 record the segmentation-store
 # entries it was grounded from, an L2-L4 result the judge verdicts it replayed.
@@ -2275,6 +2286,10 @@ def _l1_version_record(
         # ExtractorLabel.detail, which embeds the absolute source path.
         "extractor": label.extractor if label is not None else vf.suffix.lower().lstrip("."),
         "reason": label.reason if label is not None else None,
+        # Issue #252: how much text this version came out with, so a version
+        # whose extraction collapsed (a scan read as a few stray words) shows
+        # next to its siblings instead of passing for a short document.
+        "words": sum(len(node.text.split()) for node in tree.all_nodes()),
     }
     if label is not None and label.timed_out:
         # Issue #231: this version's text came from a fallback after a
@@ -2383,6 +2398,12 @@ def _collect_l1(
                 # whenever docling ran clean with no degradation — see
                 # ExtractorLabel.reason (issue #81).
                 "reason": record.get("reason"),
+                # Issue #252: extracted word count (see _l1_version_record) and
+                # whether a fallback recovered this text after a docling
+                # timeout. Engine-internal: stripped from the published
+                # playbook with signature_block_span.
+                "words": record.get("words"),
+                "docling_timed_out": bool(record.get(_L1_TIMED_OUT_KEY)),
                 # issue #217: where the stripped signature block sat in this
                 # version's normalized text ([start, end) — same coordinates
                 # as ClauseNode.char_span), or None when no block was found
@@ -3677,6 +3698,11 @@ def mine_corpus(
             # existing L1-L4 stage-cache entry once, the same one-time cost
             # as any other fingerprint-field addition.
             "extractor_env": detect_extractor(corpus_dir),
+            # Issue #252: the docling release and OCR engine/language behind
+            # that environment. Upgrading docling or changing the OCR setup
+            # changes L1 text for identical bytes, so it busts the stage cache
+            # exactly as installing docling does.
+            "extractor_stack": extractor_stack(detect_extractor(corpus_dir)),
             "declared_extractor": config.extraction.extractor,
             # Issue #218: whether the ocrmypdf second OCR path is on PATH
             # changes L1 output for a byte-identical scanned PDF under a
@@ -4291,6 +4317,19 @@ def mine_corpus(
         for ver in (doc.get("version_ingest", []) or [])
         if isinstance(ver, dict) and ver.get("reason") in _FALLBACK_REASONS
     ]
+
+    # Thin-extraction guard (issue #252): a version that came out with under a
+    # fifth of its deal's median word count was almost certainly read badly
+    # (a scan whose text layer was a stamp, a garbled OCR), not written short.
+    # Advisory: the version is still mined; this names it so it is looked at.
+    for doc in corpus_documents:
+        thin = thin_extraction_versions(doc.get("version_ingest", []) or [])
+        if thin:
+            progress(
+                f"  WARNING: {doc.get('document_id', '?')}: {len(thin)} version(s) extracted "
+                f"far fewer words than the deal's median ({', '.join(thin)}) — check the "
+                "extraction (OCR) for them"
+            )
 
     # Alias sanity check (issue #182): if provenance.our_party_aliases are
     # configured but NONE appear anywhere in the corpus, "us" is almost

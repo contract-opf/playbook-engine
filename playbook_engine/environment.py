@@ -77,6 +77,19 @@ EXTERNAL_TOOLS: tuple[ExternalTool, ...] = (
         expected_in_image=True,
     ),
     ExternalTool(
+        name="tesseract",
+        purpose=(
+            "the OCR engine docling is told to use for scanned PDFs "
+            "(`--ocr-engine tesseract`, issue #252)"
+        ),
+        consequence=(
+            "docling fails on a scanned PDF and the version is recorded as a "
+            "backend-error fallback to the legacy reader, which has no OCR"
+        ),
+        install="run inside the project image (`make docker-build`), or `apt-get install tesseract-ocr`",
+        expected_in_image=True,
+    ),
+    ExternalTool(
         name="ocrmypdf",
         purpose=(
             "second OCR path (tesseract) for a scanned PDF that docling's own "

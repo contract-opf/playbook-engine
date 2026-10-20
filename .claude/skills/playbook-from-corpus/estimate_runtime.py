@@ -34,9 +34,17 @@ folded into the "already extracted" figure. Operators who really run
 extraction on the host (no container, no docling) can opt out explicitly
 with ``PLAYBOOK_ESTIMATE_TARGET_ENV=legacy``.
 
+Since issue #252 a docling-environment entry is only a hit when it also carries
+the docling stack that is current (docling release, OCR engine, OCR language):
+the engine refuses an entry with no ``extractor_stack`` or a different one. This
+script applies the same rule — it reads each entry's stack from the JSONL and
+counts a docling entry as a hit only when it equals ``_DOCLING_STACK`` below — so
+a cache written before the stack existed, or by another docling release, is
+reported as uncached and gets the full ETA.
+
 Time constants are calibrated from a representative affiliation-agreement
 corpus on a CPU laptop (docling cold-loads its model per document; scanned
-signed copies can hit the 600s per-file timeout). They are ESTIMATES — report
+signed copies are the slowest, up to about 3 minutes). They are ESTIMATES — report
 a range, not a promise.
 """
 
@@ -82,11 +90,21 @@ import sys
 # lockstep rationale as above.
 _EXTRACTION_CACHE_FORMAT_VERSION = "5"
 
+# The docling stack the project image produces, as ``extraction.extractor_stack
+# ("docling")`` spells it (issue #252): docling release, OCR engine, OCR
+# language. A docling-environment cache entry is a hit only when it carries
+# exactly this stack; an entry with none, or another one, is a miss in the
+# engine and so here. Kept in lockstep with the docling pin in
+# docker/constraints.txt and with ``extraction._DOCLING_OCR_ENGINE`` /
+# ``_DOCLING_OCR_LANG`` (tests/test_estimate_runtime_cache.py asserts it).
+_DOCLING_STACK = "docling=2.140.0;ocr=tesseract;lang=iso:en"
+
 # Per-version wall-clock (seconds), docling on CPU. Born-digital = model
-# cold-load + convert; scanned = the same plus RapidOCR over page images,
-# which frequently approaches the 600s timeout.
+# cold-load + convert; scanned = the same plus tesseract OCR over page images
+# (issue #252: 30-180 s measured per scanned version, about 11 s a page; the
+# per-file cap grows with the page count, 120 s plus 60 s a page).
 _T_BORN_DIGITAL = 60  # ~1 min
-_T_SCANNED = 330  # ~5.5 min (some finish faster, some hit 600s)
+_T_SCANNED = 120  # ~2 min (measured 30-180 s)
 _T_DOCX = 45  # docx: docling or fast legacy fallback
 # very rough: extracted tokens per MB of raw source, from observed runs.
 _TOKENS_PER_MB = 13_800
@@ -158,9 +176,20 @@ def _extraction_cache_key(path: str, extractor_env: str) -> str:
     return _extraction_cache_key_from_digest(_file_sha256(path), extractor_env)
 
 
-def _cached_envs(path: str, cached_keys: set[str]) -> set[str]:
-    """Return the SET of extractor environments whose cache key for *path*
-    is present in *cached_keys* — empty when neither is.
+def _is_hit(env: str, stack: str) -> bool:
+    """Whether a cache entry for *env* carrying *stack* is one the engine would
+    use. Mirrors ``ExtractionCache._lookup``: a docling entry must carry the
+    current docling stack (no stack at all is a miss); legacy has no stack."""
+    return env != "docling" or stack == _DOCLING_STACK
+
+
+def _cached_envs(path: str, cached_keys: dict[str, str]) -> set[str]:
+    """Return the SET of extractor environments for which the engine would hit
+    the cache for *path* — empty when none.
+
+    *cached_keys* maps each cache key to the ``extractor_stack`` stored with it
+    (``""`` when the entry has none); see :func:`load_cached_keys` and
+    :func:`_is_hit`.
 
     A file legitimately accumulates cache entries under BOTH ``docling`` and
     ``legacy`` over time (e.g. a legacy host run followed later by a docling
@@ -184,17 +213,21 @@ def _cached_envs(path: str, cached_keys: set[str]) -> set[str]:
     return {
         env
         for env in _EXTRACTOR_ENVS
-        if _extraction_cache_key_from_digest(digest, env) in cached_keys
+        if (key := _extraction_cache_key_from_digest(digest, env)) in cached_keys
+        and _is_hit(env, cached_keys[key])
     }
 
 
-def load_cached_keys(out_dir: str) -> set[str]:
-    """Return the set of extraction-cache keys in ``<out_dir>/extraction_cache.jsonl``.
+def load_cached_keys(out_dir: str) -> dict[str, str]:
+    """Return ``{key: extractor_stack}`` for ``<out_dir>/extraction_cache.jsonl``.
 
-    Empty when the cache file is absent/unreadable — a cold cache, so nothing
-    is treated as already-extracted.
+    The stack is read from the entry's stored value (``verdict``) and is ``""``
+    when the entry carries none (written before issue #252, or by the legacy
+    environment). Empty when the cache file is absent/unreadable — a cold cache,
+    so nothing is treated as already-extracted. Later lines for a key win, as in
+    the engine's store.
     """
-    keys: set[str] = set()
+    keys: dict[str, str] = {}
     cache_path = os.path.join(out_dir, "extraction_cache.jsonl")
     try:
         with open(cache_path, encoding="utf-8") as fh:
@@ -203,7 +236,10 @@ def load_cached_keys(out_dir: str) -> set[str]:
                 if not line:
                     continue
                 with contextlib.suppress(Exception):  # corrupt line — skip
-                    keys.add(json.loads(line)["key"])
+                    record = json.loads(line)
+                    value = record.get("verdict")
+                    stack = value.get("extractor_stack") if isinstance(value, dict) else None
+                    keys[record["key"]] = stack if isinstance(stack, str) else ""
     except OSError:
         pass  # no cache yet
     return keys

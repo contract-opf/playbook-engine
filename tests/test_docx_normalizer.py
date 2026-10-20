@@ -20,7 +20,7 @@ from docx.oxml.ns import qn
 from lxml import etree
 
 from playbook_engine.docx_ingester import _extract_para_text
-from playbook_engine.docx_normalizer import normalize_tracked_docx
+from playbook_engine.docx_normalizer import normalize_tracked_docx, strip_xml_comments_docx
 from tests.test_docx_ingester import (
     _empty_docx,
     _hyperlink_tracked_docx,
@@ -319,5 +319,128 @@ def test_normalize_empty_docx_does_not_raise(tmp_path: Path) -> None:
     normalized = normalize_tracked_docx(path)
     try:
         Document(str(normalized))  # must not raise
+    finally:
+        normalized.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# XML comment nodes under w:body (issue #252, class A)
+#
+# Template-generated Word files carry a raw ``<!-- ... -->`` directly under
+# ``w:body``. docling's Word backend raises on it (``etree.QName`` on a comment
+# node), in the pinned release and in the newest, so the version fell back to the
+# legacy reader. These are NOT Word comments: no ``w:commentReference``.
+# ---------------------------------------------------------------------------
+
+_COMMENT_TEXT = " template-generated: do not edit "
+
+
+def _xml_commented_docx(tmp_path: Path, *, with_pi: bool = False) -> Path:
+    """A document with an XML comment (and optionally a processing instruction)
+    as direct children of w:body, one of them followed by tail text."""
+    doc = Document()
+    doc.add_heading("Obligations", level=1)
+    doc.add_paragraph("Party A shall perform.")
+    body = doc.element.body
+    comment = etree.Comment(_COMMENT_TEXT)
+    comment.tail = "\n  "
+    body.insert(1, comment)
+    if with_pi:
+        body.insert(2, etree.ProcessingInstruction("generator", "template-tool"))
+    doc.add_paragraph("Party B shall pay.")
+    path = tmp_path / "xml-commented.docx"
+    doc.save(str(path))
+    return path
+
+
+def _document_xml(path: Path) -> bytes:
+    with zipfile.ZipFile(path) as z:
+        return z.read("word/document.xml")
+
+
+def test_fixture_really_carries_an_xml_comment(tmp_path: Path) -> None:
+    """Premise: the fixture holds what docling chokes on, as a body child."""
+    path = _xml_commented_docx(tmp_path)
+    assert b"<!--" + _COMMENT_TEXT.encode() + b"-->" in _document_xml(path)
+    body = Document(str(path)).element.body
+    assert any(isinstance(child, etree._Comment) for child in body)
+
+
+def test_strip_xml_comments_removes_comments_and_processing_instructions(
+    tmp_path: Path,
+) -> None:
+    path = _xml_commented_docx(tmp_path, with_pi=True)
+    stripped = strip_xml_comments_docx(path)
+    assert stripped is not None
+    try:
+        xml = _document_xml(stripped)
+        assert b"<!--" not in xml
+        assert b"<?generator" not in xml
+        body = Document(str(stripped)).element.body
+        assert not any(isinstance(c, (etree._Comment, etree._ProcessingInstruction)) for c in body)
+    finally:
+        stripped.unlink(missing_ok=True)
+
+
+def test_strip_xml_comments_changes_nothing_else(tmp_path: Path) -> None:
+    """Same paragraphs, same other parts byte for byte, original untouched."""
+    path = _xml_commented_docx(tmp_path)
+    before = path.read_bytes()
+    stripped = strip_xml_comments_docx(path)
+    assert stripped is not None
+    try:
+        assert path.read_bytes() == before, "the source file must never be modified"
+        assert _paragraph_texts(Document(str(stripped))) == _paragraph_texts(Document(str(path)))
+        with zipfile.ZipFile(path) as a, zipfile.ZipFile(stripped) as b:
+            assert a.namelist() == b.namelist()
+            for name in a.namelist():
+                if name != "word/document.xml":
+                    assert a.read(name) == b.read(name), name
+    finally:
+        stripped.unlink(missing_ok=True)
+
+
+def test_strip_xml_comments_is_a_no_op_without_xml_comments(tmp_path: Path) -> None:
+    """A plain document gets no copy at all, so docling reads the original."""
+    assert strip_xml_comments_docx(_simple_docx(tmp_path)) is None
+
+
+def test_strip_xml_comments_leaves_word_comments_and_tracked_changes_alone(
+    tmp_path: Path,
+) -> None:
+    """Word comments and tracked changes are document content. Only the
+    normalizer (the retry path) may drop or resolve them; this pre-pass must not,
+    or it would change what every redline says before docling ever sees it."""
+    for builder in (_commented_docx, _tracked_and_commented_docx, _tracked_docx):
+        assert strip_xml_comments_docx(builder(tmp_path)) is None, builder.__name__
+
+
+def test_strip_xml_comments_keeps_text_that_followed_the_comment(tmp_path: Path) -> None:
+    """lxml's ``remove`` discards a node's tail; the tail must survive."""
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("alpha")
+    comment = etree.Comment("x")
+    comment.tail = "TAILTEXT"
+    p._p.append(comment)
+    path = tmp_path / "tail.docx"
+    doc.save(str(path))
+    stripped = strip_xml_comments_docx(path)
+    assert stripped is not None
+    try:
+        assert b"TAILTEXT" in _document_xml(stripped)
+        assert b"<!--" not in _document_xml(stripped)
+    finally:
+        stripped.unlink(missing_ok=True)
+
+
+def test_normalizer_retry_path_also_strips_xml_comments(tmp_path: Path) -> None:
+    """The #84 normalized copy is what docling retries on after a crash. It used
+    to keep body-level XML comments, so the retry crashed identically."""
+    path = _xml_commented_docx(tmp_path)
+    normalized = normalize_tracked_docx(path)
+    try:
+        assert b"<!--" not in _document_xml(normalized)
+        assert _paragraph_texts(Document(str(normalized))) == _paragraph_texts(Document(str(path)))
     finally:
         normalized.unlink(missing_ok=True)

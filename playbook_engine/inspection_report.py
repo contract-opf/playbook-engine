@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from playbook_engine.extraction import thin_extraction_versions
 from playbook_engine.observation_builder import read_observations_jsonl
 
 _log = logging.getLogger(__name__)
@@ -246,6 +247,9 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
     Two kinds of flag:
       - ``version_ingest_failed`` (``severity="warn"``): the version's
         extraction/segmentation raised and it was never mined at all.
+      - ``version_ingest_thin`` (``severity="warn"``, issue #252): the version
+        was mined but its word count is under a fifth of its deal's median
+        (:func:`playbook_engine.extraction.thin_extraction_versions`).
       - ``version_ingest_fallback`` (``severity="info"``, issue #81): the
         version WAS mined, but via the legacy extractor after a real
         degradation (``reason`` is ``"env-missing"``/``"backend-error"``/
@@ -260,6 +264,24 @@ def _version_ingest_review_flags(manifest: dict[str, Any]) -> list[dict[str, Any
     """
     flags: list[dict[str, Any]] = []
     for doc_id in sorted(manifest):
+        # Issue #252: a version far shorter than its siblings was probably read
+        # badly (a scan's text layer was a stamp, garbled OCR), not written short.
+        thin = thin_extraction_versions(manifest[doc_id].get("version_ingest", []) or [])
+        for version in thin:
+            flags.append(
+                {
+                    "document_id": doc_id,
+                    "severity": "warn",
+                    "kind": "version_ingest_thin",
+                    "suggested_action": (
+                        f"Version {version!r} was extracted with under a fifth of the words "
+                        "of this deal's median version, which usually means its text was "
+                        "read badly (a scan or OCR problem), not that it is short. "
+                        "Open the source file; if the extraction is wrong, re-run 'playbook "
+                        "mine' with --no-cache after fixing the OCR setup."
+                    ),
+                }
+            )
         for ver in manifest[doc_id].get("version_ingest", []) or []:
             if not isinstance(ver, dict):
                 continue

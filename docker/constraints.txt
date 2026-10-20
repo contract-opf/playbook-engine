@@ -1,5 +1,10 @@
 # Pinned docling / OCR stack for the Docker runtime (issue #244).
 #
+# Bumped to docling 2.140.0 for issue #252: 2.113.0 silently ignored
+# `--ocr-lang eng` and ran the Chinese recognizer (garbled or timed-out scans);
+# 2.140.0 honours the BCP-47 form (`iso:en`) and the explicit OCR engine
+# (`--ocr-engine tesseract`) that playbook_engine/extraction.py now passes.
+#
 # Why this exists: the Dockerfile used to install `docling` unpinned. A newer
 # docling release changed its automatic OCR engine selection so that our
 # `--ocr-lang eng` was rejected (no installed engine served `eng`), docling
@@ -20,10 +25,11 @@
 #
 # torch/torchvision come from the CPU-only index (see the Dockerfile); the pin
 # is the public version, which matches the `+cpu` local build.
-docling==2.113.0
-docling-core==2.87.0
-docling-ibm-models==3.13.3
-docling-parse==7.8.0
-rapidocr==3.9.1
-torch==2.13.0
-torchvision==0.28.0
+docling==2.140.0
+docling-slim==2.140.0
+docling-core==2.102.0
+docling-ibm-models==4.0.3
+docling-parse==7.22.3
+rapidocr==3.10.0
+torch==2.14.1
+torchvision==0.29.1

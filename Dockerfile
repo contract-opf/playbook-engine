@@ -27,6 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# The OCR engine docling is told to use (issue #252) must serve English. Fail
+# the build here rather than let a scan fail, or fall back, at run time.
+RUN tesseract --list-langs | grep -qx eng
+
 # docling (large, changes rarely) is installed BEFORE the app is copied so
 # editing engine code below does not invalidate this layer. Use the
 # CPU-only torch build — the pipeline runs inference on CPU, and the default
@@ -44,17 +48,14 @@ RUN pip install --no-cache-dir -c /tmp/constraints.txt torch torchvision --index
 # All of docling's models (layout, table-structure, and the RapidOCR default
 # OCR backend) are resolved through one setting: `settings.artifacts_path`,
 # read from the `DOCLING_ARTIFACTS_PATH` env var (pydantic-settings,
-# `env_prefix="DOCLING_"` — see `docling.datamodel.settings.AppSettings`).
+# `env_prefix="DOCLING_"` - see `docling.datamodel.settings.AppSettings`).
 # Every model downloader in `docling.utils.model_downloader.download_models`
-# (layout, tableformer, code_formula, picture_classifier, RapidOCR) takes an
-# explicit `local_dir` and calls `huggingface_hub.snapshot_download(...,
-# local_dir=...)` directly — so pointing `HF_HOME` here would do nothing:
+# takes an explicit `local_dir` and calls `huggingface_hub.snapshot_download(...,
+# local_dir=...)` directly, so pointing `HF_HOME` here would do nothing:
 # `local_dir` downloads bypass the HF cache entirely. Setting
 # `DOCLING_ARTIFACTS_PATH` is therefore the one override needed for both the
-# HF-hosted models *and* RapidOCR, which docling resolves relative to the
-# same `artifacts_path` (`RapidOcrModel` in
-# `docling.models.stages.ocr.rapid_ocr_model`) — confirmed by reading the
-# installed docling 2.113.0 source (the pinned version), not assumed.
+# HF-hosted models and RapidOCR, which docling resolves relative to the same
+# `artifacts_path`.
 ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
 
 # Pre-fetch every model docling needs (as root, at build time) into that
@@ -74,22 +75,21 @@ RUN HF_HUB_DISABLE_XET=1 docling-tools models download --output-dir /opt/docling
     || (sleep 15 && HF_HUB_DISABLE_XET=1 docling-tools models download --output-dir /opt/docling-models) \
     && chmod -R a+rX /opt/docling-models
 
-# OCR quality investigation (word-joining on table-heavy scanned pages):
-# read RapidOCR's resolution logic directly (`_resolve_rapidocr_language` in
-# `docling.models.stages.ocr.rapid_ocr_model`). Root cause confirmed:
-# `RapidOcrOptions.lang` defaults to `["chinese"]`, and running the Chinese
-# recognition model on Latin-script text is exactly what drops inter-word
-# spaces (docling upstream issues #2887, #1635, #2927 — docling's own code
-# comments cite these). docling 2.113.0 already ships an `english`/`latin`
-# RapidOCR model set that fixes this, but selecting it requires passing
-# `--ocr-lang eng` (or setting `RapidOcrOptions.lang`) on the *conversion*
-# call in `playbook_engine/extraction.py::_run_docling` — there is no
-# env var / build-time-only lever for it (`AppSettings` in
-# `docling.datamodel.settings` only exposes `artifacts_path`, not OCR
-# language). Per this ticket's scope, `extraction.py` is not touched here;
-# the fix is a one-line `--ocr-lang eng` (or `deu`/etc., per corpus
-# language) addition to the `docling convert` invocation, tracked against
-# the CLI-wiring ticket (#79 Notes / out-of-scope).
+# OCR engine and language (issue #252). The engine passes
+# `--ocr-engine tesseract --ocr-lang iso:en` on every conversion
+# (`playbook_engine/extraction.py::_run_docling`); this image carries the
+# pinned docling 2.140.0 and the apt `tesseract-ocr` English data checked above.
+# There is no env var or build-time lever for the OCR language: it has to be on
+# the conversion call. History, so nobody re-learns it:
+#   - docling's automatic engine is RapidOCR, whose default recognizer is
+#     Chinese; it drops inter-word spaces on Latin-script text (docling
+#     upstream issues #2887, #1635, #2927).
+#   - docling 2.113.0 (the previous pin) ignored `--ocr-lang eng` and ran that
+#     Chinese recognizer anyway: 130-150 s per page (a 10-page scan timed out
+#     at 600 s), about 40% of words lost, 18-28 tokens joined per document.
+#   - docling 2.140.0 honours `iso:en` for RapidOCR too, but needs 345-551 s for
+#     the same 10-page scan; tesseract needs 107-124 s and recovers 0-10% more
+#     words, so the engine names tesseract explicitly.
 
 # Install the engine (changes often; kept in its own cheap layer so a code
 # edit only re-runs this step, not the torch/docling download above).

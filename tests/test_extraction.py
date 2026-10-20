@@ -427,7 +427,11 @@ def test_extract_docling_invocation_uses_convert_and_placeholder_images(
     assert cmd[1] == "convert"  # subcommand is mandatory in docling >=2.x
     assert cmd[cmd.index("--to") + 1] == "md"
     assert cmd[cmd.index("--image-export-mode") + 1] == "placeholder"
-    assert cmd[cmd.index("--ocr-lang") + 1] == "eng"  # not docling's Chinese default
+    # OCR names its engine and a BCP-47 language in docling's current API form
+    # (issue #252); a bare "eng" is rejected by current docling, and the
+    # automatic engine choice once ran a Chinese recognizer without saying so.
+    assert cmd[cmd.index("--ocr-engine") + 1] == "tesseract"
+    assert cmd[cmd.index("--ocr-lang") + 1] == "iso:en"
 
 
 def test_extract_docling_drops_image_and_comment_lines(
@@ -1688,6 +1692,20 @@ def _fake_pdf(tmp_path: Path, name: str = "draft.pdf") -> Path:
     return path
 
 
+@pytest.fixture
+def ladder_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Switch the docling-stack check off, to exercise the format ladder alone.
+
+    Since issue #252 a docling-environment entry is only a hit when it carries
+    the stack (docling release, OCR engine and language) that is current, and
+    every entry planted below by hand is an old-format shape that carries none.
+    These tests are about what each ladder rung does to such an entry, so they
+    make the stack identical on both sides; the stack check itself is covered by
+    the ``test_stack_*`` tests.
+    """
+    monkeypatch.setattr(extraction, "extractor_stack", lambda environment: None)
+
+
 def _plant(
     cache: ExtractionCache,
     path: Path,
@@ -1729,7 +1747,7 @@ _PLANTED_TEXT = "Alpha Corp shall indemnify Beta Ltd for direct damages."
 
 
 def test_pre_81_docling_entry_is_migrated_instead_of_re_extracted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ladder_only: None
 ) -> None:
     """A pre-#81 entry whose stored extractor is "docling" carries exactly the
     blocks today's code would produce for the same bytes; only the label's
@@ -1766,7 +1784,9 @@ def test_pre_81_docling_entry_is_migrated_instead_of_re_extracted(
     assert cache.invalidated_count == 0
 
 
-def test_migrated_entry_is_refiled_under_the_current_format(tmp_path: Path) -> None:
+def test_migrated_entry_is_refiled_under_the_current_format(
+    tmp_path: Path, ladder_only: None
+) -> None:
     """Migration is paid once per entry, not once per lookup: the rewritten
     value is stored under the CURRENT format key, so the next process (a fresh
     ExtractionCache loading the same JSONL) hits it directly."""
@@ -1983,7 +2003,9 @@ def test_84_rung_invalidates_the_redline_docx_fallback_entry(
     assert cache.invalidated_count == 1
 
 
-def test_84_rung_keeps_every_entry_the_normalized_retry_cannot_change(tmp_path: Path) -> None:
+def test_84_rung_keeps_every_entry_the_normalized_retry_cannot_change(
+    tmp_path: Path, ladder_only: None
+) -> None:
     """The entries the #84 bump discarded for nothing. #84's retry is DOCX-only
     and only fires when docling FAILED, so none of these could have changed —
     each must survive the bump and hit."""
@@ -2407,7 +2429,7 @@ def test_legacy_environment_never_runs_ocrmypdf_and_names_the_docker_runtime(
     assert cache.get_failure(pdf, extractor="legacy") is not None
 
 
-def test_218_rung_invalidates_only_docling_pdf_failures(tmp_path: Path) -> None:
+def test_218_rung_invalidates_only_docling_pdf_failures(tmp_path: Path, ladder_only: None) -> None:
     """The #218 rung is scoped: a format-3 docling-environment PDF FAILURE is
     retried (it predates the ocrmypdf path and may have been a timeout);
     every entry the change cannot affect survives and hits."""
@@ -2695,7 +2717,9 @@ def test_ocrmypdf_recovery_after_a_docling_timeout_is_labelled_and_not_cached(
 # --- #231 rung: only stored backend-error fallbacks are retried --------------
 
 
-def test_231_rung_invalidates_only_backend_error_fallback_successes(tmp_path: Path) -> None:
+def test_231_rung_invalidates_only_backend_error_fallback_successes(
+    tmp_path: Path, ladder_only: None
+) -> None:
     """A format-4 ``backend-error`` success cannot say whether it was a crash
     fallback (still right), a timeout fallback (must be retried) or an
     ocrmypdf recovery (now labelled ``ocr-recovered``), so it is retried once.

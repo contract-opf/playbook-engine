@@ -18,6 +18,12 @@ degrading straight to the legacy fallback — see
 :mod:`playbook_engine.extraction`, which retries docling on the normalized
 copy before falling back.
 
+The normalized copy also drops raw XML comments (``<!-- ... -->``) and
+processing instructions under ``w:body`` (issue #252): docling's Word backend
+raises on them, so a copy that kept them would crash the retry exactly as the
+original did. :func:`strip_xml_comments_docx` does ONLY that, for the first
+attempt, without resolving tracked changes.
+
 Semantic contract: the normalized copy's plain text must equal the
 accepted-changes view :func:`playbook_engine.docx_ingester._extract_para_text`
 already produces for the ORIGINAL document (insertions included, deletions
@@ -54,11 +60,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
 from docx import Document
 from docx.oxml.ns import qn
+from lxml import etree
 
 # Tags this module mutates. All body-XML, per the ticket's scope — headers/
 # footers are separate OPC parts docx_ingester never reads either.
@@ -106,6 +114,7 @@ def normalize_tracked_docx(path: Path) -> Path:
     _remove_all(body, _W_COMMENT_REFERENCE)
     _remove_all(body, _W_COMMENT_RANGE_START)
     _remove_all(body, _W_COMMENT_RANGE_END)
+    _drop_xml_comment_nodes(body)
     _drop_comments_part(document)
 
     fd, tmp_name = tempfile.mkstemp(suffix=".docx", prefix="docx-normalized-")
@@ -171,3 +180,100 @@ def _drop_comments_part(document: Any) -> None:
     ]
     for rid in comment_rids:
         document.part.drop_rel(rid)
+
+
+def _is_foreign_node(node: Any) -> bool:
+    """Whether *node* is an lxml comment or processing instruction (not an element)."""
+    return isinstance(node, (etree._Comment, etree._ProcessingInstruction))
+
+
+def _drop_xml_comment_nodes(container: Any) -> int:
+    """Remove every XML comment (``<!-- ... -->``) and processing instruction
+    under *container*, keeping the text that followed each one. Returns how many
+    were removed.
+
+    These are NOT Word comments (``w:commentReference`` and friends): they are
+    raw XML nodes that template generators leave directly under ``w:body``.
+    docling's Word backend walks the body's children and calls
+    ``etree.QName(child)`` on each, which raises ``ValueError`` on a comment
+    node, so one such node sinks the whole conversion (issue #252, class A: 17
+    of 161 versions on the reference corpus, in both the pinned and the newest
+    docling release). Neither of them carries document content.
+
+    ``list(...)`` materialises the match set before mutating, as in
+    :func:`_remove_all`. ``etree.Element.remove`` discards the removed node's
+    ``tail``, so the tail is folded into the previous sibling (or the parent's
+    own text) first; for a comment between two ``w:p`` elements it is
+    whitespace, but dropping it silently would be wrong in the general case.
+    """
+    removed = 0
+    for node in list(container.xpath(".//comment() | .//processing-instruction()")):
+        if not _is_foreign_node(node):
+            continue
+        parent = node.getparent()
+        if parent is None:
+            continue
+        tail = node.tail
+        if tail:
+            previous = node.getprevious()
+            if previous is not None:
+                previous.tail = (previous.tail or "") + tail
+            else:
+                parent.text = (parent.text or "") + tail
+        parent.remove(node)
+        removed += 1
+    return removed
+
+
+def strip_xml_comments_docx(path: Path, dest: Path | None = None) -> Path | None:
+    """Copy *path* with XML comments and processing instructions removed from
+    its ``word/*.xml`` parts; ``None`` when there is nothing to remove.
+
+    Works on the package at the zip level and touches nothing else: no tracked
+    change is accepted or rejected, no Word comment is dropped, and every part
+    that needs no change is copied byte for byte. That is what makes it safe to
+    run BEFORE the first docling attempt on every DOCX (unlike
+    :func:`normalize_tracked_docx`, which changes the document's meaning to an
+    accepted-changes view and so is kept for the retry path).
+
+    *dest* is where the copy is written (its parent must exist); by default a
+    fresh temp file the CALLER owns and must delete. A part that does not parse
+    as XML is copied unchanged: this function never makes a document worse.
+    """
+    with zipfile.ZipFile(path) as zin:
+        replacements: dict[str, bytes] = {}
+        for info in zin.infolist():
+            name = info.filename
+            if not (name.startswith("word/") and name.endswith(".xml")):
+                continue
+            data = zin.read(name)
+            if b"<!--" not in data and b"<?" not in data.replace(b"<?xml", b"", 1):
+                continue
+            try:
+                root = etree.fromstring(
+                    data,
+                    etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False),
+                )
+            except etree.XMLSyntaxError:
+                continue
+            if _drop_xml_comment_nodes(root) == 0:
+                continue
+            replacements[name] = etree.tostring(
+                root, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+        if not replacements:
+            return None
+
+        if dest is None:
+            fd, tmp_name = tempfile.mkstemp(suffix=".docx", prefix="docx-uncommented-")
+            os.close(fd)
+            dest = Path(tmp_name)
+        with zipfile.ZipFile(dest, "w") as zout:
+            for info in zin.infolist():
+                replaced = replacements.get(info.filename)
+                zout.writestr(
+                    info,
+                    replaced if replaced is not None else zin.read(info.filename),
+                    compress_type=info.compress_type,
+                )
+    return dest
