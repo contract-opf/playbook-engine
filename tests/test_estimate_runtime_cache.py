@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import builtins
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -54,6 +55,29 @@ _SCRIPT = (
     / "playbook-from-corpus"
     / "estimate_runtime.py"
 )
+
+
+_CONSTRAINTS = Path(__file__).parent.parent / "docker" / "constraints.txt"
+
+
+def _pinned_docling_version() -> str:
+    """The docling release pinned in docker/constraints.txt (the image's docling)."""
+    for line in _CONSTRAINTS.read_text(encoding="utf-8").splitlines():
+        name, sep, version = line.partition("==")
+        if sep and name.strip() == "docling":
+            return version.split()[0].strip()
+    raise AssertionError("docker/constraints.txt pins no docling release")
+
+
+@pytest.fixture(autouse=True)
+def _image_docling_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the project image, whose docling is the pinned release.
+
+    The host venv may have no docling (``_docling_version`` would say
+    ``"unknown"``) or another release; the estimator's stack constant describes
+    the image, so entries these tests write as "the container" must carry it.
+    """
+    monkeypatch.setattr(engine_extraction, "_docling_version", _pinned_docling_version)
 
 
 def _load_estimator():
@@ -99,7 +123,79 @@ def test_estimator_key_matches_engine_cache(tmp_path: Path) -> None:
 def test_estimator_cold_cache_is_empty(tmp_path: Path) -> None:
     est = _load_estimator()
     # No cache file present → no keys, nothing treated as pre-extracted.
-    assert est.load_cached_keys(str(tmp_path)) == set()
+    assert est.load_cached_keys(str(tmp_path)) == {}
+
+
+def test_estimator_docling_stack_matches_the_engine_and_the_image_pin() -> None:
+    """The estimator replicates ``extractor_stack("docling")`` for the image
+    (issue #252); it must move with the docling pin and the OCR constants."""
+    est = _load_estimator()
+    assert engine_extraction.extractor_stack("docling") == est._DOCLING_STACK
+    assert (
+        f"docling={_pinned_docling_version()};"
+        f"ocr={engine_extraction._DOCLING_OCR_ENGINE};"
+        f"lang={engine_extraction._DOCLING_OCR_LANG}"
+    ) == est._DOCLING_STACK
+
+
+def _plant_docling_entry(out_dir: Path, src: Path, *, stack: str | None) -> None:
+    """Write a current-format docling cache entry for *src* as ``put`` did,
+    carrying *stack* (``None`` = the shape written before issue #252)."""
+    value: dict[str, object] = {
+        "canonical_text": "Fictional text.",
+        "blocks": [{"block_id": "b0", "page": 0, "char_span": [0, 15]}],
+        "extractor": "docling",
+        "reason": None,
+        "fallback_from": None,
+    }
+    if stack is not None:
+        value["extractor_stack"] = stack
+    # The estimator's key recipe is pinned to the engine's by
+    # test_estimator_key_matches_engine_cache; the engine lookup below is the
+    # independent check that this entry is what the engine reads.
+    key = _load_estimator()._extraction_cache_key(str(src), "docling")
+    with (out_dir / "extraction_cache.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": key, "verdict": value}) + "\n")
+
+
+@pytest.mark.parametrize(
+    ("stack", "cached"),
+    [
+        (None, False),  # written before the stack existed
+        ("docling=2.113.0;ocr=rapidocr;lang=en", False),  # another docling stack
+        ("docling=2.140.0;ocr=tesseract;lang=iso:en", True),  # the current stack
+    ],
+)
+def test_estimator_counts_a_docling_entry_only_when_it_carries_the_current_stack(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], stack: str | None, cached: bool
+) -> None:
+    """Regression test for the issue #252 review: a docling entry with no stack,
+    or another one, is a miss in the engine, so the estimator must not report the
+    corpus as already extracted (it would print ``~0m`` and the run would then
+    re-OCR everything)."""
+    est = _load_estimator()
+    corpus = tmp_path / "corpus"
+    (corpus / "deal1").mkdir(parents=True)
+    src = corpus / "deal1" / "v1.rtf"
+    src.write_text(r"{\rtf1 Fictional agreement text.}", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _plant_docling_entry(out_dir, src, stack=stack)
+
+    # The engine agrees with the estimator about what is a hit.
+    engine_hit = (
+        ExtractionCache(out_dir / "extraction_cache.jsonl").get(src, extractor="docling")
+        is not None
+    )
+    assert engine_hit is cached
+
+    cached_keys = est.load_cached_keys(str(out_dir))
+    assert (est._cached_envs(str(src), cached_keys) == {"docling"}) is cached
+
+    sys.argv = ["estimate_runtime.py", str(corpus), str(out_dir)]
+    est.main()
+    out = capsys.readouterr().out
+    assert ("~0m — corpus already extracted (cache hit)" in out) is cached
 
 
 def test_estimator_detects_docling_written_cache_from_docling_less_estimator(

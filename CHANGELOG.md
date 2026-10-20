@@ -47,6 +47,47 @@ changes` heading in the release it ships under.
   executed copies now carry signature-block dates (one ambiguous and one
   absent, so null) and its playbook is regenerated.
 
+- **Text extraction no longer loses or garbles versions silently (issue #252,
+  epic #245).** On the reference corpus 31 of 161 versions had bad L1 text,
+  not the 20 the fallback tally showed: 11 were labelled `docling` and were
+  wrong. Each class is fixed at its cause. (A) A DOCX with an XML comment
+  (`<!-- ... -->`) directly under `w:body` crashed docling's Word backend, in
+  the pinned release and the newest; the engine now converts a copy with those
+  nodes (and processing instructions) removed, before the first attempt, and
+  the normalized retry strips them too. Word comments and tracked changes are
+  left alone. (B) The extraction cache replayed a `backend-error` written by an
+  older docling forever, because its environment key was just `docling`; every
+  docling entry now records its stack (docling release, OCR engine, OCR
+  language) and a different stack is a miss, as is an entry with no stack, so
+  the first run after upgrading re-extracts the docling-extracted versions
+  once; the pre-flight estimator applies the same rule, and a stale-format
+  entry refused for its stack is counted as invalidated, not migrated. The L1
+  stage-cache fingerprint carries the stack too. (C, D) docling
+  is pinned to 2.140.0 (with its sibling packages) and told which OCR to use:
+  `--ocr-engine tesseract --ocr-lang iso:en`. 2.113.0 ignored `--ocr-lang
+  eng` and ran the Chinese recognizer (130-150 s a page, about 40% of words
+  lost, 18-28 tokens joined per document). tesseract was chosen over
+  2.140.0's RapidOCR on measured speed and yield: 107-124 s against 345-551 s
+  for the same 10-page scan, with 0-10% more words. That release and engine
+  are what recover classes C and D, the two partial-text-layer scans included,
+  in docling's default OCR mode. As a defensive guard, a PDF whose text layer
+  is only a stamp over scanned pages (under 50 words a page, image-dominated)
+  is also OCR'd full page (`--ocr-mode full_page`). On the reference corpus
+  the 11-page partial-text-layer scan does not trip that switch, because
+  pdfplumber reports no page images on it, and on the 3 files that do trip it,
+  full-page mode changes the word count by at most 4. The
+  docling timeout for a PDF is 120 s plus 60 s a page (floor 600 s, ceiling
+  3600 s), so a 10-page scan gets 720 s; and the ocrmypdf second path may open
+  a signed scan (`--invalidate-digital-signatures` on its temp copy). A docling
+  failure that leaves no text now says why in the error instead of reading as
+  an empty page. `playbook doctor` lists tesseract. `corpus_manifest.json`
+  `version_ingest` rows gain `words` and `docling_timed_out` (engine-internal,
+  stripped from the published playbook), `mine` warns, and the inspection
+  report flags `version_ingest_thin`, for any version under a fifth of its
+  deal's median word count. The Docker smoke test now OCRs a plain and a
+  stamped scan and asserts the words, not just `extractor=docling`, and
+  extracts a DOCX with an XML comment.
+
 - **Setup asks for every older version of our form (issue #246, epic #245).**
   `baseline.prior_templates` is a new optional config list of
   `{path, label, in_use_from?, in_use_until?}` (dates are ISO, `YYYY-MM` or a

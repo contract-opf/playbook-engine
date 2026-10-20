@@ -202,13 +202,16 @@ from __future__ import annotations
 
 import datetime
 import difflib
+import functools
+import importlib.metadata
 import logging
 import re
 import shutil
+import statistics
 import subprocess
 import tempfile
 import zipfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -235,7 +238,7 @@ from playbook_engine.docx_ingester import (
     _iter_body_blocks,
     ingest_docx,
 )
-from playbook_engine.docx_normalizer import normalize_tracked_docx
+from playbook_engine.docx_normalizer import normalize_tracked_docx, strip_xml_comments_docx
 from playbook_engine.segmentation_grounding import Block
 
 _log = logging.getLogger(__name__)
@@ -657,6 +660,36 @@ def detect_extractor(path: Path) -> str:
     return "docling" if shutil.which("docling") is not None else "legacy"
 
 
+#: A version whose extracted word count is under this share of its deal's
+#: median is flagged as a probable extraction failure (issue #252).
+THIN_EXTRACTION_RATIO = 0.2
+
+
+def thin_extraction_versions(version_ingest: list[Any]) -> list[str]:
+    """Versions of one deal whose word count is under
+    :data:`THIN_EXTRACTION_RATIO` of the deal's median.
+
+    Reads the ``version_ingest`` rows ``corpus_manifest.json`` carries (``ok``
+    rows with a ``words`` count). Needs at least two counted versions to have a
+    median to compare against, and a median of zero flags nothing. This is the
+    regression guard for extraction quality: a docling release or OCR setting
+    that silently degrades text shows up as a version far below its siblings
+    even though it is labelled ``docling`` with no reason (issue #252, class D).
+    """
+    counted = [
+        (str(row.get("version", "?")), row["words"])
+        for row in version_ingest
+        if isinstance(row, dict)
+        and row.get("status") == "ok"
+        and isinstance(row.get("words"), int)
+        and not isinstance(row.get("words"), bool)
+    ]
+    if len(counted) < 2:
+        return []
+    median = statistics.median(words for _, words in counted)
+    return [version for version, words in counted if words < THIN_EXTRACTION_RATIO * median]
+
+
 def ocrmypdf_available() -> bool:
     """Whether the ``ocrmypdf`` second OCR path (issue #218) is on ``PATH``.
 
@@ -725,6 +758,50 @@ def _resolve_extractor_env(declared: str, path: Path) -> str:
     if declared == "auto":
         return detect_extractor(path)
     return declared
+
+
+@functools.lru_cache(maxsize=1)
+def _docling_version() -> str:
+    """The installed docling release, or ``"unknown"`` when it cannot be read.
+
+    Read from package metadata, not by running ``docling --version``: the
+    runtime is the project image, where docling is installed into the same
+    interpreter as the engine, and a metadata read costs nothing and starts no
+    subprocess. A host whose docling lives in another environment reports
+    ``"unknown"``, which is still a stable stack identity (it just cannot see a
+    docling upgrade there).
+    """
+    try:
+        return importlib.metadata.version("docling")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def extractor_stack(environment: str) -> str:
+    """Identity of everything that can change docling's output for the same
+    bytes: the docling release, the OCR engine and the OCR language.
+
+    ``""`` for the legacy environment, which has none of those. The extraction
+    cache stores this with every docling-environment entry and refuses an entry
+    whose stack differs (:meth:`ExtractionCache._lookup`); the pipeline folds it
+    into the L1 stage-cache fingerprint. Before this, the only environment
+    component was the word ``docling``, so a ``backend-error`` written by an
+    older docling build was replayed forever under a newer one (issue #252,
+    class B: 5 versions that the current build converts cleanly).
+    """
+    if environment != "docling":
+        return ""
+    return f"docling={_docling_version()};ocr={_DOCLING_OCR_ENGINE};lang={_DOCLING_OCR_LANG}"
+
+
+def _stack_is_current(environment: str, value: dict[str, Any]) -> bool:
+    """Whether a stored cache *value* for *environment* may be used (issue #252).
+
+    A docling-environment entry must carry exactly the current
+    :func:`extractor_stack`; one with none (written before the stack existed) or
+    another is refused. The legacy environment has no stack and always passes.
+    """
+    return environment != "docling" or value.get("extractor_stack") == extractor_stack(environment)
 
 
 def _resolve_cache_environment(path: Path, environment: str | None) -> str:
@@ -844,6 +921,30 @@ class ExtractionCache:
         *,
         declared_extractor: str | None = None,
     ) -> dict[str, Any] | None:
+        """:meth:`_lookup_any_stack`, minus an entry written under another
+        docling stack (issue #252).
+
+        A docling-environment entry carries the :func:`extractor_stack` that
+        produced it. One written by a different docling release or OCR
+        configuration is a miss, so the next ``extract_blocks`` re-extracts and
+        its ``put`` replaces it. An entry with no stack at all (written before
+        this check existed) is a miss too: nothing says which docling made it.
+        The legacy environment has no stack and is not checked.
+        """
+        hit = self._lookup_any_stack(path, environment, declared_extractor=declared_extractor)
+        if hit is None:
+            return None
+        if not _stack_is_current(_resolve_cache_environment(path, environment), hit):
+            return None
+        return hit
+
+    def _lookup_any_stack(
+        self,
+        path: Path,
+        environment: str | None,
+        *,
+        declared_extractor: str | None = None,
+    ) -> dict[str, Any] | None:
         """Return the stored value for *path* under *environment*, migrating a
         stale-format entry forward if one exists. ``None`` on a real miss.
 
@@ -914,6 +1015,20 @@ class ExtractionCache:
                     stale_version,
                     path.name,
                     result.detail,
+                )
+                return None
+            if not _stack_is_current(env, result.value):
+                # The entry survived the format ladder but ``_lookup`` would
+                # refuse it (no docling stack, or another one): it is going to
+                # be re-extracted, so it is invalidated, not migrated, and is
+                # not re-filed under the current key (issue #252).
+                self._rejected.add((digest, env))
+                self.invalidated_count += 1
+                _log.info(
+                    "extraction cache: discarding format-%s entry for %s — "
+                    "not written by the current docling stack",
+                    stale_version,
+                    path.name,
                 )
                 return None
             self.migrated_count += 1
@@ -1035,6 +1150,11 @@ class ExtractionCache:
             "reason": getattr(extractor, "reason", None),
             "fallback_from": getattr(extractor, "fallback_from", None),
         }
+        env = _resolve_cache_environment(path, environment)
+        if env == "docling":
+            # Issue #252: which docling stack produced this entry, so another
+            # stack never replays it (see _lookup).
+            value["extractor_stack"] = extractor_stack(env)
         self._store.put(_extraction_cache_payload(path, environment), value)
 
     def get_failure(
@@ -1118,6 +1238,8 @@ class ExtractionCache:
         ocrmypdf is installed, so the file gets its second OCR pass.
         """
         value: dict[str, Any] = {"error": message, "extractor": extractor}
+        if extractor == "docling":
+            value["extractor_stack"] = extractor_stack(extractor)
         if ocrmypdf is not None:
             value["ocrmypdf"] = ocrmypdf
         self._store.put(_extraction_cache_payload(path, extractor), value)
@@ -1340,6 +1462,11 @@ def extract_blocks(
 
     if not lines:
         message = f"extraction yielded no text: {path}"
+        if detail:
+            # docling crashed on this file and nothing else recovered text:
+            # say why, so a missing OCR engine is not read as an empty page
+            # (issue #252). In-memory/log text, like ExtractorLabel.detail.
+            message += f" (docling failed: {detail[-300:]})"
         if suffix == ".pdf" and environment == "legacy":
             # Fail loud about WHY (issue #218): the legacy environment has no
             # OCR at all, so a scanned PDF can never yield text here.
@@ -1468,9 +1595,35 @@ def _extract_docling_lines(path: Path) -> list[tuple[str, int]]:
     is mandatory in docling >=2.x; ``placeholder`` image mode keeps page
     images out of the Markdown. docling Markdown is not paginated, so ``page``
     is always 0 (mirrors the RTF/DOCX convention).
+
+    Two inputs are prepared first, both to remove a cause of a bad result
+    rather than to catch it afterwards (issue #252):
+
+    - a DOCX with XML comments under ``w:body`` is converted from a copy with
+      those nodes removed (docling's Word backend crashes on them; see
+      :func:`playbook_engine.docx_normalizer.strip_xml_comments_docx`);
+    - a PDF is profiled (:func:`_profile_pdf`) so the conversion gets a
+      timeout that grows with its page count and, when its text layer is
+      only a thin stamp over scanned pages, full-page OCR.
     """
     with tempfile.TemporaryDirectory(prefix="docling-") as tmpdir:
-        markdown = _run_docling(path, Path(tmpdir))
+        source = path
+        profile: _PdfProfile | None = None
+        if path.suffix.lower() == ".docx":
+            # Same file name in a private directory, so docling's <stem>.md and
+            # every error message still name the real document.
+            staged = Path(tmpdir) / "src" / path.name
+            staged.parent.mkdir()
+            try:
+                if strip_xml_comments_docx(path, dest=staged) is not None:
+                    source = staged
+            except (OSError, zipfile.BadZipFile) as exc:
+                # Not a package we can rewrite: let docling meet the original
+                # and report its own verdict on it.
+                _log.warning("extract_blocks: cannot strip XML comments from %s (%s)", path, exc)
+        elif path.suffix.lower() == ".pdf":
+            profile = _profile_pdf(path)
+        markdown = _run_docling(source, Path(tmpdir), profile=profile)
         return _parse_markdown_lines(markdown)
 
 
@@ -1536,8 +1689,9 @@ def _retry_docling_on_normalized_docx(
 # same reasoning and budget as _DOCLING_TIMEOUT_S below.
 _OCRMYPDF_TIMEOUT_S = 600
 
-# tesseract language for the ocrmypdf pass. Mirrors _DOCLING_OCR_LANG (both
-# name English as "eng"); change the two together per corpus language.
+# tesseract language for the ocrmypdf pass (tesseract's own name for English;
+# docling's _DOCLING_OCR_LANG spells the same language "iso:en"). Change the
+# two together per corpus language.
 _OCRMYPDF_LANG = "eng"
 
 
@@ -1570,6 +1724,10 @@ def _retry_pdf_via_ocrmypdf(path: Path) -> list[tuple[str, int]]:
                 [
                     "ocrmypdf",
                     "--skip-text",
+                    # A signed scan is common in a negotiation corpus and
+                    # ocrmypdf refuses a signed PDF otherwise. Only this temp
+                    # copy's text layer is read; the original is untouched.
+                    "--invalidate-digital-signatures",
                     "--language",
                     _OCRMYPDF_LANG,
                     # Plain PDF output: skips the PDF/A (ghostscript) pass,
@@ -1603,55 +1761,161 @@ def _retry_pdf_via_ocrmypdf(path: Path) -> list[tuple[str, int]]:
             return []
 
 
-# OCR language passed to ``docling convert --ocr-lang``. English by default;
-# docling's own default is Chinese, which corrupts Latin-script scans.
-_DOCLING_OCR_LANG = "eng"
+# OCR engine and language passed to ``docling convert`` (issue #252).
+#
+# Why not docling's automatic engine choice: with RapidOCR (its pick) the
+# recognizer docling loads is not the one we ask for. docling 2.113 ignored
+# ``--ocr-lang eng`` and ran the Chinese recognizer, which took 130-150 s per
+# page (a 10-page scan timed out at 600 s), lost about 40% of the words and
+# joined 18-28 tokens per document. docling 2.140 honours ``iso:en`` and loads
+# an English recognizer, but still needs 345-551 s for the same 10-page scan, a
+# thin margin under any sane cap with 1.7x run-to-run variance.
+#
+# tesseract (the CLI engine, installed by the Dockerfile's apt layer) took
+# 107-124 s for the same documents, recovered 0-10% MORE words, and its
+# language data is explicit: a missing ``eng`` is an error, not a silent
+# fallback to another model. Measured on the reference corpus (issue #252
+# diagnosis), so this is a decision, not a default.
+#
+# The language uses docling's canonical BCP-47 form (``iso:`` prefix) so it
+# means the same thing to any engine; docling >=2.1xx rejects the bare
+# ``eng`` this module used to pass.
+_DOCLING_OCR_ENGINE = "tesseract"
+_DOCLING_OCR_LANG = "iso:en"
 
 # Per-file wall-clock cap on the docling subprocess. docling cold-loads its
 # models on every invocation and can hang indefinitely on a pathological
 # input; without a cap, one bad file blocks the whole corpus mine run
-# forever (issue #98). 10 minutes comfortably covers even large scanned
-# PDFs; a genuinely stuck conversion is far more likely than a legitimate
-# one still running at that point.
+# forever (issue #98). Non-PDF documents keep this flat cap.
 _DOCLING_TIMEOUT_S = 600
 
+# A PDF's cap scales with its page count (issue #252): OCR cost is per page, so
+# a flat cap that is generous for a 3-page scan is hopeless for a 30-page one,
+# and the answer to "it timed out" must not be to retry it forever. The budget
+# is 120 s of fixed cost (model load) plus 60 s per page, never below the flat
+# cap and never above the ceiling. Measured tesseract cost is about 11 s per
+# page (107-124 s for a 10-page scan), so a 10-page scan gets 720 s, about six
+# times what it needs; the ceiling bounds a genuinely stuck conversion.
+_DOCLING_PDF_BASE_S = 120
+_DOCLING_PDF_PER_PAGE_S = 60
+_DOCLING_PDF_CEILING_S = 3600
 
-def _run_docling(path: Path, outdir: Path) -> str:
+# A PDF whose sampled pages carry fewer words per page than this, over pages
+# dominated by an image, has a text layer that is a stamp (a signature block, a
+# scanner header) rather than the document, so it gets full-page OCR
+# (`--ocr-mode full_page`) and OCR never stops at the stamp. This is a
+# defensive guard; it is not what recovered the reference corpus (issue #252,
+# classes C and D). There, docling 2.113 returned 8 and 79 words for the two
+# partial-text-layer files, and docling 2.140 with tesseract recovers them in
+# its default OCR mode. The 11-page one has about 5 words a page, but
+# pdfplumber reports no page images on it, so it does not trip this switch and
+# still comes out at about 4,500 words. On the 3 reference files that do trip
+# it, turning full-page mode off changed their word counts by at most 4.
+_THIN_TEXT_WORDS_PER_PAGE = 50
+# A page counts as an image page when images cover at least this share of it.
+_IMAGE_PAGE_COVERAGE = 0.5
+# Pages sampled for the profile: bounds the cost on a long born-digital PDF.
+_PROFILE_MAX_PAGES = 20
+
+
+@dataclass(frozen=True)
+class _PdfProfile:
+    """What :func:`_profile_pdf` learned about a PDF before docling ran."""
+
+    pages: int
+    #: True when OCR must replace the text layer (see _THIN_TEXT_WORDS_PER_PAGE).
+    force_full_page_ocr: bool
+
+
+def _profile_pdf(path: Path) -> _PdfProfile | None:
+    """Page count and thin-text-layer verdict for *path*, or ``None`` when
+    pdfplumber cannot read it (docling then gets the flat cap and its default
+    OCR, exactly as before this function existed).
+
+    The thin-layer verdict needs three things at once: some text (a PDF with no
+    text at all is a plain scan, which docling's default OCR already handles),
+    fewer than :data:`_THIN_TEXT_WORDS_PER_PAGE` words per sampled page on
+    average, and image-dominated pages. The last keeps a short born-digital
+    document (a one-page notice) from being re-read by OCR, which would only
+    make its text worse.
+    """
+    try:
+        with pdfplumber.open(path) as pdf:
+            pages = len(pdf.pages)
+            sampled = pdf.pages[:_PROFILE_MAX_PAGES]
+            words = 0
+            image_pages = 0
+            for page in sampled:
+                words += len((page.extract_text() or "").split())
+                area = float(page.width) * float(page.height)
+                covered = sum(
+                    max(0.0, float(i["x1"]) - float(i["x0"]))
+                    * max(0.0, float(i["bottom"]) - float(i["top"]))
+                    for i in page.images
+                )
+                if area > 0 and covered / area >= _IMAGE_PAGE_COVERAGE:
+                    image_pages += 1
+    except Exception as exc:  # noqa: BLE001 — any unreadable PDF just means "no profile"
+        _log.info("extract_blocks: cannot profile %s (%s)", path, exc)
+        return None
+    if not sampled:
+        return None
+    thin = 0 < words < _THIN_TEXT_WORDS_PER_PAGE * len(sampled) and image_pages * 2 >= len(sampled)
+    return _PdfProfile(pages=pages, force_full_page_ocr=thin)
+
+
+def _docling_timeout_s(profile: _PdfProfile | None) -> int:
+    """Wall-clock cap for one docling conversion (see _DOCLING_PDF_BASE_S)."""
+    if profile is None:
+        return _DOCLING_TIMEOUT_S
+    scaled = _DOCLING_PDF_BASE_S + _DOCLING_PDF_PER_PAGE_S * profile.pages
+    return min(max(scaled, _DOCLING_TIMEOUT_S), _DOCLING_PDF_CEILING_S)
+
+
+def _run_docling(path: Path, outdir: Path, *, profile: _PdfProfile | None = None) -> str:
     """Invoke the ``docling`` CLI and return the produced Markdown text.
 
     Isolated in its own helper so the exact invocation is easy to adjust
-    after in-container validation (see issue #78 Notes).
+    after in-container validation (see issue #78 Notes). *profile* (PDFs only)
+    sets the timeout and whether OCR replaces a thin text layer.
     """
+    command = [
+        "docling",
+        "convert",
+        str(path),
+        "--to",
+        "md",
+        # Emit a `<!-- image -->` placeholder instead of embedding page
+        # images as multi-KB base64 data URIs (docling's default),
+        # which would otherwise become garbage blocks that wreck token
+        # cost and citation text. The parser drops the placeholders.
+        "--image-export-mode",
+        "placeholder",
+        # Name the OCR engine and language explicitly (see
+        # _DOCLING_OCR_ENGINE): the automatic choice once ran the wrong
+        # recognizer without saying so. An engine that is not installed makes
+        # docling fail loudly, and that failure is recorded as a
+        # backend-error fallback rather than ever passing for an empty page.
+        "--ocr-engine",
+        _DOCLING_OCR_ENGINE,
+        "--ocr-lang",
+        _DOCLING_OCR_LANG,
+    ]
+    if profile is not None and profile.force_full_page_ocr:
+        command += ["--ocr-mode", "full_page"]
+    command += ["--output", str(outdir)]
+    timeout_s = _docling_timeout_s(profile)
     try:
         subprocess.run(
-            [
-                "docling",
-                "convert",
-                str(path),
-                "--to",
-                "md",
-                # Emit a `<!-- image -->` placeholder instead of embedding page
-                # images as multi-KB base64 data URIs (docling's default),
-                # which would otherwise become garbage blocks that wreck token
-                # cost and citation text. The parser drops the placeholders.
-                "--image-export-mode",
-                "placeholder",
-                # Pin OCR to English. docling's RapidOCR default is Chinese
-                # (`lang=["chinese"]`), which joins/garbles Latin-script words on
-                # scanned SIGNED copies. Change per corpus language (e.g. `deu`).
-                "--ocr-lang",
-                _DOCLING_OCR_LANG,
-                "--output",
-                str(outdir),
-            ],
+            command,
             capture_output=True,
             text=True,
             check=True,
-            timeout=_DOCLING_TIMEOUT_S,
+            timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         raise ExtractionError(
-            f"docling timed out after {_DOCLING_TIMEOUT_S}s converting {path}",
+            f"docling timed out after {timeout_s}s converting {path}",
             reason=FAILURE_TIMEOUT,
         ) from exc
     except subprocess.CalledProcessError as exc:
