@@ -36,6 +36,10 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
           the node it sits in, rejoin a node cut off mid-sentence, and mark a
           node that is no clause (`x_non_clause`); every split and join is
           recorded on the node (`x_resegmented`) and cites inside the original span
+        - SUB-SPLIT the multi-topic nodes that are left (agent-judged, `subsplit`
+          kind): a candidate node's sentences are partitioned into runs of one
+          clause type each, or left whole; applied only once blind-checked
+          (or the owner's), recorded as `x_resegmented.subsplit_from`
         - align "the same clause" across versions of one document
                                      │
   L4  MINE DELTAS           (deterministic diff + deterministic standard facts)

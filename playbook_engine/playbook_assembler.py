@@ -113,8 +113,10 @@ _VERSION_INGEST_SCHEMA_KEYS = frozenset({"version", "status", "error", "extracto
 # project derives ``signed_on`` / ``signed_on_basis`` from it. "resegmentation"
 # (issue #255) is the per-document count of nodes the re-segmentation pass split
 # out and rejoined; ``playbook scorecard`` reads it from corpus_manifest.json.
+# "subsplit" (issue #257) is the same for the agent sub-split of multi-topic
+# nodes (candidates, nodes split, no-split answers, nodes added).
 _CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset(
-    {"dropped_observations", "deal_date_evidence", "resegmentation"}
+    {"dropped_observations", "deal_date_evidence", "resegmentation", "subsplit"}
 )
 
 

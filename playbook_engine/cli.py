@@ -429,6 +429,7 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
         StoreBackedClassificationJudge,
         StoreBackedProvenanceJudge,
         StoreBackedScopeJudge,
+        StoreBackedSubsplitJudge,
         VerdictStore,
     )
     from playbook_engine.rubric import RubricPolicy  # noqa: PLC0415
@@ -445,6 +446,8 @@ def _verdict_store_kwargs(out_dir: Path, echo: Callable[[str], None]) -> dict[st
             store=store, pending=pending, rubric=policy
         ),
         "provenance_judge": StoreBackedProvenanceJudge(store=store, pending=pending, rubric=policy),
+        # Issue #257: the agent sub-split of multi-topic nodes, asked while mining.
+        "subsplit_judge": StoreBackedSubsplitJudge(store=store, pending=pending, rubric=policy),
         "_rubric_policy": policy,
     }
 
@@ -1904,6 +1907,38 @@ def _judge_check_prior_form_origin(out_dir: Path, cfg: Any, taxonomy: Any) -> No
         click.echo(f"  adjudication queue: {adjudication_path}")
 
 
+def _judge_check_subsplit(out_dir: Path) -> None:
+    """``playbook judge --check subsplit OUT``: emit the check queues (issue #257).
+
+    The questions are the ones the last mine of OUT asked
+    (``judge/subsplit-subjects.jsonl``)."""
+    from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
+    from playbook_engine.subsplit import load_subjects  # noqa: PLC0415
+    from playbook_engine.subsplit_check import (  # noqa: PLC0415
+        build_check_queues,
+        write_check_queues,
+    )
+
+    if not out_dir.is_dir() or not (out_dir / "observations.jsonl").is_file():
+        click.secho(
+            f"ERROR: {out_dir} holds no observation store — run `playbook mine` first",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    subjects = load_subjects(out_dir / "judge")
+    store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
+    queues = build_check_queues(store, subjects)
+    check_path, adjudication_path = write_check_queues(out_dir / "judge", queues)
+    click.secho(f"OK  {check_path}", fg="green")
+    click.echo(
+        f"subsplit check: {len(queues.check)} to check, {len(queues.adjudication)} to "
+        f"adjudicate, {queues.settled} settled, {queues.undrafted} not drafted yet"
+    )
+    if queues.adjudication:
+        click.echo(f"  adjudication queue: {adjudication_path}")
+
+
 def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api: bool) -> None:
     """``playbook judge --check equivalence OUT``: emit (and with --api, answer) the check queues."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
@@ -2056,14 +2091,15 @@ def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api:
 @click.option(
     "--check",
     "check_kind",
-    type=click.Choice(["equivalence", "prior_form_origin"]),
+    type=click.Choice(["equivalence", "prior_form_origin", "subsplit"]),
     default=None,
     help=(
         "Instead of mining, write the blind-check queue for drafted verdicts of this kind "
         "(equivalence: judge/check-pending.jsonl, the drafter's payload, no label or reason; "
-        "prior_form_origin: judge/origin-check-pending.jsonl, no draft) and the "
+        "prior_form_origin: judge/origin-check-pending.jsonl, no draft; subsplit: "
+        "judge/subsplit-check-pending.jsonl, no draft) and the "
         "adjudication queue for disputed ones (judge/adjudication-pending.jsonl, "
-        "judge/origin-adjudication-pending.jsonl). With "
+        "judge/origin-adjudication-pending.jsonl, judge/subsplit-adjudication-pending.jsonl). With "
         "--check the first argument is the derivation OUT dir. Answer the queues with a "
         "separate claude-opus-5-5 / xhigh agent and record the answers with "
         "`playbook judge-apply --check`, or pass --api (equivalence only)."
@@ -2123,10 +2159,13 @@ def judge_cmd(
     deterministic sample (all of them when there are 40 or fewer) of the
     verified absences of the precedent record: "is this clause type really
     absent from this signed text?". It measures the absence guard; nothing
-    waits on it. Every deviation is the deterministic standard
-    check, so nothing is judged for it.
+    waits on it. A ``subsplit`` item is queued while mining for every
+    classified node one of whose sentences or list items scores for a second
+    clause type: "partition these sentences into clause types, or no split".
+    Only a blind-checked (or owner's) answer cuts the node. Every deviation is
+    the deterministic standard check, so nothing is judged for it.
 
-    ``--check equivalence OUT`` (or ``--check prior_form_origin OUT``) skips
+    ``--check equivalence OUT`` (or ``prior_form_origin`` / ``subsplit``) skips
     mining and queues the independent blind check (and adjudication) of the
     verdicts already drafted into OUT; see the option's help.
 
@@ -2160,6 +2199,7 @@ def judge_cmd(
         StoreBackedProvenanceJudge,
         StoreBackedResegmentCheckJudge,
         StoreBackedScopeJudge,
+        StoreBackedSubsplitJudge,
         VerdictStore,
     )
     from playbook_engine.rubric import RubricPolicy, current_versions  # noqa: PLC0415
@@ -2179,17 +2219,20 @@ def judge_cmd(
     if use_api and check_kind is None:
         click.secho("ERROR: --api only applies with --check", fg="red", err=True)
         raise SystemExit(1)
-    if check_kind == "prior_form_origin":
+    if check_kind in ("prior_form_origin", "subsplit"):
         if use_api:
             click.secho(
-                "ERROR: --api answers equivalence checks only; answer the prior_form_origin "
+                f"ERROR: --api answers equivalence checks only; answer the {check_kind} "
                 "queues with a claude-opus-5-5 / xhigh agent and record them with "
                 "`playbook judge-apply --check`",
                 fg="red",
                 err=True,
             )
             raise SystemExit(1)
-        _judge_check_prior_form_origin((out_path or corpus_dir).resolve(), cfg, taxonomy)
+        if check_kind == "subsplit":
+            _judge_check_subsplit((out_path or corpus_dir).resolve())
+        else:
+            _judge_check_prior_form_origin((out_path or corpus_dir).resolve(), cfg, taxonomy)
         return
     if check_kind is not None:
         _judge_check_equivalence((out_path or corpus_dir).resolve(), cfg, taxonomy, use_api=use_api)
@@ -2296,6 +2339,9 @@ def judge_cmd(
                     scope_judge=scope_judge,
                     classification_judge=cls_judge,
                     provenance_judge=prov_judge,
+                    subsplit_judge=StoreBackedSubsplitJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
                     # Issue #219: the plan reads through the REAL out-dir's
                     # stage cache rather than re-mining every document into
                     # the temp dir. A replayed document is one whose every
@@ -2431,6 +2477,9 @@ def judge_cmd(
             scope_judge=scope_judge,
             classification_judge=cls_judge,
             provenance_judge=prov_judge,
+            subsplit_judge=StoreBackedSubsplitJudge(
+                store=store, pending=pending_queue, rubric=rubric_policy
+            ),
             # The stage cache stays on (issue #219) — see the --plan-only
             # branch above. extraction_cache must stay warm across judge
             # rounds (issue #78).
@@ -2562,7 +2611,8 @@ def judge_cmd(
 
 def _check_file_kind(check_path: Path) -> str:
     """Which kind of check answers *check_path* holds: ``prior_form_origin`` records carry
-    ``ours``, equivalence records carry ``parts``. A file mixing the two is rejected."""
+    ``ours``, ``subsplit`` records carry ``split``, equivalence records carry ``parts``.
+    A file mixing kinds is rejected."""
     import json  # noqa: PLC0415
 
     kinds: set[str] = set()
@@ -2574,11 +2624,16 @@ def _check_file_kind(check_path: Path) -> str:
         except json.JSONDecodeError:
             continue  # the kind's own loader reports the line
         if isinstance(record, dict):
-            kinds.add("prior_form_origin" if "ours" in record else "equivalence")
+            if "ours" in record:
+                kinds.add("prior_form_origin")
+            elif "split" in record:
+                kinds.add("subsplit")
+            else:
+                kinds.add("equivalence")
     if len(kinds) > 1:
         click.secho(
-            "ERROR: a --check file holds one kind of answer; this one mixes equivalence "
-            "(parts) and prior_form_origin (ours) records",
+            "ERROR: a --check file holds one kind of answer; this one mixes "
+            f"{' and '.join(sorted(kinds))} records",
             fg="red",
             err=True,
         )
@@ -2587,7 +2642,8 @@ def _check_file_kind(check_path: Path) -> str:
 
 
 def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: bool) -> None:
-    """``judge-apply --check``: record equivalence or prior_form_origin check / adjudication answers."""
+    """``judge-apply --check``: record equivalence, prior_form_origin or subsplit check /
+    adjudication answers."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
     from playbook_engine.equivalence_check import (  # noqa: PLC0415
         apply_check_records as apply_equivalence_checks,
@@ -2617,6 +2673,22 @@ def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: boo
                 store, load_origin_checks(check_path), allow_checker_model=allow_checker_model
             )
             updates, counts = origin.updates, origin
+        elif kind == "subsplit":
+            from playbook_engine.subsplit import load_subjects  # noqa: PLC0415
+            from playbook_engine.subsplit_check import (  # noqa: PLC0415
+                apply_check_records as apply_subsplit_checks,
+            )
+            from playbook_engine.subsplit_check import (  # noqa: PLC0415
+                load_check_records as load_subsplit_checks,
+            )
+
+            sub = apply_subsplit_checks(
+                store,
+                load_subsplit_checks(check_path),
+                {s.key: s for s in load_subjects(out_dir_resolved / "judge")},
+                allow_checker_model=allow_checker_model,
+            )
+            updates, counts = sub.updates, sub
         else:
             equivalence = apply_equivalence_checks(
                 store,
@@ -2668,7 +2740,8 @@ def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: boo
     help=(
         "JSONL file of equivalence check or adjudication answers instead of verdicts (each "
         "line: {'key', 'parts', 'additions', 'reason', 'model', 'effort'}; for "
-        "prior_form_origin: {'key', 'ours', 'reason', 'model', 'effort'}). A record whose "
+        "prior_form_origin: {'key', 'ours', 'reason', 'model', 'effort'}; for subsplit: "
+        "{'key', 'split', 'spans', 'reason', 'model', 'effort'}). A record whose "
         "model is not "
         "claude-opus-5-5 or whose effort is not xhigh is rejected unless "
         "--allow-checker-model is passed."
@@ -2774,7 +2847,7 @@ def judge_apply_cmd(
                     pending_part_ids[pitem["key"]] = [
                         str(p.get("part_id")) for p in std_parts if isinstance(p, dict)
                     ]
-                if pitem["kind"] == "deal_date" and isinstance(payload, dict):
+                if pitem["kind"] in ("deal_date", "subsplit") and isinstance(payload, dict):
                     pending_payloads[pitem["key"]] = payload
 
     # Validate all lines first before touching the store.
@@ -2847,6 +2920,14 @@ def judge_apply_cmd(
                 )
 
                 record["verdict"] = validate_origin_draft(record["verdict"])
+            elif kind == "subsplit":
+                # Issue #257: stored as {split, spans, reason, basis}; the spans
+                # are grounded against the question the item asked.
+                from playbook_engine.subsplit import validate_draft  # noqa: PLC0415
+
+                record["verdict"] = validate_draft(
+                    record["verdict"], pending_payloads.get(record["key"])
+                )
         except (ValueError, TypeError) as exc:
             # TypeError is a defensive backstop: validate_verdict type-checks
             # confidence fields up front (issue #161) so a malformed verdict

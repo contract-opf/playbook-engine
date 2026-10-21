@@ -94,6 +94,8 @@ from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELAT
 from playbook_engine.prior_reconstruction import ORIGIN_BASES, ORIGIN_KIND
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 from playbook_engine.resegmentation import CHECK_KIND as RESEGMENT_CHECK_KIND
+from playbook_engine.subsplit import SUBSPLIT_KIND
+from playbook_engine.subsplit import VERDICT_BASES as SUBSPLIT_BASES
 
 # ---------------------------------------------------------------------------
 # Kinds
@@ -110,6 +112,7 @@ JUDGE_KINDS: tuple[str, ...] = (
     RESEGMENT_CHECK_KIND,
     ORIGIN_KIND,
     ABSENCE_CHECK_KIND,
+    SUBSPLIT_KIND,
 )
 
 # ---------------------------------------------------------------------------
@@ -168,6 +171,12 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # clause, however it is worded or filed); the answer vocabulary is the
     # derived half.
     ABSENCE_CHECK_KIND: "v1",
+    # Issue #257: partition a multi-topic node's sentences and list items into
+    # contiguous runs of one clause type each, or answer no split. The prose
+    # rubric is the skill's "Sub-split" step (a false boundary is worse than a
+    # mixed node); the derived half is the taxonomy the spans are typed with
+    # and the answer vocabulary.
+    SUBSPLIT_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -312,6 +321,11 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     },
     ABSENCE_CHECK_KIND: lambda *, taxonomy, agreement_type: {
         "answers": ["absent", "present"],
+    },
+    SUBSPLIT_KIND: lambda *, taxonomy, agreement_type: {
+        "taxonomy": taxonomy_digest(taxonomy),
+        "answers": ["split", "no_split"],
+        "bases": list(SUBSPLIT_BASES),
     },
 }
 

@@ -272,6 +272,8 @@ EMPTY_PROFILES = TypeProfiles()
 def build_profiles(
     exemplars: Iterable[tuple[str, str, str]],
     template: Mapping[str, str] | None = None,
+    *,
+    dominance: float = PROFILE_DOMINANCE,
 ) -> TypeProfiles:
     """Learn :class:`TypeProfiles` from classified exemplars.
 
@@ -284,7 +286,9 @@ def build_profiles(
     type and the type holds at least :data:`PROFILE_DOMINANCE` of its
     occurrences over all types. A type is a re-homing target only when its
     corpus exemplars span :data:`MIN_TYPE_DEALS` deals and it has
-    :data:`MIN_PROFILE_TOKENS` characteristic words.
+    :data:`MIN_PROFILE_TOKENS` characteristic words. *dominance* replaces
+    :data:`PROFILE_DOMINANCE` (the sub-split's candidate test, issue #257,
+    learns looser profiles from the same exemplars).
 
     Deterministic: a pure function of its inputs, independent of their order.
     """
@@ -310,7 +314,7 @@ def build_profiles(
             weights[tid] = weights.get(tid, 0) + TEMPLATE_WEIGHT
         total = sum(weights.values())
         for tid, w in weights.items():
-            if w >= MIN_PROFILE_WEIGHT and w >= PROFILE_DOMINANCE * total:
+            if w >= MIN_PROFILE_WEIGHT and w >= dominance * total:
                 tokens[tid].add(tok)
 
     targets = frozenset(

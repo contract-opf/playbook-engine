@@ -74,7 +74,7 @@
         },
         "x_resegmented": {
           "type": ["object", "null"],
-          "description": "Vendor key (issue #255). Present on a node the re-segmentation pass split out of, or joined from, other nodes: {split_from | joined_with, basis, origin_span / origin_spans, scores, to / at}. char_span of such a node lies inside the original node's span (or covers the two joined spans), so an OPF citation still resolves to the original bytes. A node split out of another is numbered '<clause_path>.r<k>' and is a child of the node it was cut from."
+          "description": "Vendor key (issue #255). Present on a node the re-segmentation pass split out of, or joined from, other nodes: {split_from | joined_with, basis, origin_span / origin_spans, scores, to / at}. char_span of such a node lies inside the original node's span (or covers the two joined spans), so an OPF citation still resolves to the original bytes. A node split out of another is numbered '<clause_path>.r<k>' and is a child of the node it was cut from. A node the agent sub-split made (issue #257) records {subsplit_from, basis: 'agent', origin_span, span, of, key}; its later spans are numbered '<clause_path>.s<k>'."
         },
         "x_non_clause": {
           "type": ["string", "null"],

@@ -10,6 +10,48 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Agent-judged sentence-level sub-split of multi-topic nodes (issue #257,
+  epic #245).** After #255/#256 about three in ten compared texts on the private
+  acceptance corpus were still mixtures, concentrated in co-located pairs (term
+  with renewal, entire agreement with severability and amendments, termination
+  for cause with convenience): the block-aligned agent segmenter cannot cut
+  inside a block and the word-count split pass is conservative on purpose. A new
+  re-segmentation step (`playbook_engine/subsplit.py`) runs after the split and
+  join passes. A classified node is a **candidate** when one of its sentences or
+  list items gives a second clause type a meaningful score (at least two of the
+  unit's content words, and at least 0.2 of them, characteristic of a split
+  target other than the node's own, against profiles learned from the same
+  exemplars at a looser dominance, 0.3); a node the split or join pass already
+  made is not. Each candidate asks a new judge kind, **`subsplit`**
+  (`StoreBackedSubsplitJudge`, queued while mining), keyed on the node text and
+  the allowed clause types: the text cut into numbered units (sentences and list
+  items, a leading heading line folded into the first) and every
+  classifier-eligible taxonomy entry. The agent answers `{"split": false}` or a
+  partition `{"split": true, "spans": [{"start": "u0", "end": "u1",
+  "taxonomy_id": "term" | null}, ...]}` with `reason` and `basis`. Answers are
+  **grounded** as the segmentation gates ground a segmenter's block references:
+  spans contiguous from `u0`, none empty, covering every unit, at least two,
+  neighbours of different types, ids from the allowed list, and units that are
+  exactly the text's sentences and reconstruct it; `judge-apply --verdicts`
+  refuses one that does not ground. Only a **settled** verdict is applied (an
+  owner's, or a draft whose blind check agreed or that was adjudicated): `playbook
+  judge --check subsplit OUT` writes `judge/subsplit-check-pending.jsonl` (the
+  question, no draft) and `judge/subsplit-adjudication-pending.jsonl` from
+  `judge/subsplit-subjects.jsonl` (every question the last mine asked); a
+  `claude-opus-5-5` / `xhigh` agent answers `{key, split, spans, reason, model,
+  effort}`, recorded with `judge-apply --check` (agreement is the same split
+  decision and the same span boundaries and ids). The first span stays the node
+  (path, heading, and its classification when the span keeps the node's type);
+  each later span becomes `<path>.s<k>` with `classification.basis` `subsplit`
+  (confidence 0.9) or unclassified for a `null` span; every node records
+  `x_resegmented: {subsplit_from, basis: "agent", origin_span, span, of, key}`
+  and cites a `char_span` inside the original block. Deterministic given the
+  store; the stage cache records each verdict as a dependency. The corpus manifest
+  gains a per-deal `subsplit` count (internal, never published) and `playbook
+  scorecard` (version 14) a `subsplit` section (candidates, split, no-split,
+  spans added, observations, questions, answers, check states, agreement rate).
+  Equivalence keys of the affected texts move.
+
 - **Verified absence counts: "we signed N deals without clause X", with a missed
   classification never read as an absence (issue #251, epic #245).** A deal with
   no precedent for a clause was counted as signed without it, but on the private

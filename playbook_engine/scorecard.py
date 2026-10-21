@@ -90,6 +90,8 @@ from playbook_engine.resegmentation import (
     check_subjects,
 )
 from playbook_engine.rubric import rubric_version
+from playbook_engine.subsplit import SUBSPLIT_KIND, is_settled, load_subjects
+from playbook_engine.subsplit_check import check_state as subsplit_check_state
 
 __all__ = [
     "SCORECARD_FILENAME",
@@ -171,7 +173,14 @@ __all__ = [
 #: verified and possibly-present counts, the sampled ``absence_check`` and its
 #: outcome (``checked``, ``wrong``: a confirmed-present item means the guard is
 #: too weak), and the digest's ``n_signed_without_*`` totals.
-SCORECARD_VERSION = 13
+#:
+#: v14 (issue #257): a ``subsplit`` section counts the agent sub-split of
+#: multi-topic nodes: candidate nodes, nodes split and left whole on a settled
+#: verdict, nodes added, the observations built from them, the distinct
+#: questions and their answers (split / no split / not drafted), the blind
+#: check by state and its agreement rate; the ``subsplit`` classification
+#: basis appears.
+SCORECARD_VERSION = 14
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -197,6 +206,7 @@ CLASSIFICATION_BASES = frozenset(
         "inherited",
         "content_similarity",
         "resegmented",
+        "subsplit",
         "aligned",
         "unrecorded",
         "non_clause",
@@ -218,7 +228,7 @@ DROPPED_REASONS = frozenset(
 #: pending items are counted under ``other``.
 PENDING_KINDS = frozenset(
     {"classify", "provenance", "scope", "segment", "equivalence", DEAL_DATE_KIND}
-    | {RESEGMENT_CHECK_KIND, ORIGIN_KIND, ABSENCE_CHECK_KIND}
+    | {RESEGMENT_CHECK_KIND, ORIGIN_KIND, ABSENCE_CHECK_KIND, SUBSPLIT_KIND}
 )
 
 #: Checker model ids the scorecard names (the pinned one); any other recorded
@@ -518,6 +528,76 @@ def _resegmentation_section(
         "check_sample": len(subjects),
         "checked": checked,
         "wrong": wrong,
+    }
+
+
+def _subsplit_section(
+    manifest: Any, observations: list[dict[str, Any]] | None, out_dir: Path
+) -> dict[str, Any] | None:
+    """Counts of the agent sub-split of multi-topic nodes (issue #257).
+
+    ``candidates`` / ``split`` / ``no_split`` / ``spans_added`` are summed over
+    every version of every deal (corpus manifest): nodes asked about, nodes a
+    settled verdict cut, nodes a settled verdict left whole, and the nodes the
+    cuts added. ``observations_subsplit`` counts the precedent-store
+    observations built from a node a sub-split made. ``questions`` is the
+    distinct questions the last mine asked (``judge/subsplit-subjects.jsonl``);
+    of those, ``answered_split`` / ``answered_no_split`` have a stored draft
+    under the current rubric and ``undrafted`` none. ``check`` counts the
+    drafted ones by check state, and ``agreement_rate`` is the share of the
+    blind-checked ones whose check agreed with the draft (``None`` before any
+    check). Counts only.
+    """
+    docs = [d for d in manifest if isinstance(d, dict)] if isinstance(manifest, list) else []
+    recorded = [d["subsplit"] for d in docs if isinstance(d.get("subsplit"), dict)]
+    subjects = load_subjects(out_dir / "judge")
+    if not recorded and not subjects:
+        return None
+    store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
+    answered_split = answered_no_split = undrafted = applied = 0
+    states: Counter[str] = Counter()
+    for subject in subjects:
+        stored = store.get_record_by_key(subject.key)
+        verdict = stored.verdict if stored is not None else None
+        if (
+            stored is None
+            or not isinstance(verdict, dict)
+            or not isinstance(verdict.get("split"), bool)
+            or (
+                subject.rubric_version is not None
+                and stored.rubric_version != subject.rubric_version
+            )
+        ):
+            undrafted += 1
+            continue
+        if verdict["split"]:
+            answered_split += 1
+        else:
+            answered_no_split += 1
+        states[subsplit_check_state(verdict)] += 1
+        applied += is_settled(verdict)
+    checked = states["agreed"] + states["disputed"] + states["adjudicated"]
+    sub_obs = sum(
+        1
+        for o in observations or []
+        if isinstance(o.get("x_resegmented"), dict) and "subsplit_from" in o["x_resegmented"]
+    )
+    return {
+        "candidates": _sum_counts(r.get("candidates") for r in recorded) if recorded else None,
+        "split": _sum_counts(r.get("split") for r in recorded) if recorded else None,
+        "no_split": _sum_counts(r.get("no_split") for r in recorded) if recorded else None,
+        "spans_added": _sum_counts(r.get("spans_added") for r in recorded) if recorded else None,
+        "observations_subsplit": sub_obs if observations is not None else None,
+        "questions": len(subjects),
+        "answered_split": answered_split,
+        "answered_no_split": answered_no_split,
+        "undrafted": undrafted,
+        "settled": applied,
+        "check": {
+            state: states[state]
+            for state in ("unchecked", "agreed", "disputed", "adjudicated", "owner")
+        },
+        "agreement_rate": round(states["agreed"] / checked, 4) if checked else None,
     }
 
 
@@ -1239,6 +1319,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "template": _template_section(template_obs, playbook),
         "classification": _classification_section(observations),
         "resegmentation": _resegmentation_section(manifest, observations, out_dir),
+        "subsplit": _subsplit_section(manifest, observations, out_dir),
         "absence": _absence_section(playbook, observations, out_dir),
         "precedent": _precedent_section(playbook),
         "prior_standards": _prior_standards_section(playbook),

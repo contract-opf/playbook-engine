@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import absence, deal_dates, resegmentation
+from playbook_engine import absence, deal_dates, resegmentation, subsplit
 from playbook_engine.agent_judge import (
     PendingQueue,
     StoreBackedAbsenceCheckJudge,
@@ -157,7 +157,7 @@ from playbook_engine.provenance_detector import (
 )
 from playbook_engine.reversal_detector import detect_reversals
 from playbook_engine.rtf_ingester import ingest_rtf
-from playbook_engine.rubric import RubricPolicy, current_versions
+from playbook_engine.rubric import RubricPolicy, current_versions, rubric_version
 from playbook_engine.scope_gate import (
     ScopeDecision,
     ScopeJudge,
@@ -480,7 +480,10 @@ _L1_RECORD_VERSION = 2
 # later list marker counts only after a piece that ends open), so a tracked insertion of several whole clauses of one
 # type is no longer one passage; a split unit needs five profile words, not four;
 # the agent check dedupes passages that differ only in whitespace.
-_RESEGMENTATION_VERSION = 4
+# v5 (issue #257): after the split and join passes, a multi-topic node is
+# sub-split on a settled ``subsplit`` agent verdict (playbook_engine.subsplit);
+# corpus_doc gained "subsplit" and the result "subsplit_subjects".
+_RESEGMENTATION_VERSION = 5
 # Where a cached record keeps the store entries it was built from, as
 # ``{key: fingerprint}`` (issue #219) — an L1 record the segmentation-store
 # entries it was grounded from, an L2-L4 result the judge verdicts it replayed.
@@ -1092,12 +1095,30 @@ def _classified_from_taxonomy_by_path(
 
 @dataclasses.dataclass
 class _VersionClassification:
-    """One version's final classification and its re-segmented tree (issue #255)."""
+    """One version's final classification and its re-segmented tree (issues #255, #257)."""
 
     tree: ClauseTree
     classified: list[ClassifiedClause]
     splits: int = 0
     joins: int = 0
+    #: The sub-split (issue #257): candidate nodes, nodes split, nodes a settled
+    #: verdict left whole, nodes added, and the questions asked.
+    subsplit_candidates: int = 0
+    subsplit_split: int = 0
+    subsplit_no_split: int = 0
+    subsplit_spans_added: int = 0
+    subsplit_subjects: list[subsplit.SubsplitSubject] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubsplitContext:
+    """The ``subsplit`` judge (issue #257), the rubric its questions are asked
+    under and the candidate profiles (``subsplit.CANDIDATE_DOMINANCE``; the
+    split pass's own profiles when ``None``)."""
+
+    judge: subsplit.SubsplitJudge | None = None
+    rubric_version: str | None = None
+    profiles: resegmentation.TypeProfiles | None = None
 
 
 def _resegment_classified(
@@ -1109,11 +1130,14 @@ def _resegment_classified(
     tracked: TrackedChanges | None,
     content_exemplars: Mapping[str, str] | None,
     eligible_ids: Collection[str],
+    subsplit_ctx: _SubsplitContext | None = None,
 ) -> _VersionClassification:
     """Re-segment one classified version (issue #255; see :mod:`playbook_engine.resegmentation`).
 
     Splits mixed nodes and rejoins truncated ones, lets the content test place
-    a node the join just completed, then marks what is still not a clause. The
+    a node the join just completed, then sub-splits the multi-topic nodes that
+    are left on a settled agent verdict (issue #257, :mod:`playbook_engine.subsplit`;
+    only with *subsplit_ctx*), then marks what is still not a clause. The
     input tree and classification are not mutated.
     """
     res = resegmentation.resegment(tree, classified, profiles, labels=labels, tracked=tracked)
@@ -1124,11 +1148,28 @@ def _resegment_classified(
         if res.joins
         else res.classified
     )
+    out_tree = res.tree
+    sub: subsplit.SubsplitOutcome | None = None
+    if subsplit_ctx is not None:
+        sub = subsplit.apply_subsplits(
+            res.tree,
+            matched,
+            subsplit_ctx.profiles if subsplit_ctx.profiles is not None else profiles,
+            labels=labels,
+            judge=subsplit_ctx.judge,
+            rubric_version=subsplit_ctx.rubric_version,
+        )
+        out_tree, matched = sub.tree, sub.classified
     return _VersionClassification(
-        tree=res.tree,
+        tree=out_tree,
         classified=resegmentation.mark_non_clauses(matched),
         splits=res.splits,
         joins=res.joins,
+        subsplit_candidates=sub.candidates if sub is not None else 0,
+        subsplit_split=sub.split if sub is not None else 0,
+        subsplit_no_split=sub.no_split if sub is not None else 0,
+        subsplit_spans_added=sub.spans_added if sub is not None else 0,
+        subsplit_subjects=list(sub.subjects) if sub is not None else [],
     )
 
 
@@ -1169,6 +1210,7 @@ def _classify_llm_segmented_tree(
     profiles: resegmentation.TypeProfiles | None = None,
     labels: Mapping[str, str] | None = None,
     tracked: TrackedChanges | None = None,
+    subsplit_ctx: _SubsplitContext | None = None,
 ) -> _VersionClassification:
     """Final classification of one LLM/agent-segmented version (issues #235, #253).
 
@@ -1188,7 +1230,9 @@ def _classify_llm_segmented_tree(
     Between steps 2 and 3 (issue #255, when *profiles* is given) the version is
     re-segmented: mixed nodes are split by clause type, truncated ones rejoined,
     and a node that is not a clause is marked ``x_non_clause`` so the judge is
-    never asked about it. Without *profiles* the tree is returned untouched.
+    never asked about it; with *subsplit_ctx*, multi-topic nodes are then
+    sub-split on settled agent verdicts (issue #257). Without *profiles* the
+    tree is returned untouched.
     """
     segmented = _classified_from_taxonomy_by_path(tree, taxonomy_by_path)
     matched = assign_by_content(segmented, content_exemplars, eligible_ids=eligible_ids)
@@ -1202,6 +1246,7 @@ def _classify_llm_segmented_tree(
             tracked=tracked,
             content_exemplars=content_exemplars,
             eligible_ids=eligible_ids,
+            subsplit_ctx=subsplit_ctx,
         )
     result.classified = reclassify_unclassified(result.classified, taxonomy, judge)
     return result
@@ -1211,6 +1256,8 @@ def _corpus_profiles(
     states: Mapping[str, _L1State],
     template_std_by_tid: Mapping[str, str],
     eligible_ids: Collection[str],
+    *,
+    dominance: float = resegmentation.PROFILE_DOMINANCE,
 ) -> resegmentation.TypeProfiles:
     """The corpus's clause-type vocabulary for the split pass (issue #255).
 
@@ -1232,7 +1279,9 @@ def _corpus_profiles(
                 if tid is not None and tid in eligible_ids:
                     exemplars.append((doc_id, tid, node.text or ""))
     return resegmentation.build_profiles(
-        exemplars, {t: x for t, x in template_std_by_tid.items() if t in eligible_ids}
+        exemplars,
+        {t: x for t, x in template_std_by_tid.items() if t in eligible_ids},
+        dominance=dominance,
     )
 
 
@@ -3117,6 +3166,7 @@ def _compute_doc_from_l1(
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
     profiles: resegmentation.TypeProfiles | None = None,
     prior_standards_by_tid: dict[str, list[PriorFormNodes]] | None = None,
+    subsplit_ctx: _SubsplitContext | None = None,
 ) -> dict[str, Any] | None:
     """L2-L4 for one document from its L1 state (issue #219).
 
@@ -3367,6 +3417,8 @@ def _compute_doc_from_l1(
     classified_by_version: dict[str, list[ClassifiedClause]] = {}
     resegmented_trees: dict[str, dict[str, Any]] = {}
     reseg_totals = {"splits": 0, "joins": 0}
+    subsplit_totals = {"candidates": 0, "split": 0, "no_split": 0, "spans_added": 0}
+    subsplit_subjects: dict[str, subsplit.SubsplitSubject] = {}
     reseg_profiles = profiles if profiles is not None else resegmentation.EMPTY_PROFILES
     reseg_labels = {e.id: e.label for e in taxonomy.classifier_entries()}
     eligible_ids = set(taxonomy_ids)
@@ -3383,6 +3435,7 @@ def _compute_doc_from_l1(
                 profiles=reseg_profiles,
                 labels=reseg_labels,
                 tracked=tracked_by_vid.get(vid),
+                subsplit_ctx=subsplit_ctx,
             )
         else:
             version_result = _resegment_classified(
@@ -3401,11 +3454,18 @@ def _compute_doc_from_l1(
                 tracked=tracked_by_vid.get(vid),
                 content_exemplars=content_exemplars,
                 eligible_ids=eligible_ids,
+                subsplit_ctx=subsplit_ctx,
             )
         classified_by_version[vid] = version_result.classified
         resegmented_trees[vid] = version_result.tree.to_dict()
         reseg_totals["splits"] += version_result.splits
         reseg_totals["joins"] += version_result.joins
+        subsplit_totals["candidates"] += version_result.subsplit_candidates
+        subsplit_totals["split"] += version_result.subsplit_split
+        subsplit_totals["no_split"] += version_result.subsplit_no_split
+        subsplit_totals["spans_added"] += version_result.subsplit_spans_added
+        for subject in version_result.subsplit_subjects:
+            subsplit_subjects.setdefault(subject.key, subject)
 
     # L4: Diff + reversals + deviations → observations
     #
@@ -3594,6 +3654,10 @@ def _compute_doc_from_l1(
     # rejoined over this deal's versions (counts only; corpus_manifest.json
     # only — never published in playbook.opf.json).
     corpus_doc["resegmentation"] = dict(reseg_totals)
+    # Issue #257: the agent sub-split over this deal's versions -- candidate
+    # nodes, nodes split, nodes a settled verdict left whole, nodes added
+    # (counts only; corpus_manifest.json only, like "resegmentation").
+    corpus_doc["subsplit"] = dict(subsplit_totals)
     corpus_doc["provenance_confidence"] = prov_result.confidence
     corpus_doc["provenance_is_ambiguous"] = prov_result.is_ambiguous
     # null when no signed copy was detected (issue #202): signed_ordinal is a
@@ -3653,7 +3717,31 @@ def _compute_doc_from_l1(
         # so cached results from before this field fall back to the coarser
         # observation-text scan there.
         "our_alias_matched": our_alias_matched,
+        # The subsplit questions this deal's candidate nodes asked (issue
+        # #257), in key order: mine_corpus writes them to
+        # judge/subsplit-subjects.jsonl for the blind check.
+        "subsplit_subjects": [subsplit_subjects[k].to_dict() for k in sorted(subsplit_subjects)],
     }
+
+
+def _write_subsplit_subjects(
+    out_dir: Path, subjects: Mapping[str, dict[str, Any]], *, force_rewrite: bool = False
+) -> None:
+    """Write ``judge/subsplit-subjects.jsonl``: every subsplit question this mine
+    asked, one ``{key, payload, rubric_version}`` per line in key order (issue
+    #257). ``playbook judge --check subsplit`` and the scorecard read it. Like
+    ``pending.jsonl`` it carries the question's text as the judge saw it; it
+    stays in the local ``judge/`` exchange directory and is never published."""
+    path = out_dir / "judge" / subsplit.SUBJECTS_FILENAME
+    body = "".join(
+        json.dumps(subjects[k], sort_keys=True, ensure_ascii=False) + "\n" for k in sorted(subjects)
+    )
+    if not force_rewrite and path.is_file() and path.read_text(encoding="utf-8") == body:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(body, encoding="utf-8")
+    tmp.replace(path)
 
 
 def mine_corpus(
@@ -3682,6 +3770,7 @@ def mine_corpus(
     progress: Callable[[str], None] = lambda _: None,
     cache_dir: Path | None = None,
     force_rewrite: bool = False,
+    subsplit_judge: subsplit.SubsplitJudge | None = None,
 ) -> None:
     """Run L1–L4 (ingest → scope → classify → diff/deviation) and write the observation store.
 
@@ -3855,6 +3944,15 @@ def mine_corpus(
                               no registry file is read or written and no
                               held-out map is created.
         progress:             Callable receiving progress message strings.
+        subsplit_judge:       The ``subsplit`` judge (issue #257;
+                              ``agent_judge.StoreBackedSubsplitJudge``): asked
+                              about every multi-topic candidate node in the
+                              re-segmentation stage; only its settled answers
+                              are applied. ``None`` (the default) counts the
+                              candidates and changes nothing. With a judge the
+                              questions are written to
+                              ``judge/subsplit-subjects.jsonl`` for the blind
+                              check (``playbook judge --check subsplit``).
 
     Raises:
         PipelineError:  On an unrecoverable pipeline error.
@@ -3898,7 +3996,7 @@ def mine_corpus(
     # whose compute queued anything (PendingQueue.capture_adds — a miss, a
     # stale rubric, a malformed stored verdict) is never cached at all, so a
     # replayed document never hides a pending item from the round's queue.
-    raw_judges: list[Any] = [_scope_judge, _cls_judge, provenance_judge]
+    raw_judges: list[Any] = [_scope_judge, _cls_judge, provenance_judge, subsplit_judge]
     verdict_stores: list[VerdictStore] = _distinct(
         getattr(j, "store", None)
         for j in raw_judges
@@ -4307,6 +4405,8 @@ def mine_corpus(
 
     all_observations: list[Observation] = []
     all_round_moves: list[RoundMove] = []
+    # The subsplit questions every document asked (issue #257), by key.
+    all_subsplit_subjects: dict[str, dict[str, Any]] = {}
     corpus_documents: list[dict[str, Any]] = []
     # Per-doc our_party-alias match signals (issue #201): True/False from
     # _compute_doc_result's full-tree scan, None for cached results that
@@ -4550,10 +4650,13 @@ def mine_corpus(
         except Exception as pre_exc:  # noqa: BLE001 — re-raised per document below
             l1_by_doc[pre_dir.name] = (None, pre_exc, pre_timed_out)
 
-    reseg_profiles = _corpus_profiles(
-        {doc: state for doc, (state, _exc, _t) in l1_by_doc.items() if state is not None},
-        template_std_by_tid,
-        {e.id for e in taxonomy.classifier_entries()},
+    l1_states = {doc: state for doc, (state, _exc, _t) in l1_by_doc.items() if state is not None}
+    classifier_ids = {e.id for e in taxonomy.classifier_entries()}
+    reseg_profiles = _corpus_profiles(l1_states, template_std_by_tid, classifier_ids)
+    # Issue #257: the sub-split's candidate test learns looser profiles from
+    # the same exemplars (subsplit.CANDIDATE_DOMINANCE).
+    subsplit_profiles = _corpus_profiles(
+        l1_states, template_std_by_tid, classifier_ids, dominance=subsplit.CANDIDATE_DOMINANCE
     )
     # The corpus vocabulary and the pass's code version key every document's
     # L2-L4 result: a new document anywhere moves the profiles.
@@ -4562,7 +4665,19 @@ def mine_corpus(
             "l2": l2_config_fp,
             "resegmentation_profiles": reseg_profiles.fingerprint(),
             "resegmentation_version": _RESEGMENTATION_VERSION,
+            # Issue #257: whether (and which) subsplit judge was asked. Its
+            # verdicts themselves are recorded dependencies (issue #219).
+            "subsplit_judge": (
+                _judge_identity(subsplit_judge) if subsplit_judge is not None else None
+            ),
+            "subsplit_profiles": subsplit_profiles.fingerprint(),
+            "subsplit_constants": subsplit.fingerprint_constants(),
         }
+    )
+    subsplit_ctx = _SubsplitContext(
+        judge=subsplit_judge,
+        rubric_version=rubric_version(subsplit.SUBSPLIT_KIND, taxonomy=taxonomy),
+        profiles=subsplit_profiles,
     )
 
     progress(
@@ -4609,6 +4724,7 @@ def mine_corpus(
                 template_std_nodes_by_tid=template_std_nodes_by_tid,
                 profiles=reseg_profiles,
                 prior_standards_by_tid=prior_standards_by_tid,
+                subsplit_ctx=subsplit_ctx,
             )
 
         if store is None:
@@ -4793,6 +4909,8 @@ def mine_corpus(
         # Round moves (issue #177) — .get(): cached results predating the
         # feature carry no key and simply contribute no trail entries.
         all_round_moves.extend(round_move_from_dict(raw) for raw in result.get("round_moves", []))
+        for raw_subject in result.get("subsplit_subjects") or []:
+            all_subsplit_subjects.setdefault(str(raw_subject["key"]), raw_subject)
         corpus_documents.append(result["corpus_doc"])
         # Alias sanity flags (issue #201) — .get(): cached results predating
         # the field contribute None (unknown) and the corpus-level check
@@ -5169,6 +5287,16 @@ def mine_corpus(
         f"{sum(r.get('joins', 0) for r in reseg_counts)} join(s) over all versions; "
         f"{sum(1 for o in all_observations if o.non_clause)} observation(s) are not clauses"
     )
+    # Issue #257: the agent sub-split of multi-topic nodes (counts only).
+    sub_counts = [d["subsplit"] for d in corpus_documents if isinstance(d.get("subsplit"), dict)]
+    progress(
+        f"  sub-split: {sum(r.get('candidates', 0) for r in sub_counts)} candidate node(s), "
+        f"{sum(r.get('split', 0) for r in sub_counts)} split on a settled verdict, "
+        f"{sum(r.get('no_split', 0) for r in sub_counts)} answered no split; "
+        f"{len(all_subsplit_subjects)} distinct question(s)"
+    )
+    if subsplit_judge is not None:
+        _write_subsplit_subjects(out_dir, all_subsplit_subjects, force_rewrite=force_rewrite)
 
     # Extraction fallback budget (issue #81): count every version_ingest
     # entry across the whole run whose "reason" reflects a DEGRADATION — the
