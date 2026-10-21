@@ -10,6 +10,34 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Re-segmentation: tighten the split and join thresholds after the blind check
+  found 3 of 10 sampled items wrong (issue #256, epic #245).** The #255 pass
+  was measured by the orchestrator's blind `resegment_check` on the private
+  acceptance corpus: 8 splits judged, 7 right and 1 wrong; 2 joins judged, both
+  wrong (the same passage set, differing only in whitespace). The wrong join
+  was one author's tracked insertion of a whole run of clauses that the
+  segmenter had all typed alike (a recital, a lead-in, an obligation, a list of
+  exceptions, a return duty, a term, a carve-out), stitched into one clause
+  because the redline basis needed only the insertion and a shared type. A
+  redline join now also needs the text itself to continue across the cut: the
+  piece before ends open (mid-sentence, or on a colon or semicolon), or the next
+  opens in lower case or with a back-reference ("Such ...", "The foregoing ...",
+  "However, ..."); a later list marker ("2.", "(b)") on the next counts only when
+  the piece before ends open, since after a complete sentence it numbers a clause
+  of its own. Two pieces that each read as complete,
+  the second opening a sentence of its own, stay two clauses whatever the
+  insertion says, and a lead-in is never taken in as the end of a complete piece
+  before it. The wrong split was a one-line sentence of generic words (four
+  profile words in six) that cleared the share threshold; a unit must now hold
+  at least five profile words of the target (`MIN_UNIT_HITS` 4 to 5). The check
+  sample drops a passage that differs from another only in whitespace (a
+  no-break space, a double space), keeping the variant with the lowest hash, so
+  one passage is queued once; it still holds every split and join when there
+  are 60 or fewer, else the 60 with the lowest hash. Version 4 of the pass
+  (`_RESEGMENTATION_VERSION`) re-keys the L2-L4 cache. On the private acceptance
+  corpus the pass went from 13 splits and 18 joins to 9 splits and 0 joins
+  (non-clauses 411 to 412); the 6 distinct items now sampled are every
+  recorded split, and a self-check of all 6 found 0 wrong.
 - **Re-segmentation: split mixed-in provisions to their own clause type, rejoin
   truncated clauses, and mark what is not a clause (issue #255, epic #245).** A
   deal's "clause" either held provisions of other clause types (a preamble that

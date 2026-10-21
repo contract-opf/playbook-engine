@@ -13,6 +13,7 @@ SECURITY NOTE: synthetic, fictional text only, written for these tests.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import jsonschema
@@ -348,6 +349,39 @@ def test_a_weak_match_is_not_split() -> None:
     assert result.tree.to_dict() == _tree([node]).to_dict()
 
 
+#: Issue #256: a one-line sentence made mostly of a type's generic words (here
+#: four profile words in six) cleared the share threshold and was re-homed; the
+#: blind check found it did not belong to the type. It and its longer, thinner
+#: sibling (four profile words in eight) stay put; a sentence with real evidence
+#: (:data:`_FOREIGN_ONE`, and the five-word-hit sentence below) still moves.
+_GENERIC_SHORT = "Each side must keep liability policy on Tuesday."
+_GENERIC_THIN = "The hospital must keep a liability policy in the clean building overnight."
+_EVIDENCED_SHORT = "The hospital must keep a liability policy in force."
+
+
+def test_a_short_or_thin_sentence_of_generic_words_is_not_re_homed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profiles = _profiles()
+    for sentence in (_GENERIC_SHORT, _GENERIC_THIN):
+        node = _node("1", f"{_PARTIES[0]}\n{sentence}", 0)
+        assert _run([node], [_PARTIES_ID]).splits == 0
+        assert _run([node], [_PARTIES_ID]).tree.to_dict() == _tree([node]).to_dict()
+    # Both really are what the earlier threshold (four profile words) re-homed:
+    # the test fails if the threshold falls back.
+    monkeypatch.setattr(rs, "MIN_UNIT_HITS", 4)
+    for sentence in (_GENERIC_SHORT, _GENERIC_THIN):
+        toks = rs._unit_tokens(sentence)
+        assert rs._score_unit(toks, _PARTIES_ID, profiles) is not None
+        node = _node("1", f"{_PARTIES[0]}\n{sentence}", 0)
+        assert _run([node], [_PARTIES_ID]).splits == 1
+    monkeypatch.undo()
+    # A sentence with real evidence still moves, short or long.
+    for sentence in (_EVIDENCED_SHORT, _FOREIGN_ONE):
+        node = _node("1", f"{_PARTIES[0]}\n{sentence}", 0)
+        assert _run([node], [_PARTIES_ID]).splits == 1
+
+
 def test_a_unit_that_fits_its_own_type_is_not_moved() -> None:
     # An insurance clause (typed insurance) that also states a limit sentence:
     # nothing in it is foreign.
@@ -537,7 +571,8 @@ def _paragraph_local(nodes: list[ClauseNode], author: str = "A. Author") -> Trac
 
 
 _PIECE_ONE = "Each side shall keep the other side's trade records private for the whole term."
-_PIECE_TWO = "A side may show those records to its own advisers who accept the same duty."
+#: Opens with a back-reference: the text itself says it continues the piece before.
+_PIECE_TWO = "Such a side may show those records to its own advisers who accept the same duty."
 
 
 def _labelled_pair() -> list[ClauseNode]:
@@ -697,24 +732,161 @@ def test_an_insertion_running_into_a_clause_of_another_type_is_not_stitched() ->
     ]
 
 
+#: A piece that ends open (a semicolon hands over to what follows).
+_PIECE_ONE_OPEN = (
+    "Each side shall keep the other side's trade records private for the whole term, "
+    "subject to the following;"
+)
+
+
 def test_a_lead_in_inside_an_insertion_joins_only_with_what_it_introduces() -> None:
     profiles = _join_profiles()
-    nodes = _agent_nodes([_PIECE_ONE, _LEAD_IN, _PIECE_TWO], ["Confidentiality"] * 3)
+    nodes = _agent_nodes([_PIECE_ONE_OPEN, _LEAD_IN, _PIECE_TWO], ["Confidentiality"] * 3)
     assert rs.non_clause_reason(nodes[1]) == "lead_in"
     result = _run(
         nodes, ["confidentiality", None, "confidentiality"], profiles, _paragraph_local(nodes)
     )
     assert result.joins == 2
     (joined,) = list(result.tree.all_nodes())
-    assert joined.text == "\n".join([_PIECE_ONE, _LEAD_IN, _PIECE_TWO])
+    assert joined.text == "\n".join([_PIECE_ONE_OPEN, _LEAD_IN, _PIECE_TWO])
     # Followed by a clause of another type, the lead-in is not taken in.
-    other = _agent_nodes([_PIECE_ONE, _LEAD_IN, _OTHER_NOTICE], ["Confidentiality"] * 3)
+    other = _agent_nodes([_PIECE_ONE_OPEN, _LEAD_IN, _OTHER_NOTICE], ["Confidentiality"] * 3)
     assert (
         _run(other, ["confidentiality", None, None], profiles, _paragraph_local(other)).joins == 0
     )
     # Nor when the insertion ends with it.
-    last = _agent_nodes([_PIECE_ONE, _LEAD_IN], ["Confidentiality"] * 2)
+    last = _agent_nodes([_PIECE_ONE_OPEN, _LEAD_IN], ["Confidentiality"] * 2)
     assert _run(last, ["confidentiality", None], profiles, _paragraph_local(last)).joins == 0
+    # A lead-in after a piece that reads as complete opens a passage of its own
+    # (issue #256: the blind check found one taken in as the end of the recitals
+    # before it), so neither it nor the piece after it is stitched onto that piece.
+    complete = _agent_nodes([_PIECE_ONE, _LEAD_IN, _PIECE_TWO], ["Confidentiality"] * 3)
+    assert (
+        _run(
+            complete,
+            ["confidentiality", None, "confidentiality"],
+            profiles,
+            _paragraph_local(complete),
+        ).joins
+        == 0
+    )
+
+
+#: Issue #256: one author's tracked insertion of a whole run of clauses that all
+#: carry one type -- a recital, a lead-in, an obligation, a list of exceptions,
+#: a return duty, a term, a carve-out -- each a complete passage opening a
+#: sentence of its own. The blind check found the pieces joined into one clause.
+_WHOLE_CLAUSES = [
+    "The college runs a training programme and the hospital wishes to share some of its "
+    "private trade records with the college while that programme runs.",
+    "In return for the promises made here, the hospital and the college agree as follows:",
+    "The college shall keep the trade records private and shall show them to nobody outside "
+    "the programme.",
+    "These duties do not bind the college for any record that:\n(a) the college already "
+    "held; or\n(b) the public already knows; or\n(c) a regulator asks the college to show.",
+    "The college shall destroy every copy of the trade records when the hospital asks.",
+    "Unless both sides agree otherwise in writing, the college shall keep the trade "
+    "records private for three years.",
+    "For clarity, talk between learners and teachers during a course is no breach.",
+]
+
+
+_ROMAN = ["i", "ii", "iii", "iv", "v", "vi", "vii"]
+
+#: One list-marker style per entry, as a function of the item's ordinal: every
+#: style ``_LIST_MARKER_RE`` accepts (a number, a letter or a roman numeral, with
+#: a full stop or a bracket after it, or in brackets).
+_MARKER_STYLES: dict[str, Callable[[int], str]] = {
+    "1.": lambda i: f"{i}. ",
+    "(b)": lambda i: f"({chr(96 + i)}) ",
+    "b.": lambda i: f"{chr(96 + i)}. ",
+    "b)": lambda i: f"{chr(96 + i)}) ",
+    "ii.": lambda i: f"{_ROMAN[i - 1]}. ",
+}
+
+
+def _numbered(texts: list[str], style: str = "1.") -> list[str]:
+    """*texts* with list markers of *style* in front ("1. ", "2. ", ...)."""
+    return [f"{_MARKER_STYLES[style](i)}{t}" for i, t in enumerate(texts, 1)]
+
+
+@pytest.mark.parametrize("style", [None, *_MARKER_STYLES])
+def test_a_tracked_run_of_whole_clauses_of_one_type_is_not_one_clause(style: str | None) -> None:
+    # A later clause number opens a whole numbered clause: it is no sign that the
+    # sentence before it carries on, and a lower-case one ("b.", "ii.") is no
+    # lower-case opening either.
+    whole = _numbered(_WHOLE_CLAUSES, style) if style else _WHOLE_CLAUSES
+    profiles = _join_profiles()
+    nodes = _agent_nodes(whole, ["Confidentiality"] * len(whole))
+    # The segmenter typed every piece but the lead-in, as it did on the real corpus.
+    types = ["confidentiality", None, *["confidentiality"] * 5]
+    assert rs.non_clause_reason(nodes[1]) == "lead_in"
+    result = _run(nodes, types, profiles, tracked=_paragraph_local(nodes))
+    assert result.joins == 0
+    assert [n.text for n in result.tree.all_nodes()] == whole
+    assert all(n.x_resegmented is None for n in result.tree.all_nodes())
+    # Were the lead-in typed too, it would join only with what it introduces (it
+    # ends open); the recital before it and the pieces after stay apart.
+    typed = [t or "confidentiality" for t in types]
+    result = _run(nodes, typed, profiles, tracked=_paragraph_local(nodes))
+    assert result.joins == 1
+    assert [n.text for n in result.tree.all_nodes()] == [
+        whole[0],
+        f"{whole[1]}\n{whole[2]}",
+        *whole[3:],
+    ]
+    # One insertion straddling every cut is not enough either.
+    whole = _tracked(_insertion(nodes[0].char_span[0], nodes[-1].char_span[1]))
+    assert _run(nodes, types, profiles, tracked=whole).joins == 0
+
+
+_PIECE_TWO_COMPLETE = "A side may show those records to its own advisers who accept the same duty."
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        # the piece before ends open
+        (_PIECE_ONE_OPEN, "The college shall treat each record that way."),
+        (_PIECE_ONE_OPEN, "2. The college shall treat each record that way."),
+        # the next opens lower case, or with a back-reference
+        (_PIECE_ONE, "and shall show them only to advisers who accept the same duty."),
+        (_PIECE_ONE, "Such records may be shown only to advisers who accept the same duty."),
+        (_PIECE_ONE, "However, a side may show a record that a regulator asks for."),
+    ],
+)
+def test_a_tracked_piece_with_text_that_continues_across_the_cut_is_stitched(
+    first: str, second: str
+) -> None:
+    nodes = _agent_nodes([first, second], ["Confidentiality"] * 2)
+    result = _run(nodes, ["confidentiality"] * 2, tracked=_paragraph_local(nodes))
+    assert result.joins == 1
+    (node,) = result.tree.all_nodes()
+    assert node.x_resegmented is not None
+    assert node.x_resegmented["basis"] == [rs.BASIS_REDLINE]
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        _PIECE_TWO_COMPLETE,
+        f"2. {_PIECE_TWO_COMPLETE}",
+        "(b) A side may show those records to its own advisers who accept the same duty.",
+        f"b. {_PIECE_TWO_COMPLETE}",
+        f"b) {_PIECE_TWO_COMPLETE}",
+        f"ii. {_PIECE_TWO_COMPLETE}",
+    ],
+)
+def test_a_tracked_piece_that_opens_a_complete_sentence_of_its_own_is_not_stitched(
+    second: str,
+) -> None:
+    # The insertion alone is no evidence: the piece before ends complete, and a
+    # later list marker on the next only numbers a clause of its own (a
+    # lower-case one is no lower-case opening).
+    nodes = _agent_nodes([_PIECE_ONE, second], ["Confidentiality"] * 2)
+    result = _run(nodes, ["confidentiality"] * 2, tracked=_paragraph_local(nodes))
+    assert result.joins == 0
+    assert [n.text for n in result.tree.all_nodes()] == [_PIECE_ONE, second]
 
 
 def test_a_textual_join_never_takes_in_text_that_is_not_a_clause_or_is_another_type() -> None:
@@ -758,7 +930,7 @@ def test_a_piece_that_opens_with_its_own_heading_is_not_stitched() -> None:
 
 def test_a_redline_run_longer_than_the_textual_chain_cap_is_one_passage() -> None:
     pieces = [
-        f"Clause piece number {i} keeps the supplier records private for the term."
+        f"Such clause piece number {i} keeps the supplier records private for the term."
         for i in range(10)
     ]
     nodes = []
@@ -1262,13 +1434,15 @@ def test_a_corpus_too_small_to_learn_a_type_splits_nothing(tmp_path: Path) -> No
 # after the node offsets are recorded.
 
 _ENTITY = "Northgate Hospital Trust"
+# One clause the author typed over five paragraphs: each piece after the first
+# continues the one before (an open end, a back-reference), as the text itself says.
 _INSERTED = [
     f"{_ENTITY} shall keep the supplier ledgers of the other side private while the "
-    "supervisor is on site.",
-    "The college also takes on the terms below:",
+    "supervisor is on site, and the college also takes on the terms below:",
     "The college may show those ledgers to its own advisers who accept the same duty.",
-    "Neither side shall copy a ledger except where a regulator asks for the copy.",
-    "These duties end five years after the arrangement ends.",
+    "Such advisers shall not copy a ledger except where a regulator asks for the copy.",
+    "However, the college may show a ledger to a regulator that asks to see it.",
+    "The foregoing duties end five years after the arrangement ends.",
 ]
 # The same author's insertion runs on past the clause: into a clause of another
 # type the segmenter found no type for, then into the signature lines.
@@ -1276,10 +1450,21 @@ _INSERTED_AFTER = [
     "Each notice under this arrangement goes by post to the address on the cover page.",
     "By: ______________ Name: ______________ Title: ______________",
 ]
+# The shape the blind check found wrongly joined (issue #256): one author's
+# insertion of a whole run of clauses that all carry one type, each complete and
+# opening a sentence of its own, with a lead-in the segmenter left untyped.
+_WHOLE_RUN = [
+    f"{_ENTITY} wishes to share some of its private ledgers with the college while the "
+    "supervisor is on site.",
+    "In return for the promises made here, the sides agree as follows:",
+    "The college shall keep the supplier ledgers private and shall show them to nobody "
+    "outside the programme.",
+    "The college shall destroy every copy of a ledger when the hospital asks.",
+    "Unless both sides agree otherwise in writing, the college shall keep the ledgers "
+    "private for five years.",
+]
 # The segmenter's label and type per block: the preamble, the five pieces of
-# the clause (it typed each piece and left the lead-in untyped, the shape the
-# acceptance corpus's split insertion has), the notice clause and the signature
-# lines (untyped), the law.
+# the inserted run, the notice clause and the signature lines (untyped), the law.
 _REDLINE_LABELS = [
     "Programme",
     *["Confidentiality"] * 5,
@@ -1288,6 +1473,14 @@ _REDLINE_LABELS = [
     "Governing Law",
 ]
 _REDLINE_TYPES = [
+    None,
+    *["confidentiality"] * 5,
+    None,
+    None,
+    "governing_law",
+]
+# ... and for the whole run: it typed every piece but the lead-in.
+_WHOLE_RUN_TYPES = [
     None,
     "confidentiality",
     None,
@@ -1315,27 +1508,36 @@ def _write_redlined_docx(path: Path, paragraphs: list[tuple[str, str | None]]) -
     doc.save(str(path))
 
 
-def _redline_segment_fn(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
-    """One node per block, each with the segmenter's label as its heading (never in the text)."""
-    del canonical_text
-    assert len(blocks) == len(_REDLINE_LABELS)  # one block per paragraph
-    return [
-        SegNode(
-            node_id=f"n{n}",
-            parent_id=None,
-            order=n,
-            heading=_REDLINE_LABELS[n - 1],
-            taxonomy_id=_REDLINE_TYPES[n - 1],
-            start_block_id=block.block_id,
-            end_block_id=block.block_id,
-            start_quote=block.text[:10],
-            end_quote=block.text[-10:],
-        )
-        for n, block in enumerate(blocks, start=1)
-    ]
+def _redline_segment_fn(types: list[str | None]) -> Callable[[str, list[Block]], list[SegNode]]:
+    def segment(canonical_text: str, blocks: list[Block]) -> list[SegNode]:
+        """One node per block, each with the segmenter's label as its heading (never in the text)."""
+        del canonical_text
+        assert len(blocks) == len(_REDLINE_LABELS)  # one block per paragraph
+        return [
+            SegNode(
+                node_id=f"n{n}",
+                parent_id=None,
+                order=n,
+                heading=_REDLINE_LABELS[n - 1],
+                taxonomy_id=types[n - 1],
+                start_block_id=block.block_id,
+                end_block_id=block.block_id,
+                start_quote=block.text[:10],
+                end_quote=block.text[-10:],
+            )
+            for n, block in enumerate(blocks, start=1)
+        ]
+
+    return segment
 
 
-def _mine_redlined(tmp_path: Path, *, known_entities: list[str]) -> Path:
+def _mine_redlined(
+    tmp_path: Path,
+    *,
+    known_entities: list[str],
+    inserted: list[str] | None = None,
+    types: list[str | None] | None = None,
+) -> Path:
     corpus = tmp_path / "corpus"
     deal = corpus / "deal-001"
     deal.mkdir(parents=True)
@@ -1343,7 +1545,7 @@ def _mine_redlined(tmp_path: Path, *, known_entities: list[str]) -> Path:
         deal / "v1.docx",
         [
             ("Both sides agree to run the shared programme described here.", None),
-            *[(text, "Counsel") for text in [*_INSERTED, *_INSERTED_AFTER]],
+            *[(text, "Counsel") for text in [*(inserted or _INSERTED), *_INSERTED_AFTER]],
             ("This arrangement follows the law of the province where the hospital sits.", None),
         ],
     )
@@ -1362,7 +1564,7 @@ def _mine_redlined(tmp_path: Path, *, known_entities: list[str]) -> Path:
         taxonomy=load_taxonomy(_TAXONOMY_PATH),
         out_dir=out,
         use_llm_segmentation=True,
-        llm_segment_fn=_redline_segment_fn,
+        llm_segment_fn=_redline_segment_fn(types or _REDLINE_TYPES),
         entity_registry_path=tmp_path / "registry.json",
     )
     return out
@@ -1405,6 +1607,24 @@ def test_mine_stitches_a_multi_paragraph_insertion_the_segmenter_cut_at_every_bl
     (subject,) = rs.check_subjects(out)
     assert subject.payload["check"] == "join"
     assert subject.payload["passages"] == _INSERTED
+
+
+@pytest.mark.parametrize("numbered", [False, True], ids=["plain", "numbered"])
+def test_mine_leaves_a_tracked_run_of_whole_clauses_of_one_type_unjoined(
+    tmp_path: Path, numbered: bool
+) -> None:
+    run = _numbered(_WHOLE_RUN) if numbered else _WHOLE_RUN
+    out = _mine_redlined(tmp_path, known_entities=[], inserted=run, types=_WHOLE_RUN_TYPES)
+    tree = ClauseTree.load(out / "normalized" / "deal-001" / "v1.clauses.json")
+    nodes = list(tree.all_nodes())
+    # Every block stays its own node: the preamble, the five clauses of the run,
+    # the notice clause, the signature lines, the law.
+    assert [n.heading for n in nodes] == _REDLINE_LABELS
+    assert [n.text for n in nodes[1:6]] == run
+    assert all(n.x_resegmented is None for n in nodes)
+    manifest = json.loads((out / "corpus_manifest.json").read_text())
+    assert manifest[0]["resegmentation"] == {"splits": 0, "joins": 0}
+    assert rs.check_subjects(out) == []
 
 
 def test_join_passages_are_cut_in_the_right_places_when_names_are_pseudonymized(
@@ -1475,6 +1695,88 @@ def test_check_sample_is_capped_at_sixty_and_keeps_the_lowest_hashes(tmp_path: P
     assert len(everything) == 75
     assert [s.key for s in subjects] == [s.key for s in everything][:60]
     assert all(s.payload["check"] == "join" and len(s.payload["passages"]) == 2 for s in subjects)
+
+
+def _write_joined(out: Path, name: str, first: str, second: str) -> dict[str, object]:
+    """A mined tree of one join (the real resegment producer) written under *out*;
+    returns the join's check payload."""
+    a = _node("1", first, 0)
+    b = _node("2", second, a.char_span[1] + 1)
+    tree = _tree([a, b])
+    res = rs.resegment(tree, [ClassifiedClause(n, _cls(None)) for n in tree.nodes])
+    assert res.joins == 1
+    target = out / "normalized" / "doc" / f"{name}.clauses.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    res.tree.write(target)
+    ((payload, _),) = rs._tree_subjects(res.tree)
+    return payload
+
+
+def _write_split(out: Path, name: str, before: str) -> dict[str, object]:
+    """A mined tree of one split (the real resegment producer) of
+    :data:`_FOREIGN_ONE` out of a parties node opening with *before*, written
+    under *out*; returns the split's check payload."""
+    res = _run([_node("1", f"{before}\n{_FOREIGN_ONE}", 0)], [_PARTIES_ID])
+    assert res.splits == 1
+    target = out / "normalized" / "doc" / f"{name}.clauses.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    res.tree.write(target)
+    ((payload, _),) = rs._tree_subjects(res.tree)
+    return payload
+
+
+def test_check_sample_asks_about_a_passage_once_when_versions_differ_only_in_whitespace(
+    tmp_path: Path,
+) -> None:
+    # Issue #256: versions of one document extract a no-break space or a double
+    # space differently, and the same passage was queued twice.
+    out = tmp_path / "out"
+    first = "The tenant shall keep the premises clean and shall"
+    second = "keep every fixture in good order at all times."
+    payloads = [
+        _write_joined(out, "v1", first, second),
+        _write_joined(out, "v2", first.replace("clean and", "clean\u00a0 and"), second),
+        _write_joined(out, "v3", first.replace("keep the", "keep  the"), second),
+    ]
+    assert len({judge_payload_key(p) for p in payloads}) == 3  # three distinct questions raw
+    _write_joined(
+        out,
+        "w1",
+        "The tenant shall also pay the rent on the first day of each month and",
+        "shall pay it by transfer.",
+    )
+    subjects = rs.check_subjects(out)
+    assert len(subjects) == 2  # one passage once, and the other passage
+    by_text = {" ".join(" ".join(s.payload["passages"]).split()): s for s in subjects}
+    kept = by_text[f"{first} {second}"]
+    # The variant kept is the lowest hash of the three, whatever the order of the trees.
+    assert kept.key == min(judge_payload_key(p) for p in payloads)
+    assert kept.key == judge_payload_key(kept.payload)
+    assert rs.check_subjects(out) == subjects
+    # The cap counts passages, not variants.
+    assert len(rs.check_subjects(out, limit=1)) == 1
+    # A split's context window is the last 400 characters before the split
+    # passage: a double space inside it shifts the cut, so the raw windows differ
+    # in more than whitespace, yet the split is one passage.
+    before = " ".join(_PARTIES)
+    assert len(before) > 400
+    assert "statements describe" in before[-400:]
+    payloads = [
+        _write_split(out, "s1", before),
+        _write_split(out, "s2", before.replace("statements describe", "statements  describe")),
+        _write_split(out, "s3", before.replace("the hospital offers", "the\u00a0hospital offers")),
+    ]
+    windows = {" ".join(str(p["context_before"]).split()) for p in payloads}
+    assert len(windows) > 1  # squashing the cut windows alone does not match them
+    subjects = rs.check_subjects(out)
+    assert len(subjects) == 3  # the two join passages, and the split once
+    (kept,) = [s for s in subjects if s.payload["check"] == "split"]
+    assert kept.key == min(judge_payload_key(p) for p in payloads)
+    assert kept.payload in payloads  # emitted as stored, so a banked verdict replays
+    assert kept.key == judge_payload_key(kept.payload)
+    # A split whose context differs in more than whitespace is another passage.
+    _write_split(out, "s4", before.replace("statements describe", "recitals describe"))
+    assert len(rs.check_subjects(out)) == 4
 
 
 def test_check_kind_is_a_registered_verdict_and_rubric_kind() -> None:
