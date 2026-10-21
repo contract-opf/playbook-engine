@@ -724,8 +724,13 @@ content. Judge every document's structure yourself — scripting the ECHO is
 required; scripting the SEGMENTATION JUDGMENT is fabrication.
 
 **Benefits:** semantic (not heuristic) clause grouping, and first-pass
-classification for free (the judge loop then has **no `classify` items** left —
-only provenance/scope).
+classification for free. The judge loop then has `classify` items only for the
+nodes you left `taxonomy_id: null` that carry operative text (issue #253): a
+null means "no entry fit" under the taxonomy you segmented with, and the
+segmentation cache does not change when the taxonomy does, so a clause type
+added later reaches that text only through these items. Answer them from the
+taxonomy YAML (labels and descriptions); a no-fit stays `null`. A node that is
+only its own heading, or has no letters, is never queued.
 
 **Trade-off:** that first-pass classification carries no dedicated judge
 verdict, so the engine stamps every one of it at a flat, deliberately-low

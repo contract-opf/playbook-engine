@@ -876,3 +876,104 @@ def test_cli_taxonomy_merge_no_new_source_flag_preserves_source(tmp_path: Path) 
     assert result.exit_code == 0, result.output
     merged = load_taxonomy(out_path)
     assert merged.source == existing.source
+
+
+# ---------------------------------------------------------------------------
+# Affiliation taxonomy: clause types the corpus showed it was missing (issue #253)
+# ---------------------------------------------------------------------------
+
+#: Types added because text the taxonomy had no home for kept coming back
+#: unclassified: each is double-rated on a real corpus (counts only here).
+_ADDED_TYPES = (
+    "compliance_with_laws",
+    "student_access_and_removal",
+    "survival",
+    "student_health_and_safety",
+    "program_administration",
+)
+
+
+def test_added_clause_types_are_custom_and_classifier_eligible() -> None:
+    tax = load_taxonomy(AFFILIATION_TAXONOMY)
+    eligible = {e.id for e in tax.classifier_entries()}
+    for tid in _ADDED_TYPES:
+        entry = tax.get(tid)
+        assert entry is not None, tid
+        assert entry.status == "custom" and entry.cuad_origin is None, tid
+        assert entry.id in eligible
+        assert len(entry.description) > 80, f"{tid} needs a definition with its boundary"
+
+
+def test_ip_ownership_is_active_and_covers_assignment_by_a_non_party_participant() -> None:
+    entry = load_taxonomy(AFFILIATION_TAXONOMY).get("ip_ownership")
+    assert entry is not None and entry.status == "active"
+    assert entry.cuad_origin == "Ip Ownership Assignment"  # curation: keep the CUAD link
+    assert "not a contracting party" in entry.description
+
+
+def test_severability_no_longer_reads_as_survival() -> None:
+    tax = load_taxonomy(AFFILIATION_TAXONOMY)
+    severability = tax.get("severability")
+    assert severability is not None
+    # It may point at the neighbouring type ("see survival") but not claim its job.
+    assert "survives" not in severability.description.lower()
+    assert "continues after" not in severability.description.lower().split("not what")[0]
+    assert "invalid" in severability.description.lower()
+    survival = tax.get("survival")
+    assert survival is not None
+    assert "terminat" in survival.description.lower()
+
+
+def test_assignment_description_excludes_placing_students() -> None:
+    """26 of 60 `assignment` observations on a real corpus were clauses about
+    placing students (a lexical match on the word), so the definition names
+    what the type is NOT, and sends student placement elsewhere."""
+    entry = load_taxonomy(AFFILIATION_TAXONOMY).get("assignment")
+    assert entry is not None
+    desc = entry.description.lower()
+    assert "transfer" in desc
+    assert "not" in desc and "student" in desc
+    assert "supervision_evaluation" in desc or "program_administration" in desc
+
+
+def test_boundaries_between_neighbouring_types_are_written_in_both_descriptions() -> None:
+    """A boundary stated on one side only is a coin flip for the classifier."""
+    tax = load_taxonomy(AFFILIATION_TAXONOMY)
+    pairs = [
+        ("student_health_and_safety", "background_checks"),
+        ("student_access_and_removal", "background_checks"),
+        ("survival", "severability"),
+        ("survival", "termination_cause"),
+        ("program_administration", "supervision_evaluation"),
+        ("compliance_with_laws", "accreditation_licensure"),
+    ]
+    for a, b in pairs:
+        ea, eb = tax.get(a), tax.get(b)
+        assert ea is not None and eb is not None
+        assert b in ea.description, f"{a} must name {b}"
+        assert a in eb.description, f"{b} must name {a}"
+
+
+def test_inactive_entries_that_anticipated_a_member_point_at_its_new_home() -> None:
+    tax = load_taxonomy(AFFILIATION_TAXONOMY)
+    for tid, home in (
+        ("minimum_commitment", "program_administration"),
+        ("audit_rights", "program_administration"),
+        ("exclusivity", "relationship_of_parties"),
+    ):
+        entry = tax.get(tid)
+        assert entry is not None and entry.status == "inactive"
+        assert home in entry.description
+
+
+def test_edited_taxonomy_moves_the_classify_rubric() -> None:
+    """The descriptions are the classify rubric: the derived version must move
+    with them, or banked verdicts would replay under the old wording."""
+    from playbook_engine.rubric import rubric_version
+
+    tax = load_taxonomy(AFFILIATION_TAXONOMY)
+    trimmed = Taxonomy(
+        source=tax.source,
+        entries=[e for e in tax.entries if e.id not in _ADDED_TYPES],
+    )
+    assert rubric_version("classify", taxonomy=tax) != rubric_version("classify", taxonomy=trimmed)
