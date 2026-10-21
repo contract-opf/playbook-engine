@@ -86,6 +86,11 @@ from the taxonomy, so editing it re-asks exactly these nodes and nothing else).
                              of another node because its text is that type's
                              vocabulary rather than the node's own; confidence
                              capped below ``AMBIGUITY_THRESHOLD``.
+  ``"subsplit"``           — a span of a multi-topic node that a settled agent
+                             verdict (issue #257, :mod:`playbook_engine.subsplit`)
+                             cut out and typed; an owner's or blind-checked
+                             judgment, so at a confidence above
+                             ``AMBIGUITY_THRESHOLD``.
 
 A node the re-segmentation pass marks ``x_non_clause`` (a bare section number,
 a signature block, a running header, ...) is never asked of the second-look
@@ -177,6 +182,7 @@ _BASIS_VALUES = frozenset(
         "inherited",
         "content_similarity",
         "resegmented",
+        "subsplit",
     }
 )
 

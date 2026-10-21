@@ -210,6 +210,18 @@ _FIELD_NAMES = frozenset(
         "possible_per_clause",
         "digest_without_verified",
         "digest_without_possible",
+        # Issue #257: the agent sub-split of multi-topic nodes and its blind check.
+        "subsplit",
+        "candidates",
+        "split",
+        "no_split",
+        "spans_added",
+        "observations_subsplit",
+        "questions",
+        "answered_split",
+        "answered_no_split",
+        "undrafted",
+        "check",
         # Issue #255: what the re-segmentation pass did, and its sampled check.
         "resegmentation",
         "splits",
@@ -234,6 +246,7 @@ _TOP_LEVEL = {
     "prior_reconstruction",
     "signed_on",
     "resegmentation",
+    "subsplit",
     "absence",
     "template_drift",
     "opening_drift",
@@ -304,6 +317,28 @@ _NDA_FLAT_KEYS = frozenset(
             f"absence.{per}.{stat}"
             for per in ("verified_per_clause", "possible_per_clause")
             for stat in ("n", "mean", "median", "min", "max")
+        ),
+        # Issue #257: the sub-split section (the NDA corpus is on the
+        # deterministic path, so it has no split targets: all zero).
+        *(
+            f"subsplit.{field}"
+            for field in (
+                "candidates",
+                "split",
+                "no_split",
+                "spans_added",
+                "observations_subsplit",
+                "questions",
+                "answered_split",
+                "answered_no_split",
+                "undrafted",
+                "settled",
+                "agreement_rate",
+            )
+        ),
+        *(
+            f"subsplit.check.{state}"
+            for state in ("unchecked", "agreed", "disputed", "adjudicated", "owner")
         ),
         *(
             f"resegmentation.{field}"
@@ -575,7 +610,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 13
+    assert card["scorecard_version"] == 14
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,

@@ -1028,6 +1028,8 @@ class TestJudgeKindSeam:
             "prior_form_origin",
             # Issue #251: is a clause type really absent from a signed text?
             "absence_check",
+            # Issue #257: partition a multi-topic node into clause types, or no split.
+            "subsplit",
         }
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:

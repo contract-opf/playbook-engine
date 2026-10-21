@@ -1058,6 +1058,16 @@ make docker-run CORPUS=./corpus OUT=./out \
   It counts only after the blind check (`playbook judge --check
   prior_form_origin`, a separate `claude-opus-5-5` / `xhigh` agent, then
   `judge-apply --check`). See REFERENCE.md § "Former form origin".
+- **Sub-split** (`kind: subsplit`): queued while mining, once per distinct text
+  of a classified clause one of whose sentences reads like a second clause type
+  (term with renewal, entire agreement with severability). Partition its
+  numbered units into consecutive spans of one clause type each, `{"split":
+  true, "spans": [{"start": "u0", "end": "u1", "taxonomy_id": "..." | null},
+  ...], "reason", "basis": "agent"}`, or answer `{"split": false, "reason",
+  "basis": "agent"}`; when in doubt, no split (a false boundary is worse than a
+  mixed clause). It cuts the clause only after the blind check (`playbook judge
+  --check subsplit`, a separate `claude-opus-5-5` / `xhigh` agent, then
+  `judge-apply --check`). See REFERENCE.md § "Sub-split".
 - **Absence check** (`kind: absence_check`): a sample (at most 40) of the clause
   types the engine counted as verified absent from a signed deal, queued by
   `judge` after mining. Say whether the clause is really absent from the signed

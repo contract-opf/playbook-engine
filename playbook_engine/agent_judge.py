@@ -40,6 +40,10 @@ Components:
   one verdict per sampled verified absence, "is this clause type really absent
   from this signed text?", queued after mining. It measures the absence guard;
   it changes nothing and gates nothing.
+- ``StoreBackedSubsplitJudge`` — the ``subsplit`` kind (issue #257): one
+  verdict per distinct multi-topic node text, "partition these sentences into
+  clause types, or no split", asked WHILE mining (the re-segmentation stage).
+  Only a settled verdict (an owner's, or blind-checked) is applied.
 - ``StoreBackedPriorFormOriginJudge`` — the ``prior_form_origin`` kind (issue
   #250): one verdict per recurring first-draft wording on our paper, "is this
   OUR former language?", queued after mining. Only a checked ``ours: true``
@@ -91,7 +95,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import absence, deal_dates, prior_reconstruction, resegmentation
+from playbook_engine import absence, deal_dates, prior_reconstruction, resegmentation, subsplit
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
@@ -561,6 +565,10 @@ def _validate_absence_check(verdict: dict[str, Any]) -> None:
     absence.validate_check_verdict(verdict)
 
 
+def _validate_subsplit(verdict: dict[str, Any]) -> None:
+    subsplit.validate_draft(verdict)
+
+
 def _validate_prior_form_origin(verdict: dict[str, Any]) -> None:
     prior_reconstruction.validate_origin_draft(verdict)
 
@@ -593,6 +601,7 @@ _VERDICT_KINDS: dict[
     resegmentation.CHECK_KIND: (_validate_resegment_check, lambda v: "resegment_ok" in v),
     prior_reconstruction.ORIGIN_KIND: (_validate_prior_form_origin, lambda v: "ours" in v),
     absence.CHECK_KIND: (_validate_absence_check, lambda v: "absent" in v),
+    subsplit.SUBSPLIT_KIND: (_validate_subsplit, lambda v: "split" in v),
 }
 
 
@@ -1236,4 +1245,55 @@ class StoreBackedAbsenceCheckJudge:
                 )
         if self.pending is not None:
             self.pending.add(subject.key, absence.CHECK_KIND, subject.payload, current_rubric)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedSubsplitJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedSubsplitJudge:
+    """Replays settled ``subsplit`` verdicts or queues new questions (issue #257).
+
+    Asked while mining, in the re-segmentation stage
+    (:func:`playbook_engine.subsplit.apply_subsplits`), once per candidate
+    node. Returns the stored verdict only when it is current under the
+    subject's rubric, replayable and SETTLED (an owner's, or a draft whose
+    blind check agreed or that was adjudicated:
+    :func:`~playbook_engine.subsplit.is_settled`); a false clause boundary is
+    worse than a mixed node, so a draft nobody checked yet, or a disputed one,
+    changes nothing and is not re-queued (it waits on ``playbook judge
+    --check subsplit``). A miss, a moved rubric or a malformed stored verdict
+    is queued, never guessed.
+
+    The lookup goes through :meth:`VerdictStore.get_record` so the stage cache
+    records the dependency: a cached document is recomputed when its verdict
+    is checked or re-drafted.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: subsplit.SubsplitSubject) -> dict[str, Any] | None:
+        """The settled verdict for *subject*, or ``None`` (pending, unchecked or disputed)."""
+        record = self.store.get_record(subject.payload)
+        current = subject.rubric_version
+        if record is not None and (
+            current is None
+            or self.rubric.evaluate(subsplit.SUBSPLIT_KIND, record.rubric_version, current).replay
+        ):
+            try:
+                subsplit.validate_replayable(record.verdict)
+            except ValueError:
+                _log.warning(
+                    "StoreBackedSubsplitJudge: malformed stored verdict for key %s; re-queuing",
+                    subject.key,
+                )
+            else:
+                return dict(record.verdict) if subsplit.is_settled(record.verdict) else None
+        if self.pending is not None:
+            self.pending.add(subject.key, subsplit.SUBSPLIT_KIND, subject.payload, current)
         return None

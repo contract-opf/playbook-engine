@@ -295,6 +295,59 @@ from is `true`. Do not judge the type from the sentence's position: judge the
 words. The count of `false` answers is the figure the scorecard reports
 (`resegmentation.wrong`); the aim is none.
 
+### Sub-split (`kind: subsplit`)
+
+Queued WHILE mining (by `playbook judge` and `playbook mine`), once per distinct
+text of a classified clause one of whose sentences or list items reads like a
+second clause type: a term clause that also states the renewal, an
+entire-agreement clause with severability in the same block, termination for
+cause and for convenience in one paragraph. The segmenter cannot cut inside one
+block, so the engine asks you where the clause boundaries inside the text are.
+The text comes cut into numbered units (sentences and list items; a leading
+heading line is part of the first), with every allowed clause type:
+
+```json
+{"stage": "subsplit",
+ "question": "Does this clause text state provisions of more than one clause type? ...",
+ "text": "...the whole text...",
+ "units": [{"id": "u0", "text": "..."}, {"id": "u1", "text": "..."}],
+ "taxonomy": [{"id": "renewal_term", "label": "Renewal / Auto-Renewal"}, ...]}
+```
+
+Answer `{"split": false, "reason": "<one sentence>", "basis": "agent"}` when the
+text states ONE clause (a sentence that merely mentions another topic, a
+cross-reference, a definition used by the clause, or a consequence of it
+belongs to it), or a partition into consecutive spans, each stating ONE clause
+type:
+
+```json
+{"split": true,
+ "spans": [{"start": "u0", "end": "u0", "taxonomy_id": "term"},
+           {"start": "u1", "end": "u2", "taxonomy_id": "renewal_term"}],
+ "reason": "The second and third sentences state the automatic renewal.",
+ "basis": "agent"}
+```
+
+The spans must start at `u0`, follow each other with no gap and end at the
+last unit; none may be empty; two neighbouring spans never share a type; each
+`taxonomy_id` is one from the list or `null` (a span that states no clause type
+on the list). You cannot cut inside a unit. Judge the words, not the heading:
+the first span may be a different type from the one the clause was filed
+under. **A false clause boundary is worse than a mixed clause**: when you are not
+sure a passage is a separate provision, answer `"split": false`.
+`judge-apply --verdicts` refuses an answer whose spans do not ground on the
+question.
+
+Nothing changes until the answer is blind-checked. `playbook judge --check
+subsplit $OUT --config <config>` writes `judge/subsplit-check-pending.jsonl` (the
+question, no draft) and `judge/subsplit-adjudication-pending.jsonl` (disputed
+items, both answers); a separate `claude-opus-5-5` / `xhigh` agent answers
+`{"key", "split", "spans", "reason", "model", "effort"}` per line (`spans` is
+`[]` for no split), recorded with `playbook judge-apply $OUT --check <file>`.
+Agreement is the same split decision and the same span boundaries and ids. Only
+an agreed or adjudicated answer (or one with `basis: "owner"`) cuts the clause;
+the next mine applies it. There is no `--api` path for this kind.
+
 ### Absence check (`kind: absence_check`)
 
 Queued by `playbook judge` AFTER mining, for a deterministic sample of the
@@ -529,6 +582,14 @@ absence (see "Absence check" above):
 {"absent": false, "reason": "Section 7 states the clause in other words."}
 ```
 
+**Sub-split verdict** (`kind: subsplit`) — one per distinct multi-topic text
+(see "Sub-split" above):
+```json
+{"split": true, "spans": [{"start": "u0", "end": "u0", "taxonomy_id": "entire_agreement"},
+                          {"start": "u1", "end": "u1", "taxonomy_id": "severability"}],
+ "reason": "The second sentence is a severability clause.", "basis": "agent"}
+```
+
 **Former form origin verdict** (`kind: prior_form_origin`) — one per recurring
 first-draft wording (see "Former form origin" above):
 ```json
@@ -616,7 +677,8 @@ machine-readable rubric moves: the classifier-eligible taxonomy entries
 relation and effect vocabularies for `equivalence`, the source vocabulary
 (`document_text`, `signature_block`) for `deal_date`, the two question shapes
 (`split`, `join`) for `resegment_check`, the two answers (`absent`, `present`) for `absence_check`, the answers and bases (`agent`, `judge`,
-`owner`) for `prior_form_origin`. Editing
+`owner`) for `prior_form_origin`, the classifier-eligible taxonomy entries plus
+the answers (`split`, `no_split`) and bases for `subsplit`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is
