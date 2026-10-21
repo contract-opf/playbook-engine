@@ -1071,6 +1071,22 @@ def _is_standard_language(
     return bool(normalized) and f" {normalized} " in f" {whole} "
 
 
+def is_former_form_language(
+    text: str, nodes: str | Sequence[str], party_names: Sequence[str] = ()
+) -> bool:
+    """Whether *text*, struck before signing, is one of OUR former forms' clause
+    language (issue #249): a node of the form's clause *nodes*, the whole of
+    them, or one contiguous piece — the removed-row origin test
+    :func:`_is_standard_language` applies to today's standard.
+
+    A removed row it holds for is counted under
+    :data:`DROPPED_PRIOR_STANDARD_REMOVED`, never read as the counterparty's
+    refused ask. Mining applies it to a supplied form; ``project`` applies it
+    to a reconstructed one (issue #250,
+    :mod:`playbook_engine.prior_reconstruction`)."""
+    return _is_standard_language(text, nodes, party_names)
+
+
 def _collapse_ws(text: str) -> str:
     """*text* with every whitespace run collapsed to one space (issue #233)."""
     return " ".join(text.split())
@@ -1416,7 +1432,7 @@ def build_observations(
             if whole_only:
                 if is_standard_text(text, "\n".join(kept), party_names):
                     labels.append(label)
-            elif _is_standard_language(text, kept, party_names):
+            elif is_former_form_language(text, kept, party_names):
                 labels.append(label)
         return labels
 

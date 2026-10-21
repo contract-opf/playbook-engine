@@ -36,6 +36,10 @@ Components:
   #255): one verdict per sampled split or join of the re-segmentation pass,
   queued after mining. It measures the pass; it changes nothing and gates
   nothing.
+- ``StoreBackedPriorFormOriginJudge`` — the ``prior_form_origin`` kind (issue
+  #250): one verdict per recurring first-draft wording on our paper, "is this
+  OUR former language?", queued after mining. Only a checked ``ours: true``
+  makes the cluster a reconstructed prior standard.
 
 These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, provenance_judge=…)``.
@@ -83,7 +87,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import deal_dates, resegmentation
+from playbook_engine import deal_dates, prior_reconstruction, resegmentation
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
@@ -549,6 +553,10 @@ def _validate_resegment_check(verdict: dict[str, Any]) -> None:
     resegmentation.validate_check_verdict(verdict)
 
 
+def _validate_prior_form_origin(verdict: dict[str, Any]) -> None:
+    prior_reconstruction.validate_origin_draft(verdict)
+
+
 def _validate_scope(verdict: dict[str, Any]) -> None:
     if not isinstance(verdict.get("in_scope"), bool):
         raise ValueError("'in_scope' must be a JSON boolean")
@@ -575,6 +583,7 @@ _VERDICT_KINDS: dict[
     EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "parts" in v),
     deal_dates.DEAL_DATE_KIND: (_validate_deal_date, lambda v: "signed_on" in v),
     resegmentation.CHECK_KIND: (_validate_resegment_check, lambda v: "resegment_ok" in v),
+    prior_reconstruction.ORIGIN_KIND: (_validate_prior_form_origin, lambda v: "ours" in v),
 }
 
 
@@ -1118,4 +1127,54 @@ class StoreBackedResegmentCheckJudge:
             self.pending.add(
                 subject.key, resegmentation.CHECK_KIND, subject.payload, current_rubric
             )
+        return None
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedPriorFormOriginJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedPriorFormOriginJudge:
+    """Replays stored ``prior_form_origin`` verdicts or queues new questions.
+
+    The ``prior_form_origin`` kind (issue #250). A question is one recurring
+    first-draft wording on our paper that a corpus-reconstructed prior form
+    would be built from: "is this really OUR former language, not a
+    counterparty form that recurs?"
+    (:func:`playbook_engine.prior_reconstruction.origin_subjects`). Like the
+    other post-mining kinds it has no seam inside ``mine_corpus``: ``playbook
+    judge`` asks it after mining and ``playbook project`` reads it with
+    ``pending=None``. Whether the verdict has been blind-checked is the
+    cluster's business (``prior_reconstruction.outcome_of``), not the judge's.
+
+    A hit whose rubric moved, or whose stored record is not a valid verdict, is
+    not replayed: it is re-queued (when a queue is attached) and reads as
+    unjudged. A miss is queued, never guessed.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: prior_reconstruction.OriginSubject) -> dict[str, Any] | None:
+        """The stored verdict for *subject*, or ``None`` when it is unjudged."""
+        kind = prior_reconstruction.ORIGIN_KIND
+        current_rubric = rubric_version(kind)
+        record = self.store.get_record_by_key(subject.key)
+        if (
+            record is not None
+            and self.rubric.evaluate(kind, record.rubric_version, current_rubric).replay
+        ):
+            verdict = prior_reconstruction.verdict_of(record.verdict)
+            if verdict is not None:
+                return verdict
+            _log.warning(
+                "StoreBackedPriorFormOriginJudge: malformed stored verdict for key %s; "
+                "treating as unjudged",
+                subject.key,
+            )
+        if self.pending is not None:
+            self.pending.add(subject.key, kind, subject.payload, current_rubric)
         return None

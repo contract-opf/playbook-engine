@@ -35,10 +35,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from playbook_engine.observation_builder import Observation, PriorFormNodes
-from playbook_engine.opf_accessors import PRIOR_TEMPLATE_VERSION, prior_template_document_id
+from playbook_engine.opf_accessors import (
+    PRIOR_BASIS_RECONSTRUCTED,
+    PRIOR_BASIS_SUPPLIED,
+    PRIOR_TEMPLATE_VERSION,
+    prior_template_document_id,
+)
 from playbook_engine.template_standards import template_standards
 
 __all__ = [
+    "BASIS_RECONSTRUCTED",
+    "BASIS_SUPPLIED",
     "PRIOR_TEMPLATES_FILENAME",
     "PRIOR_TEMPLATES_VERSION",
     "PriorForm",
@@ -52,6 +59,13 @@ __all__ = [
 PRIOR_TEMPLATES_FILENAME = "prior_templates.json"
 PRIOR_TEMPLATES_VERSION = 1
 
+#: ``baseline.prior_templates[].basis``: the owner supplied the form's file
+#: (``baseline.prior_templates`` in the config), or the engine rebuilt it from
+#: the corpus (issue #250, :mod:`playbook_engine.prior_reconstruction`) because
+#: none was supplied. A supplied form always wins.
+BASIS_SUPPLIED = PRIOR_BASIS_SUPPLIED
+BASIS_RECONSTRUCTED = PRIOR_BASIS_RECONSTRUCTED
+
 
 @dataclass(frozen=True)
 class PriorForm:
@@ -64,6 +78,14 @@ class PriorForm:
     itself (:func:`prior_standard_entries`), not ``"template"``.
     ``in_use_from`` / ``in_use_until`` are the config's own values (``YYYY``,
     ``YYYY-MM`` or ``YYYY-MM-DD``) or ``None``.
+
+    A RECONSTRUCTED form (``basis`` :data:`BASIS_RECONSTRUCTED`, issue #250)
+    has no file: its ``observations`` are one per clause type, the dominant
+    first-draft wording of the deals that opened on it, each citing that
+    wording where it sits in a real corpus document (so the form has no
+    ``sha256`` and no config dates). ``n_deals`` is the distinct deals that
+    opened on it and ``first_signed`` / ``last_signed`` (``YYYY-MM``) the
+    span of their signing dates, ``None`` when no deal is dated.
     """
 
     label: str
@@ -71,6 +93,10 @@ class PriorForm:
     in_use_from: str | None = None
     in_use_until: str | None = None
     sha256: str | None = None
+    basis: str = BASIS_SUPPLIED
+    n_deals: int | None = None
+    first_signed: str | None = None
+    last_signed: str | None = None
 
     def nodes_by_tid(self) -> dict[str, list[str]]:
         """Every non-empty node of the form per clause type, document order,
@@ -102,11 +128,23 @@ def origin_standards(
 
 
 def baseline_prior_templates(forms: Iterable[PriorForm]) -> list[dict[str, Any]]:
-    """``baseline.prior_templates[]`` of the playbook: each supplied form's
-    label, config dates and content address (dates and hash only when known)."""
+    """``baseline.prior_templates[]`` of the playbook: each form's label and,
+    for a supplied one, its config dates and content address (dates and hash
+    only when known). A reconstructed form (issue #250) carries
+    ``basis: "reconstructed"``, the deals that opened on it and the span of
+    their signing dates instead, and never a hash."""
     out: list[dict[str, Any]] = []
     for form in forms:
         entry: dict[str, Any] = {"label": form.label}
+        if form.basis == BASIS_RECONSTRUCTED:
+            entry["basis"] = BASIS_RECONSTRUCTED
+            entry["n_deals"] = form.n_deals or 0
+            if form.first_signed is not None:
+                entry["first_signed"] = form.first_signed
+            if form.last_signed is not None:
+                entry["last_signed"] = form.last_signed
+            out.append(entry)
+            continue
         if form.in_use_from is not None:
             entry["in_use_from"] = form.in_use_from
         if form.in_use_until is not None:
@@ -132,7 +170,9 @@ def prior_standard_entries(
     ``document_id`` ``prior_template:<label>`` and ``version``
     ``prior_template``, resolved through the form's
     ``baseline.prior_templates[].sha256``; ``clause_path`` and ``char_span``
-    are the form's own coordinates.
+    are the form's own coordinates. A RECONSTRUCTED form (issue #250) has no
+    bytes of its own: its ``source_ref`` is the ordinary citation of the
+    wording in the corpus document it was read from.
 
     ``part_id`` and ``order`` of the parts are stamped later by
     ``precedent.restamp_evidence`` (they are functions of the shipped text);
@@ -147,9 +187,14 @@ def prior_standard_entries(
                 continue
             first = std.nodes[0].citation
             single = len(std.nodes) == 1
+            reconstructed = form.basis == BASIS_RECONSTRUCTED
             source_ref: dict[str, Any] = {
-                "document_id": prior_template_document_id(form.label),
-                "version": PRIOR_TEMPLATE_VERSION,
+                # A reconstructed form has no file of its own: it cites the
+                # dominant wording where it sits in a real corpus document.
+                "document_id": (
+                    first.document_id if reconstructed else prior_template_document_id(form.label)
+                ),
+                "version": first.version if reconstructed else PRIOR_TEMPLATE_VERSION,
                 "clause_path": (
                     first.clause_path
                     if single

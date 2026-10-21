@@ -579,7 +579,9 @@ def standard_history(
     note (``{text, basis: "owner"}``) or ``null`` — the only reason a change is
     ever given. Each form carries:
 
-    - ``form`` (its label), ``in_use_from``/``in_use_until``/``in_use_basis``
+    - ``form`` (its label), ``basis`` (``supplied`` by the owner, or
+      ``reconstructed`` from the corpus' first drafts, issue #250),
+      ``in_use_from``/``in_use_until``/``in_use_basis``
       (:func:`_in_use_dates`), inferred once per form from *all_records* (every
       clause type's records; default *records*) so a form's dates are the same
       in every clause;
@@ -622,6 +624,7 @@ def standard_history(
         forms.append(
             {
                 "form": label,
+                "basis": (prior_templates.get(str(label)) or {}).get("basis", "supplied"),
                 **_in_use_dates(prior_templates.get(str(label)), opened),
                 "n_opened": counts["n_opened"],
                 "n_kept": counts["n_kept"],

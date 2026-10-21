@@ -1618,6 +1618,8 @@ def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
 
     # 012 - our former forms: prior standards and the standard history (issue #249).
     vectors.append(build_vector_012())
+    # 013 - a former form rebuilt from the corpus (issue #250).
+    vectors.append(build_vector_013())
     return vectors
 
 
@@ -2233,6 +2235,150 @@ def build_vector_012() -> tuple[str, dict[str, Any]]:
             "that form's own bytes (document_id prior_template:<label>, version "
             "prior_template, resolved through the form's baseline.prior_templates sha256), "
             "never as template, which is today's form.",
+            doc,
+        ),
+    )
+
+
+def build_vector_013() -> tuple[str, dict[str, Any]]:
+    tid = "assignment"
+    std_text = (
+        "Neither party may assign this Agreement without the other party's prior written consent."
+    )
+    old_text = "Either party may assign this Agreement to an affiliate without consent."
+    label = "reconstructed 2020-02 to 2021-03"
+    vs_old = {
+        "label": "different_concept",
+        "reason": "Synthetic fixture reason: a free affiliate assignment instead of consent.",
+        "parts": [
+            {
+                "part_id": _part(1),
+                "status": "omitted",
+                "effect": "less_protective",
+                "reason": "Synthetic fixture: no consent requirement.",
+            }
+        ],
+        "additions": [
+            {"summary": "Synthetic fixture: free affiliate assignment.", "effect": "neutral"}
+        ],
+        "basis": "agent",
+        "check": None,
+    }
+    precedent = [
+        # Three deals opened on the reconstructed form; deal-a kept it.
+        _prec(
+            "deal-a",
+            tid,
+            signed_text=old_text,
+            signed_on="2020-02",
+            signed_vs=copy.deepcopy(vs_old),
+            opened_with="prior_standard",
+            opened_with_form=label,
+        ),
+        _prec(
+            "deal-b",
+            tid,
+            signed_text=std_text,
+            standard=True,
+            signed_on="2020-09",
+            opening_text=old_text,
+            opened_with="prior_standard",
+            opened_with_form=label,
+            rounds=1,
+        ),
+        _prec(
+            "deal-c",
+            tid,
+            signed_text=old_text,
+            signed_on="2021-03",
+            signed_vs=copy.deepcopy(vs_old),
+            opened_with="prior_standard",
+            opened_with_form=label,
+        ),
+        _prec(
+            "deal-d",
+            tid,
+            signed_text=std_text,
+            standard=True,
+            signed_on="2023-01",
+            opened_with="standard",
+        ),
+    ]
+    doc = _base_v06(
+        clauses=[
+            {
+                "id": f"clause.{tid}",
+                "taxonomy_id": tid,
+                "title": "Assignment",
+                "our_standard": {
+                    "text": std_text,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "9",
+                    },
+                    "parts": [{"part_id": "", "order": 1, "text": std_text}],
+                },
+                "prior_standards": [
+                    {
+                        "form_label": label,
+                        "text": old_text,
+                        "parts": [{"part_id": "", "order": 1, "text": old_text}],
+                        # A reconstructed form has no file: the dominant wording is
+                        # cited where it sits in a corpus document.
+                        "source_ref": {"document_id": "deal-a", "version": 3, "clause_path": "9"},
+                        "vs_standard": copy.deepcopy(vs_old),
+                    }
+                ],
+                "why_changed": None,
+            }
+        ],
+        precedent=precedent,
+        documents=[_deal(f"deal-{c}", signed_version=3, provenance="our_paper") for c in "abcd"],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+        prior_templates=[
+            {
+                "label": label,
+                "basis": "reconstructed",
+                "n_deals": 3,
+                "first_signed": "2020-02",
+                "last_signed": "2021-03",
+            }
+        ],
+    )
+    clause = doc["evidence"]["clauses"][0]
+    # Independent expectations, written down from the fixture and not read from the engine.
+    assert (clause["n_opened_prior"], clause["n_kept_prior"], clause["n_moved_to_current"]) == (
+        3,
+        2,
+        1,
+    )
+    digest = build_digest_v5(doc)
+    (form,) = digest["clauses"][0]["standard_history"]["forms"]
+    assert form["form"] == label and form["basis"] == "reconstructed"
+    assert (form["in_use_from"], form["in_use_until"], form["in_use_basis"]) == (
+        "2020-02",
+        "2021-03",
+        "deal_dates",
+    )
+    assert (form["n_opened"], form["n_kept"], form["n_conceded"]) == (3, 2, 1)
+    assert form["ref"] == {"document_id": "deal-a", "version": 3, "clause_path": "9"}
+    return (
+        "013-reconstructed-prior-form",
+        _vector_v06(
+            "reconstructed-prior-form",
+            "A former form of ours rebuilt from the corpus when none was supplied "
+            "(OPF-SPEC §3.5.7, issue #250). baseline.prior_templates holds one entry with "
+            "basis reconstructed, n_deals 3 and the signing-month span of the deals that "
+            "opened on it (first_signed 2020-02, last_signed 2021-03); it has no sha256 and "
+            "no owner dates because it has no file. Three of four deals' clauses opened on "
+            "it (opened_with prior_standard, opened_with_form the label): deal-a and deal-c "
+            "signed it as it stood (kept), deal-b moved to today's standard; deal-d opened "
+            "with today's standard. The prior standard's source_ref is the ordinary citation "
+            "of the dominant wording in a corpus document (deal-a, version 3), never "
+            "prior_template. The digest's standard_history form carries basis "
+            "reconstructed and in-use dates inferred from the deals' signing months "
+            "(in_use_basis deal_dates).",
             doc,
         ),
     )

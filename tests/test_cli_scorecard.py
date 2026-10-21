@@ -165,6 +165,8 @@ _FIELD_NAMES = frozenset(
         # Issue #249: our former forms and the deals that opened on them.
         "prior_standards",
         "forms",
+        "forms_supplied",
+        "forms_reconstructed",
         "clauses_with_history",
         "entries",
         "judged",
@@ -175,6 +177,23 @@ _FIELD_NAMES = frozenset(
         "why_changed",
         "unchanged",
         "standard_history_forms",
+        # Issue #250: our former forms rebuilt from the corpus' first drafts.
+        "prior_reconstruction",
+        "skipped",
+        "candidate_first_drafts",
+        "clusters",
+        "clusters_below_min_deals",
+        "clusters_not_dominant",
+        "confirmed",
+        "rejected",
+        "pending",
+        "pending_undrafted",
+        "pending_unchecked",
+        "forms_single_clause",
+        "forms_multi_clause",
+        "forms_dated",
+        "forms_undated",
+        "deals_in_forms",
         # Issue #247: signed deals dated, by basis.
         "signed_on",
         "dated",
@@ -200,6 +219,7 @@ _TOP_LEVEL = {
     "classification",
     "precedent",
     "prior_standards",
+    "prior_reconstruction",
     "signed_on",
     "resegmentation",
     "template_drift",
@@ -378,6 +398,8 @@ _NDA_FLAT_KEYS = frozenset(
             f"prior_standards.{field}"
             for field in (
                 "forms",
+                "forms_supplied",
+                "forms_reconstructed",
                 "clauses_with_history",
                 "entries",
                 "unchanged",
@@ -390,6 +412,29 @@ _NDA_FLAT_KEYS = frozenset(
                 "by_settled.adjudicated",
                 "by_settled.unchecked",
                 "by_settled.owner",
+            )
+        ),
+        # Issue #250: the NDA example supplies no former form and no first-draft
+        # wording recurs on our paper: nothing is rebuilt.
+        *(
+            f"prior_reconstruction.{field}"
+            for field in (
+                "skipped",
+                "candidate_first_drafts",
+                "clusters",
+                "clusters_below_min_deals",
+                "clusters_not_dominant",
+                "confirmed",
+                "rejected",
+                "pending",
+                "pending_undrafted",
+                "pending_unchecked",
+                "forms",
+                "forms_single_clause",
+                "forms_multi_clause",
+                "forms_dated",
+                "forms_undated",
+                "deals_in_forms",
             )
         ),
         "queues.judge_pending",
@@ -496,7 +541,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 11
+    assert card["scorecard_version"] == 12
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,

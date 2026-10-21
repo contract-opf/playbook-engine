@@ -353,7 +353,9 @@ def _render_standard_history(history: Any) -> str:
             )
         )
         items.append(
-            f"<li><strong>{_esc(form.get('form'))}</strong> ({_esc(_in_use_text(form))}): "
+            f"<li><strong>{_esc(form.get('form'))}</strong> "
+            f"{'[reconstructed from the corpus] ' if form.get('basis') == 'reconstructed' else ''}"
+            f"({_esc(_in_use_text(form))}): "
             f"{form.get('n_opened', 0)} deal(s) opened on it, {form.get('n_kept', 0)} kept it, "
             f"{form.get('n_moved_to_current', 0)} moved to today's; {_esc(compare)}.</li>"
         )

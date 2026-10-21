@@ -27,6 +27,7 @@ from playbook_engine.agent_judge import (
     PendingQueue,
     StoreBackedDealDateJudge,
     StoreBackedEquivalenceJudge,
+    StoreBackedPriorFormOriginJudge,
     StoreBackedResegmentCheckJudge,
     VerdictStore,
 )
@@ -134,6 +135,11 @@ from playbook_engine.playbook_assembler import (
     write_precedent_sidecar,
 )
 from playbook_engine.precedent import build_precedent_evidence, restamp_evidence
+from playbook_engine.prior_reconstruction import (
+    OriginSubject,
+    Reconstruction,
+    reconstruct,
+)
 from playbook_engine.prior_standards import (
     PRIOR_TEMPLATES_FILENAME,
     PRIOR_TEMPLATES_VERSION,
@@ -5306,6 +5312,86 @@ def _perspective_dict(config: EngineConfig) -> dict[str, str] | None:
     return None
 
 
+#: ``<out>/prior_reconstruction.json``: the counts (no text) of the last
+#: ``project``'s reconstruction of our former forms (issue #250); ``scorecard``
+#: reads it.
+PRIOR_RECONSTRUCTION_FILENAME = "prior_reconstruction.json"
+
+
+def _origin_verdicts(out_dir: Path) -> Callable[[OriginSubject], dict[str, Any] | None] | None:
+    """A read-only reader of the run's ``prior_form_origin`` verdicts (issue #250),
+    or ``None`` when the run has no verdict store yet (then every reconstructed
+    cluster is pending). It never queues anything; ``playbook judge`` does."""
+    verdicts_path = out_dir / "judge" / "verdicts.jsonl"
+    if not verdicts_path.is_file():
+        return None
+    return StoreBackedPriorFormOriginJudge(store=VerdictStore(verdicts_path)).judge
+
+
+def _reconstruct_prior_forms(
+    config: EngineConfig,
+    store: _ProjectionStore,
+    corpus_documents: list[dict[str, Any]],
+    clause_positions: list[Any],
+    *,
+    judge: Callable[[OriginSubject], dict[str, Any] | None] | None,
+) -> Reconstruction:
+    """Our former forms rebuilt from the corpus when none were supplied (issue #250)."""
+    perspective = _perspective_dict(config)
+    return reconstruct(
+        observations=store.observations,
+        corpus_documents=corpus_documents,
+        clause_positions=clause_positions,
+        round_moves=store.round_moves,
+        agreement_type_id=config.agreement_type.id,
+        party=perspective["party"] if perspective else None,
+        supplied_forms=store.prior_forms,
+        judge=judge,
+        has_canonical_template=config.baseline.has_canonical_template,
+        party_names=_standard_party_names(config),
+    )
+
+
+def _resolved_corpus_documents(out_dir: Path, store: _ProjectionStore) -> list[dict[str, Any]]:
+    """The mined corpus documents with each deal's ``signed_on`` resolved (issue #247).
+
+    Read-only: the ``deal_date`` verdict store is replayed, never queued, so
+    ``project`` and the equivalence queue see the same dates; an unjudged
+    question falls through to the file name and metadata."""
+    deal_date_judge: StoreBackedDealDateJudge | None = None
+    deal_date_verdicts = out_dir / "judge" / "verdicts.jsonl"
+    if deal_date_verdicts.is_file():
+        deal_date_judge = StoreBackedDealDateJudge(store=VerdictStore(deal_date_verdicts))
+    return deal_dates.resolve_corpus_documents(store.corpus_documents, deal_date_judge)
+
+
+def _store_with_reconstruction(
+    out_dir: Path, config: EngineConfig, taxonomy: Taxonomy, store: _ProjectionStore
+) -> tuple[_ProjectionStore, list[Any], list[dict[str, Any]], Reconstruction]:
+    """*store* with our reconstructed former forms folded in (issue #250), the
+    clause positions it compiles to, its resolved corpus documents and the
+    reconstruction itself."""
+    corpus_documents = _resolved_corpus_documents(out_dir, store)
+    clause_positions, _flags, _coverage = compile_clause_positions(
+        store.observations,
+        store.template_observations,
+        taxonomy_titles={e.id: e.label for e in taxonomy.entries},
+    )
+    reconstruction = _reconstruct_prior_forms(
+        config,
+        store,
+        corpus_documents,
+        clause_positions,
+        judge=_origin_verdicts(out_dir),
+    )
+    folded = dataclasses.replace(
+        store,
+        observations=reconstruction.observations,
+        prior_forms=[*store.prior_forms, *reconstruction.forms],
+    )
+    return folded, clause_positions, corpus_documents, reconstruction
+
+
 def equivalence_subjects(
     out_dir: Path, config: EngineConfig, taxonomy: Taxonomy
 ) -> list[EquivalenceSubject]:
@@ -5313,11 +5399,11 @@ def equivalence_subjects(
 
     Issue #240. Rebuilds the very evidence ``project_playbook`` would write —
     same store, same clause positions, same invisible-character strip, same
-    ``perspective.party`` — and returns :func:`~playbook_engine.equivalence.collect_subjects`
-    over it, so the keys a judge round queues are the keys ``project`` later
-    looks up. Empty when no canonical template is configured (emergent mode:
-    no clause has an ``our_standard``) or when *out_dir* holds no
-    observation store yet.
+    ``perspective.party``, same reconstructed former forms (issue #250) — and
+    returns :func:`~playbook_engine.equivalence.collect_subjects` over it, so
+    the keys a judge round queues are the keys ``project`` later looks up.
+    Empty when no canonical template is configured (emergent mode: no clause
+    has an ``our_standard``) or when *out_dir* holds no observation store yet.
     """
     if not config.baseline.has_canonical_template:
         return []
@@ -5325,10 +5411,8 @@ def equivalence_subjects(
         store = _read_projection_store(out_dir)
     except PipelineError:
         return []
-    clause_positions, _flags, _coverage = compile_clause_positions(
-        store.observations,
-        store.template_observations,
-        taxonomy_titles={e.id: e.label for e in taxonomy.entries},
+    store, clause_positions, corpus_documents, _reconstruction = _store_with_reconstruction(
+        out_dir, config, taxonomy, store
     )
     perspective = _perspective_dict(config)
     party = perspective["party"] if perspective else None
@@ -5337,7 +5421,7 @@ def equivalence_subjects(
             agreement_type_id=config.agreement_type.id,
             clause_positions=clause_positions,
             observations=store.observations,
-            corpus_documents=store.corpus_documents,
+            corpus_documents=corpus_documents,
             round_moves=store.round_moves,
             party=party,
             prior_forms=store.prior_forms,
@@ -5396,6 +5480,59 @@ def queue_resegment_checks(out_dir: Path, judge: StoreBackedResegmentCheckJudge)
     return len(subjects), unchecked
 
 
+def _write_reconstruction_counts(out_dir: Path, reconstruction: Reconstruction) -> None:
+    """Record the counts of the reconstruction (no text) for ``scorecard``.
+
+    Written on every ``project`` so a stale file never describes another run;
+    a run that attempted nothing records why."""
+    _atomic_json_write(reconstruction.counts(), out_dir / PRIOR_RECONSTRUCTION_FILENAME)
+
+
+def queue_prior_form_origin(
+    out_dir: Path,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    judge: StoreBackedPriorFormOriginJudge,
+) -> tuple[int, int]:
+    """Ask *judge* about every reconstructed clause cluster of *out_dir*; return
+    ``(subjects, unjudged)``.
+
+    Issue #250. A subject is a recurring first-draft wording on our paper that
+    would become a reconstructed prior form: the very clusters ``project``
+    builds, so the keys queued are the keys it later looks up. One with no
+    replayable stored verdict is queued on the judge's pending queue
+    (deduplicated by key). ``(0, 0)`` when nothing is to be reconstructed: no
+    canonical template, a supplied form, or no store yet.
+    """
+    questions = prior_form_origin_subjects(out_dir, config, taxonomy)
+    unjudged = sum(1 for subject in questions if judge.judge(subject) is None)
+    return len(questions), unjudged
+
+
+def prior_form_origin_subjects(
+    out_dir: Path, config: EngineConfig, taxonomy: Taxonomy
+) -> list[OriginSubject]:
+    """The origin questions of *out_dir*'s reconstructed clause clusters (issue #250)."""
+    if not config.baseline.has_canonical_template:
+        return []
+    try:
+        store = _read_projection_store(out_dir)
+    except PipelineError:
+        return []
+    reconstruction = _reconstruct_prior_forms(
+        config,
+        store,
+        _resolved_corpus_documents(out_dir, store),
+        compile_clause_positions(
+            store.observations,
+            store.template_observations,
+            taxonomy_titles={e.id: e.label for e in taxonomy.entries},
+        )[0],
+        judge=None,
+    )
+    return [outcome.subject for outcome in reconstruction.outcomes]
+
+
 def project_playbook(
     out_dir: Path,
     config: EngineConfig,
@@ -5452,11 +5589,7 @@ def project_playbook(
     # evidence mining recorded and the deal_date verdict store (read-only: no
     # queue, so `project` never writes a pending item; an unjudged question
     # falls through to the file name and metadata).
-    deal_date_judge: StoreBackedDealDateJudge | None = None
-    deal_date_verdicts = out_dir / "judge" / "verdicts.jsonl"
-    if deal_date_verdicts.is_file():
-        deal_date_judge = StoreBackedDealDateJudge(store=VerdictStore(deal_date_verdicts))
-    corpus_documents = deal_dates.resolve_corpus_documents(store.corpus_documents, deal_date_judge)
+    corpus_documents = _resolved_corpus_documents(out_dir, store)
     date_coverage = deal_dates.coverage(corpus_documents)
     progress(
         f"  signed_on: {date_coverage.dated}/{date_coverage.signed} signed deal(s) dated "
@@ -5474,6 +5607,41 @@ def project_playbook(
         t_observations,
         taxonomy_titles=taxonomy_titles,
     )
+
+    # Issue #250: when the owner supplied no older form files, our former forms
+    # are rebuilt from the corpus' first drafts on our paper and flagged
+    # reconstructed. Only clusters the origin judge confirmed (and a blind
+    # check settled) become prior standards; the deals that opened on them
+    # read ``opened_with: prior_standard``, and our former wording struck
+    # before signing is no refused ask: it is counted under
+    # removed_prior_standard, as mining counts it for a supplied form. A
+    # supplied form always wins.
+    reconstruction = _reconstruct_prior_forms(
+        config,
+        store,
+        corpus_documents,
+        clause_positions,
+        judge=_origin_verdicts(out_dir),
+    )
+    all_observations = reconstruction.observations
+    prior_forms = [*store.prior_forms, *reconstruction.forms]
+    if reconstruction.removed_by_document:
+        corpus_documents = reconstruction.corpus_documents_with_drops(corpus_documents)
+        # The dropped rows never existed for a supplied form either: recompile
+        # so the fragment flags count only the rows that remain.
+        clause_positions, coherence_flags, unclassified_coverage = compile_clause_positions(
+            all_observations,
+            t_observations,
+            taxonomy_titles=taxonomy_titles,
+        )
+    _write_reconstruction_counts(out_dir, reconstruction)
+    if reconstruction.outcomes:
+        counts = reconstruction.counts()
+        progress(
+            f"  prior forms: {counts['clusters']} reconstructed clause cluster(s) "
+            f"({counts['confirmed']} confirmed, {counts['rejected']} rejected, "
+            f"{counts['pending']} pending) -> {counts['forms']} form(s)"
+        )
 
     # Persist coherence flags (fragment quarantine; empty list when none).
     coherence_flags_path = out_dir / "coherence_flags.json"
@@ -5497,8 +5665,8 @@ def project_playbook(
             baseline_dict["template_ref"]["sha256"] = file_sha256(template_path)
     # Issue #249: the older forms of ours the mined store read (label, config
     # dates, content address). Absent when none was supplied.
-    if store.prior_forms:
-        baseline_dict["prior_templates"] = baseline_prior_templates(store.prior_forms)
+    if prior_forms:
+        baseline_dict["prior_templates"] = baseline_prior_templates(prior_forms)
 
     # Assemble agreement_type dict
     agreement_type_dict: dict[str, Any] = {
@@ -5585,7 +5753,7 @@ def project_playbook(
         existing_floor=existing_floor,
         round_moves=round_moves,
         equivalence_judge=equivalence_judge,
-        prior_forms=store.prior_forms,
+        prior_forms=prior_forms,
     )
 
     # Issue #241: the owner's optional corrections (`overrides.json`, saved by

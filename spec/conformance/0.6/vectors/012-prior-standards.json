@@ -603,6 +603,7 @@
             "forms": [
               {
                 "form": "2018 form",
+                "basis": "supplied",
                 "in_use_from": "2018-01",
                 "in_use_until": "2019-12",
                 "in_use_basis": "config",
@@ -637,6 +638,7 @@
               },
               {
                 "form": "2019 form",
+                "basis": "supplied",
                 "in_use_from": "2019-03",
                 "in_use_until": "2020-05",
                 "in_use_basis": "mixed",
@@ -669,6 +671,7 @@
               },
               {
                 "form": "2021 form",
+                "basis": "supplied",
                 "in_use_from": "2021",
                 "in_use_until": null,
                 "in_use_basis": "config",

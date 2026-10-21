@@ -90,6 +90,7 @@ from typing import Any
 
 from playbook_engine.deal_dates import DEAL_DATE_KIND, TEXT_BASES
 from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELATIONS, STATUSES
+from playbook_engine.prior_reconstruction import ORIGIN_BASES, ORIGIN_KIND
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
 from playbook_engine.resegmentation import CHECK_KIND as RESEGMENT_CHECK_KIND
 
@@ -106,6 +107,7 @@ JUDGE_KINDS: tuple[str, ...] = (
     EQUIVALENCE_KIND,
     DEAL_DATE_KIND,
     RESEGMENT_CHECK_KIND,
+    ORIGIN_KIND,
 )
 
 # ---------------------------------------------------------------------------
@@ -152,6 +154,12 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # text is a provision of the named type; a join only when the passages are
     # one clause); the question vocabulary is the derived half.
     RESEGMENT_CHECK_KIND: "v1",
+    # Issue #250: is a recurring first-draft wording on our paper OUR former
+    # language? The prose rubric is the skill's prior_form_origin step (ours
+    # only when it reads as an earlier version of the drafting of today's
+    # standard, not as a counterparty's form); the basis vocabulary is the
+    # derived half.
+    ORIGIN_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -289,6 +297,10 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     },
     RESEGMENT_CHECK_KIND: lambda *, taxonomy, agreement_type: {
         "checks": ["split", "join"],
+    },
+    ORIGIN_KIND: lambda *, taxonomy, agreement_type: {
+        "answers": ["ours", "not_ours"],
+        "bases": list(ORIGIN_BASES),
     },
 }
 
