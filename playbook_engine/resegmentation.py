@@ -29,10 +29,14 @@ deterministically, with no judge and no key:
    and the next piece is positively of the node's type (typed so, or
    unclassified with at least :data:`JOIN_MIN_TYPE_HITS` of that type's words
    and more of them than of any other type's; a lead-in, which has no topic of
-   its own, when the piece after it is), the pieces are one passage, joined
-   whether or not each ends a sentence, with no chain cap (the size cap alone).
-   An insertion alone is no such evidence: a counterparty often inserts several
-   whole clauses in one go, so a node with no type never extends on it. On
+   its own, when the piece after it is) AND the text continues across the cut
+   (the piece before ends open, or the next opens lower case or with a
+   back-reference; a list marker on the next, of any style, counts only when
+   the piece before ends open: :func:`_continues_across`), the pieces are
+   one passage, with no chain cap (the size cap alone). An insertion alone is
+   no such evidence: a counterparty often inserts several whole clauses in one
+   go, even several of one type, so a node with no type never extends on it and
+   two pieces that each read as complete stay two. On
    every basis a piece that opens with a heading of its own (one the extractor
    found, a title line, or the segmenter's label when the text begins with it)
    is never joined; the segmenter's label alone is its name for the node, not a
@@ -152,9 +156,10 @@ MIN_UNIT_TOKENS: int = 6
 """Fewer content words than this and a unit is too short to score; it follows
 the unit before it (a short tail never starts a new node on its own)."""
 
-MIN_UNIT_HITS: int = 4
+MIN_UNIT_HITS: int = 5
 """A re-homed unit must contain at least this many profile words of the
-target, whatever its share."""
+target, whatever its share: four generic words of a type's profile do not make
+a sentence that type's."""
 
 MIN_PROFILE_WEIGHT: int = 3
 """A word is characteristic of a type only if it occurs in the type's
@@ -762,6 +767,33 @@ def _type_evidence(
     return _unclassified(cls) and _profile_evidence(node, tid, profiles)
 
 
+def _continues_across(a: ClauseNode, b: ClauseNode) -> bool:
+    """Whether the text itself says *b* continues *a* at the cut between them.
+
+    *a* ends open (no sentence-final punctuation: mid-sentence, or a colon or
+    semicolon that hands over to what follows), or *b* opens lower case, or
+    with a back-reference ("Such ...", "However, ..."). A list marker of any
+    style ("2.", "(b)", "b.", "b)", "ii.") on *b* counts only when *a* ends
+    open: after a complete sentence it opens a numbered clause of its own, and
+    a lower-case marker is not a lower-case opening.
+    Two pieces that each read as complete, the second opening a sentence of its
+    own, are two paragraphs, and a tracked insertion alone does not make them
+    one clause: a counterparty often inserts a whole run of clauses of one type
+    in one go (the blind check found one such run joined into a single clause).
+    """
+    ta, tb = a.text.rstrip(), b.text.lstrip()
+    if not ta or not tb or len(re.findall(r"[A-Za-z]{2,}", ta)) < 3:
+        return False
+    if _ends_mid_sentence(ta):
+        return True
+    if _LIST_MARKER_RE.match(tb):
+        # A numbered opener after a complete sentence is a numbered clause of its
+        # own, not a continuation: the marker is evidence only when *a* ends open.
+        # Checked before the lower-case test, which "b." or "ii)" would pass.
+        return False
+    return tb[0].islower() or _follows_previous(tb)
+
+
 def _redline_piece(
     a: ClauseNode,
     b: ClauseNode,
@@ -773,15 +805,20 @@ def _redline_piece(
     """Whether *b* is the next piece of a tracked insertion that *a* is typed by.
 
     One author's insertion runs across the cut, *b* opens with no heading of its
-    own, and *b* is positively of *a*'s type (:func:`_type_evidence`). A lead-in
-    has no topic of its own: it joins when the piece after it (*c*) is the next
-    piece of the same insertion and positively of *a*'s type. An unclassified
-    *a* gives no type to test, so it never extends on this basis.
+    own, the text continues across the cut (:func:`_continues_across`), and *b*
+    is positively of *a*'s type (:func:`_type_evidence`). A lead-in has no topic
+    of its own: it joins when the piece after it (*c*) is the next piece of the
+    same insertion, continues the lead-in, and is positively of *a*'s type. An
+    unclassified *a* gives no type to test, so it never extends on this basis.
     """
     ca = cls_by_path.get(a.clause_path)
     if ca is None or ca.taxonomy_id is None:
         return False
-    if not _redline_across_cut(a, b, insertions) or _starts_clause(b):
+    if (
+        not _redline_across_cut(a, b, insertions)
+        or _starts_clause(b)
+        or not _continues_across(a, b)
+    ):
         return False
     tid = ca.taxonomy_id
     if _type_evidence(b, tid, cls_by_path, profiles):
@@ -799,6 +836,7 @@ def _redline_piece(
         and not _unjoinable(c)
         and _redline_across_cut(b, c, insertions)
         and not _starts_clause(c)
+        and _continues_across(b, c)
         and _type_evidence(c, tid, cls_by_path, profiles)
     )
 
@@ -1144,8 +1182,16 @@ def _payload_key(payload: Any) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _tree_subjects(tree: ClauseTree) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
+def _tree_subjects(tree: ClauseTree) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Every recorded split and join of *tree*, as ``(payload, identity)``.
+
+    The payload is the question exactly as the judge sees it (its hash is the
+    verdict key). The identity is the same question built from the
+    whitespace-squashed source text, a split's context window cut only after
+    squashing: two versions whose texts differ only in whitespace, even inside
+    that window (where the raw cut would shift), share it.
+    """
+    payloads: list[tuple[dict[str, Any], dict[str, Any]]] = []
     by_path = {n.clause_path: n for n in tree.all_nodes()}
     for node in tree.all_nodes():
         meta = node.x_resegmented
@@ -1159,59 +1205,92 @@ def _tree_subjects(tree: ClauseTree) -> list[dict[str, Any]]:
                 if sib is node:
                     break
                 before = sib.text
-            payloads.append(
-                {
-                    "stage": CHECK_KIND,
-                    "check": "split",
-                    "question": (
-                        "Is the text below really a provision of the clause type given, "
-                        "rather than of the clause it was cut out of?"
-                    ),
-                    "clause_type": {
-                        "id": str(meta["to"].get("id")),
-                        "label": str(meta["to"].get("label")),
-                    },
-                    "text": node.text,
-                    "context_before": before[-_CONTEXT_CHARS:],
-                }
-            )
+            payload: dict[str, Any] = {
+                "stage": CHECK_KIND,
+                "check": "split",
+                "question": (
+                    "Is the text below really a provision of the clause type given, "
+                    "rather than of the clause it was cut out of?"
+                ),
+                "clause_type": {
+                    "id": str(meta["to"].get("id")),
+                    "label": str(meta["to"].get("label")),
+                },
+                "text": node.text,
+                "context_before": before[-_CONTEXT_CHARS:],
+            }
+            identity = {
+                **_squash_whitespace(payload),
+                "context_before": _squash_whitespace(before)[-_CONTEXT_CHARS:],
+            }
+            payloads.append((payload, identity))
         elif isinstance(meta.get("at"), list) and meta.get("joined_with"):
             cuts = [0, *[int(a) for a in meta["at"]], len(node.text)]
             parts = [node.text[a:b].strip() for a, b in zip(cuts, cuts[1:], strict=False)]
-            payloads.append(
-                {
-                    "stage": CHECK_KIND,
-                    "check": "join",
-                    "question": (
-                        "Do these consecutive passages form ONE clause, each continuing "
-                        "the one before?"
-                    ),
-                    "passages": parts,
-                }
-            )
+            payload = {
+                "stage": CHECK_KIND,
+                "check": "join",
+                "question": (
+                    "Do these consecutive passages form ONE clause, each continuing the one before?"
+                ),
+                "passages": parts,
+            }
+            payloads.append((payload, _squash_whitespace(payload)))
     return payloads
+
+
+def _squash_whitespace(value: Any) -> Any:
+    """*value* with every run of whitespace (a no-break space, a double space, a
+    line break) in every string collapsed to one space; lists and dicts recursively."""
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, list):
+        return [_squash_whitespace(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _squash_whitespace(v) for k, v in value.items()}
+    return value
 
 
 def check_subjects(out_dir: Path, *, limit: int = CHECK_SAMPLE_MAX) -> list[ResegmentCheckSubject]:
     """The ``resegment_check`` sample of a mined *out_dir*.
 
     Reads the (born-safe, already pseudonymized) ``normalized/`` clause trees,
-    turns every recorded split and join into a question, drops duplicates by
-    payload (the same text in several versions is one question) and keeps the
-    *limit* questions with the lowest payload hash — all of them when there are
-    *limit* or fewer. A pure function of the trees: the sample is the same on
-    every run over the same store.
+    turns every recorded split and join into a question, drops duplicates and
+    keeps the *limit* questions with the lowest payload hash -- all of them when
+    there are *limit* or fewer. A duplicate is the same text in several
+    versions, or the same text differing only in whitespace (the versions of a
+    document extract a no-break space or a double space differently), also
+    inside a split's context window: two questions are one passage when their
+    payloads are equal or their identities are (:func:`_tree_subjects`), and
+    one passage is checked once, as the variant with the lowest hash. A pure
+    function of the trees: the sample is the same on every run over the same
+    store.
     """
-    seen: dict[str, dict[str, Any]] = {}
+    payloads: dict[str, dict[str, Any]] = {}
+    # Union-find over payload keys, always rooted at the lower key: a passage's
+    # root is its variant with the lowest hash.
+    parent: dict[str, str] = {}
+    first_of: dict[str, str] = {}  # identity key -> the first payload key seen with it
+
+    def passage(key: str) -> str:
+        while parent[key] != key:
+            key = parent[key]
+        return key
+
     for path in sorted((out_dir / "normalized").glob("*/*.clauses.json")):
         try:
             tree = ClauseTree.from_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        for payload in _tree_subjects(tree):
-            seen.setdefault(_payload_key(payload), payload)
-    keys = sorted(seen)[: max(0, limit)]
-    return [ResegmentCheckSubject(key=k, payload=seen[k]) for k in keys]
+        for payload, identity in _tree_subjects(tree):
+            key = _payload_key(payload)
+            payloads.setdefault(key, payload)
+            parent.setdefault(key, key)
+            a, b = passage(key), passage(first_of.setdefault(_payload_key(identity), key))
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+    keys = sorted({passage(key) for key in payloads})[: max(0, limit)]
+    return [ResegmentCheckSubject(key=k, payload=payloads[k]) for k in keys]
 
 
 def validate_check_verdict(verdict: Mapping[str, Any]) -> None:

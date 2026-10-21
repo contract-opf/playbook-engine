@@ -468,7 +468,12 @@ _L1_RECORD_VERSION = 2
 # piece positively of the node's type (typed so, profile words, or a lead-in
 # before such a piece); a textual join refuses a piece only for a heading of its
 # own, not for the segmenter's label.
-_RESEGMENTATION_VERSION = 3
+# v4 (issue #256): a redline join also needs continuation evidence at the cut (the
+# piece before ends open, or the next opens lower case or with a back-reference; a
+# later list marker counts only after a piece that ends open), so a tracked insertion of several whole clauses of one
+# type is no longer one passage; a split unit needs five profile words, not four;
+# the agent check dedupes passages that differ only in whitespace.
+_RESEGMENTATION_VERSION = 4
 # Where a cached record keeps the store entries it was built from, as
 # ``{key: fingerprint}`` (issue #219) — an L1 record the segmentation-store
 # entries it was grounded from, an L2-L4 result the judge verdicts it replayed.
