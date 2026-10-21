@@ -304,14 +304,20 @@ def test_assemble_clauses_carry_counts_and_no_stance() -> None:
             "taxonomy_id",
             "title",
             "our_standard",
+            "prior_standards",
+            "why_changed",
             "n_deals",
             "n_signed_standard",
             "n_variants",
             "n_refused",
             "n_opened_standard",
             "n_kept_standard",
+            "n_opened_prior",
+            "n_kept_prior",
+            "n_moved_to_current",
             "n_changed_openings",
         }
+        assert clause["prior_standards"] == [] and clause["why_changed"] is None
 
 
 def test_assemble_posture_and_floor_empty_but_present() -> None:

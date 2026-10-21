@@ -24,13 +24,60 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.6.json` | `115fe336ad18c67bc122450a40a454e5dbfa978162c463ba2a4c1e354b661585` |
-| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `9f47774ac127443ec1e1f52b5db455b48b7b68c38031aa1292211b099a21663f` |
+| `playbook.schema-0.6.json` | `11935e01fc2951214cda52f413cfe6cec18e8f5c8eb6f0e677a3fe1528518f12` |
+| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `02fbafca81bb1d25acf41fdcd25ebd0f60b3b453dada429222ba413ec92729cd` |
 
 Current `DIGEST_VERSION`: **5** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-21 — OPF 0.6 / digest 5: prior standards (issue #249)
+
+In-place change to the unfrozen `playbook.schema-0.6.json` (epic #245; 0.6 has
+no consumer yet); `digest_version` stays "5". The clauses of OUR former forms
+(`baseline.prior_templates`, issue #246) are recorded as ours and judged once
+against today's standard. Facts only: no reason for a change is ever claimed.
+
+- **`baseline.prior_templates[]`** (optional): `{label, in_use_from?,
+  in_use_until?, sha256?}` for each supplied form, in config order.
+  `$defs.inUseDate` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`).
+- **`evidence.clauses[]`** gains required `prior_standards[]`
+  (`$defs.priorStandard`: `form_label`, `text`, `parts[]` with the
+  `our_standard.parts` rule, `source_ref`, `vs_standard`), required
+  `why_changed` (`{text, basis: "owner"}` or null) and the required counts
+  `n_opened_prior`, `n_kept_prior`, `n_moved_to_current`.
+- **`evidence.precedent[].opened_with`** gains `prior_standard`; optional
+  `opened_with_form` (present exactly when it is `prior_standard`);
+  `opening_text` is recorded for it like for `standard` and `non_standard`.
+- **Digest**: required `standard_history` per clause
+  (`$defs.digestStandardHistory`: `forms[]` of `$defs.digestStandardForm`,
+  `why_changed`); an opening on a former form is never a changed opening.
+- **New validator MUSTs**: `baseline.prior_templates` labels are unique;
+  `prior_standards[].form_label` and `opened_with_form` name a supplied form
+  and a clause has one entry per form; `opened_with_form` is present exactly
+  when `opened_with` is `prior_standard`; a prior standard's `text`, `order`
+  and `part_id`s are those of its parts; its `vs_standard` is null when the
+  form reads as today's standard; the three new counts equal what `precedent`
+  implies. The digest is recomputed whole as before.
+- **A former form is cited in its own bytes.** `$defs.citation.version`
+  gains `prior_template`. A prior standard's `source_ref` (and its digest copy,
+  `standard_history.forms[].ref`) is `{document_id: "prior_template:<label>",
+  version: "prior_template", clause_path, char_span?}`, resolved through that
+  form's `baseline.prior_templates[].sha256` (OPF-SPEC §4, §4.1), never
+  `template`, which always resolves to today's form. New validator MUSTs: a
+  prior standard cites its own form, and a former form's citation names a
+  listed form that carries its `sha256`.
+- **Per-deal form, per-form dates.** `opened_with_form` is decided per deal
+  (among the forms a clause matches, the one the most of the deal's clause
+  types match, then config order), and a form's inferred in-use dates come
+  from every deal that opened on it in any clause, so they are the same in
+  every clause's `standard_history`. Description wording only; no shape change.
+- Conformance vectors regenerated (every clause gains the empty
+  `prior_standards`, `why_changed` and the counts; every digest clause an empty
+  `standard_history`); new vector 012 pins three forms, the three outcomes of a
+  deal that opened on one, an unchanged form, the three kinds of in-use dates
+  and the owner's note.
 
 ### 2026-10-20 — OPF 0.6 / digest 5: how settled each judgment is (issue #248)
 

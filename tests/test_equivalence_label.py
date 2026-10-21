@@ -1087,7 +1087,7 @@ def test_draft_check_adjudicate_project_end_to_end(judged_nda: Path, tmp_path: P
     assert totals["unchecked"] == len(items) - 2
     assert card["agreement_rate"] == 0.5
     assert card["checker_models"] == {CHECKER_MODEL: 2}
-    assert set(card["by_role"]) == {"signed", "opening", "refused"}
+    assert set(card["by_role"]) == {"signed", "opening", "refused", "prior_standard"}
     flat = json.dumps(card)
     assert "ADJUDICATED" not in flat and "DRAFT-" not in flat
 

@@ -1021,7 +1021,8 @@ make docker-run CORPUS=./corpus OUT=./out \
   human review; do not silently guess.
 - **Equivalence** (`kind: equivalence`, template mode only): for each
   distinct non-standard text (a signed text, a non-standard opening, a
-  refused ask) judge it PART BY PART against our standard's numbered parts
+  refused ask, or the clause of an OLDER form of ours that reads differently
+  from today's: role `prior_standard`) judge it PART BY PART against our standard's numbered parts
   (`our_standard_parts`), for `perspective_party`: every part `present`
   (with a `relation`: `equivalent`, `more_protective`, `less_protective`) or
   `omitted` (with the omission's `effect`: `more_protective`,
@@ -1034,7 +1035,10 @@ make docker-run CORPUS=./corpus OUT=./out \
   and new ones can appear after classification verdicts land, so keep
   looping until `pending.jsonl` is empty. See REFERENCE.md § "Equivalence".
   Each text is judged ONCE, however many deals and roles carry it, and
-  never by deal or paper side.
+  never by deal or paper side. A former form's clause is judged exactly like
+  any other text, against TODAY's parts: the question is how our old wording
+  compares with our current wording, and the payload does not name the form or
+  say why anything changed (you must not guess a reason).
 - **Signing date** (`kind: deal_date`): for an executed copy whose preamble
   and signature block the engine could not date on its own (two dates, or a
   numeric date that reads two ways such as `03/04/2021`), say when the deal
@@ -1489,7 +1493,11 @@ Writes exactly **one** human-readable artifact, self-contained, no network
   clause types with no evidence), **Review (optional)** (the shortest useful
   list of model judgments — the `vs_standard` labels the consuming model is
   shown, worst first — each with Confirm / Change label / change one part
-  (each with the owner's reason, which the digest then carries) / note) and **Posture &
+  (each with the owner's reason, which the digest then carries) / note; and,
+  when older forms of ours were supplied, an optional **"Why we changed this"**
+  field per clause that appears in one, in the owner's own words — the only
+  reason the playbook ever gives for a change; leave it blank unless the owner
+  has one) and **Posture &
   Floor** (the authored text, with edit fields). Edits save to
   `$OUT/overrides.json`: the page's **Connect folder** button (Chrome, Edge)
   writes it straight into the out-dir on every change, and **Download edits**
@@ -1513,7 +1521,10 @@ standard, how many deals opened with it and kept it, the signed variants (each
 with how many were conceded from our standard and how many signed as proposed;
 the variants judged equivalent to our standard collapse into one entry), the
 refused asks and the openings not signed as proposed, grouped by exact
-normalization with distinct-deal counts and citations, plus the clause types
+normalization with distinct-deal counts and citations, a `standard_history`
+(each older form of ours with its in-use dates, how its clause compares with
+today's standard part by part, and how many deals opened on it, kept it and
+moved to today's; our own former wording is never a "changed opening"), plus the clause types
 with no evidence at all; verdict-free except the one judged `vs_standard` judgment on each text, carried as its label plus a compact part map (one token per part of our standard, one per addition) a one-sentence reason and `settled`, how settled the judgment is (`agreed`, `adjudicated`, `unchecked` or `owner`, derived from its basis and blind check; the collapsed equivalent entry carries `settled_counts`); target ~40K tokens). There is no standalone digest file.
 
 The bare `$OUT/playbook.opf.json` remains the **canonical source of truth on

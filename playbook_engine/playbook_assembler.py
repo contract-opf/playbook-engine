@@ -25,6 +25,7 @@ import importlib.metadata
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -58,6 +59,7 @@ from playbook_engine.validator import validate_document
 
 if TYPE_CHECKING:
     from playbook_engine.agent_judge import StoreBackedEquivalenceJudge
+    from playbook_engine.prior_standards import PriorForm
 
 #: The one OPF version the engine emits and validates (issue #238): the
 #: verdict-free per-deal precedent record (issue #223) plus a digest_version 5
@@ -287,6 +289,7 @@ def assemble_playbook(
     existing_floor: dict[str, Any] | None = None,
     round_moves: list[RoundMove] | None = None,
     equivalence_judge: StoreBackedEquivalenceJudge | None = None,
+    prior_forms: Sequence[PriorForm] = (),
 ) -> dict[str, Any]:
     """Assemble and validate a complete OPF 0.6 playbook document.
 
@@ -367,6 +370,10 @@ def assemble_playbook(
                           issue #177), from which each precedent's
                           ``rounds``/``moved`` derive. ``None`` = no moves
                           recorded.
+        prior_forms:       Our older forms (issue #249,
+                          :class:`~playbook_engine.prior_standards.PriorForm`):
+                          their clauses become ``evidence.clauses[].prior_standards``
+                          and are judged like any other text. Empty: none.
         equivalence_judge: The store-backed equivalence judge (issue #240)
                           whose stored verdicts become each eligible text's
                           ``vs_standard``. Read-only here (build it without a
@@ -456,6 +463,7 @@ def assemble_playbook(
         corpus_documents=corpus_documents,
         round_moves=round_moves,
         party=perspective_party(playbook),
+        prior_forms=prior_forms,
     )
     # Posture/Floor (§3.6/§3.7): empty-but-present by default (#140 scope
     # excludes Floor invariant content — see #145) — the engine must never

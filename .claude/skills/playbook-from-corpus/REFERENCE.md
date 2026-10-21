@@ -131,7 +131,11 @@ counterparty's paper.
 Queued by `playbook judge` AFTER mining, once a canonical template is
 configured: one item per DISTINCT non-standard text of the precedent record (a
 deal's signed text, a non-standard opening, a refused ask) that has no verdict
-against our standard yet. The same words in ten deals, on either paper, in any
+against our standard yet, and one per clause of each OLDER form of ours
+(`baseline.prior_templates`, role `prior_standard`) that reads differently from
+today's standard: the same judgment answers "how does our former wording compare
+with our current wording?", once per distinct text. A former form's clause that
+is word for word today's is never queued. The same words in ten deals, on either paper, in any
 role, are one item and one shared verdict (the key is over the agreement type,
 clause type, `perspective.party`, the text and the ORDERED parts of our
 standard, never a deal or a paper side). A text that exactly matches our
@@ -147,7 +151,9 @@ then DERIVED by the engine, never chosen by you.
 **Input fields:** `taxonomy_id`, `taxonomy_title`, `perspective_party`,
 `our_standard_parts` (the numbered parts: `{n, part_id, text}`, in order),
 `candidate` (the text to judge), `roles` (which of `signed` / `opening` /
-`refused` it plays). `agreement_type_id` and `stage` are context. There is no
+`refused` / `prior_standard` it plays; a candidate that is one of our former
+forms' clauses is judged exactly like any other text, against today's parts,
+and nothing in the payload names the form). `agreement_type_id` and `stage` are context. There is no
 deal name, counterparty, paper side or outcome in the payload; none of those
 may enter your answer.
 

@@ -91,6 +91,7 @@ __all__ = [
     "RELATIONS",
     "ROLES",
     "ROLE_OPENING",
+    "ROLE_PRIOR_STANDARD",
     "ROLE_REFUSED",
     "ROLE_SIGNED",
     "STANDARD_PART_SEPARATOR",
@@ -230,7 +231,10 @@ BASES = (BASIS_JUDGE, BASIS_AGENT, BASIS_OWNER)
 ROLE_SIGNED = "signed"
 ROLE_OPENING = "opening"
 ROLE_REFUSED = "refused"
-ROLES = (ROLE_SIGNED, ROLE_OPENING, ROLE_REFUSED)
+#: A clause of one of OUR former forms (``evidence.clauses[].prior_standards[]``,
+#: issue #249), judged once against today's standard like any other text.
+ROLE_PRIOR_STANDARD = "prior_standard"
+ROLES = (ROLE_SIGNED, ROLE_OPENING, ROLE_REFUSED, ROLE_PRIOR_STANDARD)
 
 #: Verdict keys a producer-supplied draft may carry. ``label`` is optional
 #: (it is derived; a supplied one must match). ``check`` and the audit trail
@@ -727,7 +731,10 @@ def iter_slots(evidence: Mapping[str, Any]) -> Iterator[Slot]:
     """Every text entry of *evidence* that has a ``vs_standard`` field.
 
     ``signed_text`` and a non-null ``opening_text`` of each precedent record,
-    and each ``refused_asks[]`` entry, in record order.
+    and each ``refused_asks[]`` entry, in record order; then each clause's
+    ``prior_standards[]`` entry (role :data:`ROLE_PRIOR_STANDARD`, issue
+    #249), whose "record" is only ``{"taxonomy_id": ...}``: a former form's
+    clause belongs to no deal.
     """
     clauses = {
         c.get("taxonomy_id"): c for c in evidence.get("clauses") or [] if isinstance(c, dict)
@@ -745,6 +752,14 @@ def iter_slots(evidence: Mapping[str, Any]) -> Iterator[Slot]:
         for ask in record.get("refused_asks") or []:
             if isinstance(ask, dict):
                 yield Slot(ROLE_REFUSED, clause, record, ask)
+    for clause in evidence.get("clauses") or []:
+        if not isinstance(clause, dict):
+            continue
+        for prior in clause.get("prior_standards") or []:
+            if isinstance(prior, dict):
+                yield Slot(
+                    ROLE_PRIOR_STANDARD, clause, {"taxonomy_id": clause.get("taxonomy_id")}, prior
+                )
 
 
 def _standard_text(clause: dict[str, Any] | None) -> str | None:
@@ -772,8 +787,11 @@ def is_eligible(slot: Slot, party: str | None) -> bool:
     Never judged (and never queued): a text with no ``our_standard`` to be
     compared with (emergent mode); a signed text whose ``standard`` fact is
     true or whose grouping key equals our standard's (an exact match is
-    equivalent by definition and stays ``null``); an opening that is not
-    ``non_standard``; an empty text.
+    equivalent by definition and stays ``null``; so does a former form's
+    clause that reads the same as today's); an opening that is not
+    ``non_standard``; an empty text. A former form's clause
+    (:data:`ROLE_PRIOR_STANDARD`) is otherwise always judged — it is the
+    comparison of our old wording with our new.
     """
     standard = _standard_text(slot.clause)
     text = slot.entry.get("text")

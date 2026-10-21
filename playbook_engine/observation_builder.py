@@ -368,6 +368,14 @@ class Observation:
                          observation of a classified taxonomy_id in a deal
                          with a detected executed copy, on its opening
                          row, and on its reversal rows. Serialized only
+                         when not ``None``. ``"prior_standard"`` (OPF 0.6,
+                         issue #249): the first draft's text is not our
+                         current standard but IS the text of one of our
+                         former forms (``baseline.prior_templates``) for the
+                         clause; the current standard wins when both match.
+        opened_with_form: The label of the prior form ``opened_with ==
+                         "prior_standard"`` matched (the first listed form
+                         whose text matches), else ``None``. Serialized only
                          when not ``None``.
         classification_basis: How the cited node's taxonomy_id was reached
                          (issue #237) — the ``ClauseClassification.basis`` of
@@ -438,6 +446,7 @@ class Observation:
     alignment_confidence: float | None = None
     classification_basis: str | None = None
     opened_with: str | None = None
+    opened_with_form: str | None = None
     form_front_matter: bool = False
     resegmented: dict[str, Any] | None = None
     non_clause: str | None = None
@@ -499,6 +508,8 @@ class Observation:
         # written before the field existed reads back None, never "absent".
         if self.opened_with is not None:
             d["opened_with"] = self.opened_with
+        if self.opened_with_form is not None:
+            d["opened_with_form"] = self.opened_with_form
         # form_front_matter (issue #242): vendor key, template observations
         # only, omitted when False.
         if self.form_front_matter:
@@ -849,6 +860,14 @@ DROPPED_ORIGIN_UNDETERMINED = "removed_origin_undetermined"
 #: here (surfaced in ``corpus.stats.dropped_observations``).
 DROPPED_STANDARD_REMOVED_UNSIGNED = "removed_standard_no_signed_copy"
 
+#: ``dropped`` counter key (issue #249): a removed-before-signing row whose
+#: text is one of OUR FORMER forms' language for its clause
+#: (``baseline.prior_templates``) and not the current standard. It is neither
+#: the counterparty's refused ask (the origin is ours) nor a concession of the
+#: current standard, so it produces no observation and is counted here
+#: (surfaced in ``corpus.stats.dropped_observations``).
+DROPPED_PRIOR_STANDARD_REMOVED = "removed_prior_standard"
+
 #: ``dropped`` counter key (issue #221): a would-be refused ask — a removed
 #: row whose text is NON-standard (their) language, or a ``ReversalRecord``
 #: passed in — in a deal with no detected executed copy
@@ -892,6 +911,17 @@ OUTCOME_OPENING = "opening"
 OPENED_STANDARD = "standard"
 OPENED_NON_STANDARD = "non_standard"
 OPENED_ABSENT = "absent"
+#: The first draft is one of OUR former forms for the clause (OPF 0.6, issue
+#: #249): origin is ours, never the counterparty's.
+OPENED_PRIOR_STANDARD = "prior_standard"
+
+#: One of our former forms' clause text for a clause type, as
+#: ``build_observations`` matches a first draft against it:
+#: ``(form label, the form's clause nodes, the form's index in
+#: baseline.prior_templates)``. The index is the form's real position in the
+#: config, so a tie between forms is broken by config order (OPF-SPEC §3.5.5)
+#: whichever clause types the forms happen to share.
+PriorFormNodes = tuple[str, Sequence[str], int]
 
 # Severity ranks used to pick the representative net-diff row when several
 # terminal nodes share one taxonomy_id (issue #216): the row whose attribution
@@ -1110,6 +1140,7 @@ def build_observations(
     dropped: dict[str, int] | None = None,
     standard_text_by_tid: Mapping[str, str | Sequence[str]] | None = None,
     party_names: Sequence[str] = (),
+    prior_standards_by_tid: Mapping[str, Sequence[PriorFormNodes]] | None = None,
 ) -> list[Observation]:
     """Assemble ``Observation`` objects for one document (one deal).
 
@@ -1188,6 +1219,20 @@ def build_observations(
 
     Unclassified nodes get neither; a deal with no detected executed copy
     gets neither (``opened_with`` stays ``None``).
+
+    **Our former forms (issue #249, OPF 0.6).** *prior_standards_by_tid* maps
+    a taxonomy_id to ``(form label, template nodes, config index)`` for each of
+    our older forms (``baseline.prior_templates``; the index is the form's
+    position there). A first draft that
+    is not our current standard but matches a former form's clause text (the
+    same exact check ``standard`` uses, against that form's whole clause) is
+    ``opened_with == "prior_standard"`` with ``opened_with_form`` the label of
+    the form the deal opened on (decided per deal: among the forms a clause
+    matches, the one most of the deal's first-draft clause types match, then
+    config order); the current standard always wins. Its
+    origin is ours: a removed-before-signing text that is a former form's
+    language is not the counterparty's refused ask, so it produces no
+    observation and is counted under ``DROPPED_PRIOR_STANDARD_REMOVED``.
 
     Args:
         document_id:               Source document identifier.
@@ -1325,6 +1370,10 @@ def build_observations(
                                   ``provenance.known_entities``) neutralized
                                   before the standard comparison — see
                                   ``deviation_classifier.normalize_for_standard``.
+        prior_standards_by_tid:     Our former forms' clause nodes per
+                                  taxonomy_id, as ``(label, nodes, config
+                                  index)`` (see above). ``None`` or empty: no
+                                  former forms.
 
     Returns:
         One ``Observation`` per terminal taxonomy_id (plus one per
@@ -1350,6 +1399,26 @@ def build_observations(
         # is not standard.
         nodes = _standard_for(tid)
         return is_standard_text(text, "\n".join(nodes), party_names) if nodes else False
+
+    def _prior_forms_matching(text: str, tid: str | None, *, whole_only: bool = True) -> list[str]:
+        # Issue #249: the labels, in config order, of every former form of
+        # ours whose clause text *text* is, by the same exact check the
+        # standard fact uses (``whole_only``) or the removed-row origin test
+        # (a node of it or a contiguous piece). The current standard is the
+        # caller's business: it always wins.
+        if tid is None or not prior_standards_by_tid:
+            return []
+        labels: list[str] = []
+        for label, nodes, _index in prior_standards_by_tid.get(tid, ()):
+            kept = _standard_nodes(nodes)
+            if not kept:
+                continue
+            if whole_only:
+                if is_standard_text(text, "\n".join(kept), party_names):
+                    labels.append(label)
+            elif _is_standard_language(text, kept, party_names):
+                labels.append(label)
+        return labels
 
     def _deviation_of(standard: bool) -> str:
         # The deviation IS the standard fact.
@@ -1498,6 +1567,17 @@ def build_observations(
                     dropped.get(DROPPED_ORIGIN_UNDETERMINED, 0) + 1
                 )
             continue
+        if not _is_standard_language(raw_text, standard, party_names) and _prior_forms_matching(
+            raw_text, tid, whole_only=False
+        ):
+            # Issue #249: our own former wording struck before signing is
+            # neither their refused ask nor a concession of the current
+            # standard; it is counted, never read as the counterparty's.
+            if dropped is not None:
+                dropped[DROPPED_PRIOR_STANDARD_REMOVED] = (
+                    dropped.get(DROPPED_PRIOR_STANDARD_REMOVED, 0) + 1
+                )
+            continue
         if _is_standard_language(raw_text, standard, party_names):
             if not has_signed_copy:
                 # Our standard struck in a deal with no detected executed
@@ -1577,6 +1657,7 @@ def build_observations(
     # depend on whether a node's text later survived under another clause.
     first_draft_text_by_tid: dict[str, str] = {}
     opened_with_by_tid: dict[str, str] = {}
+    opened_form_by_tid: dict[str, str] = {}
     if has_signed_copy:
         first_rows: dict[str, list[tuple[int, ClauseDiff]]] = {}
         for idx, (clause_diff, _dr) in enumerate(deviation_results):
@@ -1611,16 +1692,48 @@ def build_observations(
         # reversal (a proposal inserted mid-negotiation and struck again,
         # which has no first-draft node, so it "opened" absent).
         reversal_tids = {r.taxonomy_id for r in reversals if r.taxonomy_id is not None}
-        for tid in sorted(terminal_tids | reversal_tids | set(first_draft_text_by_tid), key=str):
-            if tid is None:
+        deal_tids = [
+            t
+            for t in sorted(terminal_tids | reversal_tids | set(first_draft_text_by_tid), key=str)
+            if t is not None
+        ]
+        # Which of our former forms the deal opened on is a fact of the DEAL
+        # (issue #249), not of each clause: forms that read alike in one
+        # clause must not split a deal across two forms. Every clause whose
+        # first draft is not the current standard votes for each form it
+        # reads as; the forms are ranked by votes (most first), then config
+        # order, and each clause takes the best-ranked form it matches.
+        prior_matches: dict[str, list[str]] = {}
+        for tid in deal_tids:
+            first_text = first_draft_text_by_tid.get(tid)
+            if first_text is None or _standard_fact(first_text, tid):
                 continue
+            if labels := _prior_forms_matching(first_text, tid):
+                prior_matches[tid] = labels
+        votes: dict[str, int] = {}
+        for labels in prior_matches.values():
+            for label in labels:
+                votes[label] = votes.get(label, 0) + 1
+        # The tie-break is the form's real index in baseline.prior_templates,
+        # carried with its nodes, never the order the clause types were seen.
+        form_order = {
+            label: index
+            for forms in (prior_standards_by_tid or {}).values()
+            for label, _nodes, index in forms
+        }
+        for tid in deal_tids:
             first_text = first_draft_text_by_tid.get(tid)
             if first_text is None:
                 opened_with_by_tid[tid] = OPENED_ABSENT
-            else:
-                opened_with_by_tid[tid] = (
-                    OPENED_STANDARD if _standard_fact(first_text, tid) else OPENED_NON_STANDARD
+            elif _standard_fact(first_text, tid):
+                opened_with_by_tid[tid] = OPENED_STANDARD
+            elif tid in prior_matches:
+                opened_with_by_tid[tid] = OPENED_PRIOR_STANDARD
+                opened_form_by_tid[tid] = min(
+                    prior_matches[tid], key=lambda lb: (-votes[lb], form_order[lb])
                 )
+            else:
+                opened_with_by_tid[tid] = OPENED_NON_STANDARD
 
     # --- 3. One observation per terminal taxonomy_id (per node if None) ---
     groups: list[list[_TerminalNode]] = []
@@ -1686,6 +1799,11 @@ def build_observations(
                 alignment_confidence=alignment_conf,
                 opened_with=(
                     opened_with_by_tid.get(first.taxonomy_id)
+                    if first.taxonomy_id is not None
+                    else None
+                ),
+                opened_with_form=(
+                    opened_form_by_tid.get(first.taxonomy_id)
                     if first.taxonomy_id is not None
                     else None
                 ),
@@ -1764,6 +1882,9 @@ def build_observations(
                 opened_with=(
                     opened_with_by_tid.get(r.taxonomy_id) if r.taxonomy_id is not None else None
                 ),
+                opened_with_form=(
+                    opened_form_by_tid.get(r.taxonomy_id) if r.taxonomy_id is not None else None
+                ),
             )
         )
 
@@ -1808,6 +1929,7 @@ def build_observations(
                 opened_with=opened_with_by_tid.get(
                     tid, OPENED_STANDARD if opening_standard else OPENED_NON_STANDARD
                 ),
+                opened_with_form=opened_form_by_tid.get(tid),
             )
         )
 

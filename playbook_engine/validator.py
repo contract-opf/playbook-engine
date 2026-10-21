@@ -24,7 +24,12 @@ import yaml
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.deal_dates import BASES as SIGNED_ON_BASES
 from playbook_engine.deal_dates import is_signed_on
-from playbook_engine.opf_accessors import playbook_clauses
+from playbook_engine.opf_accessors import (
+    PRIOR_TEMPLATE_ID_PREFIX,
+    PRIOR_TEMPLATE_VERSION,
+    playbook_clauses,
+    prior_template_label,
+)
 
 #: The one OPF version this validator (and the engine) supports.
 OPF_VERSION = "0.6"
@@ -91,6 +96,17 @@ def _corpus_docs(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _prior_template_forms(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """``baseline.prior_templates[]`` by label (the first entry per label)."""
+    baseline = doc.get("baseline")
+    templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    forms: dict[str, dict[str, Any]] = {}
+    for entry in templates if isinstance(templates, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get("label"), str):
+            forms.setdefault(entry["label"], entry)
+    return forms
+
+
 def _check_opf_version(doc: dict[str, Any], result: ValidationResult) -> bool:
     """Fail loud on an opf_version this validator doesn't support.
 
@@ -133,11 +149,19 @@ def _check_citation_ref(
     path: str,
     result: ValidationResult,
     corpus_docs: dict[str, dict[str, Any]],
+    prior_forms: dict[str, dict[str, Any]],
 ) -> None:
     """Assert a citation resolves: non-null, non-empty document_id, present in
-    corpus.documents (unless 'template'), and version within that document's
-    known version count. OPF §4 — every asserted citation MUST be traceable;
-    a citation that cannot be resolved against the corpus is dangling.
+    corpus.documents (unless 'template' or one of our former forms), and
+    version within that document's known version count. OPF §4 — every
+    asserted citation MUST be traceable; a citation that cannot be resolved
+    against the corpus is dangling.
+
+    A former form's citation (issue #249: ``document_id``
+    ``prior_template:<label>``, ``version`` ``prior_template``) resolves
+    through that form's ``baseline.prior_templates[].sha256``: the form must
+    be listed and carry its content address, or no consumer can verify the
+    cited bytes are the form's (and not today's template's).
     """
     if not ref:
         result.add("missing citation — violates OPF §4", path=path)
@@ -155,6 +179,32 @@ def _check_citation_ref(
         )
         return
 
+    version = ref.get("version")
+    if version == PRIOR_TEMPLATE_VERSION or doc_id.startswith(PRIOR_TEMPLATE_ID_PREFIX):
+        form_label = prior_template_label(ref)
+        if form_label is None:
+            result.add(
+                f"citation pairs document_id {doc_id!r} with version {version!r} — a "
+                f"former form's citation is document_id '{PRIOR_TEMPLATE_ID_PREFIX}<label>' "
+                f"with version {PRIOR_TEMPLATE_VERSION!r}, violates OPF §4",
+                path=path,
+            )
+            return
+        form = prior_forms.get(form_label)
+        if form is None:
+            result.add(
+                f"citation cites former form {form_label!r}, which is not in "
+                "baseline.prior_templates — dangling citation, violates OPF §4",
+                path=path,
+            )
+        elif not form.get("sha256"):
+            result.add(
+                f"citation cites former form {form_label!r}, whose baseline.prior_templates "
+                "entry carries no sha256 — content-unaddressable citation, violates OPF §4",
+                path=path,
+            )
+        return
+
     if doc_id == "template":
         return
 
@@ -167,7 +217,6 @@ def _check_citation_ref(
         )
         return
 
-    version = ref.get("version")
     if isinstance(version, int):
         max_version = corpus_doc.get("versions")
         if isinstance(max_version, int) and version > max_version:
@@ -512,12 +561,14 @@ def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
 def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
     """OPF 0.6 §4: every asserted text carries a citation that resolves.
 
-    Covers ``evidence.clauses[].our_standard.source_ref`` and, per precedent,
-    ``signed_text.ref``, ``opening_text.ref`` and ``refused_asks[].ref``.
-    The digest's refs are copies of these (enforced by the digest equality
-    check), so they need no separate pass.
+    Covers ``evidence.clauses[].our_standard.source_ref`` and
+    ``prior_standards[].source_ref`` and, per precedent, ``signed_text.ref``,
+    ``opening_text.ref`` and ``refused_asks[].ref``. The digest's refs
+    (``standard_history.forms[].ref`` included) are copies of these (enforced
+    by the digest equality check), so they need no separate pass.
     """
     corpus_docs = _corpus_docs(doc)
+    prior_forms = _prior_template_forms(doc)
     for i, clause in enumerate(_evidence_list(doc, "clauses")):
         if not isinstance(clause, dict):
             continue
@@ -533,7 +584,17 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
                 f"evidence.clauses[{i}].our_standard.source_ref",
                 result,
                 corpus_docs,
+                prior_forms,
             )
+        for j, prior in enumerate(clause.get("prior_standards") or []):
+            if isinstance(prior, dict):
+                _check_citation_ref(
+                    prior.get("source_ref"),
+                    f"evidence.clauses[{i}].prior_standards[{j}].source_ref",
+                    result,
+                    corpus_docs,
+                    prior_forms,
+                )
     for i, record in enumerate(_evidence_list(doc, "precedent")):
         if not isinstance(record, dict):
             continue
@@ -541,7 +602,11 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
             entry = record.get(key)
             if isinstance(entry, dict):
                 _check_citation_ref(
-                    entry.get("ref"), f"evidence.precedent[{i}].{key}.ref", result, corpus_docs
+                    entry.get("ref"),
+                    f"evidence.precedent[{i}].{key}.ref",
+                    result,
+                    corpus_docs,
+                    prior_forms,
                 )
         for j, ask in enumerate(record.get("refused_asks") or []):
             if isinstance(ask, dict):
@@ -550,6 +615,7 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
                     f"evidence.precedent[{i}].refused_asks[{j}].ref",
                     result,
                     corpus_docs,
+                    prior_forms,
                 )
 
 
@@ -679,6 +745,83 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
                 )
 
 
+def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.6 prior-standards cross-checks (issue #249, OPF-SPEC §3.5.7).
+
+    - ``baseline.prior_templates[]`` labels are unique;
+    - every ``evidence.clauses[].prior_standards[]`` entry names a supplied
+      form (``form_label`` is a ``baseline.prior_templates[].label``), cites
+      the clause in THAT form (``source_ref`` is ``document_id``
+      ``prior_template:<form_label>``, ``version`` ``prior_template``; never
+      ``"template"``, which is today's form), and a clause has at most one
+      entry per form;
+    - a precedent record's ``opened_with_form`` names a supplied form;
+    - ``why_changed`` is the owner's: ``basis`` is ``"owner"`` (the schema
+      enforces the shape; there is nothing else to check).
+    """
+    baseline = doc.get("baseline")
+    templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    labels: dict[str, int] = {}
+    for i, template in enumerate(templates if isinstance(templates, list) else []):
+        label = template.get("label") if isinstance(template, dict) else None
+        if not isinstance(label, str):
+            continue
+        if label in labels:
+            result.add(
+                f"baseline.prior_templates label {label!r} repeats "
+                f"baseline.prior_templates[{labels[label]}] — labels are unique",
+                path=f"baseline.prior_templates[{i}].label",
+            )
+        else:
+            labels[label] = i
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if not isinstance(clause, dict):
+            continue
+        seen: set[str] = set()
+        for j, prior in enumerate(clause.get("prior_standards") or []):
+            if not isinstance(prior, dict):
+                continue
+            label = prior.get("form_label")
+            path = f"evidence.clauses[{i}].prior_standards[{j}].form_label"
+            if isinstance(label, str) and label not in labels:
+                result.add(
+                    f"prior_standards names form {label!r}, which is not in "
+                    "baseline.prior_templates — a prior standard comes from a supplied form",
+                    path=path,
+                )
+            source = prior.get("source_ref")
+            if (
+                isinstance(label, str)
+                and isinstance(source, dict)
+                and prior_template_label(source) != label
+            ):
+                result.add(
+                    f"prior_standards entry for form {label!r} cites document_id "
+                    f"{source.get('document_id')!r} version {source.get('version')!r} — "
+                    "a prior standard cites the clause in its own form (document_id "
+                    f"'{PRIOR_TEMPLATE_ID_PREFIX}{label}', version "
+                    f"{PRIOR_TEMPLATE_VERSION!r}), never today's template",
+                    path=f"evidence.clauses[{i}].prior_standards[{j}].source_ref",
+                )
+            if isinstance(label, str) and label in seen:
+                result.add(
+                    f"clause has more than one prior_standards entry for form {label!r}",
+                    path=path,
+                )
+            if isinstance(label, str):
+                seen.add(label)
+    for i, record in enumerate(_evidence_list(doc, "precedent")):
+        if not isinstance(record, dict):
+            continue
+        form = record.get("opened_with_form")
+        if isinstance(form, str) and form not in labels:
+            result.add(
+                f"precedent opened_with_form {form!r} is not in baseline.prior_templates — "
+                "a clause opens on a supplied form",
+                path=f"evidence.precedent[{i}].opened_with_form",
+            )
+
+
 def _check_record_signed_on(
     record: dict[str, Any],
     corpus_doc: dict[str, Any] | None,
@@ -779,11 +922,27 @@ def _check_opening(
     - ``signed`` false => ``opened_with`` null and ``opening_text`` null (an
       unsigned deal's version order is not anchored, issue #221);
     - ``opened_with`` ``"absent"`` or null => ``opening_text`` null;
+    - ``opened_with_form`` is present exactly when ``opened_with`` is
+      ``"prior_standard"`` (issue #249; that it names a supplied form is
+      :func:`_check_prior_standards`);
     - ``opening_text`` non-null => its §3.5.4 grouping key differs from
       ``signed_text``'s (or ``signed_text`` is null), and ``moved`` is true.
     """
     opened_with = record.get("opened_with")
     opening = record.get("opening_text")
+    opened_form = record.get("opened_with_form")
+    if opened_with == "prior_standard" and not isinstance(opened_form, str):
+        result.add(
+            "precedent opened_with='prior_standard' but opened_with_form is missing — it "
+            "names the former form the first draft matched",
+            path=f"{path}.opened_with_form",
+        )
+    elif opened_with != "prior_standard" and "opened_with_form" in record:
+        result.add(
+            f"precedent opened_with_form is set but opened_with={opened_with!r} — a form is "
+            "named only when the clause opened on one of our former forms",
+            path=f"{path}.opened_with_form",
+        )
     if record.get("signed") is False:
         if opened_with is not None:
             result.add(
@@ -802,7 +961,7 @@ def _check_opening(
     if opened_with is None or opened_with == "absent":
         result.add(
             f"precedent opened_with={opened_with!r} but opening_text is set — an opening is "
-            "recorded only when opened_with is 'standard' or 'non_standard'",
+            "recorded only when opened_with is 'standard', 'prior_standard' or 'non_standard'",
             path=f"{path}.opening_text",
         )
     opening_value = opening.get("text")
@@ -954,19 +1113,16 @@ def _check_standard_parts(doc: dict[str, Any], result: ValidationResult) -> None
     from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
 
     party = perspective_party(doc)
-    for i, clause in enumerate(_evidence_list(doc, "clauses")):
-        std = clause.get("our_standard") if isinstance(clause, dict) else None
-        if not isinstance(std, dict):
-            continue
+
+    def check(std: dict[str, Any], path: str, name: str) -> None:
         parts = std.get("parts")
-        path = f"evidence.clauses[{i}].our_standard"
         if not isinstance(parts, list) or not parts:
-            result.add("our_standard has no parts", path=f"{path}.parts")
-            continue
+            result.add(f"{name} has no parts", path=f"{path}.parts")
+            return
         texts = [str(p.get("text", "")) if isinstance(p, dict) else "" for p in parts]
         if std.get("text") != STANDARD_PART_SEPARATOR.join(texts):
             result.add(
-                "our_standard.text is not its parts joined in order — the parts must be the "
+                f"{name}.text is not its parts joined in order — the parts must be the "
                 "passages the text is made of",
                 path=f"{path}.text",
             )
@@ -975,14 +1131,28 @@ def _check_standard_parts(doc: dict[str, Any], result: ValidationResult) -> None
                 continue
             if part.get("order") != j + 1:
                 result.add(
-                    f"our_standard part {j} has order {part.get('order')!r}, expected {j + 1}",
+                    f"{name} part {j} has order {part.get('order')!r}, expected {j + 1}",
                     path=f"{path}.parts[{j}].order",
                 )
             if part.get("part_id") != pid:
                 result.add(
-                    f"our_standard part_id {part.get('part_id')!r} is not the content hash of "
+                    f"{name} part_id {part.get('part_id')!r} is not the content hash of "
                     f"its text ({pid!r}) — re-run `playbook project`",
                     path=f"{path}.parts[{j}].part_id",
+                )
+
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if not isinstance(clause, dict):
+            continue
+        std = clause.get("our_standard")
+        if isinstance(std, dict):
+            check(std, f"evidence.clauses[{i}].our_standard", "our_standard")
+        for j, prior in enumerate(clause.get("prior_standards") or []):
+            if isinstance(prior, dict):
+                check(
+                    prior,
+                    f"evidence.clauses[{i}].prior_standards[{j}]",
+                    "prior_standards entry",
                 )
 
 
@@ -1086,7 +1256,9 @@ def _check_equivalence(
       store never produced is invented.
     """
     from playbook_engine.equivalence import (  # noqa: PLC0415
+        ROLE_PRIOR_STANDARD,
         ROLE_SIGNED,
+        is_eligible,
         iter_slots,
         slot_key,
         standard_parts,
@@ -1110,6 +1282,10 @@ def _check_equivalence(
                 paths[id(record[key])] = f"evidence.precedent[{i}].{key}"
         for j, ask in enumerate(record.get("refused_asks") or []):
             paths[id(ask)] = f"evidence.precedent[{i}].refused_asks[{j}]"
+    for i, clause in enumerate(_evidence_list(doc, "clauses")):
+        if isinstance(clause, dict):
+            for j, prior in enumerate(clause.get("prior_standards") or []):
+                paths[id(prior)] = f"evidence.clauses[{i}].prior_standards[{j}]"
     for slot in iter_slots(evidence):
         vs = slot.entry.get("vs_standard")
         if not isinstance(vs, dict):
@@ -1120,6 +1296,17 @@ def _check_equivalence(
             result.add(
                 "vs_standard is set on a signed text whose standard fact is true — an exact "
                 "match with our standard is equivalent by definition and MUST stay null",
+                path=path,
+            )
+            continue
+        if (
+            slot.role == ROLE_PRIOR_STANDARD
+            and isinstance(standard, dict)
+            and not is_eligible(slot, party)
+        ):
+            result.add(
+                "vs_standard is set on a former form's clause that reads exactly as "
+                "today's standard — nothing differs, so it MUST be null",
                 path=path,
             )
             continue
@@ -1361,6 +1548,7 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_citations(doc, result)
     _check_signed_on(doc, result)
     _check_precedent(doc, result)
+    _check_prior_standards(doc, result)
     _check_equivalence(doc, result, verdict_store)
     _check_posture_floor_conflict(doc, result)
     _check_posture_interview_provenance(doc, result)

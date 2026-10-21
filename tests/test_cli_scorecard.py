@@ -162,6 +162,19 @@ _FIELD_NAMES = frozenset(
         "settled_unreconciled",
         "owner",
         "total",
+        # Issue #249: our former forms and the deals that opened on them.
+        "prior_standards",
+        "forms",
+        "clauses_with_history",
+        "entries",
+        "judged",
+        "by_settled",
+        "opened",
+        "kept",
+        "moved_to_current",
+        "why_changed",
+        "unchanged",
+        "standard_history_forms",
         # Issue #247: signed deals dated, by basis.
         "signed_on",
         "dated",
@@ -186,6 +199,7 @@ _TOP_LEVEL = {
     "template",
     "classification",
     "precedent",
+    "prior_standards",
     "signed_on",
     "resegmentation",
     "template_drift",
@@ -273,6 +287,7 @@ _NDA_FLAT_KEYS = frozenset(
         "digest.signed_variant_groups",
         "digest.signed_variants_n_from_standard",
         "digest.signed_variants_n_unchanged",
+        "digest.standard_history_forms",
         "digest.token_estimate",
         "digest.uncovered_clause_types",
         # Issue #228: the NDA example carries one dossier per clause.
@@ -309,7 +324,13 @@ _NDA_FLAT_KEYS = frozenset(
         *(f"equivalence.standard_parts.{field}" for field in ("clauses", "parts", "max", "mean")),
         *(
             f"equivalence.{scope}.{field}"
-            for scope in ("totals", "by_role.signed", "by_role.opening", "by_role.refused")
+            for scope in (
+                "totals",
+                "by_role.signed",
+                "by_role.opening",
+                "by_role.refused",
+                "by_role.prior_standard",
+            )
             for field in (
                 "eligible",
                 "unjudged",
@@ -352,6 +373,25 @@ _NDA_FLAT_KEYS = frozenset(
         "precedent.signed_opened_with_undetermined",
         "precedent.signed_standard",
         "precedent.signed_variants",
+        # Issue #249: the NDA example supplies no former form: all zero.
+        *(
+            f"prior_standards.{field}"
+            for field in (
+                "forms",
+                "clauses_with_history",
+                "entries",
+                "unchanged",
+                "judged",
+                "opened",
+                "kept",
+                "moved_to_current",
+                "why_changed",
+                "by_settled.agreed",
+                "by_settled.adjudicated",
+                "by_settled.unchecked",
+                "by_settled.owner",
+            )
+        ),
         "queues.judge_pending",
         "queues.judge_pending_by_kind",
         "queues.segment_pending",
@@ -456,7 +496,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 10
+    assert card["scorecard_version"] == 11
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,

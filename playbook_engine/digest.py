@@ -20,7 +20,11 @@ text's label plus its compact part map — one token per part of our standard
 effect), one token per addition, ``label_by: "owner"`` when the owner set the
 label over the parts (absent, the label is derived from them) and the
 one-sentence reason (the owner's when the owner set the label). Our standard is carried as its ordered parts, and
-``part_map_legend`` says what each token means.
+``part_map_legend`` says what each token means. Per clause, ``standard_history``
+(issue #249) lists each of OUR former forms with its in-use dates, the deals
+that opened on it (kept, conceded, moved to today's) and how its clause
+compares with today's standard part by part, plus the owner's optional
+``why_changed`` note — the only reason a change is ever given.
 
 The full OPF document carries every precedent's full text and measures in
 the millions of characters on a real corpus — far beyond what a consuming
@@ -63,7 +67,7 @@ from playbook_engine.equivalence import (
 )
 from playbook_engine.equivalence import LABELS as EQUIVALENCE_LABELS
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
-from playbook_engine.precedent import clause_counts
+from playbook_engine.precedent import clause_counts, normalize_variant_text, prior_form_counts
 
 #: Schema version of the digest section itself — bump on any shape change so
 #: consumers can dispatch (the digest is consumed outside this repo).
@@ -522,10 +526,139 @@ def digest_standard(clause: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+#: ``in_use_basis`` of a standard-history form: where its in-use dates came from.
+IN_USE_CONFIG = "config"
+IN_USE_DEAL_DATES = "deal_dates"
+IN_USE_MIXED = "mixed"
+
+
+def _in_use_dates(
+    prior_template: dict[str, Any] | None, opened: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The in-use dates of one former form, and where they came from.
+
+    The dates belong to the FORM, not to a clause: *opened* is every signed
+    deal's precedent record that opened on the form in ANY clause type, so the
+    form carries the same dates in every clause's ``standard_history``.
+
+    Each end is the config's own value (``baseline.prior_templates[]``, at the
+    precision the owner gave) when it was given, else inferred from the deals
+    that opened on the form: the earliest signing month for ``in_use_from``,
+    the latest for ``in_use_until`` (a month, ``YYYY-MM``). ``in_use_basis`` is
+    ``config`` when every date given is the config's, ``deal_dates`` when every
+    one is inferred, ``mixed`` when both kinds appear, and ``null`` when
+    there is no date at all — never guessed.
+    """
+    given = prior_template or {}
+    signed_ons = [p.get("signed_on") for p in opened]
+    from_cfg, until_cfg = given.get("in_use_from"), given.get("in_use_until")
+    first = from_cfg if from_cfg is not None else _earliest(signed_ons)
+    last = until_cfg if until_cfg is not None else _latest(signed_ons)
+    kinds = {
+        kind
+        for value, cfg in ((first, from_cfg), (last, until_cfg))
+        for kind in ((IN_USE_CONFIG if cfg is not None else IN_USE_DEAL_DATES),)
+        if value is not None
+    }
+    basis = None if not kinds else next(iter(kinds)) if len(kinds) == 1 else IN_USE_MIXED
+    return {"in_use_from": first, "in_use_until": last, "in_use_basis": basis}
+
+
+def standard_history(
+    clause: dict[str, Any],
+    records: list[dict[str, Any]],
+    prior_templates: dict[str, dict[str, Any]],
+    *,
+    party: str | None,
+    all_records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The clause's ``standard_history`` (OPF 0.6 / digest 5, issue #249).
+
+    ``{forms, why_changed}``: ``forms`` has one entry per former form of ours
+    with text for the clause, in config order; ``why_changed`` is the owner's
+    note (``{text, basis: "owner"}``) or ``null`` — the only reason a change is
+    ever given. Each form carries:
+
+    - ``form`` (its label), ``in_use_from``/``in_use_until``/``in_use_basis``
+      (:func:`_in_use_dates`), inferred once per form from *all_records* (every
+      clause type's records; default *records*) so a form's dates are the same
+      in every clause;
+    - ``n_opened``, ``n_kept``, ``n_conceded``, ``n_moved_to_current``: distinct
+      signed deals that opened on the form, kept what we sent, conceded it
+      (``n_opened - n_kept``), and ended on today's standard
+      (:func:`~playbook_engine.precedent.prior_form_counts`);
+    - ``unchanged``: the form's clause reads, under the §3.5.4 grouping key,
+      exactly as today's standard — nothing to compare, so no part map;
+    - ``label`` / ``part_map`` / ``additions`` / ``reason`` / ``settled``
+      (``label_by`` when the owner set the label): the form's clause judged
+      against today's standard, part by part, like any other text
+      (:func:`part_map_fields`); null when not judged;
+    - ``parts``: the form's own parts, in order, as ``{part_id, text}`` — a
+      part whose text is one of today's standard (same ``part_id``) carries
+      ``text: null`` to keep the digest compact;
+    - ``ref``: where the clause sits in the form.
+    """
+    current_parts = {p.get("part_id") for p in standard_parts(clause)}
+    standard = clause.get("our_standard")
+    standard_key = (
+        normalize_variant_text(standard["text"], party=party)
+        if isinstance(standard, dict) and isinstance(standard.get("text"), str)
+        else None
+    )
+    forms: list[dict[str, Any]] = []
+    for entry in clause.get("prior_standards") or []:
+        if not isinstance(entry, dict):
+            continue
+        label = entry.get("form_label")
+        opened = [
+            p
+            for p in (records if all_records is None else all_records)
+            if p.get("signed") is True
+            and p.get("opened_with") == "prior_standard"
+            and p.get("opened_with_form") == label
+        ]
+        counts = prior_form_counts(records, label)
+        text = entry.get("text")
+        forms.append(
+            {
+                "form": label,
+                **_in_use_dates(prior_templates.get(str(label)), opened),
+                "n_opened": counts["n_opened"],
+                "n_kept": counts["n_kept"],
+                "n_conceded": counts["n_opened"] - counts["n_kept"],
+                "n_moved_to_current": counts["n_moved_to_current"],
+                "unchanged": bool(
+                    standard_key
+                    and isinstance(text, str)
+                    and normalize_variant_text(text, party=party) == standard_key
+                ),
+                "label": _label_of(entry),
+                **part_map_fields(entry),
+                "parts": [
+                    {
+                        "part_id": part.get("part_id"),
+                        "text": None if part.get("part_id") in current_parts else part.get("text"),
+                    }
+                    for part in entry.get("parts") or []
+                    if isinstance(part, dict)
+                ],
+                "ref": entry.get("source_ref"),
+            }
+        )
+    note = clause.get("why_changed")
+    return {"forms": forms, "why_changed": note if isinstance(note, dict) else None}
+
+
 def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, Any]:
     """Digest 4 with a fixed per-list cap of *top_n* (``None`` = uncapped)."""
     precedent = playbook_precedent_records(playbook)
     party = perspective_party(playbook)
+    baseline = playbook.get("baseline")
+    prior_templates = {
+        str(t.get("label")): t
+        for t in (baseline.get("prior_templates") if isinstance(baseline, dict) else None) or []
+        if isinstance(t, dict)
+    }
     clauses: list[dict[str, Any]] = []
     for clause in playbook_clauses(playbook):
         tid = clause.get("taxonomy_id")
@@ -551,6 +684,13 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
                 "n_signed_standard": clause.get("n_signed_standard"),
                 "n_opened_standard": counts["n_opened_standard"],
                 "n_kept_standard": counts["n_kept_standard"],
+                "standard_history": standard_history(
+                    clause,
+                    [p for p in precedent if p.get("taxonomy_id") == tid],
+                    prior_templates,
+                    party=party,
+                    all_records=precedent,
+                ),
                 "positions": _positions([p for p in precedent if p.get("taxonomy_id") == tid]),
                 "signed_variants": listed if top_n is None else listed[:top_n],
                 "refused_asks": refused if top_n is None else refused[:top_n],

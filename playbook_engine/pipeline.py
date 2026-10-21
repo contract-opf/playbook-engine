@@ -107,6 +107,7 @@ from playbook_engine.natural_sort import natural_sort_key
 from playbook_engine.observation_builder import (
     Observation,
     ObservationCitation,
+    PriorFormNodes,
     RoundMove,
     build_observations,
     build_round_moves,
@@ -133,6 +134,13 @@ from playbook_engine.playbook_assembler import (
     write_precedent_sidecar,
 )
 from playbook_engine.precedent import build_precedent_evidence, restamp_evidence
+from playbook_engine.prior_standards import (
+    PRIOR_TEMPLATES_FILENAME,
+    PRIOR_TEMPLATES_VERSION,
+    PriorForm,
+    baseline_prior_templates,
+    origin_standards,
+)
 from playbook_engine.provenance_detector import (
     PROVENANCE_UNKNOWN,
     ProvenanceJudge,
@@ -1235,6 +1243,112 @@ def _build_template_observations(
     return _template_observations_from_classified(classified)
 
 
+def _prior_form_observations(
+    path: Path,
+    label: str,
+    *,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    classification_judge: ClassificationJudge,
+    use_llm_segmentation: bool,
+    llm_segment_fn: SegmentFn | None,
+    segmentation_cache: SegmentationVerdictCache | None,
+    extraction_cache: ExtractionCache | None,
+    refresh_extraction: bool,
+    progress: Callable[[str], None],
+) -> list[Observation] | None:
+    """Segment and classify one of our former forms EXACTLY like the current template.
+
+    Issue #249. The same producer as the template (same ingest or LLM/agent
+    segmentation, signature block cut the same way, same front-matter rule in
+    :func:`_template_observations_from_classified`), so a clause type's parts
+    in an old form are comparable, part for part, with today's standard.
+    ``None`` (and a loud warning, as for the template) when the form cannot be
+    segmented yet: the agent segmentation queue then carries it, and the run
+    proceeds without that form until the next ``mine``.
+    """
+    try:
+        if use_llm_segmentation:
+            tree, tax_by_path, _label = _llm_segment_file(
+                path,
+                "template",
+                "template",
+                [e.id for e in taxonomy.classifier_entries()],
+                llm_segment_fn,
+                segmentation_cache,
+                model=config.segmentation.model,
+                extraction_cache=extraction_cache,
+                refresh_extraction=refresh_extraction,
+                extractor=config.extraction.extractor,
+            )
+            return _template_observations_from_classified(
+                _classified_from_taxonomy_by_path(strip_signature_block(tree)[0], tax_by_path)
+            )
+        tree = segment(_ingest_file(path, "template", "template"))
+        return _build_template_observations(
+            strip_signature_block(tree)[0],
+            taxonomy,
+            classification_judge,
+            ambiguity_threshold=config.classification.ambiguity_threshold,
+            auto_classify_threshold=config.classification.auto_classify_threshold,
+        )
+    except SegmentationQAError as exc:
+        progress(
+            f"  WARNING: prior template {label!r} segmentation pending ({exc}) — run "
+            "'playbook segment'/'segment-apply' and re-mine; this run proceeds WITHOUT "
+            "that form (its deals' openings are read against the other forms only)"
+        )
+    except Exception as exc:  # noqa: BLE001
+        progress(f"  WARNING: could not ingest prior template {label!r}: {exc}")
+    return None
+
+
+def _prior_nodes(forms: Sequence[PriorForm]) -> list[tuple[str, dict[str, list[str]]]]:
+    """``(label, nodes per clause type)`` of each form, in config order."""
+    return [(f.label, f.nodes_by_tid()) for f in forms]
+
+
+def _prior_forms_json_text(forms: Sequence[PriorForm]) -> str:
+    """The exact text ``prior_templates.json`` holds for *forms*."""
+    return _json_text(
+        {
+            "prior_templates_version": PRIOR_TEMPLATES_VERSION,
+            "forms": [
+                {
+                    "label": f.label,
+                    "in_use_from": f.in_use_from,
+                    "in_use_until": f.in_use_until,
+                    "sha256": f.sha256,
+                    "observations": [o.to_dict() for o in f.observations],
+                }
+                for f in forms
+            ],
+        }
+    )
+
+
+def _read_prior_forms(out_dir: Path) -> list[PriorForm]:
+    """The forms ``mine`` persisted (``[]`` when it persisted none)."""
+    path = out_dir / PRIOR_TEMPLATES_FILENAME
+    if not path.is_file():
+        return []
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    forms: list[PriorForm] = []
+    for entry in raw.get("forms") or []:
+        forms.append(
+            PriorForm(
+                label=entry["label"],
+                observations=tuple(
+                    truncate_search_snippets(_restore_observations(entry.get("observations") or []))
+                ),
+                in_use_from=entry.get("in_use_from"),
+                in_use_until=entry.get("in_use_until"),
+                sha256=entry.get("sha256"),
+            )
+        )
+    return forms
+
+
 def _content_exemplars(template_std_by_tid: dict[str, str]) -> dict[str, str]:
     """``{taxonomy_id: our standard's clause text}`` for the content-similarity
     fallback (issue #235): the clause type's complete standard, every template
@@ -1360,6 +1474,7 @@ def _observations_from_single_version(
     our_authors: list[str] | None = None,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
     party_names: Sequence[str] = (),
+    prior_standards_by_tid: dict[str, list[PriorFormNodes]] | None = None,
 ) -> list[Observation]:
     """Create observations from a single-version document, diffed against the template.
 
@@ -1426,6 +1541,7 @@ def _observations_from_single_version(
             else template_std_by_tid
         ),
         party_names=party_names,
+        prior_standards_by_tid=prior_standards_by_tid,
     )
 
 
@@ -1475,6 +1591,7 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 alignment_confidence=raw.get("x_alignment_confidence"),
                 classification_basis=raw.get("x_classification_basis"),
                 opened_with=raw.get("opened_with"),
+                opened_with_form=raw.get("opened_with_form"),
                 form_front_matter=bool(raw.get("x_form_front_matter", False)),
                 resegmented=raw.get("x_resegmented"),
                 non_clause=raw.get("x_non_clause"),
@@ -2811,13 +2928,16 @@ def _compute_doc_result(
     refresh_extraction: bool = False,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
     timed_out_versions: list[str] | None = None,
+    prior_standards_by_tid: dict[str, list[PriorFormNodes]] | None = None,
 ) -> dict[str, Any] | None:
     """Compute L1–L4 for a single document; return a cacheable result dict or None on skip.
 
     *template_std_nodes_by_tid* (issue #216) is every template node's text
     per taxonomy_id, in document order — the origin reference for a clause
     removed before signing. When ``None`` (legacy callers), the joined
-    *template_std_by_tid* standard stands in.
+    *template_std_by_tid* standard stands in. *prior_standards_by_tid*
+    (issue #249) is the same reference for each of our former forms, as
+    ``(label, nodes)`` per taxonomy_id in config order.
 
     Deviations come from the deterministic standard check, never a judge.
 
@@ -2959,6 +3079,7 @@ def _compute_doc_result(
         normalize_trail_across_versions=normalize_trail_across_versions,
         normalize_trail_fn=normalize_trail_fn,
         template_std_nodes_by_tid=template_std_nodes_by_tid,
+        prior_standards_by_tid=prior_standards_by_tid,
     )
 
 
@@ -2983,6 +3104,7 @@ def _compute_doc_from_l1(
     normalize_trail_fn: NormalizeTrailFn | None = None,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
     profiles: resegmentation.TypeProfiles | None = None,
+    prior_standards_by_tid: dict[str, list[PriorFormNodes]] | None = None,
 ) -> dict[str, Any] | None:
     """L2-L4 for one document from its L1 state (issue #219).
 
@@ -3305,6 +3427,7 @@ def _compute_doc_from_l1(
             our_authors=config.provenance.our_authors,
             template_std_nodes_by_tid=template_std_nodes_by_tid,
             party_names=_standard_party_names(config),
+            prior_standards_by_tid=prior_standards_by_tid,
         )
     else:
         classified_versions = [(vid, classified_by_version[vid]) for vid in ordered_ids]
@@ -3405,6 +3528,7 @@ def _compute_doc_from_l1(
                 else template_std_by_tid
             ),
             party_names=_standard_party_names(config),
+            prior_standards_by_tid=prior_standards_by_tid,
         )
 
     # Issue #225: paper_basis / paper_confidence travel on every observation
@@ -3922,6 +4046,40 @@ def mine_corpus(
         if t_obs.taxonomy_id is not None:
             template_std_nodes_by_tid.setdefault(t_obs.taxonomy_id, []).append(t_obs.full_text)
 
+    # Issue #249: our former forms (baseline.prior_templates), segmented and
+    # classified exactly like the template. They are the origin reference a
+    # first draft is read against AFTER the current standard: a deal that
+    # opened on one of them opened on OUR wording.
+    prior_forms: list[PriorForm] = []
+    for prior_cfg in config.baseline.prior_templates:
+        prior_obs = _prior_form_observations(
+            prior_cfg.path,
+            prior_cfg.label,
+            config=config,
+            taxonomy=taxonomy,
+            classification_judge=_cls_judge,
+            use_llm_segmentation=use_llm_segmentation,
+            llm_segment_fn=llm_segment_fn,
+            segmentation_cache=segmentation_cache,
+            extraction_cache=extraction_cache,
+            refresh_extraction=refresh_extraction,
+            progress=progress,
+        )
+        if prior_obs is None:
+            continue
+        prior_forms.append(
+            PriorForm(
+                label=prior_cfg.label,
+                observations=tuple(prior_obs),
+                in_use_from=prior_cfg.in_use_from,
+                in_use_until=prior_cfg.in_use_until,
+                sha256=file_sha256(prior_cfg.path),
+            )
+        )
+        n_prior_std = len(template_standards(prior_obs))
+        progress(f"  prior template {prior_cfg.label!r}: {n_prior_std} clause type(s) classified")
+    prior_standards_by_tid = origin_standards(prior_forms)
+
     # Config fingerprint: encodes the fields that affect L1-L4 outputs.
     # Assembled HERE — after template ingestion above, not from the template
     # file's content hash alone — so that the template's classification
@@ -4042,6 +4200,21 @@ def mine_corpus(
             # taxonomy_id, so a change to any later node busts the cache too.
             "template_origin_standards": make_config_fingerprint(
                 sorted(template_std_nodes_by_tid.items())
+            ),
+            # Issue #249: our former forms feed ``opened_with`` and the
+            # removed-row origin test. Keyed in only when a form is loaded, so
+            # a run with none keeps the fingerprint (and the cache) it had.
+            **(
+                {
+                    "prior_origin_standards": make_config_fingerprint(
+                        [
+                            [label, sorted(nodes.items())]
+                            for label, nodes in _prior_nodes(prior_forms)
+                        ]
+                    )
+                }
+                if prior_forms
+                else {}
             ),
             # Switching segmentation paths also switches L3 (the LLM path's
             # own per-clause taxonomy vs classify_tree) — an L2-L4 input too,
@@ -4423,6 +4596,7 @@ def mine_corpus(
                 normalize_trail_fn=normalize_trail_fn,
                 template_std_nodes_by_tid=template_std_nodes_by_tid,
                 profiles=reseg_profiles,
+                prior_standards_by_tid=prior_standards_by_tid,
             )
 
         if store is None:
@@ -4945,6 +5119,16 @@ def mine_corpus(
         observations_jsonl_text(truncate_search_snippets(t_observations)),
         force=force_rewrite,
     )
+    # Issue #249: our former forms, persisted so project_playbook reads them
+    # without re-ingesting. Absent (and any stale file removed) when no form
+    # is configured, so a run without prior templates writes what it always did.
+    prior_forms_path = out_dir / PRIOR_TEMPLATES_FILENAME
+    if prior_forms:
+        write_text_if_changed(
+            prior_forms_path, _prior_forms_json_text(prior_forms), force=force_rewrite
+        )
+    else:
+        prior_forms_path.unlink(missing_ok=True)
     write_text_if_changed(manifest_path, _json_text(corpus_documents), force=force_rewrite)
     if store is not None:
         # "cache hits=" counts DOCUMENTS (the per-document L2-L4 layer, the
@@ -5017,6 +5201,7 @@ class _ProjectionStore:
     template_observations: list[Observation]
     round_moves: list[RoundMove]
     scope_bases: list[str]
+    prior_forms: list[PriorForm]
 
 
 def _read_projection_store(
@@ -5094,6 +5279,7 @@ def _read_projection_store(
         template_observations=t_observations,
         round_moves=round_moves,
         scope_bases=scope_bases,
+        prior_forms=_read_prior_forms(out_dir),
     )
 
 
@@ -5149,6 +5335,7 @@ def equivalence_subjects(
             corpus_documents=store.corpus_documents,
             round_moves=store.round_moves,
             party=party,
+            prior_forms=store.prior_forms,
         )
     )
     # As the assembler does: ids (precedent ids, standard part ids) over the
@@ -5303,6 +5490,10 @@ def project_playbook(
         template_path = Path(config.baseline.template_path)
         if template_path.is_file():
             baseline_dict["template_ref"]["sha256"] = file_sha256(template_path)
+    # Issue #249: the older forms of ours the mined store read (label, config
+    # dates, content address). Absent when none was supplied.
+    if store.prior_forms:
+        baseline_dict["prior_templates"] = baseline_prior_templates(store.prior_forms)
 
     # Assemble agreement_type dict
     agreement_type_dict: dict[str, Any] = {
@@ -5389,6 +5580,7 @@ def project_playbook(
         existing_floor=existing_floor,
         round_moves=round_moves,
         equivalence_judge=equivalence_judge,
+        prior_forms=store.prior_forms,
     )
 
     # Issue #241: the owner's optional corrections (`overrides.json`, saved by

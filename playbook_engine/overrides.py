@@ -24,9 +24,16 @@ File format (``overrides_version`` 1, the one and only version)::
         {"target": "posture", "id": "system_prompt",
          "value": "<text>", "basis": "owner"},
         {"target": "floor", "id": "<invariant id>", "field": "statement" | "rationale",
-         "value": "<text>", "basis": "owner"}
+         "value": "<text>", "basis": "owner"},
+        {"target": "why_changed", "id": "<taxonomy_id>",
+         "value": "<why we changed this clause>", "basis": "owner"}
       ]
     }
+
+A ``why_changed`` entry (issue #249) is the owner's optional note on why a clause's
+standard changed since our former forms; it is addressed by the clause's
+``taxonomy_id`` and lands as ``evidence.clauses[].why_changed`` ``{text, basis:
+"owner"}`` — the only reason the playbook ever gives for a change.
 
 Keys are stable ids: a ``vs_standard`` entry is addressed by the verdict cache
 key of OPF-SPEC §3.5.6 (:func:`playbook_engine.equivalence.equivalence_key`) —
@@ -110,7 +117,8 @@ OVERRIDES_VERSION = 1
 TARGET_VS_STANDARD = "vs_standard"
 TARGET_POSTURE = "posture"
 TARGET_FLOOR = "floor"
-TARGETS = (TARGET_VS_STANDARD, TARGET_POSTURE, TARGET_FLOOR)
+TARGET_WHY_CHANGED = "why_changed"
+TARGETS = (TARGET_VS_STANDARD, TARGET_POSTURE, TARGET_FLOOR, TARGET_WHY_CHANGED)
 
 #: The one Posture field an override can replace.
 POSTURE_FIELD = "system_prompt"
@@ -287,6 +295,13 @@ def parse_overrides(raw: Any) -> list[Override]:
                 ok = False
             if fld is not None:
                 problems.append(f"{where}: a posture entry takes no field")
+                ok = False
+            if not _nonempty_str(value):
+                problems.append(f"{where}: value must be non-empty text")
+                ok = False
+        elif target == TARGET_WHY_CHANGED:
+            if fld is not None:
+                problems.append(f"{where}: a why_changed entry takes no field")
                 ok = False
             if not _nonempty_str(value):
                 problems.append(f"{where}: value must be non-empty text")
@@ -551,6 +566,28 @@ def apply_overrides(
             posture[OWNER_MARKER] = BASIS_OWNER
             playbook["posture"] = posture
             result.changed[TARGET_POSTURE] += 1
+        elif entry.target == TARGET_WHY_CHANGED:
+            clause = next(
+                (
+                    c
+                    for c in evidence.get("clauses") or []
+                    if isinstance(c, dict) and c.get("taxonomy_id") == entry.id
+                ),
+                None,
+            )
+            if clause is None:
+                problems.append(
+                    f"{entry.describe()}: no clause of this playbook has that taxonomy_id "
+                    f"(the corpus changed since the page was made? remove the entry from "
+                    f"{OVERRIDES_FILENAME})"
+                )
+                continue
+            note = {"text": entry.value, "basis": BASIS_OWNER}
+            if clause.get("why_changed") == note:
+                result.unchanged += 1
+                continue
+            clause["why_changed"] = note
+            result.changed[TARGET_WHY_CHANGED] += 1
         else:
             floor = playbook.get("floor")
             invariants = floor.get("invariants") if isinstance(floor, dict) else None

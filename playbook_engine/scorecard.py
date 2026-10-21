@@ -70,6 +70,7 @@ from playbook_engine.equivalence_check import CHECKER_MODEL
 from playbook_engine.llm_segmenter_batch import SegmentationVerdictCache
 from playbook_engine.observation_builder import (
     DROPPED_ORIGIN_UNDETERMINED,
+    DROPPED_PRIOR_STANDARD_REMOVED,
     DROPPED_REFUSED_UNSIGNED,
     DROPPED_STANDARD_REMOVED_UNSIGNED,
     DROPPED_SURVIVES_IN_TERMINAL,
@@ -147,7 +148,14 @@ __all__ = [
 #: ``resegmented`` classification basis appears; and a ``resegmentation``
 #: section counts the splits and joins, the observations they produced and the
 #: agent check of a sample of them.
-SCORECARD_VERSION = 10
+#:
+#: v11 (issue #249): ``precedent`` and the ``digest`` section count the clauses
+#: that opened on one of our former forms (``opened_with`` gains
+#: ``prior_standard``); ``prior_standards`` totals the former forms, their
+#: clause entries, the opened / kept / moved-to-current deals and the entries
+#: by ``settled`` outcome; ``equivalence.by_role`` gains ``prior_standard``;
+#: ``dropped_observations`` gains ``removed_prior_standard``.
+SCORECARD_VERSION = 11
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -185,6 +193,7 @@ DROPPED_REASONS = frozenset(
         DROPPED_ORIGIN_UNDETERMINED,
         DROPPED_STANDARD_REMOVED_UNSIGNED,
         DROPPED_REFUSED_UNSIGNED,
+        DROPPED_PRIOR_STANDARD_REMOVED,
     }
 )
 
@@ -214,7 +223,7 @@ EQUIVALENCE_VOCABULARY = (
 PAPER_SIDES = frozenset({"our_paper", "counterparty_paper", "unknown"})
 
 #: ``opened_with`` (OPF 0.6, issue #233); a null value is ``undetermined``.
-OPENED_WITH = frozenset({"standard", "non_standard", "absent", "undetermined"})
+OPENED_WITH = frozenset({"standard", "prior_standard", "non_standard", "absent", "undetermined"})
 
 #: The engine's one format; any other version a playbook claims is labelled
 #: ``other``.
@@ -533,6 +542,64 @@ def _precedent_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None
     }
 
 
+def _prior_standards_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Counts of our former forms and the deals that opened on them (issue #249).
+
+    ``forms`` are the supplied forms (``baseline.prior_templates``);
+    ``clauses_with_history`` the clauses with at least one form's text and
+    ``entries`` those (clause, form) texts, of which ``unchanged`` read exactly
+    as today's standard, ``judged`` carry a ``vs_standard`` and ``by_settled``
+    the judged ones by outcome. ``opened`` / ``kept`` / ``moved_to_current``
+    total the clauses' ``n_opened_prior`` / ``n_kept_prior`` /
+    ``n_moved_to_current`` (distinct deals per clause); ``why_changed`` the
+    clauses carrying an owner note. Counts only.
+    """
+    if playbook is None:
+        return None
+    evidence = playbook.get("evidence")
+    raw = evidence.get("clauses") if isinstance(evidence, dict) else None
+    if not isinstance(raw, list):
+        return None
+    clauses = [c for c in raw if isinstance(c, dict)]
+    baseline = playbook.get("baseline")
+    templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    party = perspective_party(playbook)
+    entries = judged = unchanged = with_history = notes = 0
+    by_settled = dict.fromkeys(SETTLED, 0)
+    for clause in clauses:
+        priors = [p for p in clause.get("prior_standards") or [] if isinstance(p, dict)]
+        with_history += bool(priors)
+        notes += isinstance(clause.get("why_changed"), dict)
+        standard = clause.get("our_standard")
+        standard_text = standard.get("text") if isinstance(standard, dict) else None
+        for prior in priors:
+            entries += 1
+            text = prior.get("text")
+            if (
+                isinstance(text, str)
+                and isinstance(standard_text, str)
+                and normalize_variant_text(text, party=party)
+                == normalize_variant_text(standard_text, party=party)
+            ):
+                unchanged += 1
+            vs = prior.get("vs_standard")
+            if isinstance(vs, dict):
+                judged += 1
+                by_settled[settled_of(vs)] += 1
+    return {
+        "forms": len(templates) if isinstance(templates, list) else 0,
+        "clauses_with_history": with_history,
+        "entries": entries,
+        "unchanged": unchanged,
+        "judged": judged,
+        "by_settled": by_settled,
+        "opened": sum(_count(c.get("n_opened_prior")) or 0 for c in clauses),
+        "kept": sum(_count(c.get("n_kept_prior")) or 0 for c in clauses),
+        "moved_to_current": sum(_count(c.get("n_moved_to_current")) or 0 for c in clauses),
+        "why_changed": notes,
+    }
+
+
 def _signed_on_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
     """Counts of signed deals by how their signing date was established (issue #247).
 
@@ -673,6 +740,12 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         from_standard = unchanged = None
         settled = None
     uncovered = digest.get("uncovered_clause_types")
+    history = [
+        c["standard_history"]
+        for c in clauses
+        if isinstance(c.get("standard_history"), dict)
+        and isinstance(c["standard_history"].get("forms"), list)
+    ]
     return {
         "digest_version": _label(digest.get("digest_version"), DIGEST_VERSIONS),
         "token_estimate": digest_token_estimate(digest),
@@ -686,6 +759,7 @@ def _digest_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
         "signed_variants_n_unchanged": unchanged,
         "changed_openings": changed_openings,
         "settled": settled,
+        "standard_history_forms": sum(len(h["forms"]) for h in history),
         "uncovered_clause_types": len(uncovered) if isinstance(uncovered, list) else None,
     }
 
@@ -849,6 +923,10 @@ def _unlisted_settled(
     }
     listed: dict[str, set[str]] = {role: set() for role in _DIGEST_LIST_OF_ROLE}
     for slot in iter_slots(evidence):
+        if slot.role not in _DIGEST_LIST_OF_ROLE:
+            # A former form's clause (issue #249) sits in the digest's
+            # ``standard_history``, not in one of these three lists.
+            continue
         if not is_eligible(slot, party):
             continue
         key = slot_key(slot, agreement_type_id, party)
@@ -1020,6 +1098,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "classification": _classification_section(observations),
         "resegmentation": _resegmentation_section(manifest, observations, out_dir),
         "precedent": _precedent_section(playbook),
+        "prior_standards": _prior_standards_section(playbook),
         "signed_on": _signed_on_section(playbook),
         "template_drift": _template_drift_section(playbook),
         # Issue #233: the drift of what each clause OPENED with — per clause

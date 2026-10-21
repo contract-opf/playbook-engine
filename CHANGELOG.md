@@ -95,6 +95,46 @@ changes` heading in the release it ships under.
   segmenter's own assignments are never second-guessed. `playbook judge` now
   queues `classify` items on an agent-segmented corpus.
 
+- **OPF 0.6 / digest 5: our own former forms, recorded as ours, with a
+  factual standard history (issue #249, epic #245).** Past deals mostly
+  opened on older versions of our form (on the private acceptance corpus, 573 of 642 signed precedents
+  read `non_standard`), so our own former wording read as the counterparty's.
+  The forms supplied under `baseline.prior_templates` (issue #246) are now
+  segmented and classified exactly like the current template (same producer,
+  same front-matter rule; `mine` persists them as `prior_templates.json`, and
+  a run with none writes nothing new). A first draft that is not today's
+  standard but is a former form's clause text (the `standard` fact's exact
+  check; today's standard wins; the form is decided per deal: among the forms a
+  clause matches, the one most of the deal's clauses match, then the first listed) is
+  `opened_with: "prior_standard"` with `opened_with_form`, the form's label:
+  its origin is ours, so it is never a "changed opening", and a clause of ours
+  struck before signing is no refused ask (it is counted under
+  `corpus.stats.dropped_observations`, `removed_prior_standard`). Held and
+  conceded are computed against the form we actually sent:
+  `evidence.clauses[].n_opened_prior` / `n_kept_prior` / `n_moved_to_current`.
+  Each form's clause is kept per clause as `prior_standards[]` (parts with
+  stable `part_id`s, the same rule as `our_standard`, and a citation of the
+  clause in the form's own bytes: `document_id` `prior_template:<label>`,
+  `version` `prior_template`, resolved through the form's
+  `baseline.prior_templates[].sha256` by OPF-SPEC §4.1, `playbook
+  resolve-citation`'s resolver and the validator, never through `template`,
+  which is today's form) and judged against
+  today's standard once, part by part, with the issue #243 machinery: the new
+  equivalence subject role `prior_standard`, the same cache key (so the same
+  words signed in a deal share one verdict), drafts and blind checks drained
+  as for any other text, and nothing in the payload naming the form. Digest 5
+  gains `standard_history` per clause: for each form its label, its in-use
+  dates (the owner's, else inferred from the signing months of the deals that
+  opened on it, with `in_use_basis` saying which), its part map against
+  today's standard, its opened / kept / conceded / moved-to-current deals and
+  its own parts. The only reason a change is ever shown is the owner's
+  optional `why_changed`, written in the Review tab's "Why we changed this"
+  field (saved to `overrides.json` as a `why_changed` entry, `basis: owner`;
+  never required). `playbook scorecard` (v11) counts the forms, their
+  clauses, judged texts and the deals that opened on them. Converted in place:
+  `spec/playbook.schema-0.6.json`, `spec/conformance/0.6/` (new vector 012),
+  `examples/nda/`. No backward compatibility.
+
 - **OPF 0.6 / digest 5: how settled each judgment is (issue #248, epic
   #245).** A contested label deserves more scrutiny at review time, so the
   model-facing projections now say how settled each `vs_standard` judgment
