@@ -18,7 +18,15 @@ the judgment task.
 read it once and keep it at hand).
 
 **Task:** Assign the best-fit `taxonomy_id` from `taxonomy_ids`. Return
-`null` if no entry fits with reasonable confidence.
+`null` if no entry fits with reasonable confidence. Read each candidate's
+description in the taxonomy YAML, including the "Not ..." boundary it names:
+the boundaries exist to stop a lexical match (the word "assignment" in a clause
+about placing students) from winning over the meaning.
+
+On an agent-segmented corpus these items are the nodes the segmenter left
+`null` (issue #253), asked again under the taxonomy in force; the answer is a
+dedicated judge verdict (`basis: "judge"`), not the flat 0.45 segmenter
+confidence.
 
 **Prompt (adapt as needed):**
 
@@ -442,8 +450,11 @@ line per distinct `canonical_text`):
   (dotted clause paths are derived from the tree). `order` is 1-based within a
   parent.
 - `taxonomy_id` must be from the item's `taxonomy_ids`, or `null` if no entry
-  fits — this doubles as first-pass classification, so the judge loop then has
-  no `classify` items.
+  fits — this doubles as first-pass classification. The judge loop then has
+  `classify` items only for the nodes you left `null` that carry operative text
+  (issue #253: a clause type added after segmentation reaches that text only
+  through them); a node that is only its own heading, or has no letters, is
+  never queued.
 - `start_quote`/`end_quote` may be `""` for block-aligned clauses; the range is
   reconstructed from the block span. (Splitting *within* a block would require
   exact boundary quotes — the live-LLM segmenter's job, not this path.)

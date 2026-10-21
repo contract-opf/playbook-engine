@@ -10,6 +10,31 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Affiliation taxonomy: five clause types the corpus showed it lacked, and a
+  second look at segmenter nulls (issue #253, epic #245).** Text the taxonomy
+  had no home for stayed unclassified, so it never reached precedent and an
+  absence count could not tell "not there" from "nowhere to file it".
+  `spec/taxonomy/affiliation-agreement.yaml` gains `compliance_with_laws`,
+  `student_access_and_removal`, `survival`, `student_health_and_safety` and
+  `program_administration` (all `custom`, generic definitions that name their
+  boundary on both sides), activates `ip_ownership` (widened to assignment by
+  a participant who is not a contracting party), rewords `severability` so it
+  no longer reads as survival, tightens `assignment` to a party's transfer of
+  the agreement (it had been matching clauses about placing students), and
+  points the inactive `exclusivity`, `minimum_commitment` and `audit_rights`
+  at the types that took their one anticipated member. Because the
+  segmentation cache is keyed on the document and not on the taxonomy, a type
+  added later never reached text segmented earlier; every node the LLM/agent
+  segmenter left `null`, that our own form does not already place by content
+  similarity (issue #235, which still runs first), and that carries operative
+  text now gets one dedicated classification pass under the taxonomy in force
+  (`clause_classifier.reclassify_unclassified`; the store-backed judge's
+  rubric is derived from the taxonomy, so editing it re-asks exactly those
+  nodes). A null verdict leaves the node unclassified; a `judge_error` or
+  `needs_review` answer stays visible on the node, as in `classify_tree`; and the
+  segmenter's own assignments are never second-guessed. `playbook judge` now
+  queues `classify` items on an agent-segmented corpus.
+
 - **OPF 0.6 / digest 5: how settled each judgment is (issue #248, epic
   #245).** A contested label deserves more scrutiny at review time, so the
   model-facing projections now say how settled each `vs_standard` judgment

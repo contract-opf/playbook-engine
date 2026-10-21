@@ -48,6 +48,15 @@ exemplars come from the template's classification) and is a no-op in emergent
 mode (no exemplars). The measurements behind the constants are on the
 constants' docstrings.
 
+Second look at a segmenter null (issue #253): the LLM/agent segmenter assigns
+a ``taxonomy_id`` in the same pass that cuts the document, and a ``null`` there
+means "no entry fit" *as the taxonomy stood when the document was segmented*.
+The segmentation cache is keyed on the document, not on the taxonomy, so a
+clause type added later never reaches text segmented earlier. :func:`reclassify_unclassified`
+gives every such node, and only those, one dedicated ``ClassificationJudge``
+pass under the taxonomy in force (the store-backed judge's rubric is derived
+from the taxonomy, so editing it re-asks exactly these nodes and nothing else).
+
 ``ClauseClassification.basis`` values:
   ``"exact_match"``        — heading matched a taxonomy label exactly.
   ``"heading_similarity"`` — Jaccard ≥ ``AUTO_CLASSIFY_THRESHOLD``.
@@ -76,6 +85,7 @@ constants' docstrings.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
@@ -83,6 +93,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.taxonomy import Taxonomy, TaxonomyEntry
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Hint datatype
@@ -607,6 +619,104 @@ def assign_by_content(
                 ),
             )
         )
+    return out
+
+
+def _has_operative_text(node: ClauseNode) -> bool:
+    """True when *node* carries text beyond a bare heading (issue #253).
+
+    A node whose words are all words of its own heading ("9. INSURANCE" under
+    the heading "Insurance") states no clause, and a node with no alphabetic
+    word at all (numeric residue, glyph junk) states nothing: sending either to
+    a judge only manufactures a pending item with one possible answer. Both are
+    left to the upstream noise filter.
+    """
+    words = [w for w in _normalize(node.text or "").split() if any(c.isalpha() for c in w)]
+    if not words:
+        return False
+    heading_words = {
+        w for w in _normalize(node.heading or "").split() if any(c.isalpha() for c in w)
+    }
+    return not set(words) <= heading_words
+
+
+def reclassify_unclassified(
+    classified: list[ClassifiedClause],
+    taxonomy: Taxonomy,
+    judge: ClassificationJudge,
+) -> list[ClassifiedClause]:
+    """Give each node the segmenter left ``unclassified`` one judge pass (issue #253).
+
+    Applies to the LLM/agent segmentation path, which bypasses
+    :func:`classify_tree` (see the module docstring). Every node with
+    ``basis="unclassified"`` and operative text (:func:`_has_operative_text`)
+    goes to ``judge.classify_batch`` in one batch; a segmenter-assigned node
+    (``basis="llm_segmenter"``) is never second-guessed.
+
+    The result follows :func:`classify_tree`. A node takes the judge's answer
+    when it names a taxonomy entry (``basis="judge"``). A ``judge_error`` and a
+    ``needs_review`` sentinel (a store-backed judge queuing the node) are kept
+    on the node with ``taxonomy_id=None``. They do not show in the scorecard's
+    ``by_basis``, which reports every observation without a taxonomy id as
+    ``unclassified``; a pending item is visible in the judge's pending queue
+    and a failure in the logs. A judge that raises marks every asked node
+    ``judge_error`` and logs a warning. Only a null verdict
+    (``basis="judge"`` or ``"unclassified"`` with no taxonomy id) leaves the
+    node as the segmenter emitted it.
+
+    Raises:
+        ValueError: a wrong-length batch, a basis outside ``judge`` /
+            ``judge_error`` / ``needs_review`` / ``unclassified``, or a
+            ``taxonomy_id`` that is not an active/custom entry (OPF §5), the
+            same contract as :func:`classify_tree`.
+    """
+    asked = [
+        i
+        for i, cc in enumerate(classified)
+        if cc.classification.basis == "unclassified"
+        and cc.classification.taxonomy_id is None
+        and _has_operative_text(cc.node)
+    ]
+    if not asked:
+        return classified
+    eligible_ids = {e.id for e in _eligible_entries(taxonomy)}
+    batch = [classified[i].node for i in asked]
+    try:
+        answers = judge.classify_batch(batch, taxonomy, hints=None)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning(
+            "reclassify_unclassified: judge raised %s; %d node(s) marked judge_error",
+            type(exc).__name__,
+            len(batch),
+        )
+        failed = ClauseClassification(taxonomy_id=None, confidence=0.0, basis="judge_error")
+        out = list(classified)
+        for i in asked:
+            out[i] = ClassifiedClause(node=classified[i].node, classification=failed)
+        return out
+    if len(answers) != len(batch):
+        raise ValueError(
+            f"ClassificationJudge.classify_batch() returned {len(answers)} results "
+            f"for {len(batch)} nodes."
+        )
+    out = list(classified)
+    for i, answer in zip(asked, answers, strict=True):
+        if answer.basis not in ("judge", "judge_error", "needs_review", "unclassified"):
+            raise ValueError(
+                f"ClassificationJudge returned unexpected basis={answer.basis!r} "
+                f"for node {classified[i].node.clause_path!r}; "
+                "must be 'judge', 'judge_error', 'needs_review', or 'unclassified'."
+            )
+        if answer.taxonomy_id is None:
+            if answer.basis in ("judge_error", "needs_review"):
+                out[i] = ClassifiedClause(node=classified[i].node, classification=answer)
+            continue
+        if answer.taxonomy_id not in eligible_ids:
+            raise ValueError(
+                f"Judge returned taxonomy_id={answer.taxonomy_id!r} which "
+                "is not an active/custom entry in the supplied taxonomy."
+            )
+        out[i] = ClassifiedClause(node=classified[i].node, classification=answer)
     return out
 
 

@@ -7,6 +7,8 @@ Party names use fictional identifiers only ("Alice Corp", "Beta Ltd").
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from playbook_engine.clause_classifier import (
@@ -1131,3 +1133,224 @@ def test_content_similarity_basis_is_valid() -> None:
     cls = ClauseClassification(taxonomy_id="survival", confidence=0.4, basis="content_similarity")
     assert cls.is_ambiguous
     assert cls.to_dict()["basis"] == "content_similarity"
+
+
+# ---------------------------------------------------------------------------
+# reclassify_unclassified (issue #253): a segmenter null gets a second look
+# ---------------------------------------------------------------------------
+
+
+class _RecordingJudge:
+    """A ClassificationJudge that answers from a ``{text: classification}`` map
+    and records what it was asked (so a test can assert what was NOT sent)."""
+
+    def __init__(self, answers: dict[str, ClauseClassification]) -> None:
+        self.answers = answers
+        self.asked: list[str] = []
+
+    def classify_batch(
+        self,
+        nodes: list[ClauseNode],
+        taxonomy: Taxonomy,
+        hints: list[ClassificationHint | None] | None = None,
+    ) -> list[ClauseClassification]:
+        self.asked.extend(n.text or "" for n in nodes)
+        return [
+            self.answers.get(
+                n.text or "",
+                ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified"),
+            )
+            for n in nodes
+        ]
+
+
+def _llm(node: ClauseNode, tid: str | None) -> ClassifiedClause:
+    """A node as ``pipeline._classified_from_taxonomy_by_path`` emits it."""
+    cls = (
+        ClauseClassification(taxonomy_id=tid, confidence=0.45, basis="llm_segmenter")
+        if tid
+        else ClauseClassification(taxonomy_id=None, confidence=0.0, basis="unclassified")
+    )
+    return ClassifiedClause(node=node, classification=cls)
+
+
+_RECLASS_TAXONOMY = _taxonomy(
+    _entry("insurance", "Insurance"),
+    _entry("survival", "Survival"),
+    _entry("retired", "Retired", status="inactive"),
+)
+
+
+def test_reclassify_sends_only_unclassified_nodes_with_operative_text() -> None:
+    from playbook_engine.clause_classifier import reclassify_unclassified
+
+    survives = _node("1", "Survival", "Survival. Indemnities survive termination for two years.")
+    already = _node("2", "Insurance", "Insurance. Each party carries general liability cover.")
+    bare_heading = _node("3", "Insurance", "INSURANCE\n")
+    residue = _node("4", None, "12 \\\\\\\\ 3.4")
+    judge = _RecordingJudge(
+        {
+            survives.text: ClauseClassification(
+                taxonomy_id="survival", confidence=0.9, basis="judge"
+            ),
+            already.text: ClauseClassification(
+                taxonomy_id="survival", confidence=0.9, basis="judge"
+            ),
+        }
+    )
+    classified = [
+        _llm(survives, None),
+        _llm(already, "insurance"),
+        _llm(bare_heading, None),
+        _llm(residue, None),
+    ]
+
+    out = reclassify_unclassified(classified, _RECLASS_TAXONOMY, judge)
+
+    assert judge.asked == [survives.text]
+    assert [c.classification.taxonomy_id for c in out] == ["survival", "insurance", None, None]
+    assert out[0].classification.basis == "judge"
+    assert out[0].classification.confidence == pytest.approx(0.9)
+    # The segmenter's own assignment is never second-guessed.
+    assert out[1].classification.basis == "llm_segmenter"
+    assert out[2].classification.basis == out[3].classification.basis == "unclassified"
+    assert [c.node for c in out] == [c.node for c in classified]
+
+
+def test_reclassify_keeps_a_null_unclassified_but_surfaces_pending_and_error() -> None:
+    from playbook_engine.clause_classifier import reclassify_unclassified
+
+    texts = [
+        "Clause one with no home in the taxonomy at all, said the judge.",
+        "Clause two that the judge has not answered yet and has queued instead.",
+        "Clause three whose judge call failed and was recorded as an error here.",
+    ]
+    nodes = [_node(str(i), None, t) for i, t in enumerate(texts)]
+    judge = _RecordingJudge(
+        {
+            texts[0]: ClauseClassification(taxonomy_id=None, confidence=0.3, basis="judge"),
+            texts[1]: ClauseClassification(taxonomy_id=None, confidence=0.0, basis="needs_review"),
+            texts[2]: ClauseClassification(taxonomy_id=None, confidence=0.0, basis="judge_error"),
+        }
+    )
+    out = reclassify_unclassified([_llm(n, None) for n in nodes], _RECLASS_TAXONOMY, judge)
+    # A null verdict leaves the node as the segmenter emitted it. A queued item
+    # and a failed call stay visible (as classify_tree reports them), never
+    # erased back to "unclassified".
+    assert [(c.classification.taxonomy_id, c.classification.basis) for c in out] == [
+        (None, "unclassified"),
+        (None, "needs_review"),
+        (None, "judge_error"),
+    ]
+
+
+def test_reclassify_marks_every_asked_node_judge_error_when_the_judge_raises(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    import logging
+
+    from playbook_engine.clause_classifier import reclassify_unclassified
+    from playbook_engine.judgment import BatchedClassificationJudge, JudgmentCache
+
+    texts = [
+        "Clause one with no home in the taxonomy at all, said the judge.",
+        "Clause two that the judge never got to answer because it was down.",
+    ]
+    nodes = [_node(str(i), None, t) for i, t in enumerate(texts)]
+
+    class _Boom:
+        def classify_batch(self, nodes, taxonomy, hints=None):  # type: ignore[no-untyped-def]
+            raise RuntimeError("judge unavailable")
+
+    with caplog.at_level(logging.WARNING, logger="playbook_engine.clause_classifier"):
+        out = reclassify_unclassified([_llm(n, None) for n in nodes], _RECLASS_TAXONOMY, _Boom())
+    assert [(c.classification.taxonomy_id, c.classification.basis) for c in out] == [
+        (None, "judge_error"),
+        (None, "judge_error"),
+    ]
+    assert "judge raised RuntimeError" in caplog.text
+
+    # The production wrapper turns a delegate exception into judge_error itself;
+    # this pass must keep that rather than erase it.
+    wrapped = BatchedClassificationJudge(
+        delegate=_Boom(), cache=JudgmentCache(tmp_path / "cache.jsonl")
+    )
+    out = reclassify_unclassified([_llm(n, None) for n in nodes], _RECLASS_TAXONOMY, wrapped)
+    assert [c.classification.basis for c in out] == ["judge_error", "judge_error"]
+
+
+def test_reclassify_rejects_a_pruned_taxonomy_id_and_a_wrong_length_batch() -> None:
+    from playbook_engine.clause_classifier import reclassify_unclassified
+
+    node = _node("1", None, "A clause the judge wrongly files under a retired entry here.")
+    inactive = _RecordingJudge(
+        {node.text: ClauseClassification(taxonomy_id="retired", confidence=0.9, basis="judge")}
+    )
+    with pytest.raises(ValueError, match="not an active/custom"):
+        reclassify_unclassified([_llm(node, None)], _RECLASS_TAXONOMY, inactive)
+
+    class _Short:
+        def classify_batch(self, nodes, taxonomy, hints=None):  # type: ignore[no-untyped-def]
+            return []
+
+    with pytest.raises(ValueError, match="returned 0 results for 1"):
+        reclassify_unclassified([_llm(node, None)], _RECLASS_TAXONOMY, _Short())
+
+
+def test_reclassify_asks_only_what_the_content_fallback_left_open() -> None:
+    """On the LLM path the content test (our standard's own clause text) runs
+    first, so a judge is never asked about, and never overrules, a node our own
+    form already places."""
+    from playbook_engine.clause_classifier import reclassify_unclassified
+
+    ours = _node("1", None, "Indemnities and confidentiality survive for five years afterwards.")
+    other = _node("2", None, "A clause about something wholly different from the form entirely.")
+    judge = _RecordingJudge(
+        {
+            ours.text: ClauseClassification(taxonomy_id="insurance", confidence=0.8, basis="judge"),
+            other.text: ClauseClassification(
+                taxonomy_id="insurance", confidence=0.8, basis="judge"
+            ),
+        }
+    )
+    matched = assign_by_content(
+        [_llm(ours, None), _llm(other, None)],
+        {"survival": ours.text},
+        eligible_ids={"insurance", "survival"},
+    )
+    out = reclassify_unclassified(matched, _RECLASS_TAXONOMY, judge)
+    assert judge.asked == [other.text]
+    assert [(c.classification.taxonomy_id, c.classification.basis) for c in out] == [
+        ("survival", "content_similarity"),
+        ("insurance", "judge"),
+    ]
+
+
+def test_student_placement_headings_are_not_filed_under_assignment() -> None:
+    """Pins the existing heading-path behaviour (issue #253): with the shipped
+    affiliation taxonomy no placement heading reaches `assignment` through
+    `_fast_classify`, and a genuine transfer heading still does. This does NOT
+    guard the false positive itself, which came from the llm_segmenter and
+    aligned paths; the real guard is
+    `test_assignment_description_excludes_placing_students` in
+    tests/test_taxonomy.py."""
+    from pathlib import Path
+
+    from playbook_engine.taxonomy import load_taxonomy
+
+    tax = load_taxonomy(Path(__file__).parent.parent / "spec/taxonomy/affiliation-agreement.yaml")
+    eligible = [e for e in tax.entries if e.is_classifier_eligible]
+    index = _build_label_index(eligible)
+    tokens = _build_label_tokens(eligible)
+
+    def tid(heading: str) -> str | None:
+        cls, _ = _fast_classify(_node("1", heading, "text"), eligible, index, label_tokens=tokens)
+        return cls.taxonomy_id if cls is not None else None
+
+    for heading in (
+        "Assigning Trainees to the Host Gym",
+        "Student Assignment",
+        "Placement and Assignment of Students",
+    ):
+        assert tid(heading) != "assignment", heading
+    assert tid("Assignment") == "assignment"

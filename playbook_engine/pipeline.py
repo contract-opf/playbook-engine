@@ -17,7 +17,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,6 +47,7 @@ from playbook_engine.clause_classifier import (
     ClauseClassification,
     assign_by_content,
     classify_tree,
+    reclassify_unclassified,
 )
 from playbook_engine.clause_differ import ClauseDiff, diff_aligned
 from playbook_engine.clause_position_compiler import compile_clause_positions
@@ -332,7 +333,14 @@ _MEDIA_TYPES: dict[str, str] = {
 # about the executed copy's signing date (document text, signature block, file
 # name, file metadata, and the date passages a deal_date judge is shown). A
 # warm cache would otherwise replay documents with no date evidence forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 20
+#
+# v21 (issue #253): a node the LLM/agent segmenter left unclassified now gets a
+# dedicated classification pass under the taxonomy in force
+# (clause_classifier.reclassify_unclassified), so clause types added after a
+# document was segmented reach its text. L3 (and so L4's alignments,
+# observations and precedent) changes for identical inputs; a warm cache would
+# otherwise replay those clauses as unclassified forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 21
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1003,8 +1011,9 @@ def _classified_from_taxonomy_by_path(
 
     Bypasses ``classify_tree`` for LLM-segmented documents: segmentation and
     classification already happened in one LLM pass (see
-    :mod:`playbook_engine.llm_segmentation_stage`), so there is no second,
-    separate classify judge call on this path. A clause_path missing from
+    :mod:`playbook_engine.llm_segmentation_stage`), so this function makes no
+    judge call; the issue #253 second look at the segmenter's nulls
+    (``reclassify_unclassified``) runs afterwards, in ``_classify_llm_segmented``. A clause_path missing from
     *taxonomy_by_path* (should not happen — grounding populates one entry per
     node) is treated as unclassified rather than raising, matching
     ``classify_tree``'s own "never silently drop a node" contract.
@@ -1031,6 +1040,34 @@ def _classified_from_taxonomy_by_path(
         )
         result.append(ClassifiedClause(node=node, classification=classification))
     return result
+
+
+def _classify_llm_segmented(
+    tree: ClauseTree,
+    taxonomy_by_path: dict[str, str | None],
+    taxonomy: Taxonomy,
+    judge: ClassificationJudge,
+    content_exemplars: Mapping[str, str] | None,
+    eligible_ids: Collection[str],
+) -> list[ClassifiedClause]:
+    """Final classification of one LLM/agent-segmented version (issues #235, #253).
+
+    1. The segmenter's own ``taxonomy_id`` per node (``llm_segmenter``).
+    2. A node it left ``null`` that is (nearly) a clause of our standard takes
+       that clause's type (``content_similarity``, issue #235): deterministic,
+       keyless, and anchored in the form every other deal is compared with.
+       It goes first so a judge never overrules the type our own form gives
+       the same text, and so no judge item is spent on it.
+    3. Whatever is still unclassified gets one dedicated classification pass
+       under the taxonomy in force (issue #253,
+       :func:`~playbook_engine.clause_classifier.reclassify_unclassified`).
+       The segmentation cache is keyed on the document alone, so a null is a
+       verdict under the taxonomy the document was segmented with; a clause
+       type added later reaches that text only through this pass.
+    """
+    segmented = _classified_from_taxonomy_by_path(tree, taxonomy_by_path)
+    matched = assign_by_content(segmented, content_exemplars, eligible_ids=eligible_ids)
+    return reclassify_unclassified(matched, taxonomy, judge)
 
 
 def _build_template_observations(
@@ -2986,23 +3023,29 @@ def _compute_doc_from_l1(
 
     # L3: Classify each version. LLM-segmented versions already carry their
     # taxonomy_id from the L1 LLM pass — bypass classify_tree entirely for
-    # those (no separate classify judge for LLM-segmented docs).
+    # those. Only the segmenter's nulls that carry operative text get a second
+    # look from the classify judge (issue #253, reclassify_unclassified).
     #
     # Issue #235: a node still unclassified after that (heading paths, judge,
     # parent inheritance, or the LLM's explicit null) is compared with our
     # standard's own clause text and assigned only on a conservative
     # threshold + margin (basis "content_similarity"). Emergent mode has no
     # template, so no exemplars: a no-op there. The template itself never
-    # takes this path (see _build_template_observations).
+    # takes this path (see _build_template_observations). On the LLM path the
+    # content test runs before the issue #253 classification pass; see
+    # _classify_llm_segmented.
     content_exemplars = _content_exemplars(template_std_by_tid)
     ordered_ids = list(version_order.ordered_ids) or list(version_trees.keys())
     classified_by_version: dict[str, list[ClassifiedClause]] = {}
     for vid in ordered_ids:
         if vid in llm_taxonomy_by_path:
-            classified_by_version[vid] = assign_by_content(
-                _classified_from_taxonomy_by_path(version_trees[vid], llm_taxonomy_by_path[vid]),
+            classified_by_version[vid] = _classify_llm_segmented(
+                version_trees[vid],
+                llm_taxonomy_by_path[vid],
+                taxonomy,
+                _cls_judge,
                 content_exemplars,
-                eligible_ids=set(taxonomy_ids),
+                set(taxonomy_ids),
             )
         else:
             classified_by_version[vid] = classify_tree(
