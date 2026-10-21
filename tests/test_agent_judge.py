@@ -1024,6 +1024,8 @@ class TestJudgeKindSeam:
             "deal_date",
             # Issue #255: the sampled check of the re-segmentation pass.
             "resegment_check",
+            # Issue #250: is a recurring first draft on our paper really ours?
+            "prior_form_origin",
         }
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:

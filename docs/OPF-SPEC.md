@@ -155,9 +155,11 @@ A playbook is a single JSON object:
 {
   "has_canonical_template": true,
   "template_ref": { "document_id": "...", "title": "...", "source": "path or URI" },
-  "prior_templates": [                       // OPF 0.6, issue #249; absent when none was supplied
+  "prior_templates": [                       // OPF 0.6, issues #249, #250; absent when there is no former form
     { "label": "2019 form", "in_use_from": "2019" | "2019-03" | "2019-03-14",
-      "in_use_until": "2021-06", "sha256": "sha256:…" }   // dates and sha256 OPTIONAL
+      "in_use_until": "2021-06", "sha256": "sha256:…" },   // SUPPLIED: dates and sha256 OPTIONAL
+    { "label": "reconstructed 2021-03 to 2022-11", "basis": "reconstructed",
+      "n_deals": 7, "first_signed": "2021-03", "last_signed": "2022-11" }   // RECONSTRUCTED, §3.5.7
   ],
   "notes": "free text"
 }
@@ -167,8 +169,13 @@ the order it was given them (§3.5.7): each one's unique `label`, the in-use
 dates the owner stated (at the precision stated) and the content address of the
 form's source file. Dates the owner did not state are absent here; the digest
 infers them from deal dates and says so (§3.12.2). A form's `sha256` is what a
-citation of the form resolves through (§4.1), so a form any citation names MUST
-carry it.
+citation of the form resolves through (§4.1), so a SUPPLIED form any citation
+names MUST carry it. An entry without `basis` is supplied; `basis:
+"reconstructed"` marks a form the producer rebuilt from the corpus' first
+drafts because none was supplied (§3.5.7): it has no file, so no `sha256` and no
+owner dates, and carries `n_deals` and the `first_signed` / `last_signed` span
+(`YYYY-MM`, absent when no deal is dated) of the deals that opened on it. A
+supplied form always wins: the two kinds never appear together.
 
 If `has_canonical_template` is `false`, the playbook is *emergent*. The provenance rule still applies; with no template, `our_standard` is set only from our-paper deals, and most stances will be `mixed`/`no_signal`.
 
@@ -420,9 +427,11 @@ Definitions (normative):
   - `"standard"` — the first-draft text is our standard language. This is the
     check `standard` uses (an exact match after normalization against the
     whole template clause, with the producer's party names).
-  - `"prior_standard"` (issue #249) — it is not our current standard but IS
+  - `"prior_standard"` (issues #249, #250) — it is not our current standard but IS
     the text of one of OUR former forms for the clause (§3.5.7), by the same
-    exact check, against that form's whole clause. Its origin is ours, never
+    exact check, against that form's whole clause (for a RECONSTRUCTED form: its
+    grouping key (§3.5.4) is that of the clause's recurring first-draft wording
+    the form was built from, §3.5.7, whatever the deal's paper side). Its origin is ours, never
     the counterparty's. The current standard is tested first and wins when
     both match. Which form a deal opened on is a fact of the deal, not of each
     clause: when several former forms match a clause, the form that the most
@@ -612,6 +621,47 @@ records the clause as ours and gives the consumer a factual history of the
 standard. Only facts are recorded; **no reason is ever claimed**: the only
 reason a change is ever shown is the owner's own `why_changed`.
 
+**Reconstructed forms (issue #250).** When the producer is given NO former form
+(a supplied form always wins), it rebuilds them from the corpus, because our
+former wording is what we SENT: the first draft of a signed deal on our paper
+(`paper: "ours"`) that is not today's standard. Per clause type with an
+`our_standard`, those first drafts (the distinct opening, else the signed text)
+are clustered by a deterministic method: the §3.5.4 grouping key split into
+words; two wordings are near-identical when the Jaccard similarity of their word
+3-gram sets is at least 0.85 AND they hold the same numbers (digits or spelled
+out) and the same count of negators; wordings are visited most-deals-first and
+each joins the first cluster whose seed it matches. A cluster is a
+**reconstructed clause** when it is the first draft of at least `MIN_DEALS` (3)
+distinct deals, its **medoid** (the member wording closest to all the others,
+weighted by deals) is the first draft of at least half of them, and the medoid
+differs from today's standard. Clause-level reconstructions that co-occur (the
+smaller one's deals at least 60% inside the other's, their signing-date spans
+overlapping or undated, never two of one clause type) are one **form**; the rest
+stay a form per clause. The form is `basis: "reconstructed"` in
+`baseline.prior_templates` with its label from what is known of it (`reconstructed
+2021-03 to 2022-11`; never a year the data does not give, and no claim of why
+it changed), `n_deals` and the signing-month span; each of its clauses is a
+`prior_standards[]` entry whose text is the medoid and whose `source_ref` is the
+ordinary citation of the medoid where it sits in a corpus document (it has no
+file of its own); every signed deal whose first draft of the clause has the medoid's §3.5.4 grouping
+key reads `opened_with: "prior_standard"` with `opened_with_form` the form, on
+whatever paper side: the paper side chose the candidates the form was built
+from, never which deals opened on it. It feeds everything a supplied form feeds (the
+`vs_standard` judgment against today's standard, the counts below, the digest's
+`standard_history` with `basis: "reconstructed"`), including the removed-row
+rule below: a struck clause whose text is the form clause's wording, or one
+contiguous piece of it, is no refused ask and is counted under
+`removed_prior_standard`.
+
+A recurring first draft on our paper might still be a counterparty's wording, so
+each cluster is first put to the `prior_form_origin` judge kind (see the engine's
+`REFERENCE.md`): "is this really OUR former language?", asked of the medoid
+against today's standard, with no deal, counterparty or paper side in the payload
+or the key. It is drafted by an agent, blind-checked by a separate pinned agent,
+and adjudicated on disagreement. **Only confirmed clusters become prior
+standards**; a cluster with no verdict, an unchecked draft or a disputed one is
+pending and changes nothing in the playbook.
+
 **Prior standards.** Each form is segmented and classified exactly like the
 current template (same producer, same front-matter rule), so a clause type's
 text in a form is comparable, part for part, with today's standard. Per clause
@@ -677,9 +727,19 @@ Normative rules (a conformant validator MUST enforce each):
 - Every `prior_standards[].form_label` and every `opened_with_form` is a
   `baseline.prior_templates[].label`; a clause has at most one prior standard
   per form.
-- A prior standard's `source_ref` cites its own form: `document_id`
-  `prior_template:<form_label>` and `version` `prior_template`, and that form
-  carries its `sha256` (§4).
+- A SUPPLIED form's prior standard's `source_ref` cites its own form:
+  `document_id` `prior_template:<form_label>` and `version` `prior_template`,
+  and that form carries its `sha256` (§4).
+- Supplied and reconstructed forms never appear together in one document.
+- A RECONSTRUCTED form has no `sha256`, `in_use_from` or `in_use_until`; its
+  prior standards' `source_ref` is an ordinary corpus citation (never
+  `prior_template` or `template`); its `n_deals` is the number of distinct deals
+  whose precedent records name it in `opened_with_form`, and its `first_signed` /
+  `last_signed` the earliest and latest signing month among them (absent when
+  none is dated); and no `refused_asks[].text` of a clause type has the §3.5.4
+  grouping key of that form's prior standard of the clause type (its `text` or
+  one of its `parts`): our own former wording struck before signing is no
+  refused ask.
 - `prior_standards[].text` is its `parts` joined in order, `order` counts from
   1, and each `part_id` is the part's recomputed content hash (as
   `our_standard`).
@@ -933,6 +993,7 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
     "standard_history": {                      // issue #249, §3.5.7
       "forms": [ { "form": "2019 form",
                    "in_use_from": "2019-03" | "2019" | null, "in_use_until": "2021-06" | null,
+                   "basis": "supplied" | "reconstructed",
                    "in_use_basis": "config" | "deal_dates" | "mixed" | null,
                    "n_opened": 3, "n_kept": 2, "n_conceded": 1, "n_moved_to_current": 1,
                    "unchanged": false,
@@ -1010,6 +1071,9 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   the form in ANY clause type: the earliest (`in_use_from`) and latest
   (`in_use_until`) signing month of those deals, else `null` — never guessed.
   A form carries the same dates in every clause's `standard_history`.
+  `basis` is the form's `baseline.prior_templates[].basis` (`supplied`, or
+  `reconstructed` from the corpus' first drafts, §3.5.7): a reconstructed form has
+  no owner dates, so its dates are always inferred (`in_use_basis` `deal_dates`).
   `in_use_basis` says where the dates came from: `config` (every date shown is the owner's), `deal_dates` (every
   one is inferred), `mixed`, or `null` when there is no date. `ref` cites the
   clause inside the form.
@@ -1498,6 +1562,7 @@ must be re-mined, not only re-projected.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 and 0.5 carry no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
+- **0.6 (issue #250)** — Reconstructed former forms (§3.2, §3.5.5, §3.5.7, §3.12.2): `baseline.prior_templates[]` entries gain `basis` (`supplied` by default, or `reconstructed` for a form the producer rebuilt from the corpus' first drafts on our paper when none was supplied) with `n_deals`, `first_signed` and `last_signed`; a reconstructed form has no `sha256`, its `prior_standards[]` cite the corpus document the wording was read from, and the digest's `standard_history.forms[]` gain `basis`. Only clusters the `prior_form_origin` judgment confirmed (blind-checked, adjudicated on disagreement) become forms.
 - **0.6 (issue #249)** — Prior standards (§3.2, §3.5.4, §3.5.5, §3.5.7, §3.12.2): `baseline.prior_templates[]` (our older forms' labels, owner dates and content addresses); `evidence.clauses[].prior_standards[]` (each form's clause as parts with stable `part_id`s, cited in the form's own bytes — `version` `"prior_template"`, `document_id` `prior_template:<label>`, resolved through the form's `sha256` (§4.1) — and its `vs_standard` against today's standard, judged once, subject role `prior_standard`), `why_changed` (the owner's optional note) and the counts `n_opened_prior` / `n_kept_prior` / `n_moved_to_current`; `opened_with` gains `"prior_standard"` with `opened_with_form`, so our own former wording is never a changed opening or a refused ask; the digest's per-clause `standard_history`. OPF 0.6 and digest 5 are replaced in place; there is no backward compatibility.
 - **0.6 (issues #247, #248)** — Signing dates (§3.5.4, §3.8, §3.12.2): `corpus.documents[].signed_on` (an ISO date, or `YYYY-MM` when only the month is known, or `null`) and `signed_on_basis` (`document_text` | `signature_block` | `filename` | `file_metadata`, present exactly when the date is); every precedent record gains a required `signed_on` equal to its document's, which replaces the optional `signed_at` (the `YYYY-Qn` quarter form is gone). `digest_version` "5": `first_signed` / `last_signed` (`YYYY-MM`) on every signed variant (and the collapsed equivalent entry), every refused ask and every clause, and the corpus span is to the month. New validator MUSTs: both keys present on every in-scope document (null when unknown), a well-formed real date in 1980-2099, a basis exactly when there is a date, no date without a detected executed copy, and a precedent's date equal to its document's. New schema file `playbook.schema-0.6.json` and conformance set `spec/conformance/0.6/` (vector 010); they replace 0.5 in the reference engine. Issue #248 adds `settled` (§3.5.6, §3.12.2, §3.12.3): how settled each judged text's `vs_standard` is (`agreed`, `adjudicated`, `unchecked` or `owner`), derived from its basis and blind check and carried on every non-equivalent digest variant, refused ask and changed opening and on each dossier excerpt's `vs_standard`; the collapsed equivalent entry carries `settled_counts`; `part_map_legend.settled` states the values; conformance vector 011.
 - **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set was regenerated for digest 4 with vectors 006 and 007.

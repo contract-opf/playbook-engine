@@ -295,6 +295,44 @@ from is `true`. Do not judge the type from the sentence's position: judge the
 words. The count of `false` answers is the figure the scorecard reports
 (`resegmentation.wrong`); the aim is none.
 
+### Former form origin (`kind: prior_form_origin`)
+
+Queued by `playbook judge` AFTER mining, when the owner supplied NO older form
+files and the corpus' first drafts on our paper hold a wording that recurs. Our
+former wording is what we SENT, so a non-standard first draft that is the first
+draft of at least three signed deals and is close to identical across them
+(same numbers, same negations) would be rebuilt as a former form of ours. This
+item asks whether that wording really is OURS:
+
+```json
+{"stage": "prior_form_origin", "agreement_type_id": "...",
+ "taxonomy_id": "indemnification", "taxonomy_title": "Indemnification",
+ "perspective_party": "Fixture Co",
+ "our_standard_parts": [{"n": 1, "part_id": "3f9a2c1d", "text": "..."}],
+ "candidate": "...the recurring first-draft wording...",
+ "recurs": {"n_deals": 7, "n_wordings": 2, "first_signed": "2021-03", "last_signed": "2022-11"}}
+```
+
+Answer `{"ours": true, "reason": "<one sentence>", "basis": "agent"}` when the
+candidate reads as an EARLIER VERSION OF OUR OWN DRAFTING of today's standard:
+the same structure, defined terms, party naming and register, with different
+terms. Answer `"ours": false` when it reads as a counterparty's form or
+somebody else's paper (their entity or their typical vendor language, a
+different drafting register, terms built around their business) or you cannot
+tell: a wrong "ours" files a counterparty's wording as ours and hides their
+changed openings, a wrong "not ours" only leaves the clause as it was. Judge
+the words only; you are told nothing about any deal, counterparty or paper
+side, and none of that may matter. Only a verdict that has been blind-checked
+(and adjudicated on disagreement) makes the cluster a prior standard.
+
+The check follows the equivalence one, with its own queue files:
+`playbook judge --check prior_form_origin $OUT --config <config>` writes
+`judge/origin-check-pending.jsonl` (no draft) and
+`judge/origin-adjudication-pending.jsonl`; a separate `claude-opus-5-5` /
+`xhigh` agent answers `{"key","ours","reason","model","effort"}` per line,
+recorded with `playbook judge-apply $OUT --check <file>`. There is no `--api`
+path for this kind.
+
 ### Signing date (`kind: deal_date`)
 
 Queued by `playbook judge` AFTER mining, for an executed copy whose signing
@@ -452,6 +490,12 @@ split or join (see "Re-segmentation check" above):
 {"resegment_ok": false, "reason": "This sentence is about notice, not insurance."}
 ```
 
+**Former form origin verdict** (`kind: prior_form_origin`) — one per recurring
+first-draft wording (see "Former form origin" above):
+```json
+{"ours": true, "reason": "Same structure and defined terms as today's clause, with an older cap.", "basis": "agent"}
+```
+
 **Signing-date verdict** (`kind: deal_date`) — one per distinct set of
 passages; `signed_on`, `basis` and `quote` (see "Signing date" above):
 ```json
@@ -532,7 +576,8 @@ machine-readable rubric moves: the classifier-eligible taxonomy entries
 `scope`, the answer vocabulary for `provenance`, the label, status,
 relation and effect vocabularies for `equivalence`, the source vocabulary
 (`document_text`, `signature_block`) for `deal_date`, the two question shapes
-(`split`, `join`) for `resegment_check`. Editing
+(`split`, `join`) for `resegment_check`, the answers and bases (`agent`, `judge`,
+`owner`) for `prior_form_origin`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is

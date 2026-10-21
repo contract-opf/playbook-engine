@@ -1050,6 +1050,14 @@ make docker-run CORPUS=./corpus OUT=./out \
   one wrong answer: `null` sends the engine on to the file name and the file's
   own metadata. These are queued by `judge` after mining, in the same round
   as the others. See REFERENCE.md § "Signing date".
+- **Former form origin** (`kind: prior_form_origin`): with no older form files
+  supplied, the engine rebuilds our former forms from the corpus' first drafts
+  on our paper. Each recurring wording is put to you once: is it really OUR
+  former language, not a counterparty form that recurs? Answer `{"ours": true |
+  false, "reason": "<one sentence>", "basis": "agent"}`; when in doubt, `false`.
+  It counts only after the blind check (`playbook judge --check
+  prior_form_origin`, a separate `claude-opus-5-5` / `xhigh` agent, then
+  `judge-apply --check`). See REFERENCE.md § "Former form origin".
 - **Re-segmentation check** (`kind: resegment_check`): a sample (at most 60) of
   the splits and joins the engine's re-segmentation pass made, queued by
   `judge` after mining. Say whether a split puts the text under the right

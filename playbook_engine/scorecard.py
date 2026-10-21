@@ -78,6 +78,8 @@ from playbook_engine.observation_builder import (
 )
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 from playbook_engine.precedent import normalize_variant_text
+from playbook_engine.prior_reconstruction import ORIGIN_KIND
+from playbook_engine.prior_reconstruction import SKIPS as RECONSTRUCTION_SKIPS
 from playbook_engine.resegmentation import (
     CHECK_KIND as RESEGMENT_CHECK_KIND,
 )
@@ -155,7 +157,13 @@ __all__ = [
 #: clause entries, the opened / kept / moved-to-current deals and the entries
 #: by ``settled`` outcome; ``equivalence.by_role`` gains ``prior_standard``;
 #: ``dropped_observations`` gains ``removed_prior_standard``.
-SCORECARD_VERSION = 11
+#:
+#: v12 (issue #250): ``prior_standards`` splits the former forms by basis
+#: (``forms_supplied`` / ``forms_reconstructed``), and the
+#: ``prior_reconstruction`` section counts the clusters of recurring
+#: first-draft wording on our paper that were rebuilt as former forms
+#: (confirmed, rejected, pending), the forms they make and their year spans.
+SCORECARD_VERSION = 12
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -202,7 +210,7 @@ DROPPED_REASONS = frozenset(
 #: pending items are counted under ``other``.
 PENDING_KINDS = frozenset(
     {"classify", "provenance", "scope", "segment", "equivalence", DEAL_DATE_KIND}
-    | {RESEGMENT_CHECK_KIND}
+    | {RESEGMENT_CHECK_KIND, ORIGIN_KIND}
 )
 
 #: Checker model ids the scorecard names (the pinned one); any other recorded
@@ -244,6 +252,7 @@ ENUM_LABELS = frozenset(
     | CHECKER_MODELS
     | EQUIVALENCE_VOCABULARY
     | frozenset(NON_CLAUSE_REASONS)
+    | frozenset(RECONSTRUCTION_SKIPS)
 )
 
 
@@ -545,7 +554,8 @@ def _precedent_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None
 def _prior_standards_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
     """Counts of our former forms and the deals that opened on them (issue #249).
 
-    ``forms`` are the supplied forms (``baseline.prior_templates``);
+    ``forms`` are the former forms (``baseline.prior_templates``), supplied or
+    reconstructed from the corpus (issue #250);
     ``clauses_with_history`` the clauses with at least one form's text and
     ``entries`` those (clause, form) texts, of which ``unchanged`` read exactly
     as today's standard, ``judged`` carry a ``vs_standard`` and ``by_settled``
@@ -565,6 +575,13 @@ def _prior_standards_section(playbook: dict[str, Any] | None) -> dict[str, Any] 
     templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
     party = perspective_party(playbook)
     entries = judged = unchanged = with_history = notes = 0
+    reconstructed = [
+        t
+        for t in (templates if isinstance(templates, list) else [])
+        if isinstance(t, dict) and t.get("basis") == "reconstructed"
+    ]
+    forms_reconstructed = len(reconstructed)
+    forms_supplied = (len(templates) if isinstance(templates, list) else 0) - forms_reconstructed
     by_settled = dict.fromkeys(SETTLED, 0)
     for clause in clauses:
         priors = [p for p in clause.get("prior_standards") or [] if isinstance(p, dict)]
@@ -588,6 +605,8 @@ def _prior_standards_section(playbook: dict[str, Any] | None) -> dict[str, Any] 
                 by_settled[settled_of(vs)] += 1
     return {
         "forms": len(templates) if isinstance(templates, list) else 0,
+        "forms_supplied": forms_supplied,
+        "forms_reconstructed": forms_reconstructed,
         "clauses_with_history": with_history,
         "entries": entries,
         "unchanged": unchanged,
@@ -598,6 +617,48 @@ def _prior_standards_section(playbook: dict[str, Any] | None) -> dict[str, Any] 
         "moved_to_current": sum(_count(c.get("n_moved_to_current")) or 0 for c in clauses),
         "why_changed": notes,
     }
+
+
+_RECONSTRUCTION_COUNTS = (
+    "candidate_first_drafts",
+    "clusters",
+    "clusters_below_min_deals",
+    "clusters_not_dominant",
+    "confirmed",
+    "rejected",
+    "pending",
+    "pending_undrafted",
+    "pending_unchecked",
+    "forms",
+    "forms_single_clause",
+    "forms_multi_clause",
+    "forms_dated",
+    "forms_undated",
+    "deals_in_forms",
+)
+
+
+def _prior_reconstruction_section(out_dir: Path) -> dict[str, Any] | None:
+    """Counts of the reconstruction of our former forms the last ``project`` made (issue #250).
+
+    Read from ``prior_reconstruction.json`` (counts only, no text). ``skipped``
+    says why nothing was attempted (a supplied form wins, no canonical
+    template); ``clusters`` are the recurring first-draft wordings on our paper
+    that qualified, of which ``confirmed`` and ``rejected`` were settled by the
+    origin check and the rest are ``pending`` (``pending_undrafted`` have no
+    verdict, ``pending_unchecked`` no completed blind check). Counts only: the
+    year spans of the forms stay in the local ``prior_reconstruction.json``.
+    """
+    raw = _read_json(out_dir / "prior_reconstruction.json")
+    if not isinstance(raw, dict):
+        return None
+    skipped = raw.get("skipped")
+    section: dict[str, Any] = {
+        "skipped": skipped if skipped in RECONSTRUCTION_SKIPS else (OTHER if skipped else None)
+    }
+    for name in _RECONSTRUCTION_COUNTS:
+        section[name] = _count(raw.get(name))
+    return section
 
 
 def _signed_on_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1099,6 +1160,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "resegmentation": _resegmentation_section(manifest, observations, out_dir),
         "precedent": _precedent_section(playbook),
         "prior_standards": _prior_standards_section(playbook),
+        "prior_reconstruction": _prior_reconstruction_section(out_dir),
         "signed_on": _signed_on_section(playbook),
         "template_drift": _template_drift_section(playbook),
         # Issue #233: the drift of what each clause OPENED with — per clause

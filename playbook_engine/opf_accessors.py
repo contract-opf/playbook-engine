@@ -49,6 +49,8 @@ __all__ = [
     "verify_precedent_sidecar",
     "perspective_party",
     "playbook_clauses",
+    "PRIOR_BASIS_RECONSTRUCTED",
+    "PRIOR_BASIS_SUPPLIED",
     "PRIOR_TEMPLATE_ID_PREFIX",
     "PRIOR_TEMPLATE_VERSION",
     "prior_template_document_id",
@@ -412,6 +414,13 @@ PRIOR_TEMPLATE_VERSION = "prior_template"
 
 #: A former form's citation ``document_id`` is this prefix + the form's label.
 PRIOR_TEMPLATE_ID_PREFIX = "prior_template:"
+
+
+#: ``baseline.prior_templates[].basis`` (OPF 0.6, issues #249, #250): the owner
+#: supplied the form's file, or the producer rebuilt the form from the corpus'
+#: first drafts because none was supplied. A supplied form always wins.
+PRIOR_BASIS_SUPPLIED = "supplied"
+PRIOR_BASIS_RECONSTRUCTED = "reconstructed"
 
 
 def prior_template_document_id(label: str) -> str:

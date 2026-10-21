@@ -10,6 +10,52 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Reconstruct our former forms from the corpus when none are supplied
+  (issue #250, epic #245).** The owner of the private acceptance corpus has no
+  older form files, so prior-standard origin (issue #249) had nothing to read
+  against. Our former wording is what we sent: per clause type with an
+  `our_standard`, the first drafts of signed deals on our paper that are not
+  today's standard are clustered by a deterministic method (word 3-gram Jaccard
+  similarity of the grouping key at 0.85 or above, and the same numbers, digits
+  or spelled out, and the same count of negators; most-deals-first, each wording
+  joining the first cluster whose seed it matches). A cluster is a reconstructed
+  clause when it is the first draft of at least `MIN_DEALS` (3) distinct deals,
+  its medoid is the first draft of at least half of them and it differs from
+  today's standard; clauses that co-occur in the same deals with overlapping
+  signing dates are one form, otherwise a form per clause. A recurring wording
+  might be a counterparty's, so each cluster is put to the new `prior_form_origin`
+  judge kind (drafted by an agent, blind-checked by a separate pinned agent,
+  adjudicated on disagreement; `playbook judge --check prior_form_origin`, its
+  own queue files, `judge-apply --check` takes its answers): only a confirmed
+  cluster becomes a prior standard, and a cluster with no verdict, an unchecked
+  draft or a disputed one is pending and changes nothing. Confirmed forms are
+  `basis: "reconstructed"` in `baseline.prior_templates` with `n_deals` and the
+  `first_signed` / `last_signed` span, have no file (so no `sha256`; their
+  `prior_standards[]` cite the medoid in the corpus document it was read from),
+  and feed everything a supplied form feeds: the `vs_standard` judgment against
+  today's standard, `opened_with: prior_standard` with `opened_with_form`, the
+  `n_opened_prior` / `n_kept_prior` / `n_moved_to_current` counts and the digest's
+  `standard_history` (which gains `basis`), and our former wording struck before
+  signing: a row struck before signing whose text is a confirmed form clause's
+  wording, whole or one contiguous piece (the supplied-form test, also read under
+  the grouping key), is no refused ask and is counted under
+  `corpus.stats.dropped_observations` `removed_prior_standard`, exactly as mining
+  counts it for a supplied form. A supplied form always wins: with any
+  form supplied nothing is reconstructed. Payload and key carry no document,
+  counterparty or paper side. Paper side only chooses the candidates a form is
+  built from: once a cluster is confirmed, every signed `non_standard` opening
+  of that clause type whose first draft has the form clause's grouping key reads
+  `prior_standard`, on any paper side, exactly as a supplied form's does, and
+  the form's `n_deals` and span count those deals. `project`
+  writes the counts (no text) to `prior_reconstruction.json`; scorecard 12 reads
+  it (`prior_reconstruction`: clusters confirmed, rejected, pending; forms) and
+  splits `prior_standards.forms` by basis. The validator checks a reconstructed
+  form's `n_deals` and span against the precedent records that name it, that no
+  refused ask has the grouping key of a reconstructed form's clause, and that
+  supplied and reconstructed forms never appear together;
+  conformance vector 013 pins one, and vector 012 is re-stamped for the digest's
+  `basis`.
+
 - **Re-segmentation: tighten the split and join thresholds after the blind check
   found 3 of 10 sampled items wrong (issue #256, epic #245).** The #255 pass
   was measured by the orchestrator's blind `resegment_check` on the private

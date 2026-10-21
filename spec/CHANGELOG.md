@@ -24,13 +24,42 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.6.json` | `11935e01fc2951214cda52f413cfe6cec18e8f5c8eb6f0e677a3fe1528518f12` |
-| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `02fbafca81bb1d25acf41fdcd25ebd0f60b3b453dada429222ba413ec92729cd` |
+| `playbook.schema-0.6.json` | `6ffdfa164143f1f5d56973d78df629b296234b2224986fc8e8d5d55ffa878bcf` |
+| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `d3f6e4ba9327ac41369f34689670dc4141bcaee33b4bde2cddcde9f18df7ca76` |
 
 Current `DIGEST_VERSION`: **5** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-21 — OPF 0.6 / digest 5: reconstructed former forms (issue #250)
+
+In-place change to the unfrozen `playbook.schema-0.6.json` (epic #245; 0.6 has
+no consumer yet); `digest_version` stays "5". When the owner supplies no older
+form files, the producer rebuilds our former forms from the corpus' first drafts
+on our paper and flags them. Facts only: no reason for a change is claimed.
+
+- **`baseline.prior_templates[]`** gains optional `basis` (`supplied`, the
+  default when absent, or `reconstructed`), `n_deals` (>= 1) and
+  `first_signed` / `last_signed` (`YYYY-MM`); the last three are for a
+  reconstructed form only. A reconstructed form has no `sha256`,
+  `in_use_from` or `in_use_until`.
+- **`prior_standards[].source_ref`** of a reconstructed form is an ordinary
+  corpus citation (a `corpus.documents[]` document and version), never
+  `prior_template`.
+- **Digest**: required `basis` on each `standard_history.forms[]` entry
+  (`$defs.digestStandardForm`); conformance vector 012 is re-stamped.
+- **New validator MUSTs**: a reconstructed form carries no `sha256` or owner
+  dates and a supplied form no `n_deals` / `first_signed` / `last_signed`; a
+  reconstructed form's prior standards cite a corpus document; its `n_deals`
+  equals the distinct deals whose precedent records name it in
+  `opened_with_form` and its `first_signed` / `last_signed` the earliest and
+  latest signing month among them; no refused ask of a clause type has the
+  grouping key of a reconstructed form's prior standard of that clause type
+  (our former wording struck before signing is counted under
+  `removed_prior_standard`, as for a supplied form); supplied and reconstructed
+  forms never appear together. A deal reads as opened on a reconstructed form
+  by the same exact first-draft check as a supplied one, on any paper side.
 
 ### 2026-10-21 — OPF 0.6 / digest 5: prior standards (issue #249)
 

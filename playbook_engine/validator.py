@@ -23,8 +23,9 @@ import yaml
 
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.deal_dates import BASES as SIGNED_ON_BASES
-from playbook_engine.deal_dates import is_signed_on
+from playbook_engine.deal_dates import is_signed_on, signed_on_key
 from playbook_engine.opf_accessors import (
+    PRIOR_BASIS_RECONSTRUCTED,
     PRIOR_TEMPLATE_ID_PREFIX,
     PRIOR_TEMPLATE_VERSION,
     playbook_clauses,
@@ -746,23 +747,40 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
 
 
 def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> None:
-    """OPF 0.6 prior-standards cross-checks (issue #249, OPF-SPEC §3.5.7).
+    """OPF 0.6 prior-standards cross-checks (issues #249, #250, OPF-SPEC §3.5.7).
 
     - ``baseline.prior_templates[]`` labels are unique;
-    - every ``evidence.clauses[].prior_standards[]`` entry names a supplied
-      form (``form_label`` is a ``baseline.prior_templates[].label``), cites
-      the clause in THAT form (``source_ref`` is ``document_id``
-      ``prior_template:<form_label>``, ``version`` ``prior_template``; never
-      ``"template"``, which is today's form), and a clause has at most one
-      entry per form;
-    - a precedent record's ``opened_with_form`` names a supplied form;
+    - every ``evidence.clauses[].prior_standards[]`` entry names a listed
+      form (``form_label`` is a ``baseline.prior_templates[].label``) and a
+      clause has at most one entry per form;
+    - a SUPPLIED form's entry cites the clause in THAT form (``source_ref`` is
+      ``document_id`` ``prior_template:<form_label>``, ``version``
+      ``prior_template``; never ``"template"``, which is today's form);
+    - a RECONSTRUCTED form (``basis: "reconstructed"``, issue #250) has no
+      file: it carries no ``sha256`` or owner dates, its entries cite a corpus
+      document (never ``prior_template``), and its ``n_deals``,
+      ``first_signed`` and ``last_signed`` are what the precedent records that
+      opened on it say, and no refused ask of its clause type has the §3.5.4
+      grouping key of its clause (our own former wording struck before signing
+      is no refused ask; it is counted under ``removed_prior_standard``);
+    - a precedent record's ``opened_with_form`` names a listed form;
+    - supplied and reconstructed forms never appear together;
     - ``why_changed`` is the owner's: ``basis`` is ``"owner"`` (the schema
       enforces the shape; there is nothing else to check).
     """
     baseline = doc.get("baseline")
     templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
     labels: dict[str, int] = {}
+    reconstructed: dict[str, dict[str, Any]] = {}
+    kinds: dict[str, int] = {}
     for i, template in enumerate(templates if isinstance(templates, list) else []):
+        if isinstance(template, dict):
+            kind = (
+                "reconstructed"
+                if template.get("basis") == PRIOR_BASIS_RECONSTRUCTED
+                else "supplied"
+            )
+            kinds.setdefault(kind, i)
         label = template.get("label") if isinstance(template, dict) else None
         if not isinstance(label, str):
             continue
@@ -774,6 +792,29 @@ def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> Non
             )
         else:
             labels[label] = i
+        if isinstance(template, dict) and template.get("basis") == PRIOR_BASIS_RECONSTRUCTED:
+            reconstructed.setdefault(label, template)
+            for stray in ("sha256", "in_use_from", "in_use_until"):
+                if stray in template:
+                    result.add(
+                        f"reconstructed form {label!r} carries {stray}, which only a supplied "
+                        "form has (it has no file and no owner-given dates)",
+                        path=f"baseline.prior_templates[{i}].{stray}",
+                    )
+        elif isinstance(template, dict):
+            for stray in ("n_deals", "first_signed", "last_signed"):
+                if stray in template:
+                    result.add(
+                        f"supplied form {label!r} carries {stray}, which only a reconstructed "
+                        "form has",
+                        path=f"baseline.prior_templates[{i}].{stray}",
+                    )
+    if len(kinds) > 1:
+        result.add(
+            "baseline.prior_templates mixes supplied and reconstructed forms — a supplied "
+            "form always wins, so the two never appear together",
+            path=f"baseline.prior_templates[{max(kinds.values())}]",
+        )
     for i, clause in enumerate(_evidence_list(doc, "clauses")):
         if not isinstance(clause, dict):
             continue
@@ -786,23 +827,35 @@ def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> Non
             if isinstance(label, str) and label not in labels:
                 result.add(
                     f"prior_standards names form {label!r}, which is not in "
-                    "baseline.prior_templates — a prior standard comes from a supplied form",
+                    "baseline.prior_templates — a prior standard comes from a listed form",
                     path=path,
                 )
             source = prior.get("source_ref")
-            if (
-                isinstance(label, str)
-                and isinstance(source, dict)
-                and prior_template_label(source) != label
-            ):
-                result.add(
-                    f"prior_standards entry for form {label!r} cites document_id "
-                    f"{source.get('document_id')!r} version {source.get('version')!r} — "
-                    "a prior standard cites the clause in its own form (document_id "
-                    f"'{PRIOR_TEMPLATE_ID_PREFIX}{label}', version "
-                    f"{PRIOR_TEMPLATE_VERSION!r}), never today's template",
-                    path=f"evidence.clauses[{i}].prior_standards[{j}].source_ref",
-                )
+            if isinstance(label, str) and isinstance(source, dict):
+                source_path = f"evidence.clauses[{i}].prior_standards[{j}].source_ref"
+                if label in reconstructed:
+                    if (
+                        source.get("version") == PRIOR_TEMPLATE_VERSION
+                        or str(source.get("document_id", "")).startswith(PRIOR_TEMPLATE_ID_PREFIX)
+                        or source.get("document_id") == "template"
+                    ):
+                        result.add(
+                            f"prior_standards entry for reconstructed form {label!r} cites "
+                            f"document_id {source.get('document_id')!r} version "
+                            f"{source.get('version')!r} — a reconstructed form has no file of "
+                            "its own: it cites the wording in the corpus document it was read "
+                            "from",
+                            path=source_path,
+                        )
+                elif prior_template_label(source) != label:
+                    result.add(
+                        f"prior_standards entry for form {label!r} cites document_id "
+                        f"{source.get('document_id')!r} version {source.get('version')!r} — "
+                        "a prior standard cites the clause in its own form (document_id "
+                        f"'{PRIOR_TEMPLATE_ID_PREFIX}{label}', version "
+                        f"{PRIOR_TEMPLATE_VERSION!r}), never today's template",
+                        path=source_path,
+                    )
             if isinstance(label, str) and label in seen:
                 result.add(
                     f"clause has more than one prior_standards entry for form {label!r}",
@@ -810,6 +863,7 @@ def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> Non
                 )
             if isinstance(label, str):
                 seen.add(label)
+    opened_by_form: dict[str, list[dict[str, Any]]] = {}
     for i, record in enumerate(_evidence_list(doc, "precedent")):
         if not isinstance(record, dict):
             continue
@@ -817,9 +871,94 @@ def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> Non
         if isinstance(form, str) and form not in labels:
             result.add(
                 f"precedent opened_with_form {form!r} is not in baseline.prior_templates — "
-                "a clause opens on a supplied form",
+                "a clause opens on a listed form",
                 path=f"evidence.precedent[{i}].opened_with_form",
             )
+        elif isinstance(form, str):
+            opened_by_form.setdefault(form, []).append(record)
+    for label, template in reconstructed.items():
+        path = f"baseline.prior_templates[{labels[label]}]"
+        records = opened_by_form.get(label, [])
+        deals = {r.get("document_id") for r in records}
+        if template.get("n_deals") != len(deals):
+            result.add(
+                f"reconstructed form {label!r} says n_deals {template.get('n_deals')!r} but "
+                f"{len(deals)} distinct deal(s) opened on it (precedent opened_with_form)",
+                path=f"{path}.n_deals",
+            )
+        keys = sorted(k for r in records for k in (signed_on_key(r.get("signed_on")),) if k)
+        want_first = f"{keys[0][0]:04d}-{keys[0][1]:02d}" if keys else None
+        want_last = f"{keys[-1][0]:04d}-{keys[-1][1]:02d}" if keys else None
+        for name, want in (("first_signed", want_first), ("last_signed", want_last)):
+            if template.get(name) != want:
+                result.add(
+                    f"reconstructed form {label!r} says {name} {template.get(name)!r} but its "
+                    f"deals' signing dates give {want!r}",
+                    path=f"{path}.{name}",
+                )
+    if reconstructed:
+        _check_no_reconstructed_refused_ask(doc, set(reconstructed), result)
+
+
+def _check_no_reconstructed_refused_ask(
+    doc: dict[str, Any], reconstructed: set[str], result: ValidationResult
+) -> None:
+    """No refused ask is a RECONSTRUCTED form's clause (OPF-SPEC §3.5.7, issue #250).
+
+    A reconstructed wording IS its §3.5.4 grouping key (it decides which deals
+    opened on it), and our own former wording struck before signing is no
+    refused ask: the producer counts it under
+    ``corpus.stats.dropped_observations`` ``removed_prior_standard``. So no
+    ``refused_asks[]`` text of a clause type may have the grouping key of a
+    reconstructed form's prior standard of that clause type (its text or one of
+    its parts). A supplied form is not checked here: mining compares the deal's
+    own text with the form's file, which the document does not carry."""
+    from playbook_engine.opf_accessors import perspective_party  # noqa: PLC0415
+    from playbook_engine.precedent import normalize_variant_text  # noqa: PLC0415
+
+    party = perspective_party(doc)
+    form_keys: dict[str, dict[str, str]] = {}
+    for clause in _evidence_list(doc, "clauses"):
+        if not isinstance(clause, dict) or not isinstance(clause.get("taxonomy_id"), str):
+            continue
+        for prior in clause.get("prior_standards") or []:
+            if not isinstance(prior, dict) or prior.get("form_label") not in reconstructed:
+                continue
+            parts = prior.get("parts")
+            texts = [
+                prior.get("text"),
+                *(
+                    p.get("text")
+                    for p in (parts if isinstance(parts, list) else [])
+                    if isinstance(p, dict)
+                ),
+            ]
+            for text in texts:
+                key = normalize_variant_text(text, party=party) if isinstance(text, str) else ""
+                if key:
+                    form_keys.setdefault(clause["taxonomy_id"], {}).setdefault(
+                        key, str(prior["form_label"])
+                    )
+    for i, record in enumerate(_evidence_list(doc, "precedent")):
+        if not isinstance(record, dict):
+            continue
+        keys = form_keys.get(str(record.get("taxonomy_id")))
+        if not keys:
+            continue
+        for j, ask in enumerate(record.get("refused_asks") or []):
+            text = ask.get("text") if isinstance(ask, dict) else None
+            label = (
+                keys.get(normalize_variant_text(text, party=party))
+                if isinstance(text, str)
+                else None
+            )
+            if label is not None:
+                result.add(
+                    f"refused ask reads as reconstructed form {label!r}'s clause — our own "
+                    "former wording struck before signing is no refused ask (it is counted "
+                    "under corpus.stats.dropped_observations removed_prior_standard)",
+                    path=f"evidence.precedent[{i}].refused_asks[{j}].text",
+                )
 
 
 def _check_record_signed_on(
@@ -923,7 +1062,7 @@ def _check_opening(
       unsigned deal's version order is not anchored, issue #221);
     - ``opened_with`` ``"absent"`` or null => ``opening_text`` null;
     - ``opened_with_form`` is present exactly when ``opened_with`` is
-      ``"prior_standard"`` (issue #249; that it names a supplied form is
+      ``"prior_standard"`` (issue #249; that it names a listed form is
       :func:`_check_prior_standards`);
     - ``opening_text`` non-null => its §3.5.4 grouping key differs from
       ``signed_text``'s (or ``signed_text`` is null), and ``moved`` is true.

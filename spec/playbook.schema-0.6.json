@@ -88,7 +88,7 @@
         },
         "prior_templates": {
           "type": "array",
-          "description": "Our OLDER forms the producer was given (`baseline.prior_templates` in the config), in config order (OPF 0.6, issue #249): each one's label, the in-use dates the owner gave and its content address. Absent when none was supplied. `evidence.clauses[].prior_standards[]` and a precedent record's `opened_with_form` name a form by its label.",
+          "description": "Our OLDER forms (OPF 0.6, issues #249, #250), in the order the producer holds them: the forms the owner SUPPLIED (`baseline.prior_templates` in the config; each one's label, the in-use dates the owner gave and its content address) or, when none was supplied, forms the producer RECONSTRUCTED from the corpus' first drafts on our paper (`basis: reconstructed`: the deals that opened on it and the span of their signing dates; no file, so no hash). A supplied form always wins: the two never appear together. Absent when there is no former form. `evidence.clauses[].prior_standards[]` and a precedent record's `opened_with_form` name a form by its label.",
           "items": {
             "type": "object",
             "required": [
@@ -100,6 +100,13 @@
                 "type": "string",
                 "minLength": 1,
                 "description": "The form's label, unique in the list."
+              },
+              "basis": {
+                "enum": [
+                  "supplied",
+                  "reconstructed"
+                ],
+                "description": "Where the form came from: `supplied` (the owner gave its file; the default when absent) or `reconstructed` (rebuilt from the corpus' first drafts, issue #250). A reconstructed form has no `sha256` and no owner dates, and its `prior_standards` entries cite the corpus document the wording was read from."
               },
               "in_use_from": {
                 "$ref": "#/$defs/inUseDate",
@@ -113,6 +120,21 @@
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$",
                 "description": "Content address of the form's source file: what a citation of the form (`document_id` `prior_template:<label>`, `version` `prior_template`) resolves through (OPF-SPEC \u00a74.1). Required in effect for a form any citation names: a validator rejects a citation of a form that carries none."
+              },
+              "n_deals": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Reconstructed forms only: the distinct deals that opened on the form (the deals whose precedent records name it in `opened_with_form`)."
+              },
+              "first_signed": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$",
+                "description": "Reconstructed forms only: the earliest signing month (YYYY-MM) among those deals; absent when none is dated."
+              },
+              "last_signed": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$",
+                "description": "Reconstructed forms only: the latest signing month (YYYY-MM) among those deals; absent when none is dated."
               }
             }
           }
@@ -2774,7 +2796,7 @@
         },
         "source_ref": {
           "$ref": "#/$defs/citation",
-          "description": "Where the clause sits in the form, in the form's own bytes: `document_id` `prior_template:<form_label>` and `version` `prior_template` (resolved through that form's `baseline.prior_templates[].sha256`, never through `template`, which is today's form; OPF-SPEC \u00a74.1), `clause_path` its path (or paths) and `char_span` its span in that form."
+          "description": "Where the clause sits. For a SUPPLIED form, in the form's own bytes: `document_id` `prior_template:<form_label>` and `version` `prior_template` (resolved through that form's `baseline.prior_templates[].sha256`, never through `template`, which is today's form; OPF-SPEC \u00a74.1), `clause_path` its path (or paths) and `char_span` its span in that form. For a RECONSTRUCTED form (issue #250), which has no file, the ordinary citation of the dominant wording in the corpus document it was read from."
         },
         "vs_standard": {
           "oneOf": [
@@ -2837,6 +2859,7 @@
       "description": "One former form of ours for a clause: how deals that opened on it fared, and how its text compares with today's standard.",
       "required": [
         "form",
+        "basis",
         "in_use_from",
         "in_use_until",
         "in_use_basis",
@@ -2859,6 +2882,13 @@
           "type": "string",
           "minLength": 1,
           "description": "The form's label."
+        },
+        "basis": {
+          "enum": [
+            "supplied",
+            "reconstructed"
+          ],
+          "description": "Where the form came from (copy of `baseline.prior_templates[].basis`, `supplied` when absent): the owner gave its file, or the producer rebuilt it from the corpus' first drafts on our paper (issue #250)."
         },
         "in_use_from": {
           "oneOf": [

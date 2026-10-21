@@ -1833,6 +1833,60 @@ def _queue_resegment_check_round(mined_dir: Path, judge: Any) -> None:
         )
 
 
+def _queue_prior_form_origin_round(mined_dir: Path, cfg: Any, taxonomy: Any, judge: Any) -> None:
+    """Queue the ``prior_form_origin`` questions of the store just mined into *mined_dir* (issue #250).
+
+    A question is one recurring first-draft wording on our paper that would be
+    rebuilt as a former form of ours when the owner supplied none. Runs after
+    mining because the clusters come from the precedent record; reports nothing
+    when there is nothing to ask (a supplied form, or nothing recurs).
+    """
+    from playbook_engine.pipeline import queue_prior_form_origin  # noqa: PLC0415
+
+    subjects, unjudged = queue_prior_form_origin(mined_dir, cfg, taxonomy, judge)
+    if subjects:
+        click.echo(
+            f"  prior_form_origin: {subjects} recurring first-draft wording(s) on our paper, "
+            f"{unjudged} unjudged"
+        )
+
+
+def _judge_check_prior_form_origin(out_dir: Path, cfg: Any, taxonomy: Any) -> None:
+    """``playbook judge --check prior_form_origin OUT``: emit the check queues."""
+    from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
+    from playbook_engine.pipeline import prior_form_origin_subjects  # noqa: PLC0415
+    from playbook_engine.prior_form_origin_check import (  # noqa: PLC0415
+        build_check_queues,
+        write_check_queues,
+    )
+
+    if not out_dir.is_dir() or not (out_dir / "observations.jsonl").is_file():
+        click.secho(
+            f"ERROR: {out_dir} holds no observation store — run `playbook mine` first",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    if not cfg.baseline.has_canonical_template:
+        click.secho(
+            "OK  no canonical template configured: no former form is reconstructed, so there "
+            "is nothing to check",
+            fg="green",
+        )
+        return
+    subjects = prior_form_origin_subjects(out_dir, cfg, taxonomy)
+    store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
+    queues = build_check_queues(store, subjects)
+    check_path, adjudication_path = write_check_queues(out_dir / "judge", queues)
+    click.secho(f"OK  {check_path}", fg="green")
+    click.echo(
+        f"prior_form_origin check: {len(queues.check)} to check, {len(queues.adjudication)} to "
+        f"adjudicate, {queues.settled} settled, {queues.undrafted} not drafted yet"
+    )
+    if queues.adjudication:
+        click.echo(f"  adjudication queue: {adjudication_path}")
+
+
 def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api: bool) -> None:
     """``playbook judge --check equivalence OUT``: emit (and with --api, answer) the check queues."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
@@ -1985,15 +2039,17 @@ def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api:
 @click.option(
     "--check",
     "check_kind",
-    type=click.Choice(["equivalence"]),
+    type=click.Choice(["equivalence", "prior_form_origin"]),
     default=None,
     help=(
         "Instead of mining, write the blind-check queue for drafted verdicts of this kind "
-        "(judge/check-pending.jsonl: the drafter's payload, no label or reason) and the "
-        "adjudication queue for disputed ones (judge/adjudication-pending.jsonl). With "
+        "(equivalence: judge/check-pending.jsonl, the drafter's payload, no label or reason; "
+        "prior_form_origin: judge/origin-check-pending.jsonl, no draft) and the "
+        "adjudication queue for disputed ones (judge/adjudication-pending.jsonl, "
+        "judge/origin-adjudication-pending.jsonl). With "
         "--check the first argument is the derivation OUT dir. Answer the queues with a "
         "separate claude-opus-5-5 / xhigh agent and record the answers with "
-        "`playbook judge-apply --check`, or pass --api."
+        "`playbook judge-apply --check`, or pass --api (equivalence only)."
     ),
 )
 @click.option(
@@ -2042,12 +2098,16 @@ def judge_cmd(
     deterministic sample (all of them when there are 60 or fewer) of the
     splits and joins the re-segmentation pass made: "is this text really that
     clause type?" / "do these passages form one clause?". It measures the
-    pass; nothing waits on it. Every deviation is the deterministic standard
+    pass; nothing waits on it. A ``prior_form_origin`` item is queued for
+    each recurring first-draft wording on our paper that would be rebuilt as a
+    former form of ours when no older form files are supplied: "is this really
+    OUR former language?". Only a blind-checked ``ours: true`` makes it a
+    prior standard. Every deviation is the deterministic standard
     check, so nothing is judged for it.
 
-    ``--check equivalence OUT`` skips mining and queues the independent blind
-    check (and adjudication) of the verdicts already drafted into OUT; see the
-    option's help.
+    ``--check equivalence OUT`` (or ``--check prior_form_origin OUT``) skips
+    mining and queues the independent blind check (and adjudication) of the
+    verdicts already drafted into OUT; see the option's help.
 
     Reads the verdict store at <out>/judge/verdicts.jsonl and replays any
     previously supplied verdicts.  For every new clause payload not in the store,
@@ -2074,6 +2134,7 @@ def judge_cmd(
         StoreBackedClassificationJudge,
         StoreBackedDealDateJudge,
         StoreBackedEquivalenceJudge,
+        StoreBackedPriorFormOriginJudge,
         StoreBackedProvenanceJudge,
         StoreBackedResegmentCheckJudge,
         StoreBackedScopeJudge,
@@ -2096,6 +2157,18 @@ def judge_cmd(
     if use_api and check_kind is None:
         click.secho("ERROR: --api only applies with --check", fg="red", err=True)
         raise SystemExit(1)
+    if check_kind == "prior_form_origin":
+        if use_api:
+            click.secho(
+                "ERROR: --api answers equivalence checks only; answer the prior_form_origin "
+                "queues with a claude-opus-5-5 / xhigh agent and record them with "
+                "`playbook judge-apply --check`",
+                fg="red",
+                err=True,
+            )
+            raise SystemExit(1)
+        _judge_check_prior_form_origin((out_path or corpus_dir).resolve(), cfg, taxonomy)
+        return
     if check_kind is not None:
         _judge_check_equivalence((out_path or corpus_dir).resolve(), cfg, taxonomy, use_api=use_api)
         return
@@ -2238,6 +2311,14 @@ def judge_cmd(
                         store=store, pending=plan_pending, rubric=rubric_policy
                     ),
                 )
+                _queue_prior_form_origin_round(
+                    Path(_tmp) / "mine_out",
+                    cfg,
+                    taxonomy,
+                    StoreBackedPriorFormOriginJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
+                )
             except PipelineError as exc:
                 click.secho(f"ERROR: {exc}", fg="red", err=True)
                 raise SystemExit(1) from exc
@@ -2344,6 +2425,14 @@ def judge_cmd(
                 store=store, pending=pending_queue, rubric=rubric_policy
             ),
         )
+        _queue_prior_form_origin_round(
+            out_dir,
+            cfg,
+            taxonomy,
+            StoreBackedPriorFormOriginJudge(
+                store=store, pending=pending_queue, rubric=rubric_policy
+            ),
+        )
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
@@ -2435,46 +2524,95 @@ def judge_cmd(
         os.replace(tmp_pending, pending_path)
 
 
+def _check_file_kind(check_path: Path) -> str:
+    """Which kind of check answers *check_path* holds: ``prior_form_origin`` records carry
+    ``ours``, equivalence records carry ``parts``. A file mixing the two is rejected."""
+    import json  # noqa: PLC0415
+
+    kinds: set[str] = set()
+    for line in check_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # the kind's own loader reports the line
+        if isinstance(record, dict):
+            kinds.add("prior_form_origin" if "ours" in record else "equivalence")
+    if len(kinds) > 1:
+        click.secho(
+            "ERROR: a --check file holds one kind of answer; this one mixes equivalence "
+            "(parts) and prior_form_origin (ours) records",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+    return next(iter(kinds), "equivalence")
+
+
 def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: bool) -> None:
-    """``judge-apply --check``: record equivalence check / adjudication answers."""
+    """``judge-apply --check``: record equivalence or prior_form_origin check / adjudication answers."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
     from playbook_engine.equivalence_check import (  # noqa: PLC0415
-        apply_check_records,
-        load_check_records,
+        apply_check_records as apply_equivalence_checks,
+    )
+    from playbook_engine.equivalence_check import (  # noqa: PLC0415
+        load_check_records as load_equivalence_checks,
+    )
+    from playbook_engine.prior_form_origin_check import (  # noqa: PLC0415
+        apply_check_records as apply_origin_checks,
+    )
+    from playbook_engine.prior_form_origin_check import (  # noqa: PLC0415
+        load_check_records as load_origin_checks,
     )
 
+    kind = _check_file_kind(check_path)
     out_dir_resolved = out_dir.resolve()
     if not out_dir_resolved.is_dir():
         click.secho(f"ERROR: {out_dir_resolved} does not exist", fg="red", err=True)
         raise SystemExit(1)
     store = VerdictStore(out_dir_resolved / "judge" / "verdicts.jsonl")
+    updates: list[tuple[str, dict[str, Any]]]
+    counts: Any
+    agreement_line: str | None = None
     try:
-        result = apply_check_records(
-            store, load_check_records(check_path), allow_checker_model=allow_checker_model
-        )
+        if kind == "prior_form_origin":
+            origin = apply_origin_checks(
+                store, load_origin_checks(check_path), allow_checker_model=allow_checker_model
+            )
+            updates, counts = origin.updates, origin
+        else:
+            equivalence = apply_equivalence_checks(
+                store,
+                load_equivalence_checks(check_path),
+                allow_checker_model=allow_checker_model,
+            )
+            updates, counts = equivalence.updates, equivalence
+            if equivalence.agreed or equivalence.disagreed:
+                agreement_line = (
+                    f"  of {equivalence.agreed + equivalence.disagreed} blind check(s): same label "
+                    f"{equivalence.label_agreed}, same parts {equivalence.parts_agreed}"
+                )
     except ValueError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
-    for key, verdict in result.updates:
+    for key, verdict in updates:
         prior = store.get_record_by_key(key)
         # Same rubric stamp as the draft: the check answers the question as asked.
         store.put_by_key(key, verdict, rubric=prior.rubric if prior else None)
     click.secho(
-        f"OK  recorded {len(result.updates)} check answer(s) into "
+        f"OK  recorded {len(updates)} check answer(s) into "
         f"{out_dir_resolved / 'judge' / 'verdicts.jsonl'}",
         fg="green",
     )
     click.echo(
-        f"  agreed {result.agreed}, disagreed {result.disagreed} (awaiting adjudication), "
-        f"adjudicated {result.adjudicated}, owner-decided (skipped) {result.skipped_owner}"
+        f"  agreed {counts.agreed}, disagreed {counts.disagreed} (awaiting adjudication), "
+        f"adjudicated {counts.adjudicated}, owner-decided (skipped) {counts.skipped_owner}"
     )
-    if result.agreed or result.disagreed:
-        click.echo(
-            f"  of {result.agreed + result.disagreed} blind check(s): same label "
-            f"{result.label_agreed}, same parts {result.parts_agreed}"
-        )
-    if result.disagreed:
-        click.echo("  re-run `playbook judge --check equivalence` to queue the disagreements")
+    if agreement_line is not None:
+        click.echo(agreement_line)
+    if counts.disagreed:
+        click.echo(f"  re-run `playbook judge --check {kind}` to queue the disagreements")
 
 
 @cli.command(name="judge-apply")
@@ -2493,7 +2631,8 @@ def _judge_apply_check(out_dir: Path, check_path: Path, allow_checker_model: boo
     default=None,
     help=(
         "JSONL file of equivalence check or adjudication answers instead of verdicts (each "
-        "line: {'key', 'parts', 'additions', 'reason', 'model', 'effort'}). A record whose "
+        "line: {'key', 'parts', 'additions', 'reason', 'model', 'effort'}; for "
+        "prior_form_origin: {'key', 'ours', 'reason', 'model', 'effort'}). A record whose "
         "model is not "
         "claude-opus-5-5 or whose effort is not xhigh is rejected unless "
         "--allow-checker-model is passed."
@@ -2665,6 +2804,13 @@ def judge_apply_cmd(
                 from playbook_engine import deal_dates  # noqa: PLC0415
 
                 deal_dates.validate_verdict(record["verdict"], pending_payloads.get(record["key"]))
+            elif kind == "prior_form_origin":
+                # Issue #250: stored as {ours, reason, basis}, nothing else.
+                from playbook_engine.prior_reconstruction import (  # noqa: PLC0415
+                    validate_origin_draft,
+                )
+
+                record["verdict"] = validate_origin_draft(record["verdict"])
         except (ValueError, TypeError) as exc:
             # TypeError is a defensive backstop: validate_verdict type-checks
             # confidence fields up front (issue #161) so a malformed verdict
