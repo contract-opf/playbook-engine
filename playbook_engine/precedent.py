@@ -9,9 +9,13 @@ lists:
 
 ``evidence.clauses[]``
     One entry per clause type: ``{id, taxonomy_id, title, our_standard,
-    n_deals, n_signed_standard, n_variants, n_refused, n_opened_standard,
-    n_kept_standard, n_changed_openings}``. Every count is
+    prior_standards, why_changed, n_deals, n_signed_standard, n_variants,
+    n_refused, n_opened_standard, n_kept_standard, n_opened_prior,
+    n_kept_prior, n_moved_to_current, n_changed_openings}``. Every count is
     derived from ``evidence.precedent`` (the validator recomputes them).
+    ``prior_standards`` is the clause's text in each of OUR former forms
+    (issue #249, :mod:`playbook_engine.prior_standards`); ``why_changed`` is
+    the owner's optional note (``null`` unless the owner wrote one).
 
 ``evidence.precedent[]``
     One record per (deal, clause type): what that deal signed for the clause
@@ -36,8 +40,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.clause_position_compiler import (
@@ -47,11 +51,15 @@ from playbook_engine.clause_position_compiler import (
 )
 from playbook_engine.observation_builder import (
     OPENED_NON_STANDARD,
+    OPENED_PRIOR_STANDARD,
     OPENED_STANDARD,
     OUTCOME_OPENING,
     Observation,
     RoundMove,
 )
+
+if TYPE_CHECKING:
+    from playbook_engine.prior_standards import PriorForm
 
 __all__ = [
     "PAPER_OURS",
@@ -61,6 +69,7 @@ __all__ = [
     "build_precedent_evidence",
     "changed_opening_members",
     "clause_counts",
+    "prior_form_counts",
     "normalize_variant_text",
     "paper_of_corpus_document",
     "precedent_id",
@@ -257,6 +266,7 @@ def build_precedent_evidence(
     corpus_documents: list[dict[str, Any]],
     round_moves: list[RoundMove] | None = None,
     party: str | None,
+    prior_forms: Sequence[PriorForm] = (),
 ) -> dict[str, Any]:
     """Build the OPF 0.6 ``evidence`` section: ``{clauses, precedent}``.
 
@@ -267,7 +277,9 @@ def build_precedent_evidence(
       copy when ``signed`` is true, the last draft when it is false), or
       ``null`` when the clause was struck before signing.
     - ``opened_with`` (issue #233): what the clause opened with —
-      ``"standard"``, ``"non_standard"``, ``"absent"`` (added during the
+      ``"standard"``, ``"prior_standard"`` (issue #249: not today's standard
+      but one of OUR former forms' text for the clause; ``opened_with_form``
+      names the form), ``"non_standard"``, ``"absent"`` (added during the
       negotiation) or ``null`` (not determined: no detected executed copy, or
       a store that predates the field — never ``"absent"``). Read off the
       terminal row, else the opening row, else a refused-ask row, else
@@ -275,8 +287,8 @@ def build_precedent_evidence(
     - ``opening_text``: the first-draft text of the clause (every first-draft
       node bound into the clause type, joined in first-draft order and citing
       the first), recorded whatever its origin when ``opened_with`` is
-      ``"standard"`` or ``"non_standard"`` AND either ``signed_text`` is
-      ``null`` or the §3.5.4 grouping key of the opening differs from that of
+      ``"standard"``, ``"prior_standard"`` or ``"non_standard"`` AND either
+      ``signed_text`` is ``null`` or the §3.5.4 grouping key of the opening differs from that of
       ``signed_text`` (so a whitespace/case/punctuation-only edit is not an
       opening); ``null`` otherwise. ``null`` means "not recorded / not
       distinct", never "opened with the signed text" when ``opened_with`` is
@@ -362,11 +374,23 @@ def build_precedent_evidence(
             if signed
             else None
         )
+        opened_with_form = (
+            next(
+                (
+                    o.opened_with_form
+                    for o in (terminal, opening, *refused)
+                    if o is not None and o.opened_with_form is not None
+                ),
+                None,
+            )
+            if opened_with == OPENED_PRIOR_STANDARD
+            else None
+        )
         opening_text = (
             _text_entry(opening)
             if (
                 opening is not None
-                and opened_with in (OPENED_STANDARD, OPENED_NON_STANDARD)
+                and opened_with in (OPENED_STANDARD, OPENED_PRIOR_STANDARD, OPENED_NON_STANDARD)
                 and (
                     signed_text is None
                     or normalize_variant_text(opening.full_text, party=party)
@@ -405,6 +429,7 @@ def build_precedent_evidence(
                 "rounds": n_rounds,
                 "signed_text": signed_text,
                 "opened_with": opened_with,
+                **({"opened_with_form": opened_with_form} if opened_with_form is not None else {}),
                 "opening_text": opening_text,
                 "standard": bool(terminal is not None and terminal.standard),
                 "moved": bool(n_rounds or opening_text is not None or refused),
@@ -413,12 +438,17 @@ def build_precedent_evidence(
         )
         precedent.append(record)
 
+    from playbook_engine.prior_standards import prior_standard_entries  # noqa: PLC0415
+
+    prior_by_tid = prior_standard_entries(prior_forms, tids)
     clauses: list[dict[str, Any]] = [
         {
             "id": cp.id,
             "taxonomy_id": cp.taxonomy_id,
             "title": cp.title,
             "our_standard": cp.our_standard.to_dict() if cp.our_standard else None,
+            "prior_standards": prior_by_tid.get(cp.taxonomy_id, []),
+            "why_changed": None,
         }
         for cp in clause_positions
     ]
@@ -435,9 +465,9 @@ def restamp_evidence(
     Each precedent's ``id`` (:func:`precedent_id`) and each clause's
     ``n_*`` counts (:func:`clause_counts`, grouping by
     :func:`normalize_variant_text` with *party* — the document's
-    ``perspective.party``) and each standard part's ``part_id``
-    (``equivalence.stamp_standard_parts``, issue #243) are functions of the
-    texts they describe. The
+    ``perspective.party``) and each standard part's ``part_id`` (our standard's
+    and every prior form's, ``equivalence.stamp_standard_parts``, issues #243,
+    #249) are functions of the texts they describe. The
     assembler strips zero-width/bidi-control characters from the whole
     document after building it, so it calls this again afterwards — the ids
     and counts a validator recomputes over the shipped text must be the ones
@@ -448,6 +478,8 @@ def restamp_evidence(
     precedent = evidence["precedent"]
     for clause in evidence["clauses"]:
         stamp_standard_parts(clause.get("our_standard"), party)
+        for prior in clause.get("prior_standards") or []:
+            stamp_standard_parts(prior, party)
     for record in precedent:
         signed_text = record.get("signed_text")
         new_id = precedent_id(
@@ -489,10 +521,47 @@ def changed_opening_members(
     return groups
 
 
+def prior_form_counts(
+    records: Iterable[dict[str, Any]], label: str | None = None
+) -> dict[str, int]:
+    """Opened, kept and moved-to-current counts against OUR former forms (issue #249).
+
+    *records* are the precedent records of ONE clause type; *label*, when
+    given, restricts the count to the deals that opened on that form
+    (``opened_with_form``), else every deal that opened on any former form.
+    Distinct signed deals (``document_id``), never rows:
+
+    - ``n_opened``: ``opened_with`` is ``"prior_standard"``;
+    - ``n_kept``: of those, the deal signed the text it opened with (a signed
+      text, and no distinct ``opening_text``): it held the form we sent;
+    - ``n_moved_to_current``: of those, the signed text is today's standard
+      (``standard`` true): the deal moved from our former form to the
+      current one.
+
+    ``n_opened - n_kept`` is what was conceded (moved to today's standard,
+    or to something else, or struck) — a meaning derived, not recorded.
+    """
+    opened = [
+        p
+        for p in records
+        if isinstance(p, dict)
+        and p.get("signed") is True
+        and p.get("opened_with") == OPENED_PRIOR_STANDARD
+        and (label is None or p.get("opened_with_form") == label)
+    ]
+    kept = [p for p in opened if p.get("signed_text") and p.get("opening_text") is None]
+    moved = [p for p in opened if p.get("standard") is True]
+    return {
+        "n_opened": len({p.get("document_id") for p in opened}),
+        "n_kept": len({p.get("document_id") for p in kept}),
+        "n_moved_to_current": len({p.get("document_id") for p in moved}),
+    }
+
+
 def clause_counts(
     taxonomy_id: str, precedent: list[dict[str, Any]], *, party: str | None
 ) -> dict[str, int]:
-    """The seven ``evidence.clauses[]`` counts one clause's precedent implies.
+    """The ten ``evidence.clauses[]`` counts one clause's precedent implies.
 
     - ``n_deals``: distinct deals with a precedent record for the clause.
     - ``n_signed_standard``: distinct signed deals whose signed text is our
@@ -504,6 +573,11 @@ def clause_counts(
     - ``n_opened_standard`` (issue #234): distinct signed deals whose
       ``opened_with`` is ``"standard"``.
     - ``n_kept_standard``: of those, deals whose ``standard`` is true.
+    - ``n_opened_prior`` / ``n_kept_prior`` / ``n_moved_to_current`` (issue
+      #249): distinct signed deals whose clause opened on one of our former
+      forms (``opened_with`` is ``"prior_standard"``), of those the ones that
+      signed the text they opened with, and the ones whose signed text is
+      today's standard (:func:`prior_form_counts`).
     - ``n_changed_openings``: distinct changed openings
       (:func:`changed_opening_members`), grouped by the same key.
 
@@ -535,6 +609,7 @@ def clause_counts(
     opened_standard = [
         p for p in records if p.get("signed") is True and p.get("opened_with") == OPENED_STANDARD
     ]
+    prior = prior_form_counts(records)
     return {
         "n_deals": len(deals),
         "n_signed_standard": len(standard_deals),
@@ -544,6 +619,9 @@ def clause_counts(
         "n_kept_standard": len(
             {p.get("document_id") for p in opened_standard if p.get("standard") is True}
         ),
+        "n_opened_prior": prior["n_opened"],
+        "n_kept_prior": prior["n_kept"],
+        "n_moved_to_current": prior["n_moved_to_current"],
         "n_changed_openings": len(changed_opening_members(records, party=party)),
     }
 

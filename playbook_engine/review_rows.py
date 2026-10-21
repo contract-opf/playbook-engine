@@ -33,6 +33,7 @@ from playbook_engine.digest import (
 from playbook_engine.equivalence import (
     LABELS,
     ROLE_OPENING,
+    ROLE_PRIOR_STANDARD,
     ROLE_REFUSED,
     ROLE_SIGNED,
     ROLES,
@@ -48,6 +49,7 @@ from playbook_engine.equivalence import (
 )
 from playbook_engine.observation_builder import summarize_clause_text
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
+from playbook_engine.precedent import normalize_variant_text
 
 __all__ = ["REVIEW_LABEL_ORDER", "ReviewRows", "build_review_rows"]
 
@@ -188,6 +190,55 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
                         row["roles"].append(role)
                     row["_deals"] |= deals
 
+        # Issue #249: each former form's clause is shown in the digest's
+        # standard history, so its judgment against today's standard is a row
+        # too (role ``prior_standard``, no deals of its own).
+        for prior in clause.get("prior_standards") or []:
+            if not isinstance(prior, dict):
+                continue
+            text = prior.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            key = equivalence_key(type_id, str(tid), party, text, part_texts)
+            vs = prior.get("vs_standard")
+            label = vs.get("label") if isinstance(vs, dict) else None
+            if label not in LABELS or not isinstance(vs, dict):
+                if (
+                    key not in all_judged
+                    and _grouping_differs(text, standard_text, party)
+                    and key not in by_key
+                ):
+                    unjudged.add(key)
+                continue
+            unjudged.discard(key)
+            all_judged.add(key)
+            shown.add(key)
+            row = by_key.get(key)
+            if row is None:
+                by_key[key] = {
+                    "key": key,
+                    "taxonomy_id": tid,
+                    "title": clause.get("title") or tid,
+                    "label": label,
+                    "reason": vs.get("reason") or "",
+                    "owner_reason": _owner_reason(vs),
+                    "basis": vs.get("basis") or "",
+                    "check": check_state(vs),
+                    **_part_rows(vs),
+                    "roles": [ROLE_PRIOR_STANDARD],
+                    "text": summarize_clause_text(text),
+                    "standard": summarize_clause_text(standard_text),
+                    "cite": f"former form: {prior.get('form_label', '')}",
+                    "loc": {
+                        "role": ROLE_PRIOR_STANDARD,
+                        "tid": tid,
+                        "form": prior.get("form_label"),
+                    },
+                    "_deals": set(),
+                }
+            elif ROLE_PRIOR_STANDARD not in row["roles"]:
+                row["roles"].append(ROLE_PRIOR_STANDARD)
+
     rows: list[dict[str, Any]] = []
     for key in shown:
         row = by_key[key]
@@ -207,6 +258,14 @@ def build_review_rows(doc: dict[str, Any]) -> ReviewRows:
         if key is not None
     }
     return ReviewRows(rows, n_not_shown=len(judged - shown), n_unjudged=len(unjudged))
+
+
+def _grouping_differs(text: str, standard_text: str, party: str | None) -> bool:
+    """Whether *text* is not today's standard under the §3.5.4 grouping key
+    (an identical former clause is never judged, so it is not "unjudged")."""
+    return normalize_variant_text(text, party=party) != normalize_variant_text(
+        standard_text, party=party
+    )
 
 
 def _owner_reason(vs: dict[str, Any]) -> str:

@@ -19,6 +19,13 @@ sidecar ``playbook project`` writes next to ``playbook.opf.json`` (one
 record per line, sorted by id), whose sha256 the document carries under
 ``x_sidecars`` (:func:`precedent_sidecar_manifest`, checked by
 :func:`verify_precedent_sidecar`).
+
+Issue #249 adds the citation identity of a clause in one of OUR former forms
+(OPF-SPEC §4): ``version`` :data:`PRIOR_TEMPLATE_VERSION` and ``document_id``
+:func:`prior_template_document_id` of the form's label, resolved through that
+form's ``baseline.prior_templates[].sha256`` (:func:`prior_template_label`,
+:func:`prior_template_entry`) — never through ``"template"``, which is today's
+form.
 """
 
 from __future__ import annotations
@@ -42,6 +49,11 @@ __all__ = [
     "verify_precedent_sidecar",
     "perspective_party",
     "playbook_clauses",
+    "PRIOR_TEMPLATE_ID_PREFIX",
+    "PRIOR_TEMPLATE_VERSION",
+    "prior_template_document_id",
+    "prior_template_entry",
+    "prior_template_label",
 ]
 
 
@@ -391,3 +403,48 @@ def playbook_clauses(doc: dict[str, Any]) -> list[dict[str, Any]]:
     evidence = doc.get("evidence")
     clauses = evidence.get("clauses") if isinstance(evidence, dict) else None
     return clauses if isinstance(clauses, list) else []
+
+
+#: The reserved citation ``version`` of a clause in one of our former forms
+#: (OPF-SPEC §4, issue #249). ``"template"`` is today's form; a former form's
+#: bytes are its own, addressed by its ``baseline.prior_templates[].sha256``.
+PRIOR_TEMPLATE_VERSION = "prior_template"
+
+#: A former form's citation ``document_id`` is this prefix + the form's label.
+PRIOR_TEMPLATE_ID_PREFIX = "prior_template:"
+
+
+def prior_template_document_id(label: str) -> str:
+    """The citation ``document_id`` of our former form *label* (OPF-SPEC §4)."""
+    return PRIOR_TEMPLATE_ID_PREFIX + label
+
+
+def prior_template_label(ref: Any) -> str | None:
+    """The former form a citation names, or ``None`` when it names none.
+
+    A citation names our former form *label* exactly when its ``version`` is
+    :data:`PRIOR_TEMPLATE_VERSION` and its ``document_id`` is
+    :func:`prior_template_document_id` of *label* (a non-empty label). Any
+    other pairing — one half without the other — names no former form.
+    """
+    if not isinstance(ref, dict) or ref.get("version") != PRIOR_TEMPLATE_VERSION:
+        return None
+    document_id = ref.get("document_id")
+    if not isinstance(document_id, str) or not document_id.startswith(PRIOR_TEMPLATE_ID_PREFIX):
+        return None
+    label = document_id[len(PRIOR_TEMPLATE_ID_PREFIX) :]
+    return label or None
+
+
+def prior_template_entry(doc: dict[str, Any], label: str) -> dict[str, Any] | None:
+    """The ``baseline.prior_templates[]`` entry labelled *label*, or ``None``.
+
+    Its ``sha256`` is the content address a citation of the form resolves
+    through (OPF-SPEC §4.1).
+    """
+    baseline = doc.get("baseline")
+    templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    for entry in templates if isinstance(templates, list) else []:
+        if isinstance(entry, dict) and entry.get("label") == label:
+            return entry
+    return None

@@ -298,6 +298,25 @@ def compute_config_hash(config: EngineConfig) -> str:
         "baseline": {
             "has_canonical_template": config.baseline.has_canonical_template,
             "template_sha256": _sha256_file_or_none(config.baseline.template_path),
+            # Issue #249: our older forms change what the engine produces
+            # (the origin of a first draft, the standard history), so they
+            # move the hash. Keyed in only when supplied, so a run with none
+            # keeps the identity it had.
+            **(
+                {
+                    "prior_templates": [
+                        [
+                            prior.label,
+                            _sha256_file_or_none(prior.path),
+                            prior.in_use_from,
+                            prior.in_use_until,
+                        ]
+                        for prior in config.baseline.prior_templates
+                    ]
+                }
+                if config.baseline.prior_templates
+                else {}
+            ),
         },
         "perspective": {
             "party": config.perspective.party,

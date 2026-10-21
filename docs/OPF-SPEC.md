@@ -155,9 +155,21 @@ A playbook is a single JSON object:
 {
   "has_canonical_template": true,
   "template_ref": { "document_id": "...", "title": "...", "source": "path or URI" },
+  "prior_templates": [                       // OPF 0.6, issue #249; absent when none was supplied
+    { "label": "2019 form", "in_use_from": "2019" | "2019-03" | "2019-03-14",
+      "in_use_until": "2021-06", "sha256": "sha256:…" }   // dates and sha256 OPTIONAL
+  ],
   "notes": "free text"
 }
 ```
+`prior_templates` lists OLDER versions of our own form the producer was given, in
+the order it was given them (§3.5.7): each one's unique `label`, the in-use
+dates the owner stated (at the precision stated) and the content address of the
+form's source file. Dates the owner did not state are absent here; the digest
+infers them from deal dates and says so (§3.12.2). A form's `sha256` is what a
+citation of the form resolves through (§4.1), so a form any citation names MUST
+carry it.
+
 If `has_canonical_template` is `false`, the playbook is *emergent*. The provenance rule still applies; with no template, `our_standard` is set only from our-paper deals, and most stances will be `mixed`/`no_signal`.
 
 ### 3.3 `taxonomy`
@@ -229,12 +241,17 @@ facts only:
     "id": "clause.governing_law", "taxonomy_id": "governing_law", "title": "Governing Law",
     "our_standard": { "text": "...", "source_ref": Citation,
                       "parts": [ { "part_id": "3f9a2c1d", "order": 1, "text": "..." } ] } | null,
+    "prior_standards": [ PriorStandard ],   // our former forms' clause, §3.5.7 (empty when none)
+    "why_changed": { "text": "...", "basis": "owner" } | null,   // the owner's note, §3.5.7
     "n_deals": 6,                      // distinct deals with a precedent for this clause
     "n_signed_standard": 2,            // distinct signed deals that signed our standard
     "n_variants": 2,                   // distinct non-standard texts signed (signed deals)
     "n_refused": 0,                    // distinct refused-ask texts
     "n_opened_standard": 4,            // distinct signed deals whose clause opened with our standard (§3.5.5)
     "n_kept_standard": 2,              // of those, deals that signed our standard
+    "n_opened_prior": 3,               // distinct signed deals whose clause opened on a former form of ours (§3.5.7)
+    "n_kept_prior": 2,                 // of those, deals that signed the text they opened with
+    "n_moved_to_current": 1,           // of those, deals whose signed text is our current standard
     "n_changed_openings": 0            // distinct non-standard openings not signed as proposed (§3.12.2)
   } ],
   "precedent": [ {                     // one per (deal, clause type)
@@ -246,7 +263,8 @@ facts only:
     "signed": true, "signed_on": "2025-03-14" | "2025-03" | null,   // §3.8
     "rounds": 1,
     "signed_text":  { "text": "...", "ref": Citation } | null,
-    "opened_with": "standard" | "non_standard" | "absent" | null,   // §3.5.5
+    "opened_with": "standard" | "prior_standard" | "non_standard" | "absent" | null,   // §3.5.5
+    "opened_with_form": "2019 form",                                // OPTIONAL: present iff prior_standard, §3.5.7
     "opening_text": { "text": "...", "ref": Citation } | null,      // §3.5.5
     "standard": false, "moved": true,
     "refused_asks": [ { "text": "...", "round": 1, "ref": Citation } ]
@@ -359,12 +377,13 @@ cannot express them):
   agrees with that document's `signed_version` (non-null ⇔ `signed`) when
   recorded. `standard: true` requires a non-null `signed_text`.
 - Each clause's `n_deals` / `n_signed_standard` / `n_variants` / `n_refused` /
-  `n_opened_standard` / `n_kept_standard` / `n_changed_openings`
+  `n_opened_standard` / `n_kept_standard` / `n_opened_prior` / `n_kept_prior` /
+  `n_moved_to_current` / `n_changed_openings`
   equal what `precedent` implies (grouping texts by the grouping key above —
   not by `standard`'s normalization, whose party names are not in the
   document). Every count is distinct deals or distinct texts — never rows.
 - Every citation in `evidence` resolves (§4).
-- The opening-evidence rules of §3.5.5.
+- The opening-evidence rules of §3.5.5 and the prior-standards rules of §3.5.7.
 
 No stance, band, risk or deviation verdict appears anywhere in a 0.6
 `evidence` or `digest`. A producer that ran a judged pass MAY carry its
@@ -401,8 +420,17 @@ Definitions (normative):
   - `"standard"` — the first-draft text is our standard language. This is the
     check `standard` uses (an exact match after normalization against the
     whole template clause, with the producer's party names).
-  - `"non_standard"` — it is present but not standard, including when the
-    clause type has no template clause.
+  - `"prior_standard"` (issue #249) — it is not our current standard but IS
+    the text of one of OUR former forms for the clause (§3.5.7), by the same
+    exact check, against that form's whole clause. Its origin is ours, never
+    the counterparty's. The current standard is tested first and wins when
+    both match. Which form a deal opened on is a fact of the deal, not of each
+    clause: when several former forms match a clause, the form that the most
+    of the deal's first-draft clause types match names the opening
+    (`opened_with_form`), then the first listed in `baseline.prior_templates`;
+    so forms that read alike in one clause never split a deal across two forms.
+  - `"non_standard"` — it is present but neither, including when the clause
+    type has no template clause.
   - `"absent"` — the first draft has no node bound to the clause type, but a
     later draft or the signed copy does: the clause was added during the
     negotiation. A first-draft clause that the producer left unclassified
@@ -411,8 +439,11 @@ Definitions (normative):
   - `null` — not determined: the deal has no detected executed copy
     (`signed` false, an unsigned deal's version order is not anchored), or
     the producer predates this field. `null` is never `"absent"`.
+- **`opened_with_form`** — the `label` of the former form `opened_with:
+  "prior_standard"` matched. Present exactly when `opened_with` is
+  `"prior_standard"`, and always a `baseline.prior_templates[].label`.
 - **`opening_text`** — `{text, ref}` of the first-draft text. Recorded when
-  `opened_with` is `"standard"` or `"non_standard"` AND either `signed_text`
+  `opened_with` is `"standard"`, `"prior_standard"` or `"non_standard"` AND either `signed_text`
   is `null` (the clause was struck, or relocated away) or the §3.5.4 grouping
   key of the opening differs from that of `signed_text`. Otherwise `null`: a
   clause that opened with its signed text, or whose only edit is case,
@@ -424,6 +455,7 @@ Normative rules (a conformant validator MUST enforce each):
 
 - `signed` false ⇒ `opened_with` is `null` and `opening_text` is `null`.
 - `opened_with` is `"absent"` or `null` ⇒ `opening_text` is `null`.
+- `opened_with_form` is present ⇔ `opened_with` is `"prior_standard"`.
 - `opening_text` non-null ⇒ its grouping key differs from that of
   `signed_text` (or `signed_text` is `null`), and `moved` is `true`.
 
@@ -457,7 +489,8 @@ DERIVED from those facts.
 
 `vs_standard` is an OPTIONAL key (a producer SHOULD always write it; absent
 is read as `null`) on `signed_text`, `opening_text` and each `refused_asks[]`
-entry of a precedent record:
+entry of a precedent record, and on each `prior_standards[]` entry of a clause
+(§3.5.7):
 
 ```jsonc
 "vs_standard": {
@@ -528,8 +561,11 @@ entry of a precedent record:
   signed text whose `standard` fact is true (an exact match is equivalent by
   definition); any text of a clause whose `our_standard` is `null` (emergent
   mode: nothing to compare with); an opening whose `opened_with` is
-  `"standard"`. A refused ask, a non-standard opening and a non-standard
-  signed text are judged.
+  `"standard"` or `"prior_standard"` (the latter is our own former form, which
+  its `prior_standards[]` entry judges); a former form's clause that reads,
+  under the grouping key, as today's standard. A refused ask, a non-standard
+  opening, a non-standard signed text and each former form's clause that
+  differs from today's are judged.
 - **Cache key (the identity of "the same text").** A judgment is shared by
   every deal, paper side and role carrying the same text against the same
   parts: `sha256` over the JSON array `[agreement_type.id, taxonomy_id,
@@ -565,6 +601,90 @@ separately) / adjudicated / unchecked counts in `playbook scorecard`. Digest
 4 (issue #234) uses the labels to collapse equivalent variants into one entry
 and carries every other judged text's compact part map (§3.12.2); the critic
 dossiers carry the part reasons (§3.12.3).
+
+#### 3.5.7 OPF 0.6 — our former forms: prior standards (issue #249)
+
+Past deals mostly opened on OLDER versions of our own form. Read against
+today's standard alone, a clause that opened on last year's indemnity is
+`non_standard`, and our own former wording reads as the counterparty's. When
+the producer is given those forms (`baseline.prior_templates`, §3.2) it
+records the clause as ours and gives the consumer a factual history of the
+standard. Only facts are recorded; **no reason is ever claimed**: the only
+reason a change is ever shown is the owner's own `why_changed`.
+
+**Prior standards.** Each form is segmented and classified exactly like the
+current template (same producer, same front-matter rule), so a clause type's
+text in a form is comparable, part for part, with today's standard. Per clause
+type and form with text for it, `evidence.clauses[].prior_standards[]` holds a
+`PriorStandard`:
+
+```jsonc
+{ "form_label": "2019 form",                  // a baseline.prior_templates[].label
+  "text": "...",                               // the parts joined with a blank line
+  "parts": [ { "part_id": "3f9a2c1d", "order": 1, "text": "..." } ],   // as our_standard.parts
+  "source_ref": Citation,                      // the clause in the FORM's own bytes: document_id
+                                               // "prior_template:2019 form", version "prior_template" (§4)
+  "vs_standard": VsStandard | null }           // this clause against TODAY'S standard, §3.5.6
+```
+
+`parts` follow `our_standard.parts` exactly (a form's classified, non-empty,
+non-front-matter passages of the type in form order; `part_id` the content
+hash of the part under §3.5.4's grouping key, so a passage unchanged since the
+form has the same id in both). A clause has at most one entry per form. A
+clause type the form has no standard for has no entry for it.
+
+`source_ref` cites the clause in the form's own bytes, never in today's
+template: its `document_id` is `prior_template:` followed by the form's label,
+its `version` is `prior_template`, and it resolves through that form's
+`baseline.prior_templates[].sha256` (§4.1); its `clause_path` and `char_span`
+are the form's own coordinates. (`document_id` `"template"` always names
+today's form, so a former form cited as `"template"` would resolve to today's
+wording.)
+
+**Judging each form once.** A prior standard's `vs_standard` is the §3.5.6
+judgment of the form's clause against TODAY's standard, part by part: the
+parts it names are today's `our_standard.parts`, the cache key is the §3.5.6
+key (so the same words signed in a deal share one judgment with the form's
+clause), and the subject's role is `prior_standard`. A clause that reads, under
+the grouping key, exactly as today's standard is never judged and its
+`vs_standard` MUST be `null`; so is one on a clause with no `our_standard`.
+
+**Openings and counts.** A deal that opened on a former form is recorded as
+`opened_with: "prior_standard"` with `opened_with_form` (§3.5.5), and its
+origin is ours: it is never a changed opening (§3.12.2), and a clause of ours
+struck before signing is no refused ask (the producer counts it under
+`corpus.stats.dropped_observations`, `removed_prior_standard`). Held and
+conceded are computed against the form we actually sent, over distinct signed
+deals:
+
+- `n_opened_prior` — `opened_with` is `"prior_standard"`;
+- `n_kept_prior` — of those, the deal signed the text it opened with (a
+  non-null `signed_text` and a null `opening_text`);
+- `n_moved_to_current` — of those, `standard` is `true`: the deal moved from
+  our former form to today's.
+
+`n_opened_prior − n_kept_prior` is what was conceded; it is derived, not
+recorded.
+
+**`why_changed`.** An OPTIONAL note per clause, `{text, basis: "owner"}`,
+written only by the owner (the Review tab's "Why we changed this" field, saved
+as an `overrides.json` entry, `basis: owner`); `null` otherwise. It is never
+required and the engine never writes one.
+
+Normative rules (a conformant validator MUST enforce each):
+
+- `baseline.prior_templates[]` labels are unique.
+- Every `prior_standards[].form_label` and every `opened_with_form` is a
+  `baseline.prior_templates[].label`; a clause has at most one prior standard
+  per form.
+- A prior standard's `source_ref` cites its own form: `document_id`
+  `prior_template:<form_label>` and `version` `prior_template`, and that form
+  carries its `sha256` (§4).
+- `prior_standards[].text` is its `parts` joined in order, `order` counts from
+  1, and each `part_id` is the part's recomputed content hash (as
+  `our_standard`).
+- A prior standard's `vs_standard` follows §3.5.6's rules, and is `null` for a
+  clause that reads as today's standard.
 
 ### 3.6 `posture` (NEW) — negotiation intent as generated prose
 
@@ -810,6 +930,17 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
     "n_deals": 6, "first_signed": "2022-03", "last_signed": "2024-11",   // span of the clause's evidence
     "n_signed_standard": 2,
     "n_opened_standard": 4, "n_kept_standard": 2,
+    "standard_history": {                      // issue #249, §3.5.7
+      "forms": [ { "form": "2019 form",
+                   "in_use_from": "2019-03" | "2019" | null, "in_use_until": "2021-06" | null,
+                   "in_use_basis": "config" | "deal_dates" | "mixed" | null,
+                   "n_opened": 3, "n_kept": 2, "n_conceded": 1, "n_moved_to_current": 1,
+                   "unchanged": false,
+                   "label": ... | null, "part_map": [...] | null, "additions": [...] | null,
+                   "label_by": "owner", "reason": "..." | null, "settled": ... | null,
+                   "parts": [ { "part_id": "...", "text": "..." | null } ],
+                   "ref": Citation } ],
+      "why_changed": { "text": "...", "basis": "owner" } | null },
     "positions": { "standard": 2, "equivalent": 0, "more_protective": 0,
                    "less_protective": 0, "mixed": 1, "different_concept": 1, "unjudged": 2 },
     "signed_variants": [
@@ -858,6 +989,30 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
 - `n_opened_standard` — deals whose `opened_with` is `"standard"`;
   `n_kept_standard` — of those, deals whose `standard` is `true`. Both equal
   the same-named `evidence.clauses[]` counts.
+- `standard_history` (issue #249, §3.5.7) — always present; `forms` has one
+  entry per former form with text for the clause, in config order (never
+  capped: a handful of entries, and `parts` carries text only where a passage
+  differs from today's), `why_changed` is the clause's owner note (a copy of
+  the evidence's) or `null`. Per form: `form` is its label; `n_opened`,
+  `n_kept` and `n_moved_to_current` are distinct signed deals that opened on
+  that form (`opened_with_form`), kept what they opened with, and ended on the
+  current standard; `n_conceded` is `n_opened − n_kept`; `unchanged` is true
+  when the form's clause reads, under the grouping key, as today's standard
+  (then there is no part map). `label`, `part_map`, `additions`, `reason` and
+  `settled` (and `label_by` when the owner set the label) are the form's
+  `vs_standard` against today's standard exactly as for any other entry,
+  `null` when not judged or unchanged. `parts` lists the form's own passages
+  in order as `{part_id, text}`; `text` is `null` when the `part_id` is a part
+  of today's standard (the passage is unchanged, see `our_standard`).
+  **Dates.** `in_use_from` / `in_use_until` are the config's own values
+  (`baseline.prior_templates`, at the precision given) when given; an end the
+  owner did not give is inferred, once per form, from the deals that opened on
+  the form in ANY clause type: the earliest (`in_use_from`) and latest
+  (`in_use_until`) signing month of those deals, else `null` — never guessed.
+  A form carries the same dates in every clause's `standard_history`.
+  `in_use_basis` says where the dates came from: `config` (every date shown is the owner's), `deal_dates` (every
+  one is inferred), `mixed`, or `null` when there is no date. `ref` cites the
+  clause inside the form.
 - `positions` — the signed deals that signed a text for the clause, by what
   that text is: `standard` (the signed text is our standard language; equals
   `n_signed_standard`), each `vs_standard.label` (§3.5.6) of a non-standard
@@ -938,7 +1093,9 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   and `ref` are the summary and citation of the representative (lowest
   `document_id`); `n_to_standard` counts deals whose `standard` is `true`,
   `n_struck` deals whose `signed_text` is `null`; `label` is the
-  representative's. Ordered `n_deals` desc, then grouping key.
+  representative's. Ordered `n_deals` desc, then grouping key. An opening on
+  one of our former forms (`opened_with: "prior_standard"`) is never listed:
+  its origin is ours (§3.5.7).
 - The three lists are capped together (top 5, tightened stepwise to 1 until
   the digest fits the ~40K-token budget), the cap applying after the
   equivalent variants collapse. `n_variants_total` / `n_refused_total` /
@@ -1132,7 +1289,7 @@ Every asserted clause text MUST be traceable.
 - `document_id`, `version`, and `clause_path` are REQUIRED; `char_span` is optional.
 - `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page. A clause the reference engine cut out of another (§3.3, re-segmentation) is numbered `<clause>.r<k>`; its `char_span` lies inside the span of the clause it was cut from. One citation form is a list: an `our_standard` joined from several template clauses (§3.5) cites them all, so its `clause_path` is their dotted paths in document order separated by `, ` (for example `2, 5, 7`), and it carries no `char_span`. A `?` entry stands for a clause the compiler could not number; it has no navigation target. Every other citation names exactly one clause.
 - `char_span`, when present, indexes into the document's full normalized text (document-relative — same coordinate system as `ClauseNode.char_span` in the clause-tree artifact), not the clause's own text. It spans the whole cited clause — from the start of its heading line through the end of its own body text (sub-clauses excluded; each carries its own span) — so a consumer resolving it lands on the clause language, not only its heading. (The reference engine also cuts an execution/signature block out of the clause that precedes it, so that block is not part of the clause text or its span.)
-- `version` is the inferred ordinal (1-based); `"template"` is reserved for the baseline. Every citation's `(document_id, version)` MUST resolve against `corpus.documents` — dangling citations are non-conformant. When the cited document publishes `version_files` (§3.8), the cited version MUST have an entry there — a citation naming bytes no consumer can verify is likewise non-conformant.
+- `version` is the inferred ordinal (1-based); `"template"` is reserved for the baseline, today's form (`document_id` `"template"`), and `"prior_template"` for one of our former forms (§3.5.7), whose `document_id` is `prior_template:` followed by the form's `baseline.prior_templates[].label` (for example `{"document_id": "prior_template:2019 form", "version": "prior_template", ...}`). A former form is never cited as `"template"`: that names today's bytes. Every citation's `(document_id, version)` MUST resolve against `corpus.documents` (or, for `"template"`, `baseline.template_ref`; for `"prior_template"`, a `baseline.prior_templates[]` entry that carries a `sha256`) — dangling citations are non-conformant. When the cited document publishes `version_files` (§3.8), the cited version MUST have an entry there — a citation naming bytes no consumer can verify is likewise non-conformant.
 
 ### 4.1 Resolution algorithm (NEW)
 
@@ -1143,7 +1300,10 @@ without the compiler's workspace:
 2. Look up `corpus.documents[document_id].version_files` and select the
    entry whose `version` matches; its `sha256` is the content address of
    the exact source file the compiler read. (For `"template"`, the address
-   is `baseline.template_ref.sha256`.)
+   is `baseline.template_ref.sha256`: today's form. For `"prior_template"`,
+   it is the `sha256` of the `baseline.prior_templates[]` entry whose `label`
+   follows the `prior_template:` prefix of the `document_id`: that former
+   form's own bytes, never today's template.)
 3. Locate a file in the consumer's own corpus copy whose bytes hash to
    that address — the hash, not any filename or directory layout, is the
    key. No match means the consumer's copy differs from the compiled-from
@@ -1338,6 +1498,7 @@ must be re-mined, not only re-projected.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 and 0.5 carry no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
+- **0.6 (issue #249)** — Prior standards (§3.2, §3.5.4, §3.5.5, §3.5.7, §3.12.2): `baseline.prior_templates[]` (our older forms' labels, owner dates and content addresses); `evidence.clauses[].prior_standards[]` (each form's clause as parts with stable `part_id`s, cited in the form's own bytes — `version` `"prior_template"`, `document_id` `prior_template:<label>`, resolved through the form's `sha256` (§4.1) — and its `vs_standard` against today's standard, judged once, subject role `prior_standard`), `why_changed` (the owner's optional note) and the counts `n_opened_prior` / `n_kept_prior` / `n_moved_to_current`; `opened_with` gains `"prior_standard"` with `opened_with_form`, so our own former wording is never a changed opening or a refused ask; the digest's per-clause `standard_history`. OPF 0.6 and digest 5 are replaced in place; there is no backward compatibility.
 - **0.6 (issues #247, #248)** — Signing dates (§3.5.4, §3.8, §3.12.2): `corpus.documents[].signed_on` (an ISO date, or `YYYY-MM` when only the month is known, or `null`) and `signed_on_basis` (`document_text` | `signature_block` | `filename` | `file_metadata`, present exactly when the date is); every precedent record gains a required `signed_on` equal to its document's, which replaces the optional `signed_at` (the `YYYY-Qn` quarter form is gone). `digest_version` "5": `first_signed` / `last_signed` (`YYYY-MM`) on every signed variant (and the collapsed equivalent entry), every refused ask and every clause, and the corpus span is to the month. New validator MUSTs: both keys present on every in-scope document (null when unknown), a well-formed real date in 1980-2099, a basis exactly when there is a date, no date without a detected executed copy, and a precedent's date equal to its document's. New schema file `playbook.schema-0.6.json` and conformance set `spec/conformance/0.6/` (vector 010); they replace 0.5 in the reference engine. Issue #248 adds `settled` (§3.5.6, §3.12.2, §3.12.3): how settled each judged text's `vs_standard` is (`agreed`, `adjudicated`, `unchecked` or `owner`), derived from its basis and blind check and carried on every non-equivalent digest variant, refused ask and changed opening and on each dossier excerpt's `vs_standard`; the collapsed equivalent entry carries `settled_counts`; `part_map_legend.settled` states the values; conformance vector 011.
 - **0.5 (issue #234)** — `digest_version` "4" (§3.12.2) replaces digest 3 in place: per clause `n_opened_standard` / `n_kept_standard` / `positions`, `n_from_standard` and `n_unchanged` on each signed variant, `changed_openings` (with `n_changed_openings_total`), the `vs_standard` `label` on variants, asks and openings (equivalent variants collapse into one entry), and top-level `uncovered_clause_types`; `evidence.clauses[]` gains `n_opened_standard`, `n_kept_standard` and `n_changed_openings`. The 0.5 conformance set was regenerated for digest 4 with vectors 006 and 007.
 - **0.5 (issue #240)** — Equivalence label (§3.5.6): an optional `vs_standard` `{label, reason, basis, check} | null` on `signed_text`, `opening_text` and each `refused_asks[]` entry, judged once per distinct text against our standard and blind-checked by an independent model; three new validator MUSTs.

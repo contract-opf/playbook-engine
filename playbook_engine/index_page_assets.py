@@ -147,7 +147,7 @@ JS = r"""
 
   var META = readJSON('page-meta') || {};
   var ROWS = readJSON('review-rows') || [];
-  var PF = readJSON('pf-data') || { posture: null, floor: [] };
+  var PF = readJSON('pf-data') || { posture: null, floor: [], why_changed: {} };
   var FILE = META.overrides_file || 'overrides.json';
   var LABEL_NAMES = {
     less_protective: 'Less protective', mixed: 'Mixed', different_concept: 'Different concept',
@@ -223,7 +223,7 @@ JS = r"""
   function ekey(e) { return e.target + '|' + e.id + '|' + (e.field || ''); }
   function validEntry(e) {
     return e && typeof e === 'object' && typeof e.id === 'string' &&
-      (e.target === 'vs_standard' || e.target === 'posture' || e.target === 'floor');
+      (e.target === 'vs_standard' || e.target === 'posture' || e.target === 'floor' || e.target === 'why_changed');
   }
   function mergeFile(obj) {
     var list = obj && Array.isArray(obj.overrides) ? obj.overrides : [];
@@ -428,6 +428,12 @@ JS = r"""
   }
   function fullText(row) {
     loadCanonical();
+    if (row.loc.role === 'prior_standard') {
+      /* a former form's clause (issue #249): it belongs to no deal */
+      var pcl = ((canonical.evidence || {}).clauses || []).filter(function (c) { return c.taxonomy_id === row.loc.tid; })[0];
+      var pe = ((pcl && pcl.prior_standards) || []).filter(function (x) { return x.form_label === row.loc.form; })[0];
+      return pe && pe.text || null;
+    }
     var rec = precById[row.loc.record];
     if (!rec) return null;
     var slot = row.loc.role === 'signed' ? rec.signed_text : row.loc.role === 'opening' ? rec.opening_text : (rec.refused_asks || [])[row.loc.i || 0];
@@ -668,6 +674,7 @@ JS = r"""
   $$('textarea.edit').forEach(function (ta) {
     var target = ta.getAttribute('data-target'), id = ta.getAttribute('data-id'), field = ta.getAttribute('data-field') || null;
     var original = target === 'posture' ? (PF.posture && PF.posture.system_prompt) || '' :
+      target === 'why_changed' ? ((PF.why_changed || {})[id] || '') :
       ((PF.floor || []).filter(function (i) { return i.id === id; })[0] || {})[field] || '';
     ta.value = original;
     bindPF(ta, original, target, id, field);

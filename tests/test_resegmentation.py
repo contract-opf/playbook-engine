@@ -1540,7 +1540,7 @@ def test_scorecard_counts_the_pass_and_its_check(tmp_path: Path) -> None:
     out = tmp_path / "out"
     _mine(tmp_path, out)
     card = build_scorecard(out)
-    assert card["scorecard_version"] == 10
+    assert card["scorecard_version"] == 11
     section = card["resegmentation"]
     assert section == {
         "splits": 1,

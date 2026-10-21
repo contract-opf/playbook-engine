@@ -83,6 +83,7 @@ def _base_v06(
     documents: list[dict[str, Any]] | None = None,
     perspective: dict[str, str] | None = None,
     floor: dict[str, Any] | None = None,
+    prior_templates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """A minimal OPF 0.6 document. Clause counts and precedent ids are
     stamped by the reference functions (``precedent.clause_counts`` /
@@ -94,6 +95,8 @@ def _base_v06(
         "baseline": {"has_canonical_template": True},
         "taxonomy": {"source": "custom", "entries": []},
     }
+    if prior_templates is not None:
+        doc["baseline"]["prior_templates"] = prior_templates
     if perspective is not None:
         doc["perspective"] = perspective
     records = precedent or []
@@ -110,7 +113,16 @@ def _base_v06(
     for clause in clauses or []:
         clause = _with_parts(clause)
         stamp_standard_parts(clause.get("our_standard"), party)
-        stamped.append({**clause, **clause_counts(clause["taxonomy_id"], records, party=party)})
+        for prior in clause.get("prior_standards", []):
+            stamp_standard_parts(prior, party)
+        stamped.append(
+            {
+                **{k: clause[k] for k in ("id", "taxonomy_id", "title", "our_standard")},
+                "prior_standards": clause.get("prior_standards", []),
+                "why_changed": clause.get("why_changed"),
+                **clause_counts(clause["taxonomy_id"], records, party=party),
+            }
+        )
     doc["evidence"] = {"clauses": stamped, "precedent": records}
     _stamp_judgment_parts(doc["evidence"])
     doc["posture"] = {}
@@ -290,6 +302,7 @@ def _prec(
     signed_on: str | None = None,
     opening_text: str | None = None,
     opened_with: str | None | object = _DEFAULT,
+    opened_with_form: str | None = None,
     refused: list[tuple[str, int]] | None = None,
     paper: str = "ours",
     rounds: int = 0,
@@ -348,6 +361,7 @@ def _prec(
                 else None
             ),
             "opened_with": opened_with,
+            **({"opened_with_form": opened_with_form} if opened_with_form is not None else {}),
             "opening_text": (
                 {
                     "text": opening_text,
@@ -1601,6 +1615,9 @@ def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
 
     # 011 - how settled each judgment is (issue #248).
     vectors.append(build_vector_011())
+
+    # 012 - our former forms: prior standards and the standard history (issue #249).
+    vectors.append(build_vector_012())
     return vectors
 
 
@@ -1924,6 +1941,298 @@ def build_vector_011() -> tuple[str, dict[str, Any]]:
             "the dossier's two excerpts (the concession whose judgment was adjudicated, "
             "the changed opening that was unchecked) carry settled in their "
             "vs_standard.",
+            doc,
+        ),
+    )
+
+
+def build_vector_012() -> tuple[str, dict[str, Any]]:
+    tid = "assignment"
+    s1 = "Neither party may assign this Agreement without the other party's prior written consent."
+    s2 = "Consent shall not be unreasonably withheld for an assignment to an affiliate."
+    std_text = f"{s1}\n\n{s2}"
+    p18b = "Consent may be withheld for any reason, including an assignment to an affiliate."
+    text_18 = f"{s1}\n\n{p18b}"
+    text_19 = "Either party may assign this Agreement to an affiliate without consent."
+    variant = "Neither party may assign without consent, except to an affiliate on notice."
+    vs_variant_other = "Assignment is prohibited."
+
+    def _p(n: int, status: str, direction: str, reason: str | None = None) -> dict[str, Any]:
+        key = "relation" if status == "present" else "effect"
+        part: dict[str, Any] = {"part_id": _part(n), "status": status, key: direction}
+        if reason is not None:
+            part["reason"] = reason
+        return part
+
+    # The 2018 form against today's two parts: part 1 is the same passage,
+    # part 2 lets consent be withheld for any reason.
+    vs_18 = {
+        "label": "less_protective",
+        "reason": "Synthetic fixture reason: consent may be withheld for any reason.",
+        "parts": [
+            _p(1, "present", "equivalent"),
+            _p(2, "present", "less_protective", "Synthetic fixture: no reasonableness limit."),
+        ],
+        "additions": [],
+        "basis": "agent",
+        "check": None,
+    }
+    # The 2019 form: neither part is there, and it adds a free affiliate assignment.
+    vs_19 = {
+        "label": "different_concept",
+        "reason": "Synthetic fixture reason: a free affiliate assignment instead of consent.",
+        "parts": [
+            _p(1, "omitted", "less_protective", "Synthetic fixture: no consent requirement."),
+            _p(2, "omitted", "neutral"),
+        ],
+        "additions": [
+            {"summary": "Synthetic fixture: free affiliate assignment.", "effect": "neutral"}
+        ],
+        "basis": "agent",
+        "check": None,
+    }
+    vs_signed_variant = {
+        "label": "equivalent",
+        "reason": "Synthetic fixture reason: same legal effect.",
+        "parts": [_p(1, "present", "equivalent"), _p(2, "present", "equivalent")],
+        "additions": [],
+        "basis": "agent",
+        "check": None,
+    }
+    form_18, form_19 = "2018 form", "2019 form"
+    precedent = [
+        # deal-a: opened on the 2018 form and signed it as it stood (kept).
+        _prec(
+            "deal-a",
+            tid,
+            signed_text=text_18,
+            signed_on="2020-02",
+            signed_vs=copy.deepcopy(vs_18),
+            opened_with="prior_standard",
+            opened_with_form=form_18,
+        ),
+        # deal-b: opened on the 2018 form and moved to today's standard.
+        _prec(
+            "deal-b",
+            tid,
+            signed_text=std_text,
+            standard=True,
+            signed_on="2020-09",
+            opening_text=text_18,
+            opened_with="prior_standard",
+            opened_with_form=form_18,
+            rounds=1,
+        ),
+        # deal-c: opened on the 2019 form and ended on a variant (conceded).
+        _prec(
+            "deal-c",
+            tid,
+            signed_text=variant,
+            signed_on="2020-05",
+            signed_vs=copy.deepcopy(vs_signed_variant),
+            opening_text=text_19,
+            opened_with="prior_standard",
+            opened_with_form=form_19,
+            rounds=1,
+            paper="theirs",
+        ),
+        # deal-d: opened on the 2018 form and signed it as it stood (kept).
+        _prec(
+            "deal-d",
+            tid,
+            signed_text=text_18,
+            signed_on="2021-03",
+            signed_vs=copy.deepcopy(vs_18),
+            opened_with="prior_standard",
+            opened_with_form=form_18,
+        ),
+        # deal-e: opened with and kept today's standard.
+        _prec(
+            "deal-e",
+            tid,
+            signed_text=std_text,
+            standard=True,
+            signed_on="2023-01",
+            opened_with="standard",
+        ),
+        # deal-f: the counterparty's own opening, not signed as proposed; the
+        # text it signed is not judged. Its origin is theirs.
+        _prec(
+            "deal-f",
+            tid,
+            signed_text=vs_variant_other,
+            signed_on="2022-06",
+            opening_text="Either party may assign this Agreement freely.",
+            opened_with="non_standard",
+            rounds=1,
+            paper="theirs",
+        ),
+    ]
+    doc = _base_v06(
+        clauses=[
+            {
+                "id": f"clause.{tid}",
+                "taxonomy_id": tid,
+                "title": "Assignment",
+                "our_standard": {
+                    "text": std_text,
+                    "source_ref": {
+                        "document_id": "template",
+                        "version": "template",
+                        "clause_path": "9",
+                    },
+                    "parts": [
+                        {"part_id": "", "order": 1, "text": s1},
+                        {"part_id": "", "order": 2, "text": s2},
+                    ],
+                },
+                "prior_standards": [
+                    {
+                        "form_label": form_18,
+                        "text": text_18,
+                        "parts": [
+                            {"part_id": "", "order": 1, "text": s1},
+                            {"part_id": "", "order": 2, "text": p18b},
+                        ],
+                        "source_ref": {
+                            "document_id": f"prior_template:{form_18}",
+                            "version": "prior_template",
+                            "clause_path": "9",
+                        },
+                        "vs_standard": copy.deepcopy(vs_18),
+                    },
+                    {
+                        "form_label": form_19,
+                        "text": text_19,
+                        "parts": [{"part_id": "", "order": 1, "text": text_19}],
+                        "source_ref": {
+                            "document_id": f"prior_template:{form_19}",
+                            "version": "prior_template",
+                            "clause_path": "11",
+                        },
+                        "vs_standard": copy.deepcopy(vs_19),
+                    },
+                    {
+                        "form_label": "2021 form",
+                        "text": std_text,
+                        "parts": [
+                            {"part_id": "", "order": 1, "text": s1},
+                            {"part_id": "", "order": 2, "text": s2},
+                        ],
+                        "source_ref": {
+                            "document_id": "prior_template:2021 form",
+                            "version": "prior_template",
+                            "clause_path": "9",
+                        },
+                        "vs_standard": None,
+                    },
+                ],
+                "why_changed": {
+                    "text": "Synthetic fixture note: we stopped letting consent be withheld for any reason.",
+                    "basis": "owner",
+                },
+            }
+        ],
+        precedent=precedent,
+        documents=[
+            _deal(
+                f"deal-{c}",
+                signed_version=3,
+                provenance="counterparty_paper" if c in "cf" else "our_paper",
+            )
+            for c in "abcdef"
+        ],
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+        prior_templates=[
+            {
+                "label": form_18,
+                "in_use_from": "2018-01",
+                "in_use_until": "2019-12",
+                "sha256": "sha256:" + "0" * 64,
+            },
+            {"label": form_19, "in_use_from": "2019-03", "sha256": "sha256:" + "1" * 64},
+            {"label": "2021 form", "in_use_from": "2021", "sha256": "sha256:" + "2" * 64},
+        ],
+    )
+    clause = doc["evidence"]["clauses"][0]
+    # Independent expectations, written down from the fixture and not read from the engine.
+    assert (clause["n_opened_prior"], clause["n_kept_prior"], clause["n_moved_to_current"]) == (
+        4,
+        2,
+        1,
+    )
+    assert (clause["n_opened_standard"], clause["n_kept_standard"]) == (1, 1)
+    assert clause["n_changed_openings"] == 1  # deal-f only: our own former forms are not asks
+    digest = build_digest_v5(doc)
+    history = digest["clauses"][0]["standard_history"]
+    assert [f["form"] for f in history["forms"]] == [form_18, form_19, "2021 form"]
+    f18, f19, f21 = history["forms"]
+    assert (f18["n_opened"], f18["n_kept"], f18["n_conceded"], f18["n_moved_to_current"]) == (
+        3,
+        2,
+        1,
+        1,
+    )
+    assert (f19["n_opened"], f19["n_kept"], f19["n_conceded"], f19["n_moved_to_current"]) == (
+        1,
+        0,
+        1,
+        0,
+    )
+    assert (f21["n_opened"], f21["unchanged"], f21["part_map"]) == (0, True, None)
+    assert (f18["in_use_from"], f18["in_use_until"], f18["in_use_basis"]) == (
+        "2018-01",
+        "2019-12",
+        "config",
+    )
+    assert (f19["in_use_from"], f19["in_use_until"], f19["in_use_basis"]) == (
+        "2019-03",
+        "2020-05",
+        "mixed",
+    )
+    assert (f21["in_use_from"], f21["in_use_until"], f21["in_use_basis"]) == (
+        "2021",
+        None,
+        "config",
+    )
+    assert f18["part_map"] == ["=", "-"] and f19["part_map"] == ["x-", "x0"]
+    assert f18["parts"][0]["text"] is None and f18["parts"][1]["text"] == p18b
+    assert history["why_changed"]["basis"] == "owner"
+    # Each form's clause is cited in that form's own bytes, never as "template".
+    assert f18["ref"] == {
+        "document_id": f"prior_template:{form_18}",
+        "version": "prior_template",
+        "clause_path": "9",
+    }
+    return (
+        "012-prior-standards",
+        _vector_v06(
+            "prior-standards",
+            "Our former forms and the standard history (OPF-SPEC §3.5.7, §3.12.2, issue "
+            "#249). Three forms are supplied (baseline.prior_templates, with the content "
+            "address and any dates the owner gave). Five of six deals' clauses opened on "
+            "something of ours or a counterparty's: deal-a and deal-d opened on the 2018 "
+            "form and signed it as it stood (opened_with prior_standard, opened_with_form "
+            "2018 form, no distinct opening_text: kept), deal-b opened on it and moved to "
+            "today's standard (opening_text recorded, standard true), deal-c opened on the "
+            "2019 form and ended on a variant (conceded), deal-e opened with today's "
+            "standard, and deal-f opened with the counterparty's own text (non_standard). "
+            "The clause counts n_opened_prior 4, n_kept_prior 2 and n_moved_to_current 1 "
+            "are derived from those records, and n_changed_openings is 1: only deal-f's "
+            "opening is a counterparty ask, our own former wording never is. Each form's "
+            "clause is judged once against today's two parts (role prior_standard, the "
+            "same cache key as any text): the 2018 form's judgment is also the verdict of "
+            "the two deals that signed its words. The 2021 form reads exactly as today's "
+            "standard, so it is unchanged with no part map. The digest's standard_history "
+            "lists the forms in config order with their in-use dates (config for the 2018 "
+            "form, the config start and the latest signing month of its deals for the 2019 "
+            "form: mixed, only the config start for the 2021 form), the opened, kept, "
+            "conceded and moved-to-current deals, the part map against today's standard, "
+            "and the form's own parts (null where the passage is today's); why_changed is "
+            "the owner's note, the only reason ever given. Each form's clause is cited in "
+            "that form's own bytes (document_id prior_template:<label>, version "
+            "prior_template, resolved through the form's baseline.prior_templates sha256), "
+            "never as template, which is today's form.",
             doc,
         ),
     )

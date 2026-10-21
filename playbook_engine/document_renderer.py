@@ -285,6 +285,12 @@ def _render_playbook_clause(
             f"opened with our standard in {clause['n_opened_standard']}; "
             f"kept it in {clause.get('n_kept_standard', 0)}"
         )
+    if clause.get("n_opened_prior"):
+        meta.append(
+            f"opened on a former form of ours in {clause['n_opened_prior']}; "
+            f"kept it in {clause.get('n_kept_prior', 0)}, moved to today's in "
+            f"{clause.get('n_moved_to_current', 0)}"
+        )
     positions = (dclause or {}).get("positions") or {}
     pos_bits = [f"{positions['standard']} signed our standard"] if positions.get("standard") else []
     for label in REVIEW_LABEL_ORDER:
@@ -309,8 +315,54 @@ def _render_playbook_clause(
         else:
             parts.append("<h3>Our standard</h3>")
             parts.append(_quote_block(text, _cite_str(standard.get("source_ref"))))
+    parts.append(_render_standard_history((dclause or {}).get("standard_history")))
     parts.append("</section>")
     return "\n".join(parts)
+
+
+def _in_use_text(form: dict[str, Any]) -> str:
+    start, end = form.get("in_use_from"), form.get("in_use_until")
+    if not start and not end:
+        return "dates unknown"
+    basis = {"deal_dates": "from deal dates", "mixed": "partly from deal dates"}.get(
+        str(form.get("in_use_basis")), ""
+    )
+    return f"in use {start or '?'} to {end or '?'}" + (f" ({basis})" if basis else "")
+
+
+def _render_standard_history(history: Any) -> str:
+    """The clause's standard history (issue #249): each former form of ours, how
+    the deals that opened on it fared, and how its clause compares with today's
+    standard. Facts only; the one reason shown is the owner's note."""
+    if not isinstance(history, dict):
+        return ""
+    forms = [f for f in history.get("forms") or [] if isinstance(f, dict)]
+    note = history.get("why_changed")
+    if not forms and not isinstance(note, dict):
+        return ""
+    items = []
+    for form in forms:
+        label = form.get("label")
+        compare = (
+            "reads the same as today's standard"
+            if form.get("unchanged")
+            else (
+                f"compared with today's standard: {_LABEL_NAMES[label].lower()}"
+                if label in _LABEL_NAMES
+                else "not yet compared with today's standard"
+            )
+        )
+        items.append(
+            f"<li><strong>{_esc(form.get('form'))}</strong> ({_esc(_in_use_text(form))}): "
+            f"{form.get('n_opened', 0)} deal(s) opened on it, {form.get('n_kept', 0)} kept it, "
+            f"{form.get('n_moved_to_current', 0)} moved to today's; {_esc(compare)}.</li>"
+        )
+    out = ["<h3>Standard history</h3>"]
+    if items:
+        out.append(f"<ul>{''.join(items)}</ul>")
+    if isinstance(note, dict):
+        out.append(_quote_block(str(note.get("text", "")), "why we changed this (owner)"))
+    return "".join(out)
 
 
 def _render_digest_summary(
@@ -475,6 +527,7 @@ def _outcome(record: dict[str, Any]) -> str:
 
 _OPENED = {
     "standard": "our standard",
+    "prior_standard": "a former form of ours",
     "non_standard": "non-standard text",
     "absent": "absent (added later)",
 }
@@ -609,7 +662,43 @@ def _render_evidence_tab(
 # ---------------------------------------------------------------------------
 
 
-def _render_review_tab(review: ReviewRows) -> str:
+def _render_why_changed(doc: dict[str, Any]) -> str:
+    """The optional "Why we changed this" fields (issue #249): one per clause that
+    has a text in one of our former forms. The engine never says why a clause
+    changed; this is where the owner may, in their own words, saved to
+    ``overrides.json`` like any other edit (``basis: owner``). Never required."""
+    boxes = []
+    for clause in playbook_clauses(doc):
+        priors = [p for p in clause.get("prior_standards") or [] if isinstance(p, dict)]
+        if not priors or not isinstance(clause.get("our_standard"), dict):
+            continue
+        note = clause.get("why_changed")
+        text = note.get("text") if isinstance(note, dict) else ""
+        forms = ", ".join(_esc(p.get("form_label")) for p in priors)
+        boxes.append(
+            f'<div class="card"><h3>{_esc(clause.get("title") or clause.get("taxonomy_id"))}</h3>'
+            f'<p class="meta">Earlier forms with this clause: {forms}</p>'
+            + _edit_box(
+                "why_changed",
+                str(clause.get("taxonomy_id")),
+                None,
+                "Why we changed this (optional)",
+                str(text or ""),
+            )
+            + "</div>"
+        )
+    if not boxes:
+        return ""
+    return (
+        '<section class="card"><h2>Why we changed our standard (optional)</h2>'
+        "<p>The playbook records which earlier form each deal opened on and how that form's "
+        "clause compares with today's. It never says <em>why</em> a clause changed. If you want "
+        "the reviewing model to know, say so here in your own words; leave it blank otherwise. "
+        "Nothing waits on it.</p></section>" + "".join(boxes)
+    )
+
+
+def _render_review_tab(doc: dict[str, Any], review: ReviewRows) -> str:
     chips = [("all", "All"), ("todo", "Not reviewed yet")] + [
         (label, _LABEL_NAMES[label]) for label in REVIEW_LABEL_ORDER
     ]
@@ -629,6 +718,7 @@ def _render_review_tab(review: ReviewRows) -> str:
             f"{review.n_unjudged} text(s) in the digest have no label yet (run "
             "<code>playbook judge</code> to queue them)."
         )
+    why_changed_html = _render_why_changed(doc)
     return f"""<section class="card">
   <h2>Review (optional)</h2>
   <p>The consuming model is shown one judgment for each non-standard text: how it compares
@@ -662,7 +752,8 @@ labels themselves are in the digest of <code>{PLAYBOOK_FILE}</code>.</section></
 </div>
 <div id="review-list"></div>
 <p id="review-empty" hidden class="muted">Nothing to show for this filter.</p>
-<p><button type="button" class="btn secondary" id="review-more" hidden>Show more</button></p>"""
+<p><button type="button" class="btn secondary" id="review-more" hidden>Show more</button></p>
+{why_changed_html}"""
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +893,7 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
         "start": _render_start(doc, review),
         "playbook": _render_playbook_tab(doc, digest, clauses_sorted, tax_labels),
         "evidence": _render_evidence_tab(doc, digest, clauses_sorted, tax_labels),
-        "review": _render_review_tab(review),
+        "review": _render_review_tab(doc, review),
         "posture-floor": _render_posture_floor_tab(doc),
     }
     tab_buttons = "".join(
@@ -828,6 +919,11 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
             for i in (doc.get("floor") or {}).get("invariants") or []
             if isinstance(i, dict)
         ],
+        "why_changed": {
+            str(c.get("taxonomy_id")): c["why_changed"]["text"]
+            for c in clauses
+            if isinstance(c.get("why_changed"), dict)
+        },
     }
     raw_perspective = doc.get("perspective")
     perspective: dict[str, Any] = raw_perspective if isinstance(raw_perspective, dict) else {}

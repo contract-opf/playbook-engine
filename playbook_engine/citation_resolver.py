@@ -8,7 +8,11 @@ actual cited file and verify its bytes by content address:
 1. Read the citation ``(document_id, version, clause_path, char_span)``.
 2. Look up ``corpus.documents[document_id].version_files`` and take the
    entry whose ``version`` matches — its ``sha256`` names the exact bytes
-   the compiler read.
+   the compiler read. ``"template"`` is today's form
+   (``baseline.template_ref.sha256``); a clause of one of our former forms
+   (``version`` ``prior_template``, ``document_id``
+   ``prior_template:<label>``, issue #249) resolves through that form's
+   ``baseline.prior_templates[].sha256``.
 3. Find a file under ``corpus_dir`` whose sha256 matches (the hash IS the
    key — filenames/layout are the consumer's business): the document's own
    subdirectory ``corpus_dir/<document_id>/`` is searched first, then the
@@ -39,9 +43,13 @@ from typing import Any
 
 from playbook_engine.canonicalize import file_sha256
 from playbook_engine.opf_accessors import (
+    PRIOR_TEMPLATE_ID_PREFIX,
+    PRIOR_TEMPLATE_VERSION,
     clause_precedent,
     playbook_clauses,
     precedent_by_id,
+    prior_template_entry,
+    prior_template_label,
 )
 
 
@@ -171,7 +179,31 @@ def _resolve_ref(
     if not isinstance(version, (int, str)):
         raise CitationResolutionError(f"citation on {label} carries no version — unresolvable")
 
-    if document_id == "template":
+    if version == PRIOR_TEMPLATE_VERSION or (
+        isinstance(document_id, str) and document_id.startswith(PRIOR_TEMPLATE_ID_PREFIX)
+    ):
+        # Issue #249: a clause of one of OUR former forms. Its bytes are the
+        # form's own, never today's template's.
+        form_label = prior_template_label(ref)
+        if form_label is None:
+            raise CitationResolutionError(
+                f"citation on {label} pairs document_id {document_id!r} with version "
+                f"{version!r} — a former form's citation is document_id "
+                f"'{PRIOR_TEMPLATE_ID_PREFIX}<label>' with version {PRIOR_TEMPLATE_VERSION!r}"
+            )
+        form = prior_template_entry(playbook, form_label)
+        if form is None:
+            raise CitationResolutionError(
+                f"citation on {label} cites former form {form_label!r}, which "
+                "baseline.prior_templates does not list"
+            )
+        expected = form.get("sha256")
+        if not expected:
+            raise CitationResolutionError(
+                f"citation on {label} cites former form {form_label!r} but its "
+                "baseline.prior_templates entry carries no sha256 content address — unverifiable"
+            )
+    elif document_id == "template":
         expected = (playbook.get("baseline", {}).get("template_ref") or {}).get("sha256")
         if not expected:
             raise CitationResolutionError(

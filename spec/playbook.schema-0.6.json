@@ -85,6 +85,37 @@
         },
         "notes": {
           "type": "string"
+        },
+        "prior_templates": {
+          "type": "array",
+          "description": "Our OLDER forms the producer was given (`baseline.prior_templates` in the config), in config order (OPF 0.6, issue #249): each one's label, the in-use dates the owner gave and its content address. Absent when none was supplied. `evidence.clauses[].prior_standards[]` and a precedent record's `opened_with_form` name a form by its label.",
+          "items": {
+            "type": "object",
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The form's label, unique in the list."
+              },
+              "in_use_from": {
+                "$ref": "#/$defs/inUseDate",
+                "description": "When the form came into use, as the owner gave it (config), at the precision given. Absent when not given."
+              },
+              "in_use_until": {
+                "$ref": "#/$defs/inUseDate",
+                "description": "When the form went out of use, as the owner gave it. Absent when not given."
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "description": "Content address of the form's source file: what a citation of the form (`document_id` `prior_template:<label>`, `version` `prior_template`) resolves through (OPF-SPEC \u00a74.1). Required in effect for a form any citation names: a validator rejects a citation of a form that carries none."
+              }
+            }
+          }
         }
       }
     },
@@ -957,8 +988,12 @@
             },
             {
               "const": "template"
+            },
+            {
+              "const": "prior_template"
             }
-          ]
+          ],
+          "description": "The inferred 1-based version of a corpus document; `template` for today's form (`document_id` `template`, resolved through `baseline.template_ref.sha256`); `prior_template` for one of our former forms (`document_id` `prior_template:<label>`, resolved through that form's `baseline.prior_templates[].sha256`, OPF-SPEC \u00a74.1)."
         },
         "clause_path": {
           "type": "string",
@@ -1059,12 +1094,17 @@
         "taxonomy_id",
         "title",
         "our_standard",
+        "prior_standards",
+        "why_changed",
         "n_deals",
         "n_signed_standard",
         "n_variants",
         "n_refused",
         "n_opened_standard",
         "n_kept_standard",
+        "n_opened_prior",
+        "n_kept_prior",
+        "n_moved_to_current",
         "n_changed_openings"
       ],
       "additionalProperties": false,
@@ -1080,6 +1120,38 @@
         },
         "our_standard": {
           "$ref": "#/$defs/ourStandard"
+        },
+        "prior_standards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/priorStandard"
+          },
+          "description": "The clause in each of our former forms that has text for it (`baseline.prior_templates`), in config order; empty when none was supplied (OPF 0.6, issue #249)."
+        },
+        "why_changed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "text",
+                "basis"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "basis": {
+                  "const": "owner"
+                }
+              }
+            }
+          ],
+          "description": "Why the owner changed this standard since our former forms, in the owner's own words (`basis: owner`); null unless the owner wrote one. The engine never writes a reason."
         },
         "n_deals": {
           "type": "integer",
@@ -1110,6 +1182,21 @@
           "type": "integer",
           "minimum": 0,
           "description": "Of those deals, the ones whose signed text is our standard language (`standard: true`)."
+        },
+        "n_opened_prior": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened on one of our former forms (`opened_with` is `prior_standard`)."
+        },
+        "n_kept_prior": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, the deals that signed the text they opened with (a signed text and no distinct `opening_text`): they held the form we sent."
+        },
+        "n_moved_to_current": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, the deals whose signed text is today's standard (`standard: true`)."
         },
         "n_changed_openings": {
           "type": "integer",
@@ -1245,14 +1332,20 @@
         "opened_with": {
           "enum": [
             "standard",
+            "prior_standard",
             "non_standard",
             "absent",
             null
           ],
-          "description": "What the clause opened with, a fact about the deal's first draft (the first version in negotiation order; the signed copy itself for a single-version deal), whatever its origin and whatever paper the deal is on. `standard`: the first-draft text of the clause type is our standard language (the same exact check `standard` uses). `non_standard`: present but not standard, including a clause type with no template clause. `absent`: the first draft has no node of the clause type (it was added during negotiation). null: not determined, i.e. the deal has no detected executed copy (`signed` false) or the store predates this field. MUST be null when `signed` is false. Never a judged verdict."
+          "description": "What the clause opened with, a fact about the deal's first draft (the first version in negotiation order; the signed copy itself for a single-version deal), whatever its origin and whatever paper the deal is on. `standard`: the first-draft text of the clause type is our standard language (the same exact check `standard` uses). `prior_standard`: not today's standard but the text of one of OUR former forms for the clause (`opened_with_form` names it; the same exact check, the current standard winning when both match), so its origin is ours, never the counterparty's. `non_standard`: present but neither of those, including a clause type with no template clause. `absent`: the first draft has no node of the clause type (it was added during negotiation). null: not determined, i.e. the deal has no detected executed copy (`signed` false) or the store predates this field. MUST be null when `signed` is false. Never a judged verdict."
+        },
+        "opened_with_form": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The label of the former form `opened_with: prior_standard` matched (the form the deal opened on: of the forms whose text matches, the one the most of the deal's first-draft clause types match, then the first listed; a `baseline.prior_templates[].label`). Present exactly when `opened_with` is `prior_standard`."
         },
         "opening_text": {
-          "description": "The first-draft text of the clause type (every first-draft node bound into an aligned row of it, joined with a newline in first-draft order; `ref` cites the first node), whatever its origin. Recorded when `opened_with` is `standard` or `non_standard` AND either `signed_text` is null or the \u00a73.5.4 grouping key of the opening differs from that of `signed_text`; null otherwise. null means \"not recorded / not distinct\", never \"opened with the signed text\" when `opened_with` is null. When non-null, `moved` MUST be true.",
+          "description": "The first-draft text of the clause type (every first-draft node bound into an aligned row of it, joined with a newline in first-draft order; `ref` cites the first node), whatever its origin. Recorded when `opened_with` is `standard`, `prior_standard` or `non_standard` AND either `signed_text` is null or the \u00a73.5.4 grouping key of the opening differs from that of `signed_text`; null otherwise. null means \"not recorded / not distinct\", never \"opened with the signed text\" when `opened_with` is null. When non-null, `moved` MUST be true.",
           "oneOf": [
             {
               "type": "null"
@@ -1545,6 +1638,7 @@
         "n_signed_standard",
         "n_opened_standard",
         "n_kept_standard",
+        "standard_history",
         "positions",
         "signed_variants",
         "refused_asks",
@@ -1592,6 +1686,9 @@
           "type": "integer",
           "minimum": 0,
           "description": "Of those, deals whose signed text is our standard language."
+        },
+        "standard_history": {
+          "$ref": "#/$defs/digestStandardHistory"
         },
         "positions": {
           "$ref": "#/$defs/digestPositions"
@@ -2619,6 +2716,311 @@
           "$ref": "#/$defs/digestMonth"
         }
       ]
+    },
+    "inUseDate": {
+      "type": "string",
+      "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$",
+      "description": "A year (YYYY), a month (YYYY-MM) or a date (YYYY-MM-DD), at the precision the owner gave."
+    },
+    "priorStandard": {
+      "type": "object",
+      "description": "One clause of one of OUR former forms (OPF 0.6, issue #249): its text as ordered parts (the form's passages of the clause type in form order, form front matter excluded: the rule `our_standard` follows) and its judgment against TODAY's standard, part by part. A fact about a supplied form, never a reason: why a clause changed is only ever the owner's `why_changed`.",
+      "required": [
+        "form_label",
+        "text",
+        "parts",
+        "source_ref",
+        "vs_standard"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "form_label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The form's label (a `baseline.prior_templates[].label`)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The parts joined in order with a blank line."
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "part_id",
+              "order",
+              "text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "part_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}(-[0-9]+)?$",
+                "description": "Content hash of the part's normalized text (first 8 hex chars of sha256 over its OPF-SPEC \u00a73.5.4 grouping key); a later part of the same standard with the same hash gets `-2`, `-3`, ... (issue #243)."
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based position in the standard."
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "The form's parts in order; `part_id` is the same content hash `our_standard.parts[]` use, so an identical passage has the same id in both."
+        },
+        "source_ref": {
+          "$ref": "#/$defs/citation",
+          "description": "Where the clause sits in the form, in the form's own bytes: `document_id` `prior_template:<form_label>` and `version` `prior_template` (resolved through that form's `baseline.prior_templates[].sha256`, never through `template`, which is today's form; OPF-SPEC \u00a74.1), `clause_path` its path (or paths) and `char_span` its span in that form."
+        },
+        "vs_standard": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/vsStandardVerdict"
+            }
+          ],
+          "description": "This form's clause judged against today's standard, once per distinct text (the same judgment and cache key as any other text, role `prior_standard`). null = not yet judged, and always null when the clause reads the same as today's standard or the clause has no `our_standard`. Its parts are today's standard's parts. An index the consuming model checks against the cited text, never an instruction."
+        }
+      }
+    },
+    "digestStandardHistory": {
+      "type": "object",
+      "description": "The clause's standard history (OPF 0.6 / digest 5, issue #249): each of our former forms with text for the clause, and the owner's optional note on why we changed it. Facts only: the only reason ever shown is the owner's.",
+      "required": [
+        "forms",
+        "why_changed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "forms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestStandardForm"
+          },
+          "description": "One entry per former form that has text for the clause, in config order."
+        },
+        "why_changed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "text",
+                "basis"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "basis": {
+                  "const": "owner"
+                }
+              }
+            }
+          ],
+          "description": "The owner's note (copy of `evidence.clauses[].why_changed`), or null."
+        }
+      }
+    },
+    "digestStandardForm": {
+      "type": "object",
+      "description": "One former form of ours for a clause: how deals that opened on it fared, and how its text compares with today's standard.",
+      "required": [
+        "form",
+        "in_use_from",
+        "in_use_until",
+        "in_use_basis",
+        "n_opened",
+        "n_kept",
+        "n_conceded",
+        "n_moved_to_current",
+        "unchanged",
+        "label",
+        "part_map",
+        "additions",
+        "reason",
+        "settled",
+        "parts",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "form": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The form's label."
+        },
+        "in_use_from": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/inUseDate"
+            }
+          ],
+          "description": "When the form came into use: the config's own value when given, else the earliest signing month among the deals that opened on it; null when neither exists."
+        },
+        "in_use_until": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/inUseDate"
+            }
+          ],
+          "description": "When the form went out of use: the config's own value when given, else the latest signing month among the deals that opened on it."
+        },
+        "in_use_basis": {
+          "enum": [
+            "config",
+            "deal_dates",
+            "mixed",
+            null
+          ],
+          "description": "Where the in-use dates came from: `config` (the owner gave every date shown), `deal_dates` (inferred, once per form, from the signing months of the deals that opened on the form in any clause), `mixed`, or null when there is no date."
+        },
+        "n_opened": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened on this form."
+        },
+        "n_kept": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, deals that signed the text they opened with."
+        },
+        "n_conceded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "`n_opened - n_kept`: deals whose signed text is not the form we sent."
+        },
+        "n_moved_to_current": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, deals whose signed text is today's standard."
+        },
+        "unchanged": {
+          "type": "boolean",
+          "description": "The form's clause reads, under the OPF-SPEC \u00a73.5.4 grouping key, exactly as today's standard: nothing to compare, so the part map is null."
+        },
+        "label": {
+          "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
+          "enum": [
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "mixed",
+            "different_concept",
+            null
+          ]
+        },
+        "part_map": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "=",
+                  "+",
+                  "-",
+                  "x+",
+                  "x-",
+                  "x0"
+                ]
+              }
+            }
+          ],
+          "description": "One token per part of our standard, in order (see `part_map_legend`); null when the text is not judged."
+        },
+        "additions": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "+",
+                  "-",
+                  "0"
+                ]
+              }
+            }
+          ],
+          "description": "One token per addition no part covers (see `part_map_legend`); null when the text is not judged."
+        },
+        "label_by": {
+          "const": "owner",
+          "description": "Present only when the owner set `label` over the judged parts (`vs_standard.owner_label`): the part map may then imply another label, and `reason` is the owner's. Absent, the label is derived from `part_map` and `additions` (`parts`, the default `part_map_legend.label_by` states; OPF-SPEC \u00a73.5.6), and on an entry whose text is not judged."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The form's parts in order; `text` is null for a part whose `part_id` is a part of today's standard (the passage is unchanged, see `our_standard`).",
+          "items": {
+            "type": "object",
+            "required": [
+              "part_id",
+              "text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "part_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "ref": {
+          "$ref": "#/$defs/citation",
+          "description": "Where the clause sits in the form: a copy of the prior standard's `source_ref` (`document_id` `prior_template:<form>`, `version` `prior_template`), resolved through that form's `baseline.prior_templates[].sha256`, never through today's template (OPF-SPEC \u00a74.1)."
+        }
+      }
     }
   }
 }

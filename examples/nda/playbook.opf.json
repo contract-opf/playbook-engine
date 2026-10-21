@@ -348,12 +348,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -379,12 +384,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 3,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -410,12 +420,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -441,12 +456,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -472,12 +492,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -503,12 +528,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -534,12 +564,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -565,12 +600,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 1,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -596,12 +636,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -627,12 +672,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -658,12 +708,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -671,12 +726,17 @@
         "taxonomy_id": "limitation_of_liability",
         "title": "Limitation of Liability",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 3,
         "n_signed_standard": 0,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -702,12 +762,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -733,12 +798,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -764,12 +834,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -795,12 +870,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -826,12 +906,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -857,12 +942,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 0,
         "n_variants": 4,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -888,12 +978,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -919,12 +1014,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -932,12 +1032,17 @@
         "taxonomy_id": "residuals",
         "title": "Residuals",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 1,
         "n_signed_standard": 0,
         "n_variants": 0,
         "n_refused": 1,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -963,12 +1068,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -994,12 +1104,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -1025,12 +1140,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 3,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -1056,12 +1176,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -1087,12 +1212,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       }
     ],
@@ -5601,7 +5731,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-21T03:38:52+00:00",
+      "generated_at": "2026-10-21T05:06:34+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5634,7 +5764,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7"
+      "grounded_in": "evidence@sha256:a5a87eb007ab6eb7fd2afaa83356ab3666910ff499c90da9f998fc1fa6b6ac14"
     }
   },
   "floor": {
@@ -5654,7 +5784,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-21T03:38:53+00:00",
+        "x_signed_at": "2026-10-21T05:06:35+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -6045,7 +6175,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-21T03:38:50+00:00",
+    "generated_at": "2026-10-21T05:06:30+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -6123,6 +6253,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6195,6 +6329,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 3,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -6298,6 +6436,10 @@
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -6369,6 +6511,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -6446,6 +6592,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6489,6 +6639,10 @@
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -6589,6 +6743,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6661,6 +6819,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6786,6 +6948,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6829,6 +6995,10 @@
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -6929,6 +7099,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6985,6 +7159,10 @@
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 0,
@@ -7081,6 +7259,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7124,6 +7306,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7167,6 +7353,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -7244,6 +7434,10 @@
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -7317,6 +7511,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7389,6 +7587,10 @@
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 4,
@@ -7480,6 +7682,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7523,6 +7729,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7550,6 +7760,10 @@
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 0,
@@ -7617,6 +7831,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7660,6 +7878,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7732,6 +7954,10 @@
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -7831,6 +8057,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7955,6 +8185,10 @@
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -9372,11 +9606,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:6c2abb2a39413c893a8f01a46b973e4ffaf53457fb273b0670629c5cbf701475",
+    "content_hash": "sha256:6362547758d0ecabc422180e38f8b2d9784278977663a1c1c70fa82082091fb7",
     "section_digests": {
-      "evidence": "sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7",
-      "posture": "sha256:7db5d8560863517423b78252c9dfde32fd11cd9c89d2f1b4c536c1a20f32adcd",
-      "floor": "sha256:8bcd0236799719adbf24678aa91949f06e4066550cac6ac410c2a9e4b82f814a"
+      "evidence": "sha256:a5a87eb007ab6eb7fd2afaa83356ab3666910ff499c90da9f998fc1fa6b6ac14",
+      "posture": "sha256:68a66e75fa83f89698ed8a31761d70a67219d5095e93c730aa76f54febf79c9f",
+      "floor": "sha256:7ab9c9ca65008e98ce51b885f2b1a512a1ef2d34459108c8dff18d8d59f83165"
     }
   }
 }
