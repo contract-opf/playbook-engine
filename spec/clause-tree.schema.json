@@ -71,6 +71,14 @@
           "description": "Ordered child ClauseNode objects.",
           "items": { "$ref": "#/$defs/ClauseNode" },
           "default": []
+        },
+        "x_resegmented": {
+          "type": ["object", "null"],
+          "description": "Vendor key (issue #255). Present on a node the re-segmentation pass split out of, or joined from, other nodes: {split_from | joined_with, basis, origin_span / origin_spans, scores, to / at}. char_span of such a node lies inside the original node's span (or covers the two joined spans), so an OPF citation still resolves to the original bytes. A node split out of another is numbered '<clause_path>.r<k>' and is a child of the node it was cut from."
+        },
+        "x_non_clause": {
+          "type": ["string", "null"],
+          "description": "Vendor key (issue #255). Present on an unclassified node that is not a clause (numbering_only, signature_block, heading_or_placeholder, header_footer, fragment, lead_in, ocr_junk, email). The node is kept so citations resolve; it is left out of classification, precedent and absence counts."
         }
       }
     }

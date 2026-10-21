@@ -108,8 +108,12 @@ _VERSION_INGEST_SCHEMA_KEYS = frozenset({"version", "status", "error", "extracto
 # observation, by reason — assemble_playbook sums it into
 # ``corpus.stats.dropped_observations`` instead. "deal_date_evidence"
 # (issue #247) is what mining read about the executed copy's signing date;
-# project derives ``signed_on`` / ``signed_on_basis`` from it.
-_CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset({"dropped_observations", "deal_date_evidence"})
+# project derives ``signed_on`` / ``signed_on_basis`` from it. "resegmentation"
+# (issue #255) is the per-document count of nodes the re-segmentation pass split
+# out and rejoined; ``playbook scorecard`` reads it from corpus_manifest.json.
+_CORPUS_DOCUMENT_INTERNAL_KEYS = frozenset(
+    {"dropped_observations", "deal_date_evidence", "resegmentation"}
+)
 
 
 def _dropped_observation_stats(corpus_documents: list[dict[str, Any]]) -> dict[str, Any] | None:

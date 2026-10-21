@@ -260,6 +260,35 @@ The drafter never answers its own check. `playbook judge --check equivalence
 fallback model). An unchecked draft still reaches the playbook (`check:
 null`): nothing blocks.
 
+### Re-segmentation check (`kind: resegment_check`)
+
+Queued by `playbook judge` AFTER mining, for a deterministic sample of the
+splits and joins the engine's re-segmentation pass made (all of them when there
+are 60 or fewer). The pass cuts a sentence or list item that belongs to another
+clause type out of the node it sits in, and rejoins a node the extractor cut off
+mid-sentence with the one that continues it. Nothing waits on your answer: it is
+the measurement the pass's thresholds are tuned against, so answer what the text
+says, not what the engine did. Two shapes of question:
+
+```json
+{"stage": "resegment_check", "check": "split",
+ "question": "Is the text below really a provision of the clause type given, rather than of the clause it was cut out of?",
+ "clause_type": {"id": "insurance", "label": "Insurance"},
+ "text": "...", "context_before": "...the end of the passage it was cut out of..."}
+{"stage": "resegment_check", "check": "join",
+ "question": "Do these consecutive passages form ONE clause, each continuing the one before?",
+ "passages": ["...", "..."]}
+```
+
+Answer `{"resegment_ok": true}` when the split puts the text under the right
+clause type (or the passages are one clause), `{"resegment_ok": false,
+"reason": "<one short sentence>"}` when it does not: the text is its own
+clause's, a different type's, or the passages are two clauses that merely sit
+next to each other. A text that fits both the named type and the clause it came
+from is `true`. Do not judge the type from the sentence's position: judge the
+words. The count of `false` answers is the figure the scorecard reports
+(`resegmentation.wrong`); the aim is none.
+
 ### Signing date (`kind: deal_date`)
 
 Queued by `playbook judge` AFTER mining, for an executed copy whose signing
@@ -411,6 +440,12 @@ derived one):
 is `more_protective`, `less_protective` or `neutral`; both relative to
 `perspective_party`. The example derives `less_protective`.
 
+**Re-segmentation check verdict** (`kind: resegment_check`) — one per sampled
+split or join (see "Re-segmentation check" above):
+```json
+{"resegment_ok": false, "reason": "This sentence is about notice, not insurance."}
+```
+
 **Signing-date verdict** (`kind: deal_date`) — one per distinct set of
 passages; `signed_on`, `basis` and `quote` (see "Signing date" above):
 ```json
@@ -490,7 +525,8 @@ machine-readable rubric moves: the classifier-eligible taxonomy entries
 (id + label + description) for `classify`, the agreement-type definition for
 `scope`, the answer vocabulary for `provenance`, the label, status,
 relation and effect vocabularies for `equivalence`, the source vocabulary
-(`document_text`, `signature_block`) for `deal_date`. Editing
+(`document_text`, `signature_block`) for `deal_date`, the two question shapes
+(`split`, `join`) for `resegment_check`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 
 A store banked before versioning (legacy verdicts) keeps replaying and is

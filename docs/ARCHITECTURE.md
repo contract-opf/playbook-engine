@@ -31,6 +31,11 @@ The engine turns a directory of agreements into an [OPF](OPF-SPEC.md) playbook. 
                                      │
   L3  SEGMENT & CLASSIFY    clause segmentation + taxonomy tagging (LLM, clause-scoped)
         - tag each clause into an ACTIVE taxonomy entry
+        - RE-SEGMENT each classified version (deterministic, no judge): split a
+          sentence or list item that is another clause type's vocabulary out of
+          the node it sits in, rejoin a node cut off mid-sentence, and mark a
+          node that is no clause (`x_non_clause`); every split and join is
+          recorded on the node (`x_resegmented`) and cites inside the original span
         - align "the same clause" across versions of one document
                                      │
   L4  MINE DELTAS           (deterministic diff + deterministic standard facts)

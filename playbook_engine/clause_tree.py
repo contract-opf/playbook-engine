@@ -28,6 +28,19 @@ Terminology (matches docs/ARCHITECTURE.md L1 description):
                  extractor path supplies real values — see
                  segmentation_grounding.build())
   children     — ordered list of child ClauseNode objects
+  x_resegmented — optional provenance of a node the re-segmentation pass
+                 (issue #255) split out of, or joined from, other nodes:
+                 ``{"split_from" | "joined_with", "basis", "origin_span",
+                 "scores", ...}``. ``char_span`` of such a node always lies
+                 inside the original node's span (or, for a join, covers the
+                 two original spans), so a citation still resolves to the
+                 original blocks.
+  x_non_clause — optional reason (a closed vocabulary,
+                 ``resegmentation.NON_CLAUSE_REASONS``) the node is not a
+                 clause: a signature block, a bare section number, a running
+                 header. The node is never deleted, so citations resolve; it
+                 is only left out of classification, precedent and absence
+                 counts.
 """
 
 from __future__ import annotations
@@ -54,6 +67,8 @@ class ClauseNode:
     page: int | None = None
     children: list[ClauseNode] = field(default_factory=list)
     heading_span: tuple[int, int] | None = None
+    x_resegmented: dict[str, Any] | None = None
+    x_non_clause: str | None = None
 
     def is_leaf(self) -> bool:
         return len(self.children) == 0
@@ -72,6 +87,12 @@ class ClauseNode:
         # serializes exactly as it did before heading_span existed.
         if self.heading_span is not None:
             d["heading_span"] = list(self.heading_span)
+        # Vendor keys (issue #255), emitted only when present for the same
+        # reason: an untouched node serializes exactly as before.
+        if self.x_resegmented is not None:
+            d["x_resegmented"] = self.x_resegmented
+        if self.x_non_clause is not None:
+            d["x_non_clause"] = self.x_non_clause
         return d
 
     @classmethod
@@ -117,6 +138,16 @@ class ClauseNode:
             raise ClauseTreeError(
                 f"clause_path {data.get('clause_path')!r}: 'text' must be a string, got {type(text).__name__}"
             )
+        x_resegmented = data.get("x_resegmented")
+        if x_resegmented is not None and not isinstance(x_resegmented, dict):
+            raise ClauseTreeError(
+                f"clause_path {data.get('clause_path')!r}: 'x_resegmented' must be an object or null"
+            )
+        x_non_clause = data.get("x_non_clause")
+        if x_non_clause is not None and not isinstance(x_non_clause, str):
+            raise ClauseTreeError(
+                f"clause_path {data.get('clause_path')!r}: 'x_non_clause' must be a string or null"
+            )
         return cls(
             clause_path=str(data["clause_path"]),
             heading=heading,
@@ -125,6 +156,8 @@ class ClauseNode:
             page=page,
             children=[ClauseNode.from_dict(c) for c in children_raw],
             heading_span=heading_span,
+            x_resegmented=x_resegmented,
+            x_non_clause=x_non_clause,
         )
 
 

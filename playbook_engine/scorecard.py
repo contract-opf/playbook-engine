@@ -77,6 +77,14 @@ from playbook_engine.observation_builder import (
 )
 from playbook_engine.opf_accessors import perspective_party, playbook_clauses
 from playbook_engine.precedent import normalize_variant_text
+from playbook_engine.resegmentation import (
+    CHECK_KIND as RESEGMENT_CHECK_KIND,
+)
+from playbook_engine.resegmentation import (
+    NON_CLAUSE_REASONS,
+    check_subjects,
+)
+from playbook_engine.rubric import rubric_version
 
 __all__ = [
     "SCORECARD_FILENAME",
@@ -131,7 +139,15 @@ __all__ = [
 #: list and in total), ``settled_not_listed`` (per list, the judged texts of
 #: that role the digest leaves out for a named reason, counted directly) and
 #: ``settled_unreconciled`` (what is left after that; must be 0).
-SCORECARD_VERSION = 9
+#:
+#: v10 (issue #255): ``classification`` gains ``clauses`` (observations that
+#: are clauses), ``non_clause`` and ``non_clause_by_reason`` (the ones marked
+#: ``x_non_clause``: a bare section number, a signature block, ...), and
+#: ``classified_share`` / ``by_basis`` now range over the clauses only; the
+#: ``resegmented`` classification basis appears; and a ``resegmentation``
+#: section counts the splits and joins, the observations they produced and the
+#: agent check of a sample of them.
+SCORECARD_VERSION = 10
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -139,10 +155,12 @@ SCORECARD_FILENAME = "scorecard.json"
 #: Any label outside its closed vocabulary is written as this.
 OTHER = "other"
 
-#: Classification bases (``clause_classifier._BASIS_VALUES``) plus the two
+#: Classification bases (``clause_classifier._BASIS_VALUES``) plus the three
 #: the scorecard itself introduces: ``aligned`` (the observation's
-#: taxonomy_id came from its aligned row, ``pipeline``) and ``unrecorded``
-#: (an observation from a store that predates ``x_classification_basis``).
+#: taxonomy_id came from its aligned row, ``pipeline``), ``unrecorded``
+#: (an observation from a store that predates ``x_classification_basis``) and
+#: ``non_clause`` (the run-manifest coverage line's label for an unclassified
+#: observation whose node is no clause, issue #255).
 CLASSIFICATION_BASES = frozenset(
     {
         "exact_match",
@@ -154,8 +172,10 @@ CLASSIFICATION_BASES = frozenset(
         "llm_segmenter",
         "inherited",
         "content_similarity",
+        "resegmented",
         "aligned",
         "unrecorded",
+        "non_clause",
     }
 )
 
@@ -173,6 +193,7 @@ DROPPED_REASONS = frozenset(
 #: pending items are counted under ``other``.
 PENDING_KINDS = frozenset(
     {"classify", "provenance", "scope", "segment", "equivalence", DEAL_DATE_KIND}
+    | {RESEGMENT_CHECK_KIND}
 )
 
 #: Checker model ids the scorecard names (the pinned one); any other recorded
@@ -213,6 +234,7 @@ ENUM_LABELS = frozenset(
     | DIGEST_VERSIONS
     | CHECKER_MODELS
     | EQUIVALENCE_VOCABULARY
+    | frozenset(NON_CLAUSE_REASONS)
 )
 
 
@@ -371,7 +393,12 @@ def _classification_block(observations: list[dict[str, Any]]) -> dict[str, Any]:
     comparison against a baseline taken before openings were recorded.
     """
     observations = [o for o in observations if o.get("outcome") != OUTCOME_OPENING]
-    classified = [o for o in observations if o.get("taxonomy_id")]
+    # Issue #255: an observation whose node is not a clause (a bare section
+    # number, a signature block, ...) is no classification observation either.
+    non_clause = [o for o in observations if o.get("x_non_clause") and not o.get("taxonomy_id")]
+    non_clause_ids = {id(o) for o in non_clause}
+    clauses = [o for o in observations if id(o) not in non_clause_ids]
+    classified = [o for o in clauses if o.get("taxonomy_id")]
     types_by_deal: dict[str, set[str]] = {}
     for o in observations:
         citation = o.get("citation")
@@ -386,13 +413,19 @@ def _classification_block(observations: list[dict[str, Any]]) -> dict[str, Any]:
     if any("x_classification_basis" in o for o in observations):
         counter: Counter[str] = Counter(
             _label(o.get("x_classification_basis", "unrecorded"), CLASSIFICATION_BASES)
-            for o in observations
+            for o in clauses
         )
         by_basis = _sorted_counts(counter)
+    reasons = frozenset(NON_CLAUSE_REASONS)
     return {
         "observations": len(observations),
+        "clauses": len(clauses),
+        "non_clause": len(non_clause),
+        "non_clause_by_reason": _sorted_counts(
+            Counter(_label(o.get("x_non_clause"), reasons) for o in non_clause)
+        ),
         "classified": len(classified),
-        "classified_share": _ratio(len(classified), len(observations)),
+        "classified_share": _ratio(len(classified), len(clauses)),
         "by_basis": by_basis,
         "deals": len(types_by_deal),
         "distinct_types_per_deal": _stats([len(t) for t in types_by_deal.values()]),
@@ -410,6 +443,56 @@ def _classification_section(observations: list[dict[str, Any]] | None) -> dict[s
         by_paper.setdefault(_label(o.get("provenance"), PAPER_SIDES), []).append(o)
     section["by_paper"] = {side: _classification_block(by_paper[side]) for side in sorted(by_paper)}
     return section
+
+
+def _resegmentation_section(
+    manifest: Any, observations: list[dict[str, Any]] | None, out_dir: Path
+) -> dict[str, Any] | None:
+    """Counts of what the re-segmentation pass did and how a sample of it checked out (issue #255).
+
+    ``splits`` / ``joins`` are the nodes the pass split out and merged over all
+    versions of all deals (from the corpus manifest); ``observations_split`` /
+    ``observations_joined`` the precedent-store observations built from such a
+    node. ``check_sample`` is the size of the ``resegment_check`` sample (the
+    recorded splits and joins, capped), ``checked`` how many of those have a
+    stored verdict under the current rubric and ``wrong`` how many of those
+    say the pass was wrong. Counts only.
+    """
+    if manifest is None and observations is None:
+        return None
+    docs = [d for d in manifest if isinstance(d, dict)] if isinstance(manifest, list) else []
+    recorded = [d["resegmentation"] for d in docs if isinstance(d.get("resegmentation"), dict)]
+    split_obs = joined_obs = 0
+    for o in observations or []:
+        meta = o.get("x_resegmented")
+        if not isinstance(meta, dict):
+            continue
+        if isinstance(meta.get("to"), dict):
+            split_obs += 1  # a node re-homed to another type, not the node it left
+        elif "joined_with" in meta:
+            joined_obs += 1
+    subjects = check_subjects(out_dir)
+    store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
+    current = rubric_version(RESEGMENT_CHECK_KIND)
+    checked = wrong = 0
+    for subject in subjects:
+        stored = store.get_record_by_key(subject.key)
+        if stored is None or stored.rubric_version != current:
+            continue
+        ok = stored.verdict.get("resegment_ok")
+        if not isinstance(ok, bool):
+            continue
+        checked += 1
+        wrong += 0 if ok else 1
+    return {
+        "splits": _sum_counts(r.get("splits") for r in recorded) if recorded else None,
+        "joins": _sum_counts(r.get("joins") for r in recorded) if recorded else None,
+        "observations_split": split_obs if observations is not None else None,
+        "observations_joined": joined_obs if observations is not None else None,
+        "check_sample": len(subjects),
+        "checked": checked,
+        "wrong": wrong,
+    }
 
 
 def _precedent_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -935,6 +1018,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "corpus": _corpus_section(manifest, quarantine, playbook),
         "template": _template_section(template_obs, playbook),
         "classification": _classification_section(observations),
+        "resegmentation": _resegmentation_section(manifest, observations, out_dir),
         "precedent": _precedent_section(playbook),
         "signed_on": _signed_on_section(playbook),
         "template_drift": _template_drift_section(playbook),

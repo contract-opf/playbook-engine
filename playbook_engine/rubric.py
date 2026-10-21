@@ -91,6 +91,7 @@ from typing import Any
 from playbook_engine.deal_dates import DEAL_DATE_KIND, TEXT_BASES
 from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELATIONS, STATUSES
 from playbook_engine.provenance_detector import _PROVENANCE_VALUES
+from playbook_engine.resegmentation import CHECK_KIND as RESEGMENT_CHECK_KIND
 
 # ---------------------------------------------------------------------------
 # Kinds
@@ -104,6 +105,7 @@ JUDGE_KINDS: tuple[str, ...] = (
     "scope",
     EQUIVALENCE_KIND,
     DEAL_DATE_KIND,
+    RESEGMENT_CHECK_KIND,
 )
 
 # ---------------------------------------------------------------------------
@@ -145,6 +147,11 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # deal was signed, with the quoted words and which source); the source
     # vocabulary is the derived half.
     DEAL_DATE_KIND: "v1",
+    # Issue #255: is a split / join of the re-segmentation pass right? The prose
+    # rubric is the skill's resegment_check step (a split is right only when the
+    # text is a provision of the named type; a join only when the passages are
+    # one clause); the question vocabulary is the derived half.
+    RESEGMENT_CHECK_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -279,6 +286,9 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     },
     DEAL_DATE_KIND: lambda *, taxonomy, agreement_type: {
         "bases": list(TEXT_BASES),
+    },
+    RESEGMENT_CHECK_KIND: lambda *, taxonomy, agreement_type: {
+        "checks": ["split", "join"],
     },
 }
 

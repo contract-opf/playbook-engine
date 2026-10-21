@@ -81,13 +81,22 @@ from the taxonomy, so editing it re-asks exactly these nodes and nothing else).
                              standard's own clause text per taxonomy_id
                              (issue #235), at a confidence capped at
                              ``CONTENT_CONFIDENCE_CAP``.
+  ``"resegmented"``        — a node the re-segmentation pass (issue #255,
+                             :mod:`playbook_engine.resegmentation`) cut out
+                             of another node because its text is that type's
+                             vocabulary rather than the node's own; confidence
+                             capped below ``AMBIGUITY_THRESHOLD``.
+
+A node the re-segmentation pass marks ``x_non_clause`` (a bare section number,
+a signature block, a running header, ...) is never asked of the second-look
+judge pass (:func:`reclassify_unclassified`): it states no clause.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -167,6 +176,7 @@ _BASIS_VALUES = frozenset(
         "llm_segmenter",
         "inherited",
         "content_similarity",
+        "resegmented",
     }
 )
 
@@ -359,6 +369,7 @@ def classify_tree(
     ambiguity_threshold: float = AMBIGUITY_THRESHOLD,
     auto_classify_threshold: float = AUTO_CLASSIFY_THRESHOLD,
     content_exemplars: Mapping[str, str] | None = None,
+    skip_judge: Callable[[ClauseNode], bool] | None = None,
 ) -> list[ClassifiedClause]:
     """Classify every node in *tree* against *taxonomy*.
 
@@ -399,6 +410,13 @@ def classify_tree(
                                  (see :func:`assign_by_content`). ``None`` or
                                  empty (emergent mode, and the template
                                  itself) makes this a no-op.
+        skip_judge:              Optional predicate (issue #255). A node the
+                                 fast path left to the judge for which it is
+                                 true is not asked: it stays
+                                 ``basis="unclassified"``, so the not-a-clause
+                                 filter (``resegmentation.mark_non_clauses``)
+                                 sees it and a rejoin can still complete it.
+                                 The pipeline passes "is not a clause" here.
 
     Returns:
         One ``ClassifiedClause`` per node in ``tree.all_nodes()`` order. A
@@ -433,6 +451,13 @@ def classify_tree(
         )
         if cls is not None:
             results[i] = ClassifiedClause(node=node, classification=cls)
+        elif skip_judge is not None and skip_judge(node):
+            results[i] = ClassifiedClause(
+                node=node,
+                classification=ClauseClassification(
+                    taxonomy_id=None, confidence=0.0, basis="unclassified"
+                ),
+            )
         else:
             judge_indices.append(i)
             judge_hints.append(hint)
@@ -593,7 +618,12 @@ def assign_by_content(
     for cc in classified:
         cls = cc.classification
         text = (cc.node.text or "").strip()
-        if cls.basis != "unclassified" or cls.taxonomy_id is not None or not text:
+        if (
+            cls.basis != "unclassified"
+            or cls.taxonomy_id is not None
+            or not text
+            or cc.node.x_non_clause is not None
+        ):
             out.append(cc)
             continue
         node_tokens = _content_tokens(text)
@@ -675,6 +705,7 @@ def reclassify_unclassified(
         for i, cc in enumerate(classified)
         if cc.classification.basis == "unclassified"
         and cc.classification.taxonomy_id is None
+        and cc.node.x_non_clause is None
         and _has_operative_text(cc.node)
     ]
     if not asked:

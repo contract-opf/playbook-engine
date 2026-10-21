@@ -1022,6 +1022,8 @@ class TestJudgeKindSeam:
             "scope",
             "equivalence",
             "deal_date",
+            # Issue #255: the sampled check of the re-segmentation pass.
+            "resegment_check",
         }
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:

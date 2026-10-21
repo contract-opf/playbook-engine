@@ -468,8 +468,10 @@ def classification_coverage(out_dir: Path) -> dict[str, int]:
     Reads ``observations.jsonl`` and tallies each observation's
     ``x_classification_basis`` (how its taxonomy_id was reached — see
     ``Observation.classification_basis``), leaving out ``opening`` rows
-    (issue #233); an observation that records none counts under
-    ``unrecorded``. Returns ``{}`` when the file is absent or
+    (issue #233); an unclassified observation whose node is no clause
+    (``x_non_clause``, issue #255: a bare section number, a signature block)
+    counts under ``non_clause`` instead of ``unclassified``; an observation
+    that records none counts under ``unrecorded``. Returns ``{}`` when the file is absent or
     holds no observation. Keys are the closed classification-basis
     vocabulary (``scorecard.CLASSIFICATION_BASES``; any other label is
     ``other``), values are counts only — nothing document-derived — so the
@@ -495,6 +497,9 @@ def classification_coverage(out_dir: Path) -> dict[str, int]:
                 if raw.get("outcome") == OUTCOME_OPENING:
                     # An opening row (issue #233) restates a first-draft
                     # clause already counted through its terminal row.
+                    continue
+                if raw.get("x_non_clause") and not raw.get("taxonomy_id"):
+                    counts["non_clause"] = counts.get("non_clause", 0) + 1
                     continue
                 basis = raw.get("x_classification_basis", "unrecorded")
                 label = basis if basis in CLASSIFICATION_BASES else "other"

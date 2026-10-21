@@ -1046,6 +1046,13 @@ make docker-run CORPUS=./corpus OUT=./out \
   one wrong answer: `null` sends the engine on to the file name and the file's
   own metadata. These are queued by `judge` after mining, in the same round
   as the others. See REFERENCE.md § "Signing date".
+- **Re-segmentation check** (`kind: resegment_check`): a sample (at most 60) of
+  the splits and joins the engine's re-segmentation pass made, queued by
+  `judge` after mining. Say whether a split puts the text under the right
+  clause type, or whether two passages are one clause: `{"resegment_ok": true |
+  false, "reason": "<optional, one sentence>"}`. Nothing waits on it and it
+  changes no playbook text; the scorecard reports how many of the sample you
+  found wrong. See REFERENCE.md § "Re-segmentation check".
 
 **The blind check (Step 6b).** Every drafted equivalence verdict is then
 checked by a separate agent pinned to `claude-opus-5-5` at `xhigh` effort

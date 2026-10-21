@@ -12,6 +12,8 @@ text.  No real agreements are referenced.  Fictional party/document names only
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from playbook_engine.clause_differ import ClauseDiff
@@ -311,6 +313,22 @@ def test_unclassified_coverage_example_citations_capped() -> None:
     assert unclassified.count == UNCLASSIFIED_EXAMPLE_LIMIT + 5
     assert len(unclassified.example_citations) == UNCLASSIFIED_EXAMPLE_LIMIT
     assert isinstance(unclassified.example_citations[0], OPFCitation)
+
+
+def test_unclassified_coverage_leaves_out_non_clauses() -> None:
+    """A node marked x_non_clause (issue #255) is not an unclassified clause."""
+    junk = [
+        dataclasses.replace(
+            _obs(None, doc_id="deal_001", version="v1", clause_path=str(i)),
+            non_clause="numbering_only",
+        )
+        for i in range(UNCLASSIFIED_EXAMPLE_LIMIT)
+    ]
+    real = _obs(None, doc_id="deal_002", version="v1", clause_path="9")
+    _positions, _flags, unclassified = compile_clause_positions([*junk, real], [])
+    assert unclassified.count == 1
+    assert unclassified.by_document == {"deal_002": 1}
+    assert [c.clause_path for c in unclassified.example_citations] == ["9"]
 
 
 def test_unclassified_coverage_zero_when_all_classified() -> None:

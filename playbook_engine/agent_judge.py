@@ -32,6 +32,10 @@ Components:
 - ``StoreBackedDealDateJudge``       — the ``deal_date`` kind (issue #247):
   one verdict per distinct set of date passages of an executed copy, queued
   after mining when the deterministic readers found no date.
+- ``StoreBackedResegmentCheckJudge`` — the ``resegment_check`` kind (issue
+  #255): one verdict per sampled split or join of the re-segmentation pass,
+  queued after mining. It measures the pass; it changes nothing and gates
+  nothing.
 
 These are drop-in replacements for the judge parameters of
 ``mine_corpus(scope_judge=…, classification_judge=…, provenance_judge=…)``.
@@ -79,7 +83,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import deal_dates
+from playbook_engine import deal_dates, resegmentation
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
@@ -541,6 +545,10 @@ def _validate_deal_date(verdict: dict[str, Any]) -> None:
     deal_dates.validate_verdict(verdict)
 
 
+def _validate_resegment_check(verdict: dict[str, Any]) -> None:
+    resegmentation.validate_check_verdict(verdict)
+
+
 def _validate_scope(verdict: dict[str, Any]) -> None:
     if not isinstance(verdict.get("in_scope"), bool):
         raise ValueError("'in_scope' must be a JSON boolean")
@@ -566,6 +574,7 @@ _VERDICT_KINDS: dict[
     "classify": (_validate_classify, lambda v: "taxonomy_id" in v),
     EQUIVALENCE_KIND: (_validate_equivalence, lambda v: "parts" in v),
     deal_dates.DEAL_DATE_KIND: (_validate_deal_date, lambda v: "signed_on" in v),
+    resegmentation.CHECK_KIND: (_validate_resegment_check, lambda v: "resegment_ok" in v),
 }
 
 
@@ -1057,4 +1066,56 @@ class StoreBackedDealDateJudge:
             )
         if self.pending is not None:
             self.pending.add(key, deal_dates.DEAL_DATE_KIND, subject.payload, current_rubric)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedResegmentCheckJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedResegmentCheckJudge:
+    """Replays stored ``resegment_check`` verdicts or queues new questions.
+
+    The ``resegment_check`` kind (issue #255). A question is one sampled split
+    ("is this text really a provision of that clause type?") or join ("do
+    these passages form one clause?") of the re-segmentation pass, read from
+    the mined ``normalized/`` trees (:func:`playbook_engine.resegmentation.check_subjects`).
+    Like the other post-mining kinds it has no seam inside ``mine_corpus``,
+    and its answer feeds nothing back: the verdicts are the measurement the
+    pass's thresholds are tuned against.
+
+    A hit whose rubric moved, or whose stored record is not a valid verdict,
+    is not replayed: it is re-queued (when a queue is attached) and reads as
+    unchecked. A miss is queued, never guessed.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: resegmentation.ResegmentCheckSubject) -> bool | None:
+        """Whether the pass was right about *subject*, or ``None`` when unchecked."""
+        current_rubric = rubric_version(resegmentation.CHECK_KIND)
+        record = self.store.get_record_by_key(subject.key)
+        if (
+            record is not None
+            and self.rubric.evaluate(
+                resegmentation.CHECK_KIND, record.rubric_version, current_rubric
+            ).replay
+        ):
+            try:
+                resegmentation.validate_check_verdict(record.verdict)
+                return bool(record.verdict["resegment_ok"])
+            except ValueError:
+                _log.warning(
+                    "StoreBackedResegmentCheckJudge: malformed stored verdict for key %s; "
+                    "treating as unchecked",
+                    subject.key,
+                )
+        if self.pending is not None:
+            self.pending.add(
+                subject.key, resegmentation.CHECK_KIND, subject.payload, current_rubric
+            )
         return None

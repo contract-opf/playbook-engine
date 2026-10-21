@@ -382,6 +382,23 @@ class Observation:
                          ``x_classification_basis`` (omitted when ``None``) —
                          read by ``playbook scorecard``, never by the
                          playbook.
+        resegmented:     How the cited node was made by the re-segmentation
+                         pass (issue #255): the node's ``x_resegmented``
+                         record (``split_from`` or ``joined_with``, ``basis``,
+                         ``scores``, ``origin_span``) when the node was split
+                         out of, or joined from, other nodes, else ``None``.
+                         Recorded by the pipeline after the observation is
+                         built. Serialized under the vendor key
+                         ``x_resegmented`` (omitted when ``None``) — read by
+                         ``playbook scorecard``, never by the playbook.
+        non_clause:      Why the cited node is not a clause (issue #255): a
+                         ``resegmentation.NON_CLAUSE_REASONS`` value for an
+                         unclassified node that is a bare section number, a
+                         signature block, a running header and the like, else
+                         ``None``. Such an observation is left out of
+                         classification, precedent and absence counts.
+                         Serialized under the vendor key ``x_non_clause``
+                         (omitted when ``None``).
         form_front_matter: Whether this TEMPLATE observation is form front
                          matter (issue #242): a fill-in table ahead of the
                          template's first operative clause, which
@@ -422,6 +439,8 @@ class Observation:
     classification_basis: str | None = None
     opened_with: str | None = None
     form_front_matter: bool = False
+    resegmented: dict[str, Any] | None = None
+    non_clause: str | None = None
 
     def __post_init__(self) -> None:
         if not self.full_text:
@@ -484,6 +503,11 @@ class Observation:
         # only, omitted when False.
         if self.form_front_matter:
             d["x_form_front_matter"] = True
+        # resegmented / non_clause (issue #255): vendor keys, omitted unless set.
+        if self.resegmented is not None:
+            d["x_resegmented"] = self.resegmented
+        if self.non_clause is not None:
+            d["x_non_clause"] = self.non_clause
         return d
 
 
