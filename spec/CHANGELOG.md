@@ -24,13 +24,37 @@ reverse-engineering `git log`.
 
 | File | sha256 |
 |---|---|
-| `playbook.schema-0.6.json` | `6ffdfa164143f1f5d56973d78df629b296234b2224986fc8e8d5d55ffa878bcf` |
-| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `d3f6e4ba9327ac41369f34689670dc4141bcaee33b4bde2cddcde9f18df7ca76` |
+| `playbook.schema-0.6.json` | `b2a925811fd661c5d7c11eaa768444fa63764b479c34fff9a50187c580668bf2` |
+| `spec/conformance/0.6/` (manifest.json + vectors/*.json, concatenated) | `c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96` |
 
 Current `DIGEST_VERSION`: **5** (`playbook_engine/digest.py`) — the only
 digest the engine builds.
 
 ## History
+
+### 2026-10-21 — OPF 0.6 / digest 5: verified absence counts (issue #251)
+
+In-place change to the unfrozen `playbook.schema-0.6.json` (epic #245; 0.6 has
+no consumer yet); `digest_version` stays "5". A deal with no precedent record
+for a clause is no proof it signed without it (the clause may be unclassified),
+so absence is recorded as two facts. Facts only.
+
+- **`evidence.absence`** (required; `$defs.absence`, `absenceRecord`,
+  `absenceCandidate`): `guard` and `records[]`, one per signed deal and clause
+  type with no signed text, with `status` (`absent_verified` or
+  `possibly_present`), `basis` (`scored` or `unverifiable`), `n_checked` and up to
+  three `candidates` (`ref`, `score`, `filed_under`: the clause type the classifier
+  filed the node under, or null).
+- **Digest**: required `n_signed_without_verified`, `n_signed_without_possible`
+  and `verified_absent_deals` on each clause (`$defs.digestClause`,
+  `digestAbsentDeal`); conformance vectors 001-013 are re-stamped and vector 014
+  is new.
+- **New validator MUSTs**: the records are complete (exactly the in-scope signed
+  deals crossed with the clause types, less the pairs with a `signed_text`), ids
+  recompute from `(agreement_type.id, document_id, taxonomy_id)` and are unique,
+  one record per pair, a record names a clause and a signed deal, `status`
+  follows `basis` and `candidates`, candidates are ordered best score first, none
+  scores below `guard` and each cites its own deal and resolves (§4).
 
 ### 2026-10-21 — OPF 0.6 / digest 5: reconstructed former forms (issue #250)
 

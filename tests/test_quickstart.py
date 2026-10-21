@@ -52,7 +52,7 @@ _OUT_PLACEHOLDER = "out/quickstart-demo"
 # text (timestamps/paths vary; these substrings do not).
 _EXPECTED_MARKERS = [
     "no errors, 2 warning(s)",  # lint-corpus
-    "loaded 7 verdict(s)",  # judge-apply
+    "loaded 8 verdict(s)",  # judge-apply
     "L1-L4 complete: 10 observations, 2 docs",  # mine
     "Playbook written:",  # project
 ]

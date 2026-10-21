@@ -574,6 +574,7 @@ def judged_out(tmp_path: Path) -> Path:
             "scope_rationale": "Affiliation agreement.",
             "scope_confidence": 0.9,
         },
+        "absence_check": {"absent": True, "reason": "No passage states the clause."},
     }
     verdicts.write_text(
         "".join(

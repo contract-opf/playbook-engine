@@ -57,7 +57,11 @@ _ANSWERS: dict[str, str] = {
 }
 
 
-_EMPTY_EVIDENCE_SECTION: dict[str, Any] = {"clauses": [], "precedent": []}
+_EMPTY_EVIDENCE_SECTION: dict[str, Any] = {
+    "clauses": [],
+    "precedent": [],
+    "absence": {"guard": 0.1, "records": []},
+}
 # Issue #132 review finding 1: self-consistent with `_EMPTY_EVIDENCE_SECTION`
 # above (rather than an arbitrary placeholder digest) so a re-run against an
 # unchanged `evidence` section is a genuine no-op on `grounded_in` too —

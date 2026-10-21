@@ -275,7 +275,8 @@ facts only:
     "opening_text": { "text": "...", "ref": Citation } | null,      // §3.5.5
     "standard": false, "moved": true,
     "refused_asks": [ { "text": "...", "round": 1, "ref": Citation } ]
-  } ]
+  } ],
+  "absence": { "guard": 0.1, "records": [ AbsenceRecord ] }   // signed deals without a clause, §3.5.8
 }
 ```
 
@@ -746,6 +747,86 @@ Normative rules (a conformant validator MUST enforce each):
 - A prior standard's `vs_standard` follows §3.5.6's rules, and is `null` for a
   clause that reads as today's standard.
 
+#### 3.5.8 OPF 0.6 — verified absence: "we signed N deals without this clause" (issue #251)
+
+A new contract may lack a clause type entirely, and the consumer then needs to
+know how often we have signed without it. A deal with no precedent record for a
+clause is not enough: the clause may be in the deal's signed copy and never have
+been classified (a missed classification must not read as an absence). So
+`evidence.absence` records, for **every signed deal and clause type with no
+signed text**, which of two **facts** holds. Neither is a verdict.
+
+```jsonc
+"absence": {
+  "guard": 0.1,                         // the score at or above which a node keeps a deal out of the verified count
+  "records": [ {                        // sorted by (document_id, taxonomy_id)
+    "id": "abs.0f3a9c2b17d4e655",       // "abs." + first 16 hex of sha256(canonical([agreement_type.id, document_id, taxonomy_id]))
+    "taxonomy_id": "assignment", "document_id": "deal-b",
+    "status": "absent_verified" | "possibly_present",
+    "basis": "scored" | "unverifiable",
+    "n_checked": 24,                    // signed-text nodes examined
+    "candidates": [ { "ref": Citation, "score": 0.222, "filed_under": "term" | null } ]   // at most three, best first; [] when verified
+  } ]
+}
+```
+
+- **Which pairs.** The signed deals are the in-scope `corpus.documents[]` with a
+  non-null `signed_version`. A pair (deal, clause type) has a record exactly when
+  the deal has no `evidence.precedent` record for the clause with a non-null
+  `signed_text`. A clause struck before signing therefore has a record (the deal
+  did sign without it); an unsigned deal has none. The records are complete: a
+  validator MUST reject a document missing the record of any such pair, one for a
+  pair that has a signed text, a duplicate, an id that is not recomputed from
+  `(agreement_type.id, document_id, taxonomy_id)`, and a `candidates[].ref` that
+  does not resolve (§4) or cites another deal.
+- **The nodes.** Every clause node of the deal's executed copy except those filed
+  under this very clause type: the ones the classifier left unclassified AND the
+  ones it filed under another clause type (a clause stated inside a block filed
+  under a neighbouring type is as good as unclassified for "is it in this deal?").
+  A node that is no clause (a bare section number, a signature block, a running
+  header; see `x_non_clause`) is not examined. A node filed under this very clause
+  type that was too short to reach `evidence.precedent` scores 1.0: it is the
+  classifier's own finding of the clause. (A node filed under this very clause type
+  that is long enough to be precedent gives the deal a `signed_text` and so no
+  record.) `n_checked` counts the nodes examined: every node not filed under
+  this clause type, and each too-short one filed under it. A deal whose executed
+  copy has no node to examine is `unverifiable` with `n_checked` 0.
+
+- **The score** of a node against a clause type is the content-word Jaccard
+  similarity that the content-similarity classifier uses (stop words dropped,
+  numerals kept), taken as the best over the node as a whole and each of its
+  paragraphs, sentences and list items (a big node that holds the clause among
+  others would otherwise dilute it), and over every reference text of the clause
+  type: the parts and the whole of our standard and of each former form's
+  clause, and every text any deal signed, opened with or had refused for the
+  clause. It is rounded to three places and compared with `guard` after rounding.
+  `guard` is well below the assign threshold (0.25): assigning a node to a clause
+  needs confidence, declining to verify an absence needs only plausibility.
+- **Status.** `absent_verified` — `basis` is `scored` and no node scores at or
+  above `guard` (`candidates` is empty). `possibly_present` — otherwise: at least
+  one node does (`candidates`, with the cited node, its score and `filed_under`, the clause type the
+  classifier filed it under or `null`), or
+  `basis: "unverifiable"`, nothing could be checked (the deal's executed copy
+  produced no readable text or has 1,000 characters or more of passages that
+  extracted as junk, such as columns of digits, where the clause may sit; or the
+  clause type has no reference text anywhere).
+  A validator MUST reject a `status` the `basis` and `candidates` do not imply,
+  candidates not ordered best score first, and a score below `guard`.
+- **Conservative by design.** A neighbouring clause's shared vocabulary can score
+  at or above `guard` against a clause it does not state, which keeps a deal out
+  of the verified count: the error is always towards `possibly_present`, never
+  towards a false absence. `absent_verified` therefore means "no passage of the
+  signed copy resembles the clause", a lower bound on the deals that signed
+  without it.
+- **Pure and paper-blind.** Both facts are a pure function of the store; paper
+  side takes no part in them.
+- **The spot-check.** The producer measures its guard with the `absence_check`
+  judge kind ("is clause type X really absent from this signed text?"), asked of
+  a deterministic sample of the verified records (all of them when there are 40 or
+  fewer, else the 40 with the lowest payload hash); the answer gates nothing and
+  is not recorded in the document. A confirmed-present item means the guard is
+  too weak: it is tightened until the checked sample has none.
+
 ### 3.6 `posture` (NEW) — negotiation intent as generated prose
 
 The Posture is the "smart, system-prompt-style directions" layer: a prose block that tells the review engine *how to negotiate this agreement type*, generated by the compiler from a short interview (§7) and grounded in the Evidence.
@@ -1029,7 +1110,10 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
                             "additions": [...] | null, "label_by": "owner",
                             "reason": "..." | null, "settled": ... | null,
                             "ref": Citation, "precedent_ids": ["prec.…"] } ],
-    "n_variants_total": 2, "n_refused_total": 0, "n_changed_openings_total": 1
+    "n_variants_total": 2, "n_refused_total": 0, "n_changed_openings_total": 1,
+    "n_signed_without_verified": 12, "n_signed_without_possible": 3,       // §3.5.8
+    "verified_absent_deals": [ { "document_id": "...", "signed_on": "2025-03" | "2025-03-14" | null,
+                                 "absence_id": "abs.…" } ]
   } ],
   "uncovered_clause_types": [ { "taxonomy_id": "...", "label": "..." } ]
 }
@@ -1166,6 +1250,15 @@ index of §3.5.6 (`vs_standard`: its label and compact part map):
   `n_changed_openings_total` are always the uncapped totals of distinct texts
   and equal `evidence.clauses[].n_variants` / `n_refused` /
   `n_changed_openings`.
+- `n_signed_without_verified` / `n_signed_without_possible` (issue #251, §3.5.8)
+  — distinct signed deals with no signed text for the clause, split into those it
+  is **verified absent** from (`absent_verified`) and those it is **possibly
+  present** in (`possibly_present`: a passage resembles it, or nothing could be checked). Facts, with no verdict:
+  with the deals that signed the clause they make every signed deal.
+  `verified_absent_deals` lists the verified deals (`absence_id` resolves into
+  `evidence.absence.records[]`), latest `signed_on` first (undated last), then
+  `document_id`, capped with the other lists; the counts are always the uncapped
+  totals.
 - `uncovered_clause_types` — every classifier-eligible `taxonomy.entries[]`
   entry (`status` `active` or `custom`) with no `evidence.clauses[]` entry,
   `{taxonomy_id, label}`, sorted by `taxonomy_id`, never capped. It means "a
@@ -1562,6 +1655,7 @@ must be re-mined, not only re-projected.
 3. **`historical_stance` vs. a numeric tendency.** ~~`mixed` is coarse. A future version might carry a held-rate (e.g. "held in 7 of 9 our-paper deals") instead of/alongside the enum. Deferred.~~ **Resolved, then superseded:** 0.2/0.3 carried the held-rate as `summary.stance_detail`; 0.4 and 0.5 carry no stance at all, only per-clause deal counts (`n_signed_standard` of `n_deals`, §3.5.4).
 
 ## Appendix B — Changelog
+- **0.6 (issue #251)** — Verified absence (§3.5.8, §3.12.2): `evidence.absence` (`guard` and one `records[]` entry per signed deal and clause type with no signed text: `absent_verified` or `possibly_present`, its `basis`, `n_checked` and cited `candidates`); the digest's per-clause `n_signed_without_verified`, `n_signed_without_possible` and `verified_absent_deals`. A missed classification is never read as an absence. OPF 0.6 and digest 5 are replaced in place; there is no backward compatibility.
 - **0.6 (issue #250)** — Reconstructed former forms (§3.2, §3.5.5, §3.5.7, §3.12.2): `baseline.prior_templates[]` entries gain `basis` (`supplied` by default, or `reconstructed` for a form the producer rebuilt from the corpus' first drafts on our paper when none was supplied) with `n_deals`, `first_signed` and `last_signed`; a reconstructed form has no `sha256`, its `prior_standards[]` cite the corpus document the wording was read from, and the digest's `standard_history.forms[]` gain `basis`. Only clusters the `prior_form_origin` judgment confirmed (blind-checked, adjudicated on disagreement) become forms.
 - **0.6 (issue #249)** — Prior standards (§3.2, §3.5.4, §3.5.5, §3.5.7, §3.12.2): `baseline.prior_templates[]` (our older forms' labels, owner dates and content addresses); `evidence.clauses[].prior_standards[]` (each form's clause as parts with stable `part_id`s, cited in the form's own bytes — `version` `"prior_template"`, `document_id` `prior_template:<label>`, resolved through the form's `sha256` (§4.1) — and its `vs_standard` against today's standard, judged once, subject role `prior_standard`), `why_changed` (the owner's optional note) and the counts `n_opened_prior` / `n_kept_prior` / `n_moved_to_current`; `opened_with` gains `"prior_standard"` with `opened_with_form`, so our own former wording is never a changed opening or a refused ask; the digest's per-clause `standard_history`. OPF 0.6 and digest 5 are replaced in place; there is no backward compatibility.
 - **0.6 (issues #247, #248)** — Signing dates (§3.5.4, §3.8, §3.12.2): `corpus.documents[].signed_on` (an ISO date, or `YYYY-MM` when only the month is known, or `null`) and `signed_on_basis` (`document_text` | `signature_block` | `filename` | `file_metadata`, present exactly when the date is); every precedent record gains a required `signed_on` equal to its document's, which replaces the optional `signed_at` (the `YYYY-Qn` quarter form is gone). `digest_version` "5": `first_signed` / `last_signed` (`YYYY-MM`) on every signed variant (and the collapsed equivalent entry), every refused ask and every clause, and the corpus span is to the month. New validator MUSTs: both keys present on every in-scope document (null when unknown), a well-formed real date in 1980-2099, a basis exactly when there is a date, no date without a detected executed copy, and a precedent's date equal to its document's. New schema file `playbook.schema-0.6.json` and conformance set `spec/conformance/0.6/` (vector 010); they replace 0.5 in the reference engine. Issue #248 adds `settled` (§3.5.6, §3.12.2, §3.12.3): how settled each judged text's `vs_standard` is (`agreed`, `adjudicated`, `unchecked` or `owner`), derived from its basis and blind check and carried on every non-equivalent digest variant, refused ask and changed opening and on each dossier excerpt's `vs_standard`; the collapsed equivalent entry carries `settled_counts`; `part_map_legend.settled` states the values; conformance vector 011.

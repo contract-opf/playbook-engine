@@ -1341,7 +1341,7 @@ def test_posture_interview_q4_promotion_refreshes_the_sections(tmp_path: Path) -
 def test_refresh_leaves_a_document_without_the_sections_alone() -> None:
     doc: dict[str, Any] = {
         "floor": {"invariants": []},
-        "evidence": {"clauses": [], "precedent": []},
+        "evidence": {"clauses": [], "precedent": [], "absence": {"guard": 0.1, "records": []}},
     }
     assert refresh_derived_sections(doc) is False
     assert set(doc) == {"floor", "evidence"}

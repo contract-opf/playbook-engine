@@ -77,7 +77,7 @@ playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canne
 Expected output:
 
 ```text
-OK  loaded 7 verdict(s) into out/quickstart-demo/judge/verdicts.jsonl
+OK  loaded 8 verdict(s) into out/quickstart-demo/judge/verdicts.jsonl
 ```
 
 ### 3. Mine the corpus

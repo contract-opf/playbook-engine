@@ -5724,14 +5724,1133 @@
         "moved": false,
         "refused_asks": []
       }
-    ]
+    ],
+    "absence": {
+      "guard": 0.1,
+      "records": [
+        {
+          "id": "abs.211c7cd8cf60e638",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "beta-industries",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.957fc3891191583c",
+          "taxonomy_id": "residuals",
+          "document_id": "beta-industries",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "13",
+                "char_span": [
+                  3739,
+                  4014
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "2",
+                "char_span": [
+                  426,
+                  640
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  425
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.f19e831a4c686aba",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "delta-ventures",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.3f2dccfe608002f0",
+          "taxonomy_id": "residuals",
+          "document_id": "delta-ventures",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "13",
+                "char_span": [
+                  3615,
+                  3890
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "2",
+                "char_span": [
+                  424,
+                  638
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  423
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.73e219f2e84fc5f4",
+          "taxonomy_id": "residuals",
+          "document_id": "epsilon-systems",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 28,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  3621,
+                  3896
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  430,
+                  644
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  429
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.91465c705cc01859",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "gamma-holdings",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.b840630d57b78595",
+          "taxonomy_id": "residuals",
+          "document_id": "gamma-holdings",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  3648,
+                  3923
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  427,
+                  641
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  426
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.28b3c4bce4508b7a",
+          "taxonomy_id": "confidentiality_of_discussions",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "17",
+                "char_span": [
+                  2941,
+                  3049
+                ]
+              },
+              "score": 0.278,
+              "filed_under": "assignment"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.114,
+              "filed_under": "compelled_disclosure"
+            }
+          ]
+        },
+        {
+          "id": "abs.00a36d17b8677cc2",
+          "taxonomy_id": "definition_confidential_info",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "2",
+                "char_span": [
+                  310,
+                  580
+                ]
+              },
+              "score": 0.108,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.d1325377e1fcbcca",
+          "taxonomy_id": "export_control",
+          "document_id": "theta-logistics",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": []
+        },
+        {
+          "id": "abs.663e822c72fdefbf",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "3",
+                "char_span": [
+                  581,
+                  1011
+                ]
+              },
+              "score": 0.1,
+              "filed_under": "exclusions_from_confidential"
+            }
+          ]
+        },
+        {
+          "id": "abs.171aa8f98786c10f",
+          "taxonomy_id": "no_license_ip_ownership",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "11",
+                "char_span": [
+                  2212,
+                  2337
+                ]
+              },
+              "score": 0.208,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "5",
+                "char_span": [
+                  1161,
+                  1359
+                ]
+              },
+              "score": 0.129,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.107,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.bb4acc8c46638593",
+          "taxonomy_id": "no_obligation_to_proceed",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "11",
+                "char_span": [
+                  2212,
+                  2337
+                ]
+              },
+              "score": 0.105,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.98cbf1a9633cd25e",
+          "taxonomy_id": "notice_of_unauthorized_disclosure",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.154,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.13,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.12,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.63b44f8d066aaaa8",
+          "taxonomy_id": "parties_and_recitals",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.219,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.105,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.a59930efc8661980",
+          "taxonomy_id": "permitted_disclosure_reps",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.296,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "5",
+                "char_span": [
+                  1161,
+                  1359
+                ]
+              },
+              "score": 0.125,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.111,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.ae3e6be63752f3ad",
+          "taxonomy_id": "purpose_permitted_use",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.176,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.158,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.136,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.0592b753701d28ea",
+          "taxonomy_id": "residuals",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.182,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.16,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.143,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.18dc0650b4ea3a0a",
+          "taxonomy_id": "return_or_destruction",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.242,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.104,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.e9c4974a8aebe335",
+          "taxonomy_id": "confidentiality_of_discussions",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "18",
+                "char_span": [
+                  3196,
+                  3304
+                ]
+              },
+              "score": 0.278,
+              "filed_under": "assignment"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.114,
+              "filed_under": "compelled_disclosure"
+            }
+          ]
+        },
+        {
+          "id": "abs.3baa46c164d32b45",
+          "taxonomy_id": "definition_confidential_info",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  312,
+                  582
+                ]
+              },
+              "score": 0.108,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.e9d1ca8024fc5bae",
+          "taxonomy_id": "export_control",
+          "document_id": "zeta-diagnostics",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": []
+        },
+        {
+          "id": "abs.bbdfd3504c8cde94",
+          "taxonomy_id": "no_license_ip_ownership",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "11",
+                "char_span": [
+                  2213,
+                  2338
+                ]
+              },
+              "score": 0.208,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "5",
+                "char_span": [
+                  1163,
+                  1361
+                ]
+              },
+              "score": 0.129,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.107,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.7c239f3af3f82815",
+          "taxonomy_id": "no_obligation_to_proceed",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "11",
+                "char_span": [
+                  2213,
+                  2338
+                ]
+              },
+              "score": 0.105,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.b58fc4d91e5cb65d",
+          "taxonomy_id": "notice_of_unauthorized_disclosure",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.154,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.13,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.12,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.4987a07867fd3a50",
+          "taxonomy_id": "parties_and_recitals",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.226,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.105,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.c373fa6a614ff06d",
+          "taxonomy_id": "permitted_disclosure_reps",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.296,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "5",
+                "char_span": [
+                  1163,
+                  1361
+                ]
+              },
+              "score": 0.125,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  2453,
+                  2706
+                ]
+              },
+              "score": 0.12,
+              "filed_under": "limitation_of_liability"
+            }
+          ]
+        },
+        {
+          "id": "abs.adf6096790dc2c97",
+          "taxonomy_id": "purpose_permitted_use",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.176,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.158,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.136,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.4066b5f6ba19d9dd",
+          "taxonomy_id": "residuals",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.182,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.16,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.143,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.183ef6b739088657",
+          "taxonomy_id": "return_or_destruction",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.242,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.104,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        }
+      ]
+    }
   },
   "posture": {
     "system_prompt": "Rounds before escalating: Typically two rounds of redlines before we escalate to outside counsel or walk; our own history shows most deals settle by the second or third version. Default leverage posture: Collaborative — four of our six negotiated NDAs closed on our own paper and most changes were accepted without escalation; we lead from our standard form but do not force it through unchanged. Non-material counterparty change: We accept non-material redlines (venue, governing law, notice mechanics, minor wording) to keep a deal moving, but hold firm on the two clause types named above and never accept a limitation-of-liability clause that reaches a confidentiality breach. Hard lines named in interview (see Floor): Exclusions from Confidential Information; Survival of Confidentiality Obligations. Flexible to close a deal: Governing law, dispute resolution venue, and standard of care — our history shows these move to a counterparty's preferred jurisdiction or phrasing without us treating it as a loss. Output audience and deal-size sensitivity: Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader.",
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-21T05:06:34+00:00",
+      "generated_at": "2026-10-21T12:34:10+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5764,7 +6883,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:a5a87eb007ab6eb7fd2afaa83356ab3666910ff499c90da9f998fc1fa6b6ac14"
+      "grounded_in": "evidence@sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650"
     }
   },
   "floor": {
@@ -5784,7 +6903,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-21T05:06:35+00:00",
+        "x_signed_at": "2026-10-21T12:34:11+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -6175,7 +7294,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-21T05:06:30+00:00",
+    "generated_at": "2026-10-21T12:34:09+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -6300,7 +7419,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.compelled_disclosure",
@@ -6407,7 +7529,10 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -6482,7 +7607,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.counterparts",
@@ -6563,7 +7691,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.definition_confidential_info",
@@ -6610,7 +7741,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.dispute_resolution_venue",
@@ -6714,7 +7848,10 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.entire_agreement_amendment",
@@ -6790,7 +7927,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.exclusions_from_confidential",
@@ -6919,7 +8059,10 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 1,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.export_control",
@@ -6966,7 +8109,21 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 2,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": [
+          {
+            "document_id": "theta-logistics",
+            "signed_on": null,
+            "absence_id": "abs.d1325377e1fcbcca"
+          },
+          {
+            "document_id": "zeta-diagnostics",
+            "signed_on": null,
+            "absence_id": "abs.e9d1ca8024fc5bae"
+          }
+        ]
       },
       {
         "id": "clause.governing_law",
@@ -7070,7 +8227,10 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.injunctive_relief",
@@ -7146,7 +8306,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.limitation_of_liability",
@@ -7230,7 +8393,26 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 3,
+        "n_signed_without_possible": 1,
+        "verified_absent_deals": [
+          {
+            "document_id": "gamma-holdings",
+            "signed_on": "2022-11-30",
+            "absence_id": "abs.91465c705cc01859"
+          },
+          {
+            "document_id": "delta-ventures",
+            "signed_on": "2022-06-02",
+            "absence_id": "abs.f19e831a4c686aba"
+          },
+          {
+            "document_id": "beta-industries",
+            "signed_on": "2022-03-16",
+            "absence_id": "abs.211c7cd8cf60e638"
+          }
+        ]
       },
       {
         "id": "clause.no_license_ip_ownership",
@@ -7277,7 +8459,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.no_obligation_to_proceed",
@@ -7324,7 +8509,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.no_warranty_as_is",
@@ -7405,7 +8593,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.notice_of_unauthorized_disclosure",
@@ -7482,7 +8673,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.notices",
@@ -7558,7 +8752,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.parties_and_recitals",
@@ -7653,7 +8850,10 @@
         "changed_openings": [],
         "n_variants_total": 4,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.permitted_disclosure_reps",
@@ -7700,7 +8900,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.purpose_permitted_use",
@@ -7747,7 +8950,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.residuals",
@@ -7802,7 +9008,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 1,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 6,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.return_or_destruction",
@@ -7849,7 +9058,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.severability",
@@ -7925,7 +9137,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.standard_of_care",
@@ -8028,7 +9243,10 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.survival_period",
@@ -8156,7 +9374,10 @@
         ],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.term",
@@ -8232,7 +9453,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       }
     ],
     "uncovered_clause_types": [
@@ -9606,11 +10830,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:6362547758d0ecabc422180e38f8b2d9784278977663a1c1c70fa82082091fb7",
+    "content_hash": "sha256:d5df096e604dfbe0e088d09a0fc79a6a9799d833eae6f676c16cb9334e0c0596",
     "section_digests": {
-      "evidence": "sha256:a5a87eb007ab6eb7fd2afaa83356ab3666910ff499c90da9f998fc1fa6b6ac14",
-      "posture": "sha256:68a66e75fa83f89698ed8a31761d70a67219d5095e93c730aa76f54febf79c9f",
-      "floor": "sha256:7ab9c9ca65008e98ce51b885f2b1a512a1ef2d34459108c8dff18d8d59f83165"
+      "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
+      "posture": "sha256:2917e416528a64c119934e8b7b1b69a3d5d3671978ec4d7d80ced9845aa8a4d6",
+      "floor": "sha256:8fea54a4f67eafb57e32f063c4a8f34d060bdf574662d0f515a17f39dab3edeb"
     }
   }
 }

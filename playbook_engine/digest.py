@@ -24,7 +24,12 @@ one-sentence reason (the owner's when the owner set the label). Our standard is 
 (issue #249) lists each of OUR former forms with its in-use dates, the deals
 that opened on it (kept, conceded, moved to today's) and how its clause
 compares with today's standard part by part, plus the owner's optional
-``why_changed`` note — the only reason a change is ever given.
+``why_changed`` note — the only reason a change is ever given. Per clause, too,
+``n_signed_without_verified`` / ``n_signed_without_possible`` (issue #251) say
+how many signed deals have no signed text for the clause because it is verified
+absent from the signed copy, or is possibly present (a passage resembles it), with
+``verified_absent_deals`` listing the verified ones (capped with the other
+lists, the counts uncapped): facts from ``evidence.absence``, never a verdict.
 
 The full OPF document carries every precedent's full text and measures in
 the millions of characters on a real corpus — far beyond what a consuming
@@ -51,6 +56,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from playbook_engine.absence import STATUS_POSSIBLE, STATUS_VERIFIED, absence_records
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.deal_dates import signed_on_key
 from playbook_engine.equivalence import (
@@ -652,6 +658,44 @@ def standard_history(
     return {"forms": forms, "why_changed": note if isinstance(note, dict) else None}
 
 
+def _absence_summary(
+    records: list[dict[str, Any]], playbook: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """One clause's absence records by status (issue #251), one entry per deal.
+
+    The verified list is ``[{document_id, signed_on, absence_id}]``, latest
+    ``signed_on`` first (undated last), then ``document_id``; the possibly
+    present list is only counted."""
+    corpus = playbook.get("corpus")
+    documents = corpus.get("documents") if isinstance(corpus, dict) else None
+    signed_on = {
+        d.get("document_id"): d.get("signed_on") for d in documents or [] if isinstance(d, dict)
+    }
+    by_status: dict[str, dict[Any, dict[str, Any]]] = {STATUS_VERIFIED: {}, STATUS_POSSIBLE: {}}
+    for record in records:
+        status = record.get("status")
+        if status in by_status:
+            by_status[status].setdefault(
+                record.get("document_id"),
+                {
+                    "document_id": record.get("document_id"),
+                    "signed_on": signed_on.get(record.get("document_id")),
+                    "absence_id": record.get("id"),
+                },
+            )
+    return {
+        status: sorted(
+            deals.values(),
+            key=lambda d: (
+                (k := _signed_on_key(d["signed_on"])) is None,
+                tuple(-x for x in (k or (0, 0, 0))),
+                str(d["document_id"]),
+            ),
+        )
+        for status, deals in by_status.items()
+    }
+
+
 def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, Any]:
     """Digest 4 with a fixed per-list cap of *top_n* (``None`` = uncapped)."""
     precedent = playbook_precedent_records(playbook)
@@ -662,9 +706,11 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
         for t in (baseline.get("prior_templates") if isinstance(baseline, dict) else None) or []
         if isinstance(t, dict)
     }
+    absences = absence_records(playbook)
     clauses: list[dict[str, Any]] = []
     for clause in playbook_clauses(playbook):
         tid = clause.get("taxonomy_id")
+        absence = _absence_summary([a for a in absences if a.get("taxonomy_id") == tid], playbook)
         groups = clause_precedent_groups(tid, precedent, party=party)
         variants = groups["signed_variants"]
         refused = groups["refused_asks"]
@@ -701,6 +747,11 @@ def _build_digest_at(playbook: dict[str, Any], top_n: int | None) -> dict[str, A
                 "n_variants_total": len(variants),
                 "n_refused_total": len(refused),
                 "n_changed_openings_total": len(changed),
+                "n_signed_without_verified": len(absence[STATUS_VERIFIED]),
+                "n_signed_without_possible": len(absence[STATUS_POSSIBLE]),
+                "verified_absent_deals": (
+                    absence[STATUS_VERIFIED] if top_n is None else absence[STATUS_VERIFIED][:top_n]
+                ),
             }
         )
     agreement_type = playbook.get("agreement_type")

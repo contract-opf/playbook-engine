@@ -292,8 +292,8 @@ def test_assemble_clauses_present() -> None:
 
 
 def test_assemble_evidence_is_clauses_and_precedent() -> None:
-    """Issue #223: evidence is {clauses, precedent} — no clause library."""
-    assert set(_minimal_playbook()["evidence"]) == {"clauses", "precedent"}
+    """Issue #223: evidence is {clauses, precedent} — no clause library; issue #251 adds absence."""
+    assert set(_minimal_playbook()["evidence"]) == {"clauses", "precedent", "absence"}
 
 
 def test_assemble_clauses_carry_counts_and_no_stance() -> None:
@@ -424,6 +424,8 @@ def test_assemble_identity_content_hash_stable_across_run_id_and_generated_at() 
         corpus_documents=[_corpus_doc("deal_001")],
         generated_at="2099-01-01T00:00:00Z",
         run_id="run-2-completely-different",
+        # The same observations: the absence record (issue #251) reads them.
+        observations=[_obs("indemnification"), _obs("governing_law", clause_path="12")],
     )
     assert pb_a["identity"]["content_hash"] == pb_b["identity"]["content_hash"]
 

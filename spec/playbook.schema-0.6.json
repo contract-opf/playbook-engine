@@ -232,10 +232,11 @@
     },
     "evidence": {
       "type": "object",
-      "description": "\u00a73.5 (OPF 0.6) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
+      "description": "\u00a73.5 (OPF 0.6) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type); `absence` says, for every signed deal and clause type with no signed precedent, whether the clause is verified absent from the signed copy or possibly present (a signed-text passage other than one filed under the clause itself scores as plausibly the clause) (issue #251). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
       "required": [
         "clauses",
-        "precedent"
+        "precedent",
+        "absence"
       ],
       "additionalProperties": false,
       "properties": {
@@ -250,6 +251,9 @@
           "items": {
             "$ref": "#/$defs/precedent"
           }
+        },
+        "absence": {
+          "$ref": "#/$defs/absence"
         }
       }
     },
@@ -1667,7 +1671,10 @@
         "changed_openings",
         "n_variants_total",
         "n_refused_total",
-        "n_changed_openings_total"
+        "n_changed_openings_total",
+        "n_signed_without_verified",
+        "n_signed_without_possible",
+        "verified_absent_deals"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1755,6 +1762,23 @@
           "type": "integer",
           "minimum": 0,
           "description": "Uncapped number of changed openings; equals evidence.clauses[].n_changed_openings."
+        },
+        "n_signed_without_verified": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals with no signed text for the clause where it is verified absent (`evidence.absence`, status `absent_verified`): no signed-text passage other than one filed under the clause itself resembles it. A fact; no verdict."
+        },
+        "n_signed_without_possible": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals with no signed text for the clause where it is possibly present (status `possibly_present`: a signed-text passage other than one filed under the clause itself resembles it, or nothing could be checked). Together with the verified count, every signed deal without a signed text for the clause."
+        },
+        "verified_absent_deals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestAbsentDeal"
+          },
+          "description": "The deals counted in `n_signed_without_verified`, latest `signed_on` first (undated last), then `document_id`; capped (see `n_signed_without_verified`)."
         }
       }
     },
@@ -3049,6 +3073,134 @@
         "ref": {
           "$ref": "#/$defs/citation",
           "description": "Where the clause sits in the form: a copy of the prior standard's `source_ref` (`document_id` `prior_template:<form>`, `version` `prior_template`), resolved through that form's `baseline.prior_templates[].sha256`, never through today's template (OPF-SPEC \u00a74.1)."
+        }
+      }
+    },
+    "absence": {
+      "type": "object",
+      "description": "Verified absence (OPF 0.6, issue #251, OPF-SPEC \u00a73.5.8) \u2014 facts only. One record per (signed deal, clause type) with no signed precedent: every in-scope deal with a detected executed copy (`corpus.documents[].signed_version` non-null) crossed with every `evidence.clauses` entry, less the pairs that have a `precedent` record with a `signed_text`. `guard` is the similarity score at or above which a signed-text node keeps a deal out of the verified count. The validator enforces completeness, uniqueness and the status rules.",
+      "required": [
+        "guard",
+        "records"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "guard": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "description": "The score threshold the producer used: a record's `candidates[].score` is at least this, and a `scored` record is `absent_verified` exactly when it has no candidate."
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/absenceRecord"
+          }
+        }
+      }
+    },
+    "absenceRecord": {
+      "type": "object",
+      "description": "One signed deal with no signed text for one clause type (OPF 0.6). At most one record per (document_id, taxonomy_id). A fact about the signed copy, never a verdict.",
+      "required": [
+        "id",
+        "taxonomy_id",
+        "document_id",
+        "status",
+        "basis",
+        "n_checked",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^abs\\.[0-9a-f]{16}$",
+          "description": "\"abs.\" + the first 16 hex chars of sha256(canonical([agreement_type.id, document_id, taxonomy_id]))."
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "absent_verified",
+            "possibly_present"
+          ],
+          "description": "`absent_verified`: no signed-text node of the deal scores at or above `guard` against the clause type (see `basis`). `possibly_present`: at least one does (`candidates`), or the check could not be made (`basis: unverifiable`)."
+        },
+        "basis": {
+          "enum": [
+            "scored",
+            "unverifiable"
+          ],
+          "description": "`scored`: the deal's signed-text nodes were scored against the clause type's reference texts. `unverifiable`: nothing could be checked (the executed copy produced no readable text or has 1,000 characters or more of passages that extracted as junk, or the clause type has no reference text); the status is then `possibly_present`."
+        },
+        "n_checked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many of the deal's signed-text nodes were examined: every clause node of the executed copy except those filed under this clause type (a node that is no clause is not one), plus any node filed under this clause type but too short to be precedent."
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/absenceCandidate"
+          },
+          "description": "The signed-text nodes scoring at or above `guard`, best first (at most three); empty when `status` is `absent_verified`."
+        }
+      }
+    },
+    "absenceCandidate": {
+      "type": "object",
+      "required": [
+        "ref",
+        "score",
+        "filed_under"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/citation"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Content-word Jaccard similarity of the cited node (as a whole, or its best paragraph, sentence or list item) to the clause type's reference texts, rounded to three places; 1.0 for a node the classifier assigned to the clause type that was too short to be precedent."
+        },
+        "filed_under": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The clause type the classifier filed the cited node under (`taxonomy_id`), or null when it left the node unclassified. A node filed under the very clause type of the record is one too short to be precedent (score 1.0)."
+        }
+      }
+    },
+    "digestAbsentDeal": {
+      "type": "object",
+      "description": "A signed deal the clause is verified absent from (an `evidence.absence.records[]` entry).",
+      "required": [
+        "document_id",
+        "signed_on",
+        "absence_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signed_on": {
+          "$ref": "#/$defs/signedOnOrNull"
+        },
+        "absence_id": {
+          "type": "string",
+          "pattern": "^abs\\.[0-9a-f]{16}$"
         }
       }
     }
