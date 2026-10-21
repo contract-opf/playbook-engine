@@ -166,6 +166,16 @@ _FIELD_NAMES = frozenset(
         "signed_on",
         "dated",
         "null_dates",
+        # Issue #255: what the re-segmentation pass did, and its sampled check.
+        "resegmentation",
+        "splits",
+        "joins",
+        "observations_split",
+        "observations_joined",
+        "check_sample",
+        "wrong",
+        "non_clause",
+        "non_clause_by_reason",
     }
 )
 
@@ -177,6 +187,7 @@ _TOP_LEVEL = {
     "classification",
     "precedent",
     "signed_on",
+    "resegmentation",
     "template_drift",
     "opening_drift",
     "dropped_observations",
@@ -215,6 +226,27 @@ _NDA_FLAT_KEYS = frozenset(
                 "distinct_types_per_deal.min",
                 "distinct_types_per_deal.n",
                 "observations",
+            )
+        ),
+        # Issue #255: the NDA example's signature blocks are no clauses.
+        "classification.clauses",
+        "classification.non_clause",
+        "classification.non_clause_by_reason.signature_block",
+        *(
+            f"classification.by_paper.{paper}.{field}"
+            for paper in ("our_paper", "unknown")
+            for field in ("clauses", "non_clause", "non_clause_by_reason.signature_block")
+        ),
+        *(
+            f"resegmentation.{field}"
+            for field in (
+                "splits",
+                "joins",
+                "observations_split",
+                "observations_joined",
+                "check_sample",
+                "checked",
+                "wrong",
             )
         ),
         "classification.classified",
@@ -424,7 +456,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 9
+    assert card["scorecard_version"] == 10
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,
@@ -446,9 +478,10 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     assert cls["deals"] == 6
     # Every NDA observation carries x_classification_basis (pipeline, #237),
     # so nothing is "unrecorded" and the bases add up to the observations.
-    assert sum(cls["by_basis"].values()) == cls["observations"]
+    assert sum(cls["by_basis"].values()) == cls["clauses"]
+    assert cls["clauses"] + cls["non_clause"] == cls["observations"]
     assert "unrecorded" not in cls["by_basis"]
-    assert cls["by_basis"]["unclassified"] == cls["observations"] - cls["classified"]
+    assert cls["by_basis"]["unclassified"] == cls["clauses"] - cls["classified"]
     # Paper side is a diagnostic split that partitions the same observations.
     assert set(cls["by_paper"]) <= {"our_paper", "counterparty_paper", "unknown"}
     assert sum(b["observations"] for b in cls["by_paper"].values()) == cls["observations"]
@@ -816,7 +849,8 @@ def test_observations_from_an_older_store_count_as_unrecorded(
     out = _copy_out(nda_out, tmp_path / "out")
     path = out / "observations.jsonl"
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    for row in rows[:10]:
+    # (A non-clause observation is outside by_basis, issue #255: leave those be.)
+    for row in [r for r in rows if "x_non_clause" not in r][:10]:
         row.pop("x_classification_basis", None)
     path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     card = build_scorecard(out)

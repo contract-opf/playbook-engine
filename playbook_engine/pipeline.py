@@ -22,11 +22,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import deal_dates
+from playbook_engine import deal_dates, resegmentation
 from playbook_engine.agent_judge import (
     PendingQueue,
     StoreBackedDealDateJudge,
     StoreBackedEquivalenceJudge,
+    StoreBackedResegmentCheckJudge,
     VerdictStore,
 )
 from playbook_engine.artifact_store import (
@@ -51,7 +52,7 @@ from playbook_engine.clause_classifier import (
 )
 from playbook_engine.clause_differ import ClauseDiff, diff_aligned
 from playbook_engine.clause_position_compiler import compile_clause_positions
-from playbook_engine.clause_tree import ClauseTree
+from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import EngineConfig
 from playbook_engine.deviation_classifier import assess_deviations_deterministic
 from playbook_engine.docx_ingester import TextUnit, TrackedChanges, ingest_docx
@@ -340,7 +341,16 @@ _MEDIA_TYPES: dict[str, str] = {
 # document was segmented reach its text. L3 (and so L4's alignments,
 # observations and precedent) changes for identical inputs; a warm cache would
 # otherwise replay those clauses as unclassified forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 21
+#
+# v22 (issue #255): a version's nodes are re-segmented after classification —
+# mixed-in provisions are split out to their own clause type, truncated clauses
+# are rejoined, and a node that is not a clause is marked x_non_clause
+# (resegmentation.resegment / mark_non_clauses). L3 (and so L4's alignments,
+# observations and precedent) and the persisted trees change for identical
+# inputs; observations gained "x_resegmented" / "x_non_clause"; corpus_doc
+# gained "resegmentation". A warm cache would otherwise replay the old mixed
+# and truncated clauses forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 22
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -433,6 +443,24 @@ _L1_STAGE = "l1"
 _L2_L4_STAGE = "l2-l4"
 # v2 (issue #252): the record gained "words" (the extracted word count).
 _L1_RECORD_VERSION = 2
+
+# The code version of the re-segmentation pass (issue #255), folded into every
+# document's L2-L4 key with the corpus's type profiles. Bump it whenever
+# resegmentation.py changes what it produces for identical inputs and the
+# change is not already in a constant that fingerprints the profiles.
+#
+# v2 (issue #255, review round 1): a redline join stitches the pieces of one
+# author's tracked insertion that meet at the cut (no mid-sentence, heading-label
+# or chain-cap refusal), a join record carries ``scores``, a signature-block
+# phrase no longer marks an operative counterparts / e-signature clause, and on
+# the deterministic path a node that is not a clause is never sent to the judge.
+# v3 (issue #255, review round 2): no join takes in or extends text the
+# not-a-clause filter marks (a lead-in or fragment aside) or an unclassified
+# piece the split scorer reads as another type; a redline join needs the next
+# piece positively of the node's type (typed so, profile words, or a lead-in
+# before such a piece); a textual join refuses a piece only for a heading of its
+# own, not for the segmenter's label.
+_RESEGMENTATION_VERSION = 3
 # Where a cached record keeps the store entries it was built from, as
 # ``{key: fingerprint}`` (issue #219) — an L1 record the segmentation-store
 # entries it was grounded from, an L2-L4 result the judge verdicts it replayed.
@@ -1042,6 +1070,48 @@ def _classified_from_taxonomy_by_path(
     return result
 
 
+@dataclasses.dataclass
+class _VersionClassification:
+    """One version's final classification and its re-segmented tree (issue #255)."""
+
+    tree: ClauseTree
+    classified: list[ClassifiedClause]
+    splits: int = 0
+    joins: int = 0
+
+
+def _resegment_classified(
+    tree: ClauseTree,
+    classified: list[ClassifiedClause],
+    *,
+    profiles: resegmentation.TypeProfiles,
+    labels: Mapping[str, str],
+    tracked: TrackedChanges | None,
+    content_exemplars: Mapping[str, str] | None,
+    eligible_ids: Collection[str],
+) -> _VersionClassification:
+    """Re-segment one classified version (issue #255; see :mod:`playbook_engine.resegmentation`).
+
+    Splits mixed nodes and rejoins truncated ones, lets the content test place
+    a node the join just completed, then marks what is still not a clause. The
+    input tree and classification are not mutated.
+    """
+    res = resegmentation.resegment(tree, classified, profiles, labels=labels, tracked=tracked)
+    # Only a node a join just completed can newly clear the content test; a
+    # split-off node is typed already and every other node is as it was.
+    matched = (
+        assign_by_content(res.classified, content_exemplars, eligible_ids=eligible_ids)
+        if res.joins
+        else res.classified
+    )
+    return _VersionClassification(
+        tree=res.tree,
+        classified=resegmentation.mark_non_clauses(matched),
+        splits=res.splits,
+        joins=res.joins,
+    )
+
+
 def _classify_llm_segmented(
     tree: ClauseTree,
     taxonomy_by_path: dict[str, str | None],
@@ -1049,7 +1119,37 @@ def _classify_llm_segmented(
     judge: ClassificationJudge,
     content_exemplars: Mapping[str, str] | None,
     eligible_ids: Collection[str],
+    *,
+    profiles: resegmentation.TypeProfiles | None = None,
+    labels: Mapping[str, str] | None = None,
+    tracked: TrackedChanges | None = None,
 ) -> list[ClassifiedClause]:
+    """:func:`_classify_llm_segmented_tree` without the re-segmented tree."""
+    return _classify_llm_segmented_tree(
+        tree,
+        taxonomy_by_path,
+        taxonomy,
+        judge,
+        content_exemplars,
+        eligible_ids,
+        profiles=profiles,
+        labels=labels,
+        tracked=tracked,
+    ).classified
+
+
+def _classify_llm_segmented_tree(
+    tree: ClauseTree,
+    taxonomy_by_path: dict[str, str | None],
+    taxonomy: Taxonomy,
+    judge: ClassificationJudge,
+    content_exemplars: Mapping[str, str] | None,
+    eligible_ids: Collection[str],
+    *,
+    profiles: resegmentation.TypeProfiles | None = None,
+    labels: Mapping[str, str] | None = None,
+    tracked: TrackedChanges | None = None,
+) -> _VersionClassification:
     """Final classification of one LLM/agent-segmented version (issues #235, #253).
 
     1. The segmenter's own ``taxonomy_id`` per node (``llm_segmenter``).
@@ -1064,10 +1164,56 @@ def _classify_llm_segmented(
        The segmentation cache is keyed on the document alone, so a null is a
        verdict under the taxonomy the document was segmented with; a clause
        type added later reaches that text only through this pass.
+
+    Between steps 2 and 3 (issue #255, when *profiles* is given) the version is
+    re-segmented: mixed nodes are split by clause type, truncated ones rejoined,
+    and a node that is not a clause is marked ``x_non_clause`` so the judge is
+    never asked about it. Without *profiles* the tree is returned untouched.
     """
     segmented = _classified_from_taxonomy_by_path(tree, taxonomy_by_path)
     matched = assign_by_content(segmented, content_exemplars, eligible_ids=eligible_ids)
-    return reclassify_unclassified(matched, taxonomy, judge)
+    result = _VersionClassification(tree=tree, classified=matched)
+    if profiles is not None:
+        result = _resegment_classified(
+            tree,
+            matched,
+            profiles=profiles,
+            labels=labels or {},
+            tracked=tracked,
+            content_exemplars=content_exemplars,
+            eligible_ids=eligible_ids,
+        )
+    result.classified = reclassify_unclassified(result.classified, taxonomy, judge)
+    return result
+
+
+def _corpus_profiles(
+    states: Mapping[str, _L1State],
+    template_std_by_tid: Mapping[str, str],
+    eligible_ids: Collection[str],
+) -> resegmentation.TypeProfiles:
+    """The corpus's clause-type vocabulary for the split pass (issue #255).
+
+    Exemplars are the nodes the agent/LLM segmenter assigned a type, across
+    every ingested version of every document (a deal counts once per word),
+    plus our standard's clause text per type. A corpus on the deterministic
+    path has no segmenter assignments, so only our standard contributes and no
+    type becomes a split target (``resegmentation.MIN_TYPE_DEALS``).
+    """
+    exemplars: list[tuple[str, str, str]] = []
+    for doc_id in sorted(states):
+        l1 = states[doc_id]
+        for vid in sorted(l1.version_trees):
+            by_path = l1.llm_taxonomy_by_path.get(vid)
+            if not by_path:
+                continue
+            for node in l1.version_trees[vid].all_nodes():
+                tid = by_path.get(node.clause_path or "?")
+                if tid is not None and tid in eligible_ids:
+                    exemplars.append((doc_id, tid, node.text or ""))
+    return resegmentation.build_profiles(
+        exemplars, {t: x for t, x in template_std_by_tid.items() if t in eligible_ids}
+    )
 
 
 def _build_template_observations(
@@ -1330,6 +1476,8 @@ def _restore_observations(raw_list: list[dict[str, Any]]) -> list[Observation]:
                 classification_basis=raw.get("x_classification_basis"),
                 opened_with=raw.get("opened_with"),
                 form_front_matter=bool(raw.get("x_form_front_matter", False)),
+                resegmented=raw.get("x_resegmented"),
+                non_clause=raw.get("x_non_clause"),
             )
         )
     return result
@@ -1359,6 +1507,27 @@ def _observation_classification_basis(
     if classification.taxonomy_id != obs.taxonomy_id:
         return "aligned"
     return classification.basis
+
+
+def _with_node_provenance(
+    obs: Observation, node_by_path: Mapping[tuple[str, str], ClauseNode]
+) -> Observation:
+    """*obs* with the cited node's ``x_resegmented`` / ``x_non_clause`` (issue #255).
+
+    Unchanged when the node is not in *node_by_path* or carries neither. A
+    non-clause mark is kept only on an observation that has no taxonomy_id
+    (an aligned row can give a marked node's observation a type).
+    """
+    cit = obs.citation
+    if cit.version_id is None:
+        return obs
+    node = node_by_path.get((cit.version_id, cit.clause_path or "?"))
+    if node is None:
+        return obs
+    non_clause = node.x_non_clause if obs.taxonomy_id is None else None
+    if node.x_resegmented is None and non_clause is None:
+        return obs
+    return dataclasses.replace(obs, resegmented=node.x_resegmented, non_clause=non_clause)
 
 
 def _standard_party_names(config: EngineConfig) -> list[str]:
@@ -1670,9 +1839,17 @@ def _pseudonymize_observations(
                 obs.citation.version_id, known_entities, registry, version_alias_map
             ),
         )
+        resegmented = obs.resegmented
+        if resegmented is not None and "at" in resegmented:
+            resegmented = resegmentation.rebase_join_offsets(
+                resegmented,
+                obs.full_text,
+                lambda t: pseudonymize_text(t, known_entities, registry),
+            )
         out.append(
             dataclasses.replace(
                 obs,
+                resegmented=resegmented,
                 observation_id=_pseudonymize_observation_id(
                     obs.observation_id, known_entities, registry
                 ),
@@ -1779,7 +1956,16 @@ def _pseudonymize_clause_node(
     if isinstance(new.get("heading"), str):
         new["heading"] = pseudonymize_text(new["heading"], known_entities, registry)
     if isinstance(new.get("text"), str):
-        new["text"] = pseudonymize_text(new["text"], known_entities, registry)
+        raw_text = new["text"]
+        new["text"] = pseudonymize_text(raw_text, known_entities, registry)
+        # A join records where each passage starts in the raw text (issue #255):
+        # moved with the text, or the resegment_check would cut it mid-word.
+        if isinstance(new.get("x_resegmented"), dict):
+            new["x_resegmented"] = resegmentation.rebase_join_offsets(
+                new["x_resegmented"],
+                raw_text,
+                lambda t: pseudonymize_text(t, known_entities, registry),
+            )
     new["children"] = [
         _pseudonymize_clause_node(c, known_entities, registry) for c in new.get("children", [])
     ]
@@ -2796,6 +2982,7 @@ def _compute_doc_from_l1(
     normalize_trail_across_versions: bool = False,
     normalize_trail_fn: NormalizeTrailFn | None = None,
     template_std_nodes_by_tid: dict[str, list[str]] | None = None,
+    profiles: resegmentation.TypeProfiles | None = None,
 ) -> dict[str, Any] | None:
     """L2-L4 for one document from its L1 state (issue #219).
 
@@ -3034,28 +3221,57 @@ def _compute_doc_from_l1(
     # takes this path (see _build_template_observations). On the LLM path the
     # content test runs before the issue #253 classification pass; see
     # _classify_llm_segmented.
+    #
+    # Issue #255: each classified version is then re-segmented
+    # (resegmentation.resegment): mixed-in provisions are split out to their own
+    # clause type, truncated clauses are rejoined, and a node that is not a
+    # clause is marked x_non_clause. The version's tree is replaced by the
+    # re-segmented one (every split and join carries x_resegmented), so the
+    # persisted trees, the observations and the citations all agree.
     content_exemplars = _content_exemplars(template_std_by_tid)
     ordered_ids = list(version_order.ordered_ids) or list(version_trees.keys())
     classified_by_version: dict[str, list[ClassifiedClause]] = {}
+    resegmented_trees: dict[str, dict[str, Any]] = {}
+    reseg_totals = {"splits": 0, "joins": 0}
+    reseg_profiles = profiles if profiles is not None else resegmentation.EMPTY_PROFILES
+    reseg_labels = {e.id: e.label for e in taxonomy.classifier_entries()}
+    eligible_ids = set(taxonomy_ids)
     for vid in ordered_ids:
+        version_result: _VersionClassification
         if vid in llm_taxonomy_by_path:
-            classified_by_version[vid] = _classify_llm_segmented(
+            version_result = _classify_llm_segmented_tree(
                 version_trees[vid],
                 llm_taxonomy_by_path[vid],
                 taxonomy,
                 _cls_judge,
                 content_exemplars,
-                set(taxonomy_ids),
+                eligible_ids,
+                profiles=reseg_profiles,
+                labels=reseg_labels,
+                tracked=tracked_by_vid.get(vid),
             )
         else:
-            classified_by_version[vid] = classify_tree(
+            version_result = _resegment_classified(
                 version_trees[vid],
-                taxonomy,
-                _cls_judge,
-                ambiguity_threshold=config.classification.ambiguity_threshold,
-                auto_classify_threshold=config.classification.auto_classify_threshold,
+                classify_tree(
+                    version_trees[vid],
+                    taxonomy,
+                    _cls_judge,
+                    ambiguity_threshold=config.classification.ambiguity_threshold,
+                    auto_classify_threshold=config.classification.auto_classify_threshold,
+                    content_exemplars=content_exemplars,
+                    skip_judge=lambda node: resegmentation.non_clause_reason(node) is not None,
+                ),
+                profiles=reseg_profiles,
+                labels=reseg_labels,
+                tracked=tracked_by_vid.get(vid),
                 content_exemplars=content_exemplars,
+                eligible_ids=eligible_ids,
             )
+        classified_by_version[vid] = version_result.classified
+        resegmented_trees[vid] = version_result.tree.to_dict()
+        reseg_totals["splits"] += version_result.splits
+        reseg_totals["joins"] += version_result.joins
 
     # L4: Diff + reversals + deviations → observations
     #
@@ -3220,6 +3436,16 @@ def _compute_doc_from_l1(
         for obs in doc_obs
     ]
 
+    # Issue #255: how the cited node came to be (split out of / joined from
+    # other nodes) and whether it is not a clause at all, read from the very
+    # nodes the observations were built from.
+    node_by_path: dict[tuple[str, str], ClauseNode] = {
+        (vid, cc.node.clause_path or "?"): cc.node
+        for vid, classified in classified_by_version.items()
+        for cc in classified
+    }
+    doc_obs = [_with_node_provenance(obs, node_by_path) for obs in doc_obs]
+
     # corpus.documents[].provenance is a frozen two-valued field and keeps
     # today's value (issue #225): an undetermined ("unknown") side is written
     # the §2.3 way via two_valued_side, and provenance_is_ambiguous: true
@@ -3228,6 +3454,10 @@ def _compute_doc_from_l1(
     # Issue #216: summed into corpus.stats.dropped_observations by
     # assemble_playbook (and stripped from the embedded corpus document).
     corpus_doc["dropped_observations"] = dict(sorted(dropped_observations.items()))
+    # Issue #255: how many nodes the re-segmentation pass split out and
+    # rejoined over this deal's versions (counts only; corpus_manifest.json
+    # only — never published in playbook.opf.json).
+    corpus_doc["resegmentation"] = dict(reseg_totals)
     corpus_doc["provenance_confidence"] = prov_result.confidence
     corpus_doc["provenance_is_ambiguous"] = prov_result.is_ambiguous
     # null when no signed copy was detected (issue #202): signed_ordinal is a
@@ -3278,7 +3508,7 @@ def _compute_doc_from_l1(
         # Serialised trees (issue #139); .get()-read by mine_corpus so
         # cached results from before this feature simply contribute none
         # (see _NORMALIZED_TREES_CACHE_VERSION, which busts those entries).
-        "version_trees": version_tree_dicts,
+        "version_trees": {**version_tree_dicts, **resegmented_trees},
         # Serialized RoundMoves (issue #177); .get()-read by mine_corpus so
         # cached results from before this feature simply contribute none.
         "round_moves": [rm.to_dict() for rm in round_moves],
@@ -4081,23 +4311,15 @@ def mine_corpus(
             doc_id, _, vid = custom_id.partition("/")
             batch_seg_nodes_by_doc.setdefault(doc_id, {})[vid] = seg_nodes
 
-    def _run_doc(
+    def _collect_doc_l1(
         doc_id: str,
-        doc_dir: Path,
         version_files: list[Path],
         doc_batch_seg_nodes: dict[str, list[SegNode]] | None,
         doc_batch_extractions: dict[str, _BatchExtraction] | None,
         timed_out_versions: list[str],
-    ) -> Any:
-        """Compute one document's L1–L4 result, via the layered stage cache when present.
-
-        L1 runs (or replays) per version through the "l1" layer, then L2-L4
-        runs (or replays) per document through the "l2-l4" layer, keyed by
-        the L1 records it consumes (issue #219). *timed_out_versions*
-        collects every version whose extraction timed out (issue #218); a
-        result with any is returned but never stored.
-        """
-        l1 = _collect_l1(
+    ) -> _L1State:
+        """Run (or replay) L1 for every version of one document (issue #219)."""
+        return _collect_l1(
             doc_id,
             version_files,
             config=config,
@@ -4113,6 +4335,71 @@ def mine_corpus(
             extraction_cache=extraction_cache,
             refresh_extraction=refresh_extraction,
         )
+
+    # -------------------------------------------------------------------
+    # L1 for every document first (issue #255). The split pass scores each
+    # sentence of a deal against the clause-type vocabulary of the WHOLE
+    # corpus, so the corpus's segmented trees must all exist before any
+    # document is classified. L1 is cached per version and held in memory
+    # here; a document whose L1 failed keeps its exception and raises it in
+    # the loop below, where it is quarantined exactly as before.
+    # -------------------------------------------------------------------
+    l1_by_doc: dict[str, tuple[_L1State | None, BaseException | None, list[str]]] = {}
+    for pre_dir in doc_dirs:
+        pre_files = _discover_versions(pre_dir)
+        if not pre_files:
+            continue
+        pre_timed_out: list[str] = []
+        try:
+            l1_by_doc[pre_dir.name] = (
+                _collect_doc_l1(
+                    pre_dir.name,
+                    pre_files,
+                    batch_seg_nodes_by_doc.get(pre_dir.name),
+                    batch_extractions_by_doc.get(pre_dir.name),
+                    pre_timed_out,
+                ),
+                None,
+                pre_timed_out,
+            )
+        except Exception as pre_exc:  # noqa: BLE001 — re-raised per document below
+            l1_by_doc[pre_dir.name] = (None, pre_exc, pre_timed_out)
+
+    reseg_profiles = _corpus_profiles(
+        {doc: state for doc, (state, _exc, _t) in l1_by_doc.items() if state is not None},
+        template_std_by_tid,
+        {e.id for e in taxonomy.classifier_entries()},
+    )
+    # The corpus vocabulary and the pass's code version key every document's
+    # L2-L4 result: a new document anywhere moves the profiles.
+    l2_config_fp = make_config_fingerprint(
+        {
+            "l2": l2_config_fp,
+            "resegmentation_profiles": reseg_profiles.fingerprint(),
+            "resegmentation_version": _RESEGMENTATION_VERSION,
+        }
+    )
+
+    progress(
+        f"  split pass: {len(reseg_profiles.targets)} clause type(s) are split targets "
+        f"(seen in at least {resegmentation.MIN_TYPE_DEALS} deals)"
+    )
+
+    def _run_doc(
+        doc_id: str,
+        doc_dir: Path,
+        version_files: list[Path],
+        l1: _L1State,
+        timed_out_versions: list[str],
+    ) -> Any:
+        """Compute one document's L2–L4 result, via the layered stage cache when present.
+
+        L1 was run (or replayed) per version up front; L2-L4 runs (or
+        replays) per document through the "l2-l4" layer, keyed by the L1
+        records it consumes (issue #219). *timed_out_versions* holds every
+        version whose extraction timed out (issue #218); a result with any is
+        returned but never stored.
+        """
 
         def _compute_l2_l4(_l1: _L1State = l1) -> Any:
             return _compute_doc_from_l1(
@@ -4135,6 +4422,7 @@ def mine_corpus(
                 normalize_trail_across_versions=normalize_trail_across_versions,
                 normalize_trail_fn=normalize_trail_fn,
                 template_std_nodes_by_tid=template_std_nodes_by_tid,
+                profiles=reseg_profiles,
             )
 
         if store is None:
@@ -4235,19 +4523,12 @@ def mine_corpus(
 
         progress(f"  {doc_id}: {len(version_files)} version file(s)")
 
-        doc_batch_seg_nodes = batch_seg_nodes_by_doc.get(doc_id)
-        doc_batch_extractions = batch_extractions_by_doc.get(doc_id)
-
-        doc_timed_out: list[str] = []
+        doc_l1, doc_l1_exc, doc_timed_out = l1_by_doc[doc_id]
         try:
-            result = _run_doc(
-                doc_id,
-                doc_dir,
-                version_files,
-                doc_batch_seg_nodes,
-                doc_batch_extractions,
-                doc_timed_out,
-            )
+            if doc_l1_exc is not None:
+                raise doc_l1_exc
+            assert doc_l1 is not None
+            result = _run_doc(doc_id, doc_dir, version_files, doc_l1, doc_timed_out)
         except (SegmentationQAError, NormalizeTrailError, HintsError) as exc:
             reason = f"{type(exc).__name__}: {exc}"
             progress(f"    QUARANTINED {doc_id}: {reason}")
@@ -4683,6 +4964,15 @@ def mine_corpus(
         progress(
             f"L1-L4 complete: {len(all_observations)} observations, {len(corpus_documents)} docs"
         )
+    # Issue #255: what the re-segmentation pass did (counts only).
+    reseg_counts = [
+        d["resegmentation"] for d in corpus_documents if isinstance(d.get("resegmentation"), dict)
+    ]
+    progress(
+        f"  split and join pass: {sum(r.get('splits', 0) for r in reseg_counts)} split(s), "
+        f"{sum(r.get('joins', 0) for r in reseg_counts)} join(s) over all versions; "
+        f"{sum(1 for o in all_observations if o.non_clause)} observation(s) are not clauses"
+    )
 
     # Extraction fallback budget (issue #81): count every version_ingest
     # entry across the whole run whose "reason" reflects a DEGRADATION — the
@@ -4898,6 +5188,20 @@ def queue_deal_dates(out_dir: Path, judge: StoreBackedDealDateJudge) -> tuple[in
     subjects = deal_dates.subjects_of(store.corpus_documents)
     unjudged = sum(1 for subject in subjects if judge.judge(subject) is None)
     return len(subjects), unjudged
+
+
+def queue_resegment_checks(out_dir: Path, judge: StoreBackedResegmentCheckJudge) -> tuple[int, int]:
+    """Ask *judge* about the sampled splits and joins of *out_dir*; return ``(subjects, unchecked)``.
+
+    Issue #255. The sample is :func:`~playbook_engine.resegmentation.check_subjects`
+    over the mined ``normalized/`` trees: every recorded split and join when
+    there are 60 or fewer, else the 60 with the lowest payload hash. A subject
+    with no replayable stored verdict is queued on the judge's pending queue
+    (deduplicated by key); nothing about the playbook depends on the answer.
+    """
+    subjects = resegmentation.check_subjects(out_dir)
+    unchecked = sum(1 for subject in subjects if judge.judge(subject) is None)
+    return len(subjects), unchecked
 
 
 def project_playbook(

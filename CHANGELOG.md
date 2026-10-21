@@ -10,6 +10,66 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Re-segmentation: split mixed-in provisions to their own clause type, rejoin
+  truncated clauses, and mark what is not a clause (issue #255, epic #245).** A
+  deal's "clause" either held provisions of other clause types (a preamble that
+  swallowed an insurance paragraph) or was cut short, so precedent, the
+  `vs_standard` part maps and absence counts compared fragments and mixtures as
+  if they were whole clauses. An agent segmenter can only cut at extractor block
+  boundaries, so the new stage `resegmentation.py` works *inside* a block. After
+  a version is segmented and classified it (1) cuts each node into paragraphs,
+  then sentences and list items, and scores every unit against the clause-type
+  vocabulary of the whole corpus (our standard plus the classified exemplars of
+  each type across deals, so types with no `our_standard` such as insurance are
+  covered); a unit is re-homed only when at least half its content words are
+  characteristic of another type, it leads the node's own type and every other
+  type by a margin, and that type is seen in at least three deals; contiguous
+  re-homed units become a new node (`<clause>.r<k>`, a child of the node it was
+  cut from) typed `resegmented` at a confidence below 0.70, and the first unit of
+  a node never moves; (2) merges a node cut off mid-sentence or mid-list with the
+  next sibling when that one starts in lower case, continues the list numbering,
+  and both share a type or the next is unclassified, and also when one
+  author's tracked insertion runs across the cut (the extractor records one
+  insertion span per paragraph and an agent segmenter cuts at every block, so
+  the pieces of one insertion meet at the cut) and the next piece is positively
+  of the node's type: typed so, or unclassified with at least two of that type's
+  characteristic words and more of them than of any other type's, or a lead-in
+  followed by such a piece (an insertion alone is no such evidence, since a
+  counterparty often inserts several whole clauses at once, so a node with no
+  type never extends on it); such a join needs no sentence break and has no
+  chain cap, only the size cap, so a redline split across segments is stitched.
+  On every basis a piece that opens with a heading of its own (one the
+  extractor found, a title line, or the segmenter's label when the text begins
+  with it) is never joined, while the segmenter's label alone is not a clause
+  start; no join takes in or extends a piece, typed or not, that the
+  not-a-clause test of (3) rejects (a lead-in or a fragment aside), so a
+  signature block, header or OCR junk is never folded into a typed clause; and
+  no join takes in an unclassified piece the split pass's scorer reads as
+  another clause type;
+  (3) marks an unclassified node that is not a clause (`numbering_only`,
+  `signature_block`, `heading_or_placeholder`, `header_footer`, `fragment`,
+  `lead_in`, `ocr_junk`, `email`) as `x_non_clause`, never deleting it, and
+  keeps it out of the second-look classify queue (on the deterministic path too:
+  the first-pass judge is not asked either), the scorecard's classified share,
+  the coverage line and the playbook's `corpus.stats.unclassified`. A phrase
+  about signing marks a signature block only when the text states nothing
+  operative, so a counterparts or e-signature clause stays a clause. Every split and join is recorded on the node
+  (`x_resegmented`: `split_from` or `joined_with`, `basis`, `scores` (empty for a
+  join), `origin_span` / `origin_spans`, and for a join `at`, kept true when
+  names are pseudonymized) and on the observation built from it, and every new span lies
+  inside the original, so citations still resolve; the pass is a pure function
+  of the mined version, so `mine` and `project` see the same answer. Because the
+  split pass needs the whole corpus's vocabulary, `mine` now runs L1 for every
+  document before classifying any. A new store-backed judge kind,
+  `resegment_check`, queues a deterministic sample (all, when 60 or fewer) of the
+  splits and joins after mining ("is this text really that clause type?" / "do
+  these passages form one clause?"); it measures the pass and gates nothing.
+  `playbook scorecard` (version 10) gains a `resegmentation` section (splits,
+  joins, observations built from them, sample size, checked, wrong) and
+  `classification.clauses` / `non_clause` / `non_clause_by_reason`;
+  `classified_share` is now over the clauses. `spec/clause-tree.schema.json`
+  gains the two vendor keys. No OPF change: nothing is written into `evidence`.
+
 - **Affiliation taxonomy: five clause types the corpus showed it lacked, and a
   second look at segmenter nulls (issue #253, epic #245).** Text the taxonomy
   had no home for stayed unclassified, so it never reached precedent and an

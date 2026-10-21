@@ -5601,7 +5601,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-20T19:19:59+00:00",
+      "generated_at": "2026-10-21T03:38:52+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5654,7 +5654,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-20T19:20:01+00:00",
+        "x_signed_at": "2026-10-21T03:38:53+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -5968,25 +5968,16 @@
       "documents_in_scope": 6,
       "versions_total": 17,
       "unclassified": {
-        "count": 34,
+        "count": 28,
         "by_document": {
-          "beta-industries": 6,
-          "delta-ventures": 4,
-          "epsilon-systems": 4,
-          "gamma-holdings": 4,
-          "theta-logistics": 8,
-          "zeta-diagnostics": 8
+          "beta-industries": 5,
+          "delta-ventures": 3,
+          "epsilon-systems": 3,
+          "gamma-holdings": 3,
+          "theta-logistics": 7,
+          "zeta-diagnostics": 7
         },
         "example_citations": [
-          {
-            "document_id": "beta-industries",
-            "version": 4,
-            "clause_path": "0",
-            "char_span": [
-              0,
-              58
-            ]
-          },
           {
             "document_id": "beta-industries",
             "version": 4,
@@ -6022,6 +6013,15 @@
               5484,
               5684
             ]
+          },
+          {
+            "document_id": "beta-industries",
+            "version": 3,
+            "clause_path": "21",
+            "char_span": [
+              5669,
+              6040
+            ]
           }
         ]
       },
@@ -6045,7 +6045,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-20T19:19:58+00:00",
+    "generated_at": "2026-10-21T03:38:50+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -9372,11 +9372,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:69f9735ec53fe48bf8db07fd10236f36ef56daf5eed2311aa0abb6326f5cfe1a",
+    "content_hash": "sha256:6c2abb2a39413c893a8f01a46b973e4ffaf53457fb273b0670629c5cbf701475",
     "section_digests": {
       "evidence": "sha256:f0b22f01904689ad6124f22f28eb9fc2d4d1727d8653d513f9fbec1375ff8dc7",
-      "posture": "sha256:d6ad8df60e6976152aba5216a3e6bc0a261de23701d7c2382444ee557471e8fb",
-      "floor": "sha256:963cc8f529279fd6d46f4d542a3209ba5526c893fe050016ecdaf705629001ed"
+      "posture": "sha256:7db5d8560863517423b78252c9dfde32fd11cd9c89d2f1b4c536c1a20f32adcd",
+      "floor": "sha256:8bcd0236799719adbf24678aa91949f06e4066550cac6ac410c2a9e4b82f814a"
     }
   }
 }

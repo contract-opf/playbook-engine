@@ -185,8 +185,16 @@ class UnclassifiedCoverage:
 
 
 def compute_unclassified_coverage(observations: list[Observation]) -> UnclassifiedCoverage:
-    """Summarise the ``taxonomy_id=None`` observations in *observations*."""
-    unclassified = [obs for obs in observations if obs.taxonomy_id is None]
+    """Summarise the ``taxonomy_id=None`` observations in *observations*.
+
+    A node the re-segmentation pass marked ``x_non_clause`` (a bare section
+    number, a signature block, a running header, ...; issue #255) is not a
+    clause that failed to classify, so it is left out of the count, the
+    per-document tally and the example citations.
+    """
+    unclassified = [
+        obs for obs in observations if obs.taxonomy_id is None and obs.non_clause is None
+    ]
     by_document: dict[str, int] = {}
     for obs in unclassified:
         doc_id = obs.citation.document_id

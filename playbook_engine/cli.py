@@ -1817,6 +1817,22 @@ def _queue_deal_date_round(mined_dir: Path, judge: Any) -> None:
         )
 
 
+def _queue_resegment_check_round(mined_dir: Path, judge: Any) -> None:
+    """Queue the ``resegment_check`` sample of the store just mined into *mined_dir* (issue #255).
+
+    A question is one sampled split or join of the re-segmentation pass. Runs
+    after mining because the splits and joins are recorded in the mined clause
+    trees; reports nothing when the pass changed nothing.
+    """
+    from playbook_engine.pipeline import queue_resegment_checks  # noqa: PLC0415
+
+    subjects, unchecked = queue_resegment_checks(mined_dir, judge)
+    if subjects:
+        click.echo(
+            f"  resegment_check: {subjects} sampled split(s) and join(s), {unchecked} unchecked"
+        )
+
+
 def _judge_check_equivalence(out_dir: Path, cfg: Any, taxonomy: Any, *, use_api: bool) -> None:
     """``playbook judge --check equivalence OUT``: emit (and with --api, answer) the check queues."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
@@ -2022,7 +2038,11 @@ def judge_cmd(
     verdict against our standard yet. A ``deal_date`` item is queued for every
     executed copy whose signing date no deterministic reader (document text,
     signature block) could establish but whose text has date passages for the
-    agent to read. Every deviation is the deterministic standard
+    agent to read. A ``resegment_check`` item is queued for each of a
+    deterministic sample (all of them when there are 60 or fewer) of the
+    splits and joins the re-segmentation pass made: "is this text really that
+    clause type?" / "do these passages form one clause?". It measures the
+    pass; nothing waits on it. Every deviation is the deterministic standard
     check, so nothing is judged for it.
 
     ``--check equivalence OUT`` skips mining and queues the independent blind
@@ -2055,6 +2075,7 @@ def judge_cmd(
         StoreBackedDealDateJudge,
         StoreBackedEquivalenceJudge,
         StoreBackedProvenanceJudge,
+        StoreBackedResegmentCheckJudge,
         StoreBackedScopeJudge,
         VerdictStore,
     )
@@ -2211,6 +2232,12 @@ def judge_cmd(
                         store=store, pending=plan_pending, rubric=rubric_policy
                     ),
                 )
+                _queue_resegment_check_round(
+                    Path(_tmp) / "mine_out",
+                    StoreBackedResegmentCheckJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
+                )
             except PipelineError as exc:
                 click.secho(f"ERROR: {exc}", fg="red", err=True)
                 raise SystemExit(1) from exc
@@ -2310,6 +2337,12 @@ def judge_cmd(
         _queue_deal_date_round(
             out_dir,
             StoreBackedDealDateJudge(store=store, pending=pending_queue, rubric=rubric_policy),
+        )
+        _queue_resegment_check_round(
+            out_dir,
+            StoreBackedResegmentCheckJudge(
+                store=store, pending=pending_queue, rubric=rubric_policy
+            ),
         )
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
