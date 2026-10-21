@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import deal_dates, resegmentation
+from playbook_engine import absence, deal_dates, resegmentation
 from playbook_engine.agent_judge import (
     PendingQueue,
+    StoreBackedAbsenceCheckJudge,
     StoreBackedDealDateJudge,
     StoreBackedEquivalenceJudge,
     StoreBackedPriorFormOriginJudge,
@@ -5425,6 +5426,7 @@ def equivalence_subjects(
             round_moves=store.round_moves,
             party=party,
             prior_forms=store.prior_forms,
+            absence=False,
         )
     )
     # As the assembler does: ids (precedent ids, standard part ids) over the
@@ -5476,6 +5478,63 @@ def queue_resegment_checks(out_dir: Path, judge: StoreBackedResegmentCheckJudge)
     (deduplicated by key); nothing about the playbook depends on the answer.
     """
     subjects = resegmentation.check_subjects(out_dir)
+    unchecked = sum(1 for subject in subjects if judge.judge(subject) is None)
+    return len(subjects), unchecked
+
+
+def absence_check_subjects(
+    out_dir: Path, config: EngineConfig, taxonomy: Taxonomy
+) -> list[absence.AbsenceSubject]:
+    """The ``absence_check`` sample of *out_dir*: verified absences to spot-check (issue #251).
+
+    Rebuilds the very evidence ``project_playbook`` would write (same store, same
+    clause positions, same reconstructed former forms, same invisible-character
+    strip, same ``perspective.party``) and returns
+    :func:`~playbook_engine.absence.check_subjects` over its verified absences,
+    so the keys a judge round queues are the keys ``scorecard`` later looks up.
+    Empty when *out_dir* holds no observation store yet.
+    """
+    try:
+        store = _read_projection_store(out_dir)
+    except PipelineError:
+        return []
+    store, clause_positions, corpus_documents, _reconstruction = _store_with_reconstruction(
+        out_dir, config, taxonomy, store
+    )
+    perspective = _perspective_dict(config)
+    party = perspective["party"] if perspective else None
+    evidence = _strip_invisible(
+        build_precedent_evidence(
+            agreement_type_id=config.agreement_type.id,
+            clause_positions=clause_positions,
+            observations=store.observations,
+            corpus_documents=corpus_documents,
+            round_moves=store.round_moves,
+            party=party,
+            prior_forms=store.prior_forms,
+        )
+    )
+    return absence.check_subjects(
+        clauses=evidence["clauses"],
+        records=evidence["absence"]["records"],
+        observations=store.observations,
+    )
+
+
+def queue_absence_checks(
+    out_dir: Path,
+    config: EngineConfig,
+    taxonomy: Taxonomy,
+    judge: StoreBackedAbsenceCheckJudge,
+) -> tuple[int, int]:
+    """Ask *judge* about the sampled verified absences of *out_dir*; return ``(subjects, unchecked)``.
+
+    Issue #251. The sample is :func:`absence_check_subjects`: every verified
+    absence when there are 40 or fewer, else the 40 with the lowest payload hash.
+    A subject with no replayable stored verdict is queued on the judge's pending
+    queue (deduplicated by key); nothing about the playbook depends on the answer.
+    """
+    subjects = absence_check_subjects(out_dir, config, taxonomy)
     unchecked = sum(1 for subject in subjects if judge.judge(subject) is None)
     return len(subjects), unchecked
 

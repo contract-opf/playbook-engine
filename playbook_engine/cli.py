@@ -1851,6 +1851,23 @@ def _queue_prior_form_origin_round(mined_dir: Path, cfg: Any, taxonomy: Any, jud
         )
 
 
+def _queue_absence_check_round(mined_dir: Path, cfg: Any, taxonomy: Any, judge: Any) -> None:
+    """Queue the ``absence_check`` sample of the store just mined into *mined_dir* (issue #251).
+
+    A question is one sampled verified absence: "is this clause type really
+    absent from this signed text?". Runs after mining because the verified
+    absences come from the precedent record; reports nothing when there is
+    nothing to ask.
+    """
+    from playbook_engine.pipeline import queue_absence_checks  # noqa: PLC0415
+
+    subjects, unchecked = queue_absence_checks(mined_dir, cfg, taxonomy, judge)
+    if subjects:
+        click.echo(
+            f"  absence_check: {subjects} sampled verified absence(s), {unchecked} unchecked"
+        )
+
+
 def _judge_check_prior_form_origin(out_dir: Path, cfg: Any, taxonomy: Any) -> None:
     """``playbook judge --check prior_form_origin OUT``: emit the check queues."""
     from playbook_engine.agent_judge import VerdictStore  # noqa: PLC0415
@@ -2102,7 +2119,11 @@ def judge_cmd(
     each recurring first-draft wording on our paper that would be rebuilt as a
     former form of ours when no older form files are supplied: "is this really
     OUR former language?". Only a blind-checked ``ours: true`` makes it a
-    prior standard. Every deviation is the deterministic standard
+    prior standard. An ``absence_check`` item is queued for each of a
+    deterministic sample (all of them when there are 40 or fewer) of the
+    verified absences of the precedent record: "is this clause type really
+    absent from this signed text?". It measures the absence guard; nothing
+    waits on it. Every deviation is the deterministic standard
     check, so nothing is judged for it.
 
     ``--check equivalence OUT`` (or ``--check prior_form_origin OUT``) skips
@@ -2131,6 +2152,7 @@ def judge_cmd(
     """
     from playbook_engine.agent_judge import (  # noqa: PLC0415
         PendingQueue,
+        StoreBackedAbsenceCheckJudge,
         StoreBackedClassificationJudge,
         StoreBackedDealDateJudge,
         StoreBackedEquivalenceJudge,
@@ -2319,6 +2341,14 @@ def judge_cmd(
                         store=store, pending=plan_pending, rubric=rubric_policy
                     ),
                 )
+                _queue_absence_check_round(
+                    Path(_tmp) / "mine_out",
+                    cfg,
+                    taxonomy,
+                    StoreBackedAbsenceCheckJudge(
+                        store=store, pending=plan_pending, rubric=rubric_policy
+                    ),
+                )
             except PipelineError as exc:
                 click.secho(f"ERROR: {exc}", fg="red", err=True)
                 raise SystemExit(1) from exc
@@ -2432,6 +2462,12 @@ def judge_cmd(
             StoreBackedPriorFormOriginJudge(
                 store=store, pending=pending_queue, rubric=rubric_policy
             ),
+        )
+        _queue_absence_check_round(
+            out_dir,
+            cfg,
+            taxonomy,
+            StoreBackedAbsenceCheckJudge(store=store, pending=pending_queue, rubric=rubric_policy),
         )
     except PipelineError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)

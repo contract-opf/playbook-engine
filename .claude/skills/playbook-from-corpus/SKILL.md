@@ -1058,6 +1058,13 @@ make docker-run CORPUS=./corpus OUT=./out \
   It counts only after the blind check (`playbook judge --check
   prior_form_origin`, a separate `claude-opus-5-5` / `xhigh` agent, then
   `judge-apply --check`). See REFERENCE.md § "Former form origin".
+- **Absence check** (`kind: absence_check`): a sample (at most 40) of the clause
+  types the engine counted as verified absent from a signed deal, queued by
+  `judge` after mining. Say whether the clause is really absent from the signed
+  text shown: `{"absent": true | false, "reason": "<optional, one sentence>"}`.
+  Nothing waits on it and it changes no playbook text; the scorecard reports
+  how many of the sample you found present (`absence.wrong`), and any such item
+  means the engine's guard must be lowered. See REFERENCE.md § "Absence check".
 - **Re-segmentation check** (`kind: resegment_check`): a sample (at most 60) of
   the splits and joins the engine's re-segmentation pass made, queued by
   `judge` after mining. Say whether a split puts the text under the right

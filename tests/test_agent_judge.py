@@ -1026,6 +1026,8 @@ class TestJudgeKindSeam:
             "resegment_check",
             # Issue #250: is a recurring first draft on our paper really ours?
             "prior_form_origin",
+            # Issue #251: is a clause type really absent from a signed text?
+            "absence_check",
         }
 
     def test_a_deviation_verdict_is_no_longer_a_kind(self) -> None:

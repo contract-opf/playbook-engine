@@ -36,6 +36,10 @@ Components:
   #255): one verdict per sampled split or join of the re-segmentation pass,
   queued after mining. It measures the pass; it changes nothing and gates
   nothing.
+- ``StoreBackedAbsenceCheckJudge`` — the ``absence_check`` kind (issue #251):
+  one verdict per sampled verified absence, "is this clause type really absent
+  from this signed text?", queued after mining. It measures the absence guard;
+  it changes nothing and gates nothing.
 - ``StoreBackedPriorFormOriginJudge`` — the ``prior_form_origin`` kind (issue
   #250): one verdict per recurring first-draft wording on our paper, "is this
   OUR former language?", queued after mining. Only a checked ``ours: true``
@@ -87,7 +91,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from playbook_engine import deal_dates, prior_reconstruction, resegmentation
+from playbook_engine import absence, deal_dates, prior_reconstruction, resegmentation
 from playbook_engine.clause_classifier import ClauseClassification
 from playbook_engine.clause_tree import ClauseNode, ClauseTree
 from playbook_engine.config import AgreementType
@@ -553,6 +557,10 @@ def _validate_resegment_check(verdict: dict[str, Any]) -> None:
     resegmentation.validate_check_verdict(verdict)
 
 
+def _validate_absence_check(verdict: dict[str, Any]) -> None:
+    absence.validate_check_verdict(verdict)
+
+
 def _validate_prior_form_origin(verdict: dict[str, Any]) -> None:
     prior_reconstruction.validate_origin_draft(verdict)
 
@@ -584,6 +592,7 @@ _VERDICT_KINDS: dict[
     deal_dates.DEAL_DATE_KIND: (_validate_deal_date, lambda v: "signed_on" in v),
     resegmentation.CHECK_KIND: (_validate_resegment_check, lambda v: "resegment_ok" in v),
     prior_reconstruction.ORIGIN_KIND: (_validate_prior_form_origin, lambda v: "ours" in v),
+    absence.CHECK_KIND: (_validate_absence_check, lambda v: "absent" in v),
 }
 
 
@@ -1177,4 +1186,54 @@ class StoreBackedPriorFormOriginJudge:
             )
         if self.pending is not None:
             self.pending.add(subject.key, kind, subject.payload, current_rubric)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# StoreBackedAbsenceCheckJudge
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoreBackedAbsenceCheckJudge:
+    """Replays stored ``absence_check`` verdicts or queues new questions.
+
+    The ``absence_check`` kind (issue #251). A question is one sampled verified
+    absence: "is this clause type really absent from this signed text?"
+    (:func:`playbook_engine.pipeline.absence_check_subjects`). Like the other
+    post-mining kinds it has no seam inside ``mine_corpus``, and its answer feeds
+    nothing back into the playbook: the verdicts are the measurement the absence
+    guard (:data:`playbook_engine.absence.ABSENCE_GUARD`) is tuned against, and
+    an item judged present (``absent: false``) means the guard is too high.
+
+    A hit whose rubric moved, or whose stored record is not a valid verdict, is
+    not replayed: it is re-queued (when a queue is attached) and reads as
+    unchecked. A miss is queued, never guessed.
+    """
+
+    store: VerdictStore
+    pending: PendingQueue | None = None
+    rubric: RubricPolicy = field(default_factory=RubricPolicy)
+
+    def judge(self, subject: absence.AbsenceSubject) -> bool | None:
+        """Whether the clause is really absent from *subject*'s text, or ``None`` when unchecked."""
+        current_rubric = rubric_version(absence.CHECK_KIND)
+        record = self.store.get_record_by_key(subject.key)
+        if (
+            record is not None
+            and self.rubric.evaluate(
+                absence.CHECK_KIND, record.rubric_version, current_rubric
+            ).replay
+        ):
+            try:
+                absence.validate_check_verdict(record.verdict)
+                return bool(record.verdict["absent"])
+            except ValueError:
+                _log.warning(
+                    "StoreBackedAbsenceCheckJudge: malformed stored verdict for key %s; "
+                    "treating as unchecked",
+                    subject.key,
+                )
+        if self.pending is not None:
+            self.pending.add(subject.key, absence.CHECK_KIND, subject.payload, current_rubric)
         return None

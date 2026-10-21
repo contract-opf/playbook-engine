@@ -20,7 +20,9 @@ corpus/                  -- six fictional negotiations (four on our paper, two
                              on counterparty paper)
 canned-verdicts.jsonl    -- pre-computed judge verdicts (classification,
                              provenance, scope, and the 27 `vs_standard`
-                             part-by-part equivalence judgments) for every item the
+                             part-by-part equivalence judgments, the one `deal_date`
+                             question, and the 5 `absence_check` spot-checks of
+                             the verified absences) for every item the
                              deterministic pipeline can't resolve on its own
                              (deviation is never judged by default -- it is
                              the deterministic standard check)
@@ -294,3 +296,16 @@ fabricates negotiation intent or hard lines, and never loads
 companion test for the genuinely-judged path: it loads
 `canned-verdicts.jsonl`, runs the Posture interview and `floor sign`, and
 diffs the result against the committed `playbook.opf.json`.
+
+## Verified absence (issue #251)
+
+`evidence.absence` records, for every signed deal and clause type with no signed
+text, whether the clause is verified absent from the signed copy (no passage of it
+resembles the clause) or possibly present (`digest.clauses[]`
+`n_signed_without_verified` / `n_signed_without_possible`). Of the 30 such pairs
+here, 5 are verified absent (limitation of liability from three of our-paper deals
+and export control from the two counterparty-paper deals) and 25 possibly present:
+most are clauses of a counterparty-paper deal that are unclassified or filed under a
+neighbouring clause (the hard cases above), so a missed classification is never
+read as an absence. The canned verdicts answer the 5 `absence_check` items
+(all sampled absences, since there are 40 or fewer) with `absent: true`.

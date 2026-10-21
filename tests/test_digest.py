@@ -973,3 +973,28 @@ def test_v4_view_bundle_states_the_new_facts_in_plain_words(tmp_path: Path) -> N
     for tab_html in (playbook_tab, evidence_tab):
         assert "judged equivalent to our standard" not in tab_html
         assert "protective than our standard" not in tab_html
+
+
+def test_v5_digest_carries_the_verified_absence_counts_of_the_nda_example() -> None:
+    """Issue #251: every digest clause reports how many signed deals it was verified
+    absent from and how many it is possibly present in, equal to ``evidence.absence``;
+    the verified deals listed are verified records of that clause."""
+    nda = json.loads((_ROOT / "examples" / "nda" / "playbook.opf.json").read_text(encoding="utf-8"))
+    records = nda["evidence"]["absence"]["records"]
+    assert records, "the NDA example has signed deals that signed without some clause"
+    by_id = {r["id"]: r for r in records}
+    for clause in nda["digest"]["clauses"]:
+        mine = [r for r in records if r["taxonomy_id"] == clause["taxonomy_id"]]
+        assert clause["n_signed_without_verified"] == sum(
+            r["status"] == "absent_verified" for r in mine
+        )
+        assert clause["n_signed_without_possible"] == sum(
+            r["status"] == "possibly_present" for r in mine
+        )
+        assert len(clause["verified_absent_deals"]) <= 5
+        for deal in clause["verified_absent_deals"]:
+            record = by_id[deal["absence_id"]]
+            assert record["status"] == "absent_verified"
+            assert record["document_id"] == deal["document_id"]
+            assert record["taxonomy_id"] == clause["taxonomy_id"]
+    assert nda["digest"] == build_digest_v5(nda)

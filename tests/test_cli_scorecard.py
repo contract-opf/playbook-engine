@@ -198,6 +198,18 @@ _FIELD_NAMES = frozenset(
         "signed_on",
         "dated",
         "null_dates",
+        # Issue #251: verified absence counts and their sampled check.
+        "absence",
+        "guard",
+        "pairs",
+        "verified",
+        "possible",
+        "unverifiable",
+        "clauses_with_verified",
+        "verified_per_clause",
+        "possible_per_clause",
+        "digest_without_verified",
+        "digest_without_possible",
         # Issue #255: what the re-segmentation pass did, and its sampled check.
         "resegmentation",
         "splits",
@@ -222,6 +234,7 @@ _TOP_LEVEL = {
     "prior_reconstruction",
     "signed_on",
     "resegmentation",
+    "absence",
     "template_drift",
     "opening_drift",
     "dropped_observations",
@@ -270,6 +283,27 @@ _NDA_FLAT_KEYS = frozenset(
             f"classification.by_paper.{paper}.{field}"
             for paper in ("our_paper", "unknown")
             for field in ("clauses", "non_clause", "non_clause_by_reason.signature_block")
+        ),
+        *(
+            f"absence.{field}"
+            for field in (
+                "guard",
+                "pairs",
+                "verified",
+                "possible",
+                "unverifiable",
+                "clauses_with_verified",
+                "digest_without_verified",
+                "digest_without_possible",
+                "check_sample",
+                "checked",
+                "wrong",
+            )
+        ),
+        *(
+            f"absence.{per}.{stat}"
+            for per in ("verified_per_clause", "possible_per_clause")
+            for stat in ("n", "mean", "median", "min", "max")
         ),
         *(
             f"resegmentation.{field}"
@@ -541,7 +575,7 @@ def test_scorecard_on_nda_writes_the_pinned_shape(nda_out: Path, tmp_path: Path)
     card = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
     assert set(card) == _TOP_LEVEL
     assert set(flatten_scorecard(card)) == _NDA_FLAT_KEYS
-    assert card["scorecard_version"] == 12
+    assert card["scorecard_version"] == 13
     assert card["opf_version"] == "0.6"
     assert card["corpus"] == {
         "documents": 6,

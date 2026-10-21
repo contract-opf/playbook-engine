@@ -31,6 +31,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from playbook_engine.absence import build_absence
 from playbook_engine.canonicalize import (
     canonicalize,
     canonicalize_playbook,
@@ -41,6 +42,7 @@ from playbook_engine.canonicalize import (
 from playbook_engine.digest import DIGEST_VERSION_V5, build_digest_v5
 from playbook_engine.dossiers import build_derived_sections
 from playbook_engine.equivalence import iter_slots, stamp_standard_parts, standard_parts
+from playbook_engine.observation_builder import Observation, ObservationCitation
 from playbook_engine.opf_accessors import perspective_party
 from playbook_engine.precedent import clause_counts, precedent_id
 
@@ -84,6 +86,7 @@ def _base_v06(
     perspective: dict[str, str] | None = None,
     floor: dict[str, Any] | None = None,
     prior_templates: list[dict[str, Any]] | None = None,
+    absence_nodes: list[Observation] | None = None,
 ) -> dict[str, Any]:
     """A minimal OPF 0.6 document. Clause counts and precedent ids are
     stamped by the reference functions (``precedent.clause_counts`` /
@@ -142,6 +145,7 @@ def _base_v06(
         assert not dates or dates == {deal["signed_on"]}, (deal, dates)
         corpus_documents.append(deal)
     doc["corpus"] = {"documents": corpus_documents, "stats": {}}
+    doc["evidence"]["absence"] = _absence_section(doc, absence_nodes or [])
     doc["compiler"] = {
         "name": "playbook-engine",
         "version": ENGINE_VERSION,
@@ -149,6 +153,53 @@ def _base_v06(
         "generated_at": "2026-01-01T00:00:00Z",
     }
     return doc
+
+
+def _node(document_id: str, clause_path: str, taxonomy_id: str | None, text: str) -> Observation:
+    """A signed-text node of a fixture deal's executed copy (version 3): the row the
+    reference compile would hold for it. *taxonomy_id* is the clause type the
+    classifier filed it under, ``None`` when it left it unclassified."""
+    return Observation(
+        observation_id=f"{document_id}/3/{clause_path}",
+        taxonomy_id=taxonomy_id,
+        text_summary=text[:100],
+        full_text=text,
+        citation=ObservationCitation(
+            document_id=document_id,
+            version=3,
+            clause_path=clause_path,
+            char_span=(0, len(text)),
+        ),
+        deviation="none",
+        risk_delta={"direction": "neutral", "magnitude": "none"},
+        provenance="our_paper",
+        outcome="signed",
+    )
+
+
+def _absence_section(doc: dict[str, Any], extra_nodes: list[Observation]) -> dict[str, Any]:
+    """``evidence.absence`` of a fixture (OPF-SPEC §3.5.8), written by the reference
+    ``absence.build_absence`` over the deals' signed-text nodes, never by hand: the
+    validator cannot see ``n_checked`` or ``filed_under``, so a hand-written record
+    could state what no compile can produce.
+
+    The nodes are one per signed precedent record (filed under its clause type, at
+    clause path ``p<n>``) plus *extra_nodes*: the passages of a deal's signed copy that
+    are not precedent (unclassified ones, ones filed under another type, ones too short
+    to be precedent). A deal with none has nothing to check."""
+    evidence = doc["evidence"]
+    nodes = [
+        _node(p["document_id"], f"p{i}", p["taxonomy_id"], p["signed_text"]["text"])
+        for i, p in enumerate(evidence["precedent"])
+        if p["signed"] and p["signed_text"]
+    ] + extra_nodes
+    return build_absence(
+        agreement_type_id=_AGREEMENT_TYPE_ID,
+        clauses=evidence["clauses"],
+        precedent=evidence["precedent"],
+        observations=nodes,
+        corpus_documents=doc["corpus"]["documents"],
+    )
 
 
 def _ref(document_id: str, version: int, clause_path: str = "1") -> dict[str, Any]:
@@ -1620,6 +1671,7 @@ def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
     vectors.append(build_vector_012())
     # 013 - a former form rebuilt from the corpus (issue #250).
     vectors.append(build_vector_013())
+    vectors.append(build_vector_014())
     return vectors
 
 
@@ -2379,6 +2431,195 @@ def build_vector_013() -> tuple[str, dict[str, Any]]:
             "prior_template. The digest's standard_history form carries basis "
             "reconstructed and in-use dates inferred from the deals' signing months "
             "(in_use_basis deal_dates).",
+            doc,
+        ),
+    )
+
+
+def build_vector_014() -> tuple[str, dict[str, Any]]:
+    """Verified absence counts (OPF-SPEC §3.5.8, issue #251)."""
+    assign = "assignment"
+    law = "governing_law"
+    assign_text = (
+        "Neither party may assign this Agreement without the other party's prior written consent."
+    )
+    law_text = "This Agreement is governed by the laws of the State of New York."
+    law_other = "This Agreement is governed by the laws of the State of Delaware."
+
+    def std(text: str, clause_path: str) -> dict[str, Any]:
+        return {
+            "text": text,
+            "source_ref": {
+                "document_id": "template",
+                "version": "template",
+                "clause_path": clause_path,
+            },
+        }
+
+    deals = [
+        ("deal-a", 3, "2025-01-10"),
+        ("deal-b", 3, "2025-02-10"),
+        ("deal-c", 3, "2025-03-10"),
+        ("deal-d", 3, "2025-04"),
+        ("deal-e", 3, None),
+        ("deal-f", 3, "2025-06-20"),
+        ("deal-g", None, None),
+        ("deal-h", 3, "2025-08-01"),
+    ]
+    documents = [
+        _deal(
+            name,
+            signed_version=version,
+            provenance="our_paper",
+            **({"signed_on": signed_on} if signed_on is not None else {}),
+        )
+        for name, version, signed_on in deals
+    ]
+    precedent = [
+        # deal-a signed both clauses: it is counted by neither absence count.
+        _prec("deal-a", assign, signed_text=assign_text, standard=True, signed_on="2025-01-10"),
+        _prec("deal-a", law, signed_text=law_text, standard=True, signed_on="2025-01-10"),
+        # deal-b signed only governing law.
+        _prec("deal-b", law, signed_text=law_other, signed_on="2025-02-10"),
+        # deal-f opened with our assignment standard and struck it before
+        # signing: it signed without the clause, and the text it signed holds
+        # nothing like it.
+        _prec(
+            "deal-f",
+            assign,
+            signed_text=None,
+            opening_text=assign_text,
+            signed_on="2025-06-20",
+            opened_with="standard",
+        ),
+        _prec("deal-f", law, signed_text=law_text, standard=True, signed_on="2025-06-20"),
+        # deal-g has no executed copy: it signed nothing, so it is in no count.
+        _prec("deal-g", assign, signed_text=assign_text, standard=True, signed=False),
+    ]
+
+    # Passages of the executed copies that are not precedent. Their scores against
+    # the two clauses were measured with the reference scorer, not guessed.
+    unrelated = [
+        "The Institution shall maintain commercial general liability insurance in the "
+        "amount of two million dollars per occurrence.",
+        "Each party shall keep the other's confidential information secret and use it "
+        "only to perform this Agreement.",
+        "Notices under this Agreement must be in writing and delivered by hand or by "
+        "registered mail to the address of the recipient.",
+        "This Agreement may be signed in counterparts, each of which is an original and "
+        "all of which are one instrument.",
+    ]
+
+    def filler(document_id: str, count: int, first_path: int) -> list[Observation]:
+        return [
+            _node(document_id, str(first_path + i), None, unrelated[i % len(unrelated)])
+            for i in range(count)
+        ]
+
+    absence_nodes = [
+        # deal-c: seven unclassified passages, none close to either clause.
+        *filler("deal-c", 7, 1),
+        # deal-d: an unclassified passage restating assignment (0.308 against the
+        # assignment clause: a missed classification, not an absence), and a passage the
+        # classifier filed under a third clause type, subcontracting, that mentions
+        # consent to delegating duties (0.133: a clause stated inside a block filed
+        # elsewhere), plus three unrelated passages.
+        _node(
+            "deal-d",
+            "7",
+            None,
+            "Neither side may assign or transfer its rights under this contract without "
+            "prior approval from the other.",
+        ),
+        _node(
+            "deal-d",
+            "12",
+            "subcontracting",
+            "The Institution must obtain written consent before engaging a subcontractor "
+            "to perform its duties.",
+        ),
+        *filler("deal-d", 3, 1),
+        # deal-e has no nodes: its executed copy produced no readable text.
+        # deal-h: a node the classifier assigned to governing law, too short to be
+        # precedent (it scores 1.0 for governing law: it IS the classifier's finding of
+        # the clause), plus two unrelated passages.
+        _node("deal-h", "2", law, "Governing law: New York."),
+        *filler("deal-h", 2, 3),
+    ]
+    doc = _base_v06(
+        clauses=[
+            {
+                "id": f"clause.{assign}",
+                "taxonomy_id": assign,
+                "title": "Assignment",
+                "our_standard": std(assign_text, "9"),
+            },
+            {
+                "id": f"clause.{law}",
+                "taxonomy_id": law,
+                "title": "Governing Law",
+                "our_standard": std(law_text, "10"),
+            },
+        ],
+        precedent=precedent,
+        documents=documents,
+        perspective={"party": "Fixture Co", "counterparty_type": "Fixture Counterparty"},
+        absence_nodes=absence_nodes,
+    )
+    digest = build_digest_v5(doc)
+    by_tid = {c["taxonomy_id"]: c for c in digest["clauses"]}
+    # Independent expectations, written down from the fixture and not read from the engine.
+    # assignment: signed without it are b, c, d, e, f, h (deal-a signed it; deal-g is unsigned);
+    # d and e are not verified.
+    assert (
+        by_tid[assign]["n_signed_without_verified"],
+        by_tid[assign]["n_signed_without_possible"],
+    ) == (4, 2)
+    assert [d["document_id"] for d in by_tid[assign]["verified_absent_deals"]] == [
+        "deal-h",
+        "deal-f",
+        "deal-c",
+        "deal-b",
+    ]
+    # governing law: signed without it are c, d, e, h (a, b and f signed it).
+    assert (
+        by_tid[law]["n_signed_without_verified"],
+        by_tid[law]["n_signed_without_possible"],
+    ) == (2, 2)
+    assert [d["document_id"] for d in by_tid[law]["verified_absent_deals"]] == ["deal-d", "deal-c"]
+    return (
+        "014-verified-absence",
+        _vector_v06(
+            "verified-absence",
+            "Verified absence counts (OPF-SPEC §3.5.8, §3.12.2, issue #251): evidence.absence "
+            "has one record for every signed deal and clause type with no signed text, split "
+            "into absent_verified and possibly_present, and the digest counts them per clause "
+            "(n_signed_without_verified, n_signed_without_possible) and lists the verified "
+            "deals (verified_absent_deals, latest signed_on first, undated last). The records "
+            "are the output of the reference scorer over the deals' signed-text nodes: every "
+            "node of a signed copy not filed under the clause is counted in n_checked, and a "
+            "node filed under the clause that is too short to be precedent scores 1.0. Two "
+            "clauses (assignment, governing law), eight deals. deal-a signed both clauses and "
+            "is counted by neither; deal-g has no executed copy and is in no count. "
+            "Assignment: deal-b (one node examined, its governing law clause, nothing close), "
+            "deal-c (seven unclassified passages, none close), deal-f (opened with our "
+            "standard and struck it before signing: it still signed without the clause; one "
+            "node examined, its governing law clause) and deal-h (three nodes) are verified "
+            "absent (n_signed_without_verified 4); deal-d has an unclassified passage scoring "
+            "0.308 against the clause and a passage the classifier filed under a third clause "
+            "type (subcontracting) scoring 0.133 (a missed classification, so possibly "
+            "present, candidates best first, each saying what the classifier filed it under, "
+            "filed_under) and deal-e's executed copy yielded no nodes at all (basis "
+            "unverifiable, possibly present, nothing checked): n_signed_without_possible 2. "
+            "Governing law: deal-c and deal-d (whose five nodes score below the guard for "
+            "this clause) are verified absent, ordered latest signed_on first (deal-d's "
+            "month-only 2025-04 is after deal-c's 2025-03-10); deal-e is unverifiable and "
+            "deal-h has a node the classifier assigned to the clause that was too short to "
+            "be precedent (score 1.0, filed_under the clause itself), so possibly present. "
+            "A node filed under the clause that is long enough to be precedent gives its deal "
+            "a signed text and no absence record, so no record here cites one. The "
+            "guard (0.1) is carried in evidence.absence.guard; a candidate scores at least "
+            "that, and a scored record is absent_verified exactly when it has no candidate.",
             doc,
         ),
     )

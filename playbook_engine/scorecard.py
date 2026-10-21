@@ -46,6 +46,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from playbook_engine import absence as absence_mod
+from playbook_engine.absence import CHECK_KIND as ABSENCE_CHECK_KIND
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
@@ -163,7 +165,13 @@ __all__ = [
 #: ``prior_reconstruction`` section counts the clusters of recurring
 #: first-draft wording on our paper that were rebuilt as former forms
 #: (confirmed, rejected, pending), the forms they make and their year spans.
-SCORECARD_VERSION = 12
+#:
+#: v13 (issue #251): an ``absence`` section counts the verified absences
+#: (``evidence.absence``) by status and basis, the per-clause spread of the
+#: verified and possibly-present counts, the sampled ``absence_check`` and its
+#: outcome (``checked``, ``wrong``: a confirmed-present item means the guard is
+#: too weak), and the digest's ``n_signed_without_*`` totals.
+SCORECARD_VERSION = 13
 
 #: Default file name, written into the out-dir.
 SCORECARD_FILENAME = "scorecard.json"
@@ -210,7 +218,7 @@ DROPPED_REASONS = frozenset(
 #: pending items are counted under ``other``.
 PENDING_KINDS = frozenset(
     {"classify", "provenance", "scope", "segment", "equivalence", DEAL_DATE_KIND}
-    | {RESEGMENT_CHECK_KIND, ORIGIN_KIND}
+    | {RESEGMENT_CHECK_KIND, ORIGIN_KIND, ABSENCE_CHECK_KIND}
 )
 
 #: Checker model ids the scorecard names (the pinned one); any other recorded
@@ -507,6 +515,79 @@ def _resegmentation_section(
         "joins": _sum_counts(r.get("joins") for r in recorded) if recorded else None,
         "observations_split": split_obs if observations is not None else None,
         "observations_joined": joined_obs if observations is not None else None,
+        "check_sample": len(subjects),
+        "checked": checked,
+        "wrong": wrong,
+    }
+
+
+def _absence_section(
+    playbook: dict[str, Any] | None, observations: list[dict[str, Any]] | None, out_dir: Path
+) -> dict[str, Any] | None:
+    """Counts of the verified-absence record and its spot-check (issue #251).
+
+    ``pairs`` is every (signed deal, clause type) with no signed precedent;
+    ``verified`` and ``possible`` split it by status (``unverifiable`` is the
+    part of ``possible`` that could not be checked at all); the ``*_per_clause``
+    distributions are anonymous. ``check_sample`` is the number of sampled
+    verified absences, ``checked`` how many have a stored ``absence_check``
+    verdict under the current rubric and ``wrong`` how many of those say the
+    clause is in fact present (a confirmed-present item: the guard is too
+    high). ``digest_without_verified`` / ``digest_without_possible`` total the
+    digest's ``n_signed_without_*`` over its clauses; they equal ``verified`` and
+    ``possible``. Counts only: nothing is keyed by a deal or a clause type.
+    """
+    if playbook is None:
+        return None
+    evidence = playbook.get("evidence")
+    section = evidence.get("absence") if isinstance(evidence, dict) else None
+    if not isinstance(section, dict):
+        return None
+    records = absence_mod.absence_records(playbook)
+    guard = section.get("guard")
+    per_clause = absence_mod.counts_by_clause(records)
+    unverifiable = sum(1 for r in records if r.get("basis") == absence_mod.BASIS_UNVERIFIABLE)
+    digest = playbook.get("digest")
+    digest_clauses = list((digest.get("clauses") if isinstance(digest, dict) else None) or [])
+    subjects: list[absence_mod.AbsenceSubject] = []
+    if observations is not None and isinstance(evidence, dict):
+        from playbook_engine.pipeline import _restore_observations  # noqa: PLC0415
+
+        try:
+            subjects = absence_mod.check_subjects(
+                clauses=[c for c in evidence.get("clauses") or [] if isinstance(c, dict)],
+                records=records,
+                observations=_restore_observations(observations),
+            )
+        except (KeyError, TypeError, ValueError):
+            subjects = []
+    store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
+    current = rubric_version(ABSENCE_CHECK_KIND)
+    checked = wrong = 0
+    for subject in subjects:
+        stored = store.get_record_by_key(subject.key)
+        if stored is None or stored.rubric_version != current:
+            continue
+        absent = stored.verdict.get("absent")
+        if not isinstance(absent, bool):
+            continue
+        checked += 1
+        wrong += 0 if absent else 1
+    return {
+        "guard": guard if isinstance(guard, (int, float)) and not isinstance(guard, bool) else None,
+        "pairs": len(records),
+        "verified": sum(1 for r in records if r.get("status") == absence_mod.STATUS_VERIFIED),
+        "possible": sum(1 for r in records if r.get("status") == absence_mod.STATUS_POSSIBLE),
+        "unverifiable": unverifiable,
+        "clauses_with_verified": sum(1 for c in per_clause.values() if c["verified"]),
+        "verified_per_clause": _stats([c["verified"] for c in per_clause.values()]),
+        "possible_per_clause": _stats([c["possible"] for c in per_clause.values()]),
+        "digest_without_verified": _sum_counts(
+            c.get("n_signed_without_verified") for c in digest_clauses if isinstance(c, dict)
+        ),
+        "digest_without_possible": _sum_counts(
+            c.get("n_signed_without_possible") for c in digest_clauses if isinstance(c, dict)
+        ),
         "check_sample": len(subjects),
         "checked": checked,
         "wrong": wrong,
@@ -1158,6 +1239,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "template": _template_section(template_obs, playbook),
         "classification": _classification_section(observations),
         "resegmentation": _resegmentation_section(manifest, observations, out_dir),
+        "absence": _absence_section(playbook, observations, out_dir),
         "precedent": _precedent_section(playbook),
         "prior_standards": _prior_standards_section(playbook),
         "prior_reconstruction": _prior_reconstruction_section(out_dir),

@@ -10,6 +10,49 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **Verified absence counts: "we signed N deals without clause X", with a missed
+  classification never read as an absence (issue #251, epic #245).** A deal with
+  no precedent for a clause was counted as signed without it, but on the private
+  acceptance corpus about one observation in six is still unclassified, so the
+  clause may have been in the deal all along. New `evidence.absence`
+  (`{guard, records[]}`, OPF-SPEC §3.5.8, `playbook_engine/absence.py`): one record
+  per signed deal and clause type with no signed text (a clause struck before
+  signing included; an unsigned deal never), `absent_verified` when none of the
+  deal's signed-text nodes (the unclassified ones AND those filed under another
+  clause type, since a clause stated inside a block filed under a neighbouring type
+  is a missed classification too; nodes that are no clause are left out) scores at or above `ABSENCE_GUARD` (0.10,
+  well below the 0.25 content-similarity assign threshold) against the clause
+  type, `possibly_present` otherwise, with the cited `candidates` (best score
+  first, at most three, each with the clause type the classifier filed the node
+  under or `null`), `n_checked`, and `basis` `scored` or `unverifiable`
+  (the executed copy produced no readable text or has 1,000 characters or more of
+  passages that extracted as junk, such as columns of digits, or the clause type has
+  no reference text: never verified). The score is the content-word Jaccard
+  similarity of #235, the best over the node and each of its paragraphs,
+  sentences and list items (a big node holding the clause among others would
+  dilute it), against our standard's parts, our former forms' clauses and every
+  text any deal signed, opened with or had refused for the clause; a node the
+  classifier filed under the clause but that was too short to be precedent scores
+  1.0; a node that is no clause (`x_non_clause`) is ignored. A neighbouring clause's shared
+  vocabulary can keep a deal out of the verified count; the error is always towards
+  `possibly_present`. Digest 5 gains per
+  clause `n_signed_without_verified`, `n_signed_without_possible` (facts, no
+  verdict) and `verified_absent_deals` (`document_id`, `signed_on`, `absence_id`;
+  latest first, capped with the other lists). A new judge kind, `absence_check`
+  (`StoreBackedAbsenceCheckJudge`, queued by `playbook judge`): "is this clause
+  type really absent from this signed text?", asked of a deterministic sample of
+  the verified absences (all when 40 or fewer, else the 40 with the lowest payload
+  hash; payload: clause type, our standard, the deal's whole signed text; no
+  deal, counterparty or paper side in the payload or key); it gates nothing,
+  and a confirmed-present answer means the guard is too weak. `playbook
+  scorecard` (version 13) gains an `absence` section (pairs, verified, possible,
+  unverifiable, per-clause spread, the digest totals, `check_sample`, `checked`,
+  `wrong`). The validator checks completeness (a record for exactly the signed
+  deals crossed with the clause types, less the pairs that have a signed text),
+  ids, statuses against basis and candidates, candidate order, scores against
+  the guard and that candidates cite their own deal; conformance vector 014 pins
+  it and vectors 001-013 are re-stamped. OPF 0.6 is replaced in place.
+
 - **Reconstruct our former forms from the corpus when none are supplied
   (issue #250, epic #245).** The owner of the private acceptance corpus has no
   older form files, so prior-standard origin (issue #249) had nothing to read

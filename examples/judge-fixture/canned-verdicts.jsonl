@@ -5,3 +5,4 @@
 {"key": "db0f05de4415874dd1710867188a9c07c26e6a4189970da5e05e9e89f4145dd2", "verdict": {"basis": "judge", "confidence": 0.85, "taxonomy_id": "data_privacy_security"}}
 {"key": "c297ae480bf8aebc6cd82154c9c4f03b4efcff9c7183a84332dd445a16c74b15", "verdict": {"in_scope": true, "scope_confidence": 0.9, "scope_rationale": "Canned fixture verdict - matches fixture-affiliation clause profile."}}
 {"key": "bcb45ba5d80276d337f2db11d874e5e782411c9afc0ade08953cef89aac3cd21", "verdict": {"in_scope": true, "scope_confidence": 0.9, "scope_rationale": "Canned fixture verdict - matches fixture-affiliation clause profile."}}
+{"key": "b92e4f0f19c03eba90c612904b430cfc096587b3a47539f2439a31721700f7bb", "verdict": {"absent": true, "reason": "No passage of the signed text states an indemnification clause.", "basis": "agent"}}

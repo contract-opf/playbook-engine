@@ -564,7 +564,8 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
 
     Covers ``evidence.clauses[].our_standard.source_ref`` and
     ``prior_standards[].source_ref`` and, per precedent, ``signed_text.ref``,
-    ``opening_text.ref`` and ``refused_asks[].ref``. The digest's refs
+    ``opening_text.ref`` and ``refused_asks[].ref``, and per absence record
+    each ``candidates[].ref``. The digest's refs
     (``standard_history.forms[].ref`` included) are copies of these (enforced
     by the digest equality check), so they need no separate pass.
     """
@@ -614,6 +615,24 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
                 _check_citation_ref(
                     ask.get("ref"),
                     f"evidence.precedent[{i}].refused_asks[{j}].ref",
+                    result,
+                    corpus_docs,
+                    prior_forms,
+                )
+    absence = (
+        (doc.get("evidence") or {}).get("absence")
+        if isinstance(doc.get("evidence"), dict)
+        else None
+    )
+    records = absence.get("records") if isinstance(absence, dict) else None
+    for i, record in enumerate(records if isinstance(records, list) else []):
+        if not isinstance(record, dict):
+            continue
+        for j, candidate in enumerate(record.get("candidates") or []):
+            if isinstance(candidate, dict):
+                _check_citation_ref(
+                    candidate.get("ref"),
+                    f"evidence.absence.records[{i}].candidates[{j}].ref",
                     result,
                     corpus_docs,
                     prior_forms,
@@ -744,6 +763,151 @@ def _check_precedent(doc: dict[str, Any], result: ValidationResult) -> None:
                     f"{key}={clause.get(key)!r} but evidence.precedent implies {expected_n}",
                     path=f"evidence.clauses[{i}].{key}",
                 )
+
+
+def _check_absence(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF 0.6 verified-absence cross-checks (issue #251, OPF-SPEC §3.5.8).
+
+    - every absence ``id`` is unique and equals ``absence.absence_id(agreement_type.id,
+      document_id, taxonomy_id)``; at most one record per (document_id, taxonomy_id);
+    - every ``taxonomy_id`` names an ``evidence.clauses`` entry and every
+      ``document_id`` is an in-scope deal with a detected executed copy;
+    - completeness: the records are exactly the signed deals crossed with the clause
+      types, less the pairs with a precedent record that has a ``signed_text`` (a
+      deal that signed the clause is not "signed without it", and every one that did
+      not is counted, verified or not);
+    - the status follows the evidence: ``absent_verified`` means ``basis`` is
+      ``scored`` and there is no candidate; anything else is ``possibly_present``;
+      ``candidates`` are ordered best first, each scores at least ``guard``, and each
+      cites the record's own deal.
+    """
+    from playbook_engine.absence import (  # noqa: PLC0415
+        BASIS_SCORED,
+        STATUS_POSSIBLE,
+        STATUS_VERIFIED,
+        absence_id,
+        signed_deal_ids,
+    )
+
+    evidence = doc.get("evidence")
+    section = evidence.get("absence") if isinstance(evidence, dict) else None
+    if not isinstance(section, dict) or not isinstance(section.get("records"), list):
+        return  # the schema pass reports the missing or malformed section
+    guard = section.get("guard")
+    agreement_type = doc.get("agreement_type")
+    agreement_type_id = agreement_type.get("id") if isinstance(agreement_type, dict) else None
+    clause_tids = {
+        c.get("taxonomy_id")
+        for c in _evidence_list(doc, "clauses")
+        if isinstance(c, dict) and isinstance(c.get("taxonomy_id"), str)
+    }
+    corpus = doc.get("corpus")
+    documents = corpus.get("documents") if isinstance(corpus, dict) else None
+    precedent = [p for p in _evidence_list(doc, "precedent") if isinstance(p, dict)]
+    signed = set(signed_deal_ids([d for d in documents or [] if isinstance(d, dict)], precedent))
+    has_signed_text = {
+        (p.get("document_id"), p.get("taxonomy_id"))
+        for p in precedent
+        if p.get("signed") is True and isinstance(p.get("signed_text"), dict)
+    }
+
+    seen_ids: dict[str, int] = {}
+    seen_pairs: dict[tuple[Any, Any], int] = {}
+    for i, record in enumerate(section["records"]):
+        if not isinstance(record, dict):
+            continue
+        path = f"evidence.absence.records[{i}]"
+        rid, doc_id, tid = record.get("id"), record.get("document_id"), record.get("taxonomy_id")
+        if isinstance(rid, str):
+            if rid in seen_ids:
+                result.add(
+                    f"duplicate absence id {rid!r} (first seen at "
+                    f"evidence.absence.records[{seen_ids[rid]}])",
+                    path=f"{path}.id",
+                )
+            else:
+                seen_ids[rid] = i
+            if (
+                isinstance(agreement_type_id, str)
+                and isinstance(doc_id, str)
+                and isinstance(tid, str)
+                and rid != absence_id(agreement_type_id, doc_id, tid)
+            ):
+                result.add(
+                    f"absence id {rid!r} does not match the id recomputed from "
+                    "(agreement_type.id, document_id, taxonomy_id)",
+                    path=f"{path}.id",
+                )
+        pair = (doc_id, tid)
+        if pair in seen_pairs:
+            result.add(
+                f"more than one absence record for deal {doc_id!r} and clause {tid!r} "
+                f"(first at evidence.absence.records[{seen_pairs[pair]}])",
+                path=path,
+            )
+        else:
+            seen_pairs[pair] = i
+        if tid not in clause_tids:
+            result.add(
+                f"absence taxonomy_id {tid!r} names no evidence.clauses entry",
+                path=f"{path}.taxonomy_id",
+            )
+        if doc_id not in signed:
+            result.add(
+                f"absence document_id {doc_id!r} is not an in-scope deal with a detected "
+                "executed copy",
+                path=f"{path}.document_id",
+            )
+        elif pair in has_signed_text:
+            result.add(
+                f"absence record for deal {doc_id!r} and clause {tid!r}, but the deal has a "
+                "signed text for the clause — it did not sign without it",
+                path=path,
+            )
+        candidates = [c for c in record.get("candidates") or [] if isinstance(c, dict)]
+        verified = record.get("basis") == BASIS_SCORED and not candidates
+        expected_status = STATUS_VERIFIED if verified else STATUS_POSSIBLE
+        if record.get("status") in (STATUS_VERIFIED, STATUS_POSSIBLE) and (
+            record["status"] != expected_status
+        ):
+            result.add(
+                f"absence status={record['status']!r} but basis={record.get('basis')!r} with "
+                f"{len(candidates)} candidate(s) implies {expected_status!r}",
+                path=f"{path}.status",
+            )
+        scores = [
+            c["score"]
+            for c in candidates
+            if isinstance(c.get("score"), (int, float)) and not isinstance(c.get("score"), bool)
+        ]
+        if len(scores) == len(candidates):
+            if scores != sorted(scores, reverse=True):
+                result.add(
+                    "absence candidates are not ordered best score first", path=f"{path}.candidates"
+                )
+            if isinstance(guard, (int, float)) and any(x < guard for x in scores):
+                result.add(
+                    f"an absence candidate scores below the section's guard ({guard})",
+                    path=f"{path}.candidates",
+                )
+        for j, candidate in enumerate(candidates):
+            ref = candidate.get("ref")
+            if isinstance(ref, dict) and ref.get("document_id") != doc_id:
+                result.add(
+                    f"absence candidate cites document {ref.get('document_id')!r}, not the "
+                    f"record's deal {doc_id!r}",
+                    path=f"{path}.candidates[{j}].ref.document_id",
+                )
+
+    expected_pairs = {(d, t) for d in signed for t in clause_tids} - has_signed_text
+    missing = sorted(expected_pairs - set(seen_pairs), key=str)
+    if missing:
+        result.add(
+            f"evidence.absence has no record for {len(missing)} signed deal / clause pair(s) "
+            f"with no signed text (first: deal {missing[0][0]!r}, clause {missing[0][1]!r}) — "
+            "every signed deal without a clause is verified absent or possibly present",
+            path="evidence.absence.records",
+        )
 
 
 def _check_prior_standards(doc: dict[str, Any], result: ValidationResult) -> None:
@@ -1687,6 +1851,7 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_citations(doc, result)
     _check_signed_on(doc, result)
     _check_precedent(doc, result)
+    _check_absence(doc, result)
     _check_prior_standards(doc, result)
     _check_equivalence(doc, result, verdict_store)
     _check_posture_floor_conflict(doc, result)

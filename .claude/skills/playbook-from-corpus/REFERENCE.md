@@ -295,6 +295,39 @@ from is `true`. Do not judge the type from the sentence's position: judge the
 words. The count of `false` answers is the figure the scorecard reports
 (`resegmentation.wrong`); the aim is none.
 
+### Absence check (`kind: absence_check`)
+
+Queued by `playbook judge` AFTER mining, for a deterministic sample of the
+engine's verified absences (all of them when there are 40 or fewer). The engine
+counts "we signed N deals without clause X" (OPF-SPEC §3.5.8) and calls a deal
+**verified absent** from a clause when no signed-text passage other than one
+filed under the clause itself is even plausibly that clause (the passages the
+classifier left unclassified and the ones it filed under other clause types
+are all scored). Nothing waits on
+your answer: it is the measurement the engine's guard is tuned against, so
+answer what the text says. The question carries the clause type, our standard
+for it and the deal's whole signed text as an ordered list of its passages, each
+with the clause type the classifier filed it under (`null` when it filed none):
+
+```json
+{"stage": "absence_check",
+ "question": "Is the clause type below really absent from this signed text, that is, does no passage of it state this clause?",
+ "clause_type": {"id": "assignment", "label": "Assignment"},
+ "our_standard": "...",
+ "signed_text": [ {"clause_type": "Term", "text": "..."},
+                  {"clause_type": null, "text": "..."} ]}
+```
+
+Answer `{"absent": true}` when no passage states the clause, however it is worded
+and wherever it sits (including a sentence inside a longer passage, or a passage
+filed under another clause type), and `{"absent": false, "reason": "<one short
+sentence>"}` when a passage does. A clause stated inside a passage filed under another clause type makes it
+present. A passage that merely touches the same
+subject without stating the clause (a lead-in, a cross-reference, a defined
+term) does not make it present. The count of `false` answers is the figure the
+scorecard reports (`absence.wrong`); the aim is none, and any `false` means the
+guard (`ABSENCE_GUARD`) is too weak and must be lowered.
+
 ### Former form origin (`kind: prior_form_origin`)
 
 Queued by `playbook judge` AFTER mining, when the owner supplied NO older form
@@ -490,6 +523,12 @@ split or join (see "Re-segmentation check" above):
 {"resegment_ok": false, "reason": "This sentence is about notice, not insurance."}
 ```
 
+**Absence check verdict** (`kind: absence_check`) — one per sampled verified
+absence (see "Absence check" above):
+```json
+{"absent": false, "reason": "Section 7 states the clause in other words."}
+```
+
 **Former form origin verdict** (`kind: prior_form_origin`) — one per recurring
 first-draft wording (see "Former form origin" above):
 ```json
@@ -576,7 +615,7 @@ machine-readable rubric moves: the classifier-eligible taxonomy entries
 `scope`, the answer vocabulary for `provenance`, the label, status,
 relation and effect vocabularies for `equivalence`, the source vocabulary
 (`document_text`, `signature_block`) for `deal_date`, the two question shapes
-(`split`, `join`) for `resegment_check`, the answers and bases (`agent`, `judge`,
+(`split`, `join`) for `resegment_check`, the two answers (`absent`, `present`) for `absence_check`, the answers and bases (`agent`, `judge`,
 `owner`) for `prior_form_origin`. Editing
 `spec/taxonomy/*.yaml` re-queues classify verdicts and nothing else.
 

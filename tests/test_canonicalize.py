@@ -43,7 +43,7 @@ def _minimal_doc(**overrides: Any) -> dict[str, Any]:
         "agreement_type": {"id": "test-agreement", "name": "Test Agreement"},
         "baseline": {"has_canonical_template": False},
         "taxonomy": {"source": "custom", "entries": []},
-        "evidence": {"clauses": [], "precedent": []},
+        "evidence": {"clauses": [], "precedent": [], "absence": {"guard": 0.1, "records": []}},
         "posture": {},
         "floor": {},
         "corpus": {"documents": [], "stats": {}},

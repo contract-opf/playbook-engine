@@ -853,6 +853,7 @@ def reconstruct(
         round_moves=round_moves,
         party=party,
         prior_forms=(),
+        absence=False,
     )
     clauses = {str(c["taxonomy_id"]): c for c in evidence["clauses"]}
     standard_keys = {

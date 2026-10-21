@@ -5,7 +5,7 @@ longer honestly fill once judged deviation verdicts left the consumer path
 (issue #220, and the judge itself was retired in issue #239) and the deal
 became the unit of precedent (issue #216); they were retired (issue #238 —
 git history has them). OPF 0.6's evidence is two
-lists:
+lists (plus the absence record below):
 
 ``evidence.clauses[]``
     One entry per clause type: ``{id, taxonomy_id, title, our_standard,
@@ -28,6 +28,12 @@ lists:
     side is carried as honest metadata (``paper``) and never partitions,
     gates or weights anything (owner decision 2026-09-13 (b)).
 
+``evidence.absence`` (issue #251, :mod:`playbook_engine.absence`)
+    ``{guard, records}``: for every signed deal and clause type with no signed
+    text, whether the clause is verified absent from the signed copy or
+    possibly present (a passage of the signed copy other than one filed under
+    the clause itself scores as plausibly the clause).
+
 Nothing here is judged.
 
 The builders are pure functions of the L4 store (observations, round moves,
@@ -43,6 +49,7 @@ import re
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from playbook_engine.absence import build_absence
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.clause_position_compiler import (
     ClausePosition,
@@ -267,8 +274,9 @@ def build_precedent_evidence(
     round_moves: list[RoundMove] | None = None,
     party: str | None,
     prior_forms: Sequence[PriorForm] = (),
+    absence: bool = True,
 ) -> dict[str, Any]:
-    """Build the OPF 0.6 ``evidence`` section: ``{clauses, precedent}``.
+    """Build the OPF 0.6 ``evidence`` section: ``{clauses, precedent, absence}``.
 
     One precedent per (document_id, taxonomy_id) carrying any classified
     observation of a compiled clause type:
@@ -309,6 +317,14 @@ def build_precedent_evidence(
     has no detected executed copy or no source states a date — never guessed
     (:mod:`playbook_engine.deal_dates`). The digest's ``first_signed`` /
     ``last_signed`` are derived from it.
+
+    ``absence`` (issue #251, :mod:`playbook_engine.absence`): for every signed
+    deal and clause type with no signed precedent, whether the clause is
+    verified absent from the signed copy or possibly present (a passage other
+    than one filed under the clause itself scores as plausibly the clause).
+    Pass ``absence=False`` to leave the section out (a caller that only needs
+    the precedent record, such as the equivalence queue and the prior-form
+    reconstruction; the result is then not a document's ``evidence``).
 
     Sub-sentence fragments are excluded exactly as the clause-type compiler
     excludes them (``MIN_OBSERVATION_TEXT_LEN``); unclassified observations
@@ -452,8 +468,16 @@ def build_precedent_evidence(
         }
         for cp in clause_positions
     ]
-    evidence = {"clauses": clauses, "precedent": precedent}
+    evidence: dict[str, Any] = {"clauses": clauses, "precedent": precedent}
     restamp_evidence(evidence, agreement_type_id, party=party)
+    if absence:
+        evidence["absence"] = build_absence(
+            agreement_type_id=agreement_type_id,
+            clauses=evidence["clauses"],
+            precedent=precedent,
+            observations=observations,
+            corpus_documents=corpus_documents,
+        )
     return evidence
 
 

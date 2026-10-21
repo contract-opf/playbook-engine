@@ -88,6 +88,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from playbook_engine.absence import CHECK_KIND as ABSENCE_CHECK_KIND
 from playbook_engine.deal_dates import DEAL_DATE_KIND, TEXT_BASES
 from playbook_engine.equivalence import EFFECTS, EQUIVALENCE_KIND, LABELS, RELATIONS, STATUSES
 from playbook_engine.prior_reconstruction import ORIGIN_BASES, ORIGIN_KIND
@@ -108,6 +109,7 @@ JUDGE_KINDS: tuple[str, ...] = (
     DEAL_DATE_KIND,
     RESEGMENT_CHECK_KIND,
     ORIGIN_KIND,
+    ABSENCE_CHECK_KIND,
 )
 
 # ---------------------------------------------------------------------------
@@ -160,6 +162,12 @@ RUBRIC_PROMPT_VERSIONS: dict[str, str] = {
     # standard, not as a counterparty's form); the basis vocabulary is the
     # derived half.
     ORIGIN_KIND: "v1",
+    # Issue #251: is a clause type really absent from a signed text the engine
+    # counted it as verified-absent from? The prose rubric is the skill's
+    # absence_check step (absent only when no passage of the text states the
+    # clause, however it is worded or filed); the answer vocabulary is the
+    # derived half.
+    ABSENCE_CHECK_KIND: "v1",
 }
 
 #: Truncation length for the derived digest. 12 hex chars = 48 bits; these
@@ -301,6 +309,9 @@ _DERIVED_SURFACES: dict[str, Callable[..., Any]] = {
     ORIGIN_KIND: lambda *, taxonomy, agreement_type: {
         "answers": ["ours", "not_ours"],
         "bases": list(ORIGIN_BASES),
+    },
+    ABSENCE_CHECK_KIND: lambda *, taxonomy, agreement_type: {
+        "answers": ["absent", "present"],
     },
 }
 
