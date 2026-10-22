@@ -10,6 +10,28 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+- **The interactive Q4 prompt now says it is binding before you answer (issue
+  #125).** `playbook posture interview` (without `--answers-file`) prints a
+  warning ahead of the `sacred_clauses` question that each bare clause-type
+  name is signed into the Floor as a hard line no review may override, and
+  `playbook posture questions` lists the same note. The question text and the
+  promotion rules are unchanged; the skill already led with this disclosure.
+
+- **Version-pair diffs no longer report partition artifacts as changes (issue
+  #122).** When two versions of one agreement were extracted differently, the
+  same clause could diff as `modified` only because one side kept its leading
+  clause number (`2.9. `, `(a) `, `Section 4. `), used curly instead of straight
+  quotes, wrapped differently, or was only the bare section heading the other
+  extraction merged into the body. `clause_differ` now compares the two sides
+  with leading clause numbers, quote style and whitespace folded away, and
+  treats a pair where exactly one side is a bare heading (short, title or upper
+  case, no sentence punctuation, no operative verb, not a `[Reserved]` /
+  `Intentionally Omitted` placeholder) as `unchanged`; neither yields a round
+  move. A bare number is only stripped with a closing `.` or `)`, so a clause
+  that opens on content ("30 days") still diffs. Added and removed rows are
+  untouched. The L1-L4 stage-cache version (`_DEVIATION_VS_TEMPLATE_VERSION`)
+  is bumped to 23; the OPF digest and format are unchanged.
+
 - **Agent-judged sentence-level sub-split of multi-topic nodes (issue #257,
   epic #245).** After #255/#256 about three in ten compared texts on the private
   acceptance corpus were still mixtures, concentrated in co-located pairs (term

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from playbook_engine.clause_aligner import align_versions
+from playbook_engine.clause_aligner import AlignmentSlot, ClauseAlignment, align_versions
 from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_differ import (
     ClauseDiff,
@@ -325,3 +325,93 @@ def test_document_diff_to_dict_structure() -> None:
     assert "consecutive" in d
     assert "net" in d
     assert d["version_order"] == ["v1", "v2"]
+
+
+# ---------------------------------------------------------------------------
+# Partition artifacts between two extractions (issue #122)
+# ---------------------------------------------------------------------------
+
+_BODY = (
+    "Each notice under this Agreement shall be in writing and delivered to the "
+    "address of the receiving party set out above."
+)
+
+
+def _pair_diff(before: str, after: str, tid: str = "notice") -> ClauseDiff:
+    """Diff one row the aligner bound across two versions (built directly, so
+    a pair the aligner's similarity gate would split is still diffed as one
+    row — the mispaired shape issue #122 reports)."""
+    row = ClauseAlignment(
+        taxonomy_id=tid,
+        slots=(
+            AlignmentSlot(version="v1", clause=_cc("1", tid, before)),
+            AlignmentSlot(version="v2", clause=_cc("1", tid, after)),
+        ),
+    )
+    (cd,) = diff_aligned([row], ["v1", "v2"]).consecutive[0].diffs
+    return cd
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        f"2.9. {_BODY}",
+        f"10. {_BODY}",
+        f"(a) {_BODY}",
+        f"Section 4. {_BODY}",
+        f"3.1. (b) {_BODY}",
+    ],
+    ids=["dotted", "renumbered", "letter", "section", "nested"],
+)
+def test_renumber_only_pair_is_unchanged(before: str) -> None:
+    """A leading clause number kept on one side only is not a deviation."""
+    cd = _pair_diff(before, f"7.2. {_BODY}" if before.startswith("10.") else _BODY)
+    assert cd.kind == "unchanged"
+    assert cd.hunks == ()
+
+
+def test_quote_style_and_whitespace_only_pair_is_unchanged() -> None:
+    before = "Alice Corp’s “Confidential Information”  excludes public\n data."
+    after = 'Alice Corp\'s "Confidential Information" excludes public data.'
+    cd = _pair_diff(before, after, "conf")
+    assert cd.kind == "unchanged"
+    assert cd.hunks == ()
+
+
+@pytest.mark.parametrize("heading", ["10. NOTICES AND COMMUNICATION", "Notices", "4.2 Notices"])
+def test_bare_heading_against_body_is_suppressed(heading: str) -> None:
+    """One side split off as a bare heading is a partition artifact, either way round."""
+    assert _pair_diff(_BODY, heading).kind == "unchanged"
+    assert _pair_diff(heading, _BODY).kind == "unchanged"
+
+
+def test_real_wording_change_still_diffs_after_normalization() -> None:
+    cd = _pair_diff(
+        f"2.9. {_BODY}", "3.1. " + _BODY.replace("in writing", "in writing or by email")
+    )
+    assert cd.kind == "modified"
+    assert any("email" in h.new_text for h in cd.hunks)
+
+
+def test_leading_content_number_is_not_stripped() -> None:
+    """A clause opening on a number that is content ("30 days") still diffs."""
+    cd = _pair_diff("30 days notice is required.", "60 days notice is required.")
+    assert cd.kind == "modified"
+
+
+def test_clause_struck_to_placeholder_still_diffs() -> None:
+    """'[Reserved]' reads like a heading but is the operative text of a struck clause."""
+    assert _pair_diff(_BODY, "[Reserved]").kind == "modified"
+    assert _pair_diff(_BODY, "Intentionally Omitted.").kind == "modified"
+
+
+def test_two_differing_headings_still_diff() -> None:
+    assert _pair_diff("NOTICES", "NOTICES AND COMMUNICATIONS").kind == "modified"
+
+
+def test_one_sided_clause_addition_still_surfaces() -> None:
+    v1 = [_cc("1", "ind", "Alice shall indemnify.")]
+    v2 = [_cc("1", "ind", "1. Alice shall indemnify."), _cc("2", "notice", _BODY)]
+    doc = _align_and_diff([("v1", v1), ("v2", v2)])
+    changed = doc.consecutive[0].changed()
+    assert [(cd.taxonomy_id, cd.kind) for cd in changed] == [("notice", "added")]
