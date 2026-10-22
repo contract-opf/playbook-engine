@@ -3682,6 +3682,8 @@ def posture_questions_cmd() -> None:
     """List the canonical interview question ids (for --answers-file JSON keys)."""
     for iq in INTERVIEW_QUESTIONS:
         click.echo(f"{iq.q}: {iq.question}")
+        if iq.binding_note:
+            click.echo(f"    {iq.binding_note}")
 
 
 @posture_group.command(name="interview")
@@ -3759,6 +3761,8 @@ def posture_interview_cmd(
         click.echo("Posture interview — press Enter to skip a question.\n")
         answers = {}
         for iq in INTERVIEW_QUESTIONS:
+            if iq.binding_note:
+                click.secho(iq.binding_note, fg="yellow", bold=True)
             reply = click.prompt(iq.question, default="", show_default=False)
             if reply.strip():
                 answers[iq.q] = reply.strip()
