@@ -88,6 +88,9 @@ class InterviewQuestion:
 
     q: str
     question: str
+    # Shown before the question is asked when the answer carries binding
+    # force, so the signer knows the weight at answer time (issue #125).
+    binding_note: str = ""
 
 
 # The canonical starter set (3-6 questions; a producer MAY prune or extend —
@@ -117,6 +120,12 @@ INTERVIEW_QUESTIONS: tuple[InterviewQuestion, ...] = (
     InterviewQuestion(
         "sacred_clauses",
         "Which clause types are non-negotiable regardless of deal value?",
+        binding_note=(
+            "Note: this is the one answer with binding force. Each bare "
+            "clause-type name you give is signed into your Floor as a hard "
+            "line that no review may override. Answer only with what you "
+            "would sign."
+        ),
     ),
     InterviewQuestion(
         "flexible_clauses",

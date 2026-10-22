@@ -1088,6 +1088,35 @@ def test_cli_posture_questions_lists_canonical_ids() -> None:
         assert iq.q in output
 
 
+def test_sacred_clauses_is_the_only_question_with_a_binding_note() -> None:
+    noted = [iq.q for iq in INTERVIEW_QUESTIONS if iq.binding_note]
+    assert noted == ["sacred_clauses"]
+
+
+def test_cli_posture_questions_shows_q4_binding_note() -> None:
+    exit_code, output = _invoke("posture", "questions")
+    assert exit_code == 0
+    q4 = next(iq for iq in INTERVIEW_QUESTIONS if iq.q == "sacred_clauses")
+    assert q4.binding_note in output
+
+
+def test_cli_posture_interview_prompt_discloses_q4_weight_before_the_answer(
+    tmp_path: Path,
+) -> None:
+    # Issue #125: the interactive Q4 prompt must say, before the answer is
+    # given, that the answer is signed into the Floor as a binding hard line.
+    (tmp_path / "playbook.opf.json").write_text(json.dumps(_minimal_doc()), encoding="utf-8")
+    q4 = next(iq for iq in INTERVIEW_QUESTIONS if iq.q == "sacred_clauses")
+
+    replies = "".join(f"{_ANSWERS.get(iq.q, '')}\n" for iq in INTERVIEW_QUESTIONS)
+
+    result = CliRunner().invoke(cli, ["posture", "interview", str(tmp_path)], input=replies)
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count(q4.binding_note) == 1
+    assert result.output.index(q4.binding_note) < result.output.index(q4.question)
+
+
 def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     doc = _minimal_doc()
     opf_path = tmp_path / "playbook.opf.json"
