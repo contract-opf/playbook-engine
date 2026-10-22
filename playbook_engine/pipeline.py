@@ -365,7 +365,14 @@ _MEDIA_TYPES: dict[str, str] = {
 # inputs; observations gained "x_resegmented" / "x_non_clause"; corpus_doc
 # gained "resegmentation". A warm cache would otherwise replay the old mixed
 # and truncated clauses forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 22
+#
+# v23 (issue #122): a version pair whose two sides are the same words once
+# leading clause numbers, quote style and whitespace are folded, or where one
+# side is only a bare section heading, now diffs as "unchanged"
+# (clause_differ._version_diff) instead of "modified". L4's round moves change
+# for identical inputs; a warm cache would otherwise replay those partition
+# artifacts as negotiated changes forever.
+_DEVIATION_VS_TEMPLATE_VERSION = 23
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage

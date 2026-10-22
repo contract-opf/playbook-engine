@@ -6,6 +6,11 @@ Computes clause-scoped text diffs across versions of one aligned document:
   negotiation move.
 - **Net** (first → signed/last): captures the durable outcome of the negotiation.
 
+Two sides that differ only in leading clause numbering, quote style or
+whitespace, or where one side is only a bare section heading, diff as
+``"unchanged"``: when two versions were extracted differently, those are
+partition artifacts, not negotiated changes (issue #122).
+
 Word-level ``SequenceMatcher`` is used for text comparison.  Unchanged spans
 are never emitted in hunks (token discipline): a ``ClauseDiff`` with
 ``kind="unchanged"`` has an empty ``hunks`` tuple.
@@ -22,6 +27,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from playbook_engine.clause_aligner import ClauseAlignment
+from playbook_engine.resegmentation import looks_like_heading
 
 # ---------------------------------------------------------------------------
 # Stop words (same set as rest of pipeline)
@@ -274,7 +280,12 @@ def _version_diff(
         elif after_clause is None:
             kind = "removed"
             hunks = ()
-        elif before_text == after_text:
+        elif _same_after_rendering(before_text, after_text) or _heading_against_body(
+            before_text, after_text
+        ):
+            # Two extractions of the same clause (issue #122): renumbering,
+            # quote style, whitespace, or the heading split off on one side
+            # are partition artifacts, never a negotiated change.
             kind = "unchanged"
             hunks = ()
         else:
@@ -304,6 +315,74 @@ def _version_diff(
         version_after=v_after,
         diffs=tuple(diffs),
     )
+
+
+# A leading clause number, as a mismatched extractor keeps or drops it (issue
+# #122): "2.9. ", "10. ", "3) ", "(a) ", "(iv) ", "Section 4. ", "Article
+# IV: ". A bare number needs a closing "." or ")" — unlike
+# extraction._LEADING_LIST_MARKER_RE / resegmentation._NUMBER_PREFIX_RE, whose
+# separator is optional — so a clause opening on content ("30 days",
+# "1.5 times") is never stripped (see normalize_for_standard's note).
+_CLAUSE_NUMBER_RE = re.compile(
+    r"^(?:(?:section|article|clause)\s+(?:\d+(?:\.\d+)*|[ivxlc]+)[.:)]"
+    r"|\d+(?:\.\d+)*[.)]"
+    r"|\((?:\d{1,3}|[a-z]{1,2}|[ivxlc]{1,6})\))\s+",
+    re.IGNORECASE,
+)
+_QUOTE_FOLD = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201b": "'",
+        "\u2032": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u201f": '"',
+        "\u2033": '"',
+    }
+)
+# A heading never carries an operative verb; a title-cased sentence does.
+_OPERATIVE_RE = re.compile(r"\b(?:shall|will|must|may|agrees?|warrants?|represents?)\b", re.I)
+# "[Reserved]" / "Intentionally Omitted" reads like a heading but IS the
+# operative text: a clause struck down to it is a real negotiated removal.
+_PLACEHOLDER_RE = re.compile(r"\b(?:reserved|omitted|deleted|intentionally|blank)\b", re.I)
+
+
+def _rendering_key(text: str) -> str:
+    """*text* with its leading clause numbers, quote style and whitespace
+    folded away (issue #122). Comparison-only: never stored or cited."""
+    s = " ".join(text.translate(_QUOTE_FOLD).split())
+    while (stripped := _CLAUSE_NUMBER_RE.sub("", s, count=1)) != s:
+        s = stripped
+    return s
+
+
+def _same_after_rendering(before: str, after: str) -> bool:
+    """Whether the two sides are the same words once numbering, quote style
+    and whitespace are folded (issue #122) — one clause, renumbered or
+    re-extracted, not a move."""
+    return before == after or _rendering_key(before) == _rendering_key(after)
+
+
+def _is_bare_heading(text: str) -> bool:
+    """A section heading with no operative text: short, title or upper case,
+    no sentence punctuation (``resegmentation.looks_like_heading``), no
+    operative verb, and not a struck-clause placeholder."""
+    return (
+        looks_like_heading(text)
+        and not _OPERATIVE_RE.search(text)
+        and not _PLACEHOLDER_RE.search(text)
+    )
+
+
+def _heading_against_body(before: str, after: str) -> bool:
+    """Whether exactly one side is a bare heading (issue #122): the other
+    extractor merged that heading into the clause body, or split it off,
+    so the pair is a partition difference, not an edit. Two differing
+    headings, or two bodies, still diff."""
+    return _is_bare_heading(before) != _is_bare_heading(after)
 
 
 def _row_confidence(alignment: ClauseAlignment) -> float | None:
