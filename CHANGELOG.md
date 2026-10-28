@@ -17,6 +17,33 @@ changes` heading in the release it ships under.
   `playbook posture questions` lists the same note. The question text and the
   promotion rules are unchanged; the skill already led with this disclosure.
 
+- **A clause left on two rows by two extractions no longer reads as a removal
+  plus an addition in a round (issue #122, the two gaps left when it closed).**
+  When the aligner could not bind a heading split off its body, round moves
+  reported the whole clause removed and the heading (and body) added.
+  `clause_differ` now reconciles each consecutive version pair: a removed and an
+  added row with the same words (numbering, quote style and whitespace folded;
+  case kept, except between two bare headings) are one relocated clause; a row
+  that is exactly a bare
+  heading plus a body, against a heading row and a body row on the other side,
+  is one clause (a run-in heading with a closing `.` or `:` counts); a bound row
+  whose sides differ only by a heading that sits on the other side as its own
+  row is unchanged; and a bare heading row the other version carries at the
+  start of a row is dropped from the changes. The rows are relabeled
+  `unchanged`, never removed, and only in the consecutive diffs: the net diff's
+  rows and the OPF/digest formats are unchanged, but round moves, reversal
+  records, and the `proposed_then_reversed` observations built from them, lose
+  the false entries a differently extracted draft produced (a heading or body
+  row there is no longer a refused ask). Only a heading's words are compared
+  without regard to case: a body whose case differs (a defined term) is a real
+  edit and still surfaces, as does a `[Reserved]` / `Intentionally Omitted`
+  placeholder (striking a clause is a change), a heading nobody carries and any
+  other change of wording. The other gap, unrelated clauses paired by index drift, no longer
+  exists: since #222 the aligner binds only on similarity (Jaccard of at least
+  0.70, or the single-edit rescue), so it cannot pair them; a regression test
+  now pins that through the real aligner. The L1-L4 stage-cache version
+  (`_DEVIATION_VS_TEMPLATE_VERSION`) is bumped to 24.
+
 - **Version-pair diffs no longer report partition artifacts as changes (issue
   #122).** When two versions of one agreement were extracted differently, the
   same clause could diff as `modified` only because one side kept its leading
