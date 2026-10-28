@@ -372,7 +372,15 @@ _MEDIA_TYPES: dict[str, str] = {
 # (clause_differ._version_diff) instead of "modified". L4's round moves change
 # for identical inputs; a warm cache would otherwise replay those partition
 # artifacts as negotiated changes forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 23
+#
+# v24 (issue #122): the consecutive version-pair diffs also relabel a clause
+# the aligner left on two rows (a heading split off its body, or the same words
+# relocated to another row) "unchanged" instead of a removal plus an addition
+# (clause_differ._reconcile_partitions). L4's round moves and reversal records
+# change for identical inputs, and so do the proposed_then_reversed observations
+# built from them (a heading or body row of a differently extracted draft is no
+# longer a refused ask); the net diff's rows and the OPF/digest formats do not.
+_DEVIATION_VS_TEMPLATE_VERSION = 24
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
