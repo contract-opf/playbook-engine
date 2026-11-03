@@ -879,7 +879,7 @@ A Floor entry is a **natural-language invariant**: one checkable statement a jud
 }
 ```
 
-An invariant MAY carry the **reserved extension keys** of §10.1, which this specification defines and which are therefore normative, not vendor-defined: `x_taxonomy_id` (the clause type it is about), `x_required_presence` (boolean), `x_condition` (a predicate spec or `"judged"`) and `x_permissible_proof` (list of strings) feed the hard-rule manifest (§3.12.3), and `x_signed_by` / `x_signed_at` record who signed the invariant and when (the Floor's attribution; a Floor invariant without it draws a validator warning). A validator rejects a malformed one. `playbook floor sign --clause ... --requires-presence --condition ... --proof ...` writes them. An editor or converter MUST preserve these keys: dropping them silently weakens a signed hard line (a deterministic presence or predicate rule becomes a judged one, and the signature is lost).
+An invariant MAY carry the **reserved extension keys** of §10.1, which this specification defines and which are therefore normative, not vendor-defined: `x_taxonomy_id` (the clause type it is about), `x_required_presence` (boolean), `x_condition` (a predicate spec or `"judged"`) and `x_permissible_proof` (list of strings) feed the hard-rule manifest (§3.12.3), and `x_signed_by` / `x_signed_at` record who signed the invariant and when, with `x_signed_hash` binding that sign-off to the signed fields: `sha256:` over the canonical form (§3.10) of the invariant's `id`, `statement`, `rationale`, `x_taxonomy_id`, `x_required_presence`, `x_condition`, `x_permissible_proof`, `x_signed_by` and `x_signed_at`, those present. An invariant whose `x_signed_hash` does not match MUST NOT be presented as signed; one signed before the key existed has none and is reported as unbound, not rejected (the Floor's attribution; a Floor invariant without it draws a validator warning). A validator rejects a malformed one. `playbook floor sign --clause ... --requires-presence --condition ... --proof ...` writes them. An editor or converter MUST preserve these keys: dropping them silently weakens a signed hard line (a deterministic presence or predicate rule becomes a judged one, and the signature is lost).
 
 **Normative rules:**
 1. **Evaluation is judgment; coverage and consequence are deterministic.** A dedicated Floor judge — separate from the model doing the review — evaluates each invariant against the clause under review and returns `clear`, `violation`, or `needs_review`. The consumer's deterministic obligations are the **coverage gate** (every invariant present MUST be evaluated and logged on every review; an unevaluated invariant fails the run, fail-closed) and the **consequence rule** (a `violation` verdict forces the negotiation-unacceptable outcome; `needs_review` forces human escalation; the model under review and the Posture can override neither).
@@ -1615,8 +1615,8 @@ hash integrity or mechanical resolvability depends on a closed shape
 There are two kinds of `x_*` key, and the rules differ:
 
 - **Reserved keys defined by this specification** — `x_taxonomy_id`,
-  `x_required_presence`, `x_condition`, `x_permissible_proof`, `x_signed_by`
-  and `x_signed_at` on a Floor invariant (§3.7, §3.12.3). They are normative:
+  `x_required_presence`, `x_condition`, `x_permissible_proof`, `x_signed_by`,
+  `x_signed_at` and `x_signed_hash` on a Floor invariant (§3.7, §3.12.3). They are normative:
   their meaning is the one given there, the hard-rule manifest is derived from
   them, and a consumer or editor MUST interpret and preserve them. They are
   the one exception to the stripping rule below, and the only normative
