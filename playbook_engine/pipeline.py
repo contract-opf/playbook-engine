@@ -4879,6 +4879,19 @@ def mine_corpus(
                 reason += " (timeout: not cached, the next run will retry)"
             progress(f"    QUARANTINED {doc_id}: {reason}")
             quarantined.append({"document_id": doc_id, "reason": reason})
+            # QA-2026-11-03 #12: give the document the same durable partial
+            # record the QA-gate path gets, so the corpus numbers (and the
+            # page's "failed extraction" count) include it.
+            if doc_l1 is not None:
+                corpus_documents.append(
+                    _build_quarantine_corpus_doc(
+                        doc_id,
+                        version_files,
+                        doc_l1.version_ingest,
+                        doc_l1.sha256_by_vid,
+                        doc_l1.media_type_by_vid,
+                    )
+                )
             continue
 
         # Replay the scope decision into scope_log (required whether result came from
