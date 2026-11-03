@@ -382,6 +382,58 @@ def test_reversal_none_taxonomy_id_no_cross_contamination() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Refused-ask text is verbatim; asks signed elsewhere are not refusals (QA 2026-11-03)
+# ---------------------------------------------------------------------------
+
+
+def test_reversal_quotes_a_modified_hunk_in_the_authors_own_words() -> None:
+    """The ask keeps case and punctuation, never the matcher's token stream."""
+    base = "All notices go to the address below."
+    v1 = [_cc("1", "notices", base)]
+    v2 = [_cc("1", "notices", base + " Attn: Mr. J. Placeholder, CLO.")]
+    v3 = [_cc("1", "notices", base)]
+
+    reversals = detect_reversals(_doc_diff([("v1", v1), ("v2", v2), ("v3", v3)]))
+
+    assert [r.proposed_text for r in reversals] == ["Attn: Mr. J. Placeholder, CLO."]
+
+
+def test_reversal_skips_a_long_ask_signed_on_another_row() -> None:
+    """A full proposal that landed in a different clause was signed, not refused."""
+    base = (
+        "Beta Ltd shall keep complete and accurate records of every shipment, invoice, "
+        "payment and return made under this agreement for the agreed retention period, "
+        "and shall store those records in a secure location at its principal office."
+    )
+    ask = "Alice Corp may audit those records once each year on thirty days notice."
+    v1 = [_cc("1", "rec", base), _cc("2", "gen", "This agreement binds successors.")]
+    v2 = [_cc("1", "rec", base + " " + ask), _cc("2", "gen", "This agreement binds successors.")]
+    v3 = [_cc("1", "rec", base), _cc("2", "gen", "This agreement binds successors. " + ask)]
+
+    reversals = detect_reversals(_doc_diff([("v1", v1), ("v2", v2), ("v3", v3)]))
+
+    assert [r for r in reversals if r.taxonomy_id == "rec"] == []
+
+
+def test_reversal_keeps_a_short_ask_whose_words_recur_elsewhere() -> None:
+    """A refused phrase is still refused when the same words occur in another clause."""
+    liability = "Alice Corp is liable for losses."
+    v1 = [
+        _cc("1", "lol", liability),
+        _cc("2", "ind", "Beta Ltd is liable for gross negligence."),
+    ]
+    v2 = [
+        _cc("1", "lol", "Alice Corp is liable for losses and gross negligence."),
+        _cc("2", "ind", "Beta Ltd is liable for gross negligence."),
+    ]
+    v3 = v1
+
+    reversals = detect_reversals(_doc_diff([("v1", v1), ("v2", v2), ("v3", v3)]))
+
+    assert [r.taxonomy_id for r in reversals] == ["lol"]
+
+
+# ---------------------------------------------------------------------------
 # No signed terminal → no reversals (issue #221)
 # ---------------------------------------------------------------------------
 

@@ -635,6 +635,28 @@ def test_v06_rejects_signed_text_edit_without_restamp() -> None:
     assert any("does not match the id recomputed" in e for e in errors), errors
 
 
+def test_v06_rejects_a_joined_text_citing_one_shorter_span() -> None:
+    """QA-2026-11-03 #11: a signed text longer than the single span it cites
+    is a join that cites only one node (OPF §4)."""
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    entry = record["signed_text"]
+    entry["ref"]["char_span"] = [0, max(1, len(entry["text"]) - 1)]
+    result = validate_document(_restamp_identity(doc))
+    warned = [e for e in result.errors if "longer than the clause span it cites" in e.message]
+    assert warned and not warned[0].blocking
+
+
+def test_v06_rejects_a_list_citation_that_carries_a_span() -> None:
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    ref = record["signed_text"]["ref"]
+    ref["clause_path"] = f"{ref['clause_path']}, 99"
+    ref["char_span"] = [0, 10_000]
+    errors = _blocking(_restamp_identity(doc))
+    assert any("lists several clauses but also carries a char_span" in e for e in errors), errors
+
+
 def test_v06_rejects_two_precedents_for_one_deal_and_clause() -> None:
     from playbook_engine.opf_accessors import perspective_party
     from playbook_engine.precedent import restamp_evidence
