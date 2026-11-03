@@ -236,11 +236,11 @@ def test_pseudonymize_text_matches_name_ending_in_punctuation(tmp_path: Path) ->
     assert "Acme Corp." not in out
     assert reg.alias_for("Acme Corp.") in out
 
-    # Substring protection at non-word edges must still hold: "CUNY" inside
-    # "CUNYA" is not a known-name-then-non-word-boundary match.
+    # Substring protection at non-word edges must still hold: "PSU" inside
+    # "PSUA" is not a known-name-then-non-word-boundary match.
     reg2 = EntityRegistry.load(tmp_path / "entity_registry2.json")
-    out2 = pseudonymize_text("CUNYA is unaffected.", ["CUNY"], reg2)
-    assert out2 == "CUNYA is unaffected."
+    out2 = pseudonymize_text("PSUA is unaffected.", ["PSU"], reg2)
+    assert out2 == "PSUA is unaffected."
 
 
 # ---------------------------------------------------------------------------
@@ -776,12 +776,12 @@ def test_alias_version_field_aliases_filename_stem(tmp_path: Path) -> None:
     from playbook_engine.pipeline import _alias_version_field
 
     reg = EntityRegistry.load(tmp_path / "reg.json")  # empty registry
-    known = ["Oglethorpe University"]
+    known = ["Placeholder University"]
     out = _alias_version_field(
-        "01__API-Internship Agreement - Oglethorpe University 6.14.23", known, reg
+        "01__Sample-Services Agreement - Placeholder University 3.9.21", known, reg
     )
-    assert "Oglethorpe" not in out
-    assert reg.alias_for("Oglethorpe University") in out
+    assert "Placeholder" not in out
+    assert reg.alias_for("Placeholder University") in out
     # A plain ordinal carries no name and passes through untouched.
     assert _alias_version_field(3, known, reg) == 3
 
@@ -791,10 +791,10 @@ def test_pseudonymize_observation_id_aliases_doc_segment(tmp_path: Path) -> None
     from playbook_engine.pipeline import _pseudonymize_observation_id
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    oid = "API-Internship-Agreement-Oglethorpe-University-6.14.23_ff1a5b80/3/0"
+    known = ["Placeholder University"]
+    oid = "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d/3/0"
     out = _pseudonymize_observation_id(oid, known, reg)
-    assert "oglethorpe" not in out.lower()
+    assert "placeholder" not in out.lower()
     assert out.endswith("/3/0")  # version/clause structure intact
 
 
@@ -803,10 +803,10 @@ def test_pseudonymize_trail_aliases_document_id(tmp_path: Path) -> None:
     from playbook_engine.pipeline import _pseudonymize_trail
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    trail = {"document_id": "API-Internship-Agreement-Oglethorpe-University-6.14.23_ff1a5b80"}
+    known = ["Placeholder University"]
+    trail = {"document_id": "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d"}
     out = _pseudonymize_trail(trail, known, reg)
-    assert "oglethorpe" not in out["document_id"].lower()
+    assert "placeholder" not in out["document_id"].lower()
     # Matches the aliased citation.document_id form pseudonymize_document_id emits.
     assert out["document_id"] == pseudonymize_document_id(trail["document_id"], known, reg)
 
@@ -825,10 +825,10 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
     from playbook_engine.pipeline import _pseudonymize_trail
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    v1 = "01__Affiliation Agreement - Oglethorpe University 1.1.24"
-    v2 = "02__Affiliation Agreement - Oglethorpe University 1.5.24"
-    v3 = "03__Affiliation Agreement - Oglethorpe University 1.10.24"
+    known = ["Placeholder University"]
+    v1 = "01__Affiliation Agreement - Placeholder University 1.1.24"
+    v2 = "02__Affiliation Agreement - Placeholder University 1.5.24"
+    v3 = "03__Affiliation Agreement - Placeholder University 1.10.24"
     trail = {
         "document_id": "deal-001",
         "ordered_versions": [v1, v2, v3],
@@ -846,7 +846,7 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
                 "clause_path": "1",
                 "version_inserted": v2,
                 "version_removed": v3,
-                "proposed_text": "Oglethorpe University shall retain audit rights.",
+                "proposed_text": "Placeholder University shall retain audit rights.",
                 "char_span": [0, 10],
             }
         ],
@@ -854,7 +854,7 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
 
     out = _pseudonymize_trail(trail, known, reg)
     serialized = json.dumps(out).lower()
-    assert "oglethorpe" not in serialized, f"raw counterparty name leaked into trail: {out}"
+    assert "placeholder" not in serialized, f"raw counterparty name leaked into trail: {out}"
 
     # Structure preserved: same number of entries, same non-name fields intact.
     assert len(out["ordered_versions"]) == 3
