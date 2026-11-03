@@ -123,7 +123,7 @@ A playbook is a single JSON object:
 ### 3.1 Top-level fields
 - `opf_version` (string, required) — `"0.6"`, the one supported version.
 - `agreement_type` (object, required) — `id` (slug), `name`, `description`, `aliases[]`.
-- `perspective` (object, OPTIONAL) — whose side this playbook is reviewed *as*: `party` (our legal entity/party name) and `counterparty_type` (what the other side typically is, e.g. `"Educational Institution"`). An open-standard OPF instance must say who "us" is — negotiation knowledge is meaningless without it. Owned by OPF (see `OPF-BUNDLE-BOUNDARY.md`).
+- `perspective` (object; schema-optional, normatively REQUIRED of a producer) — a producer MUST emit it: the schema leaves it optional only because the 1.x stability policy forbids adding a required field, `playbook validate` reports its absence as a warning, and the reference consumer (contract-toaster) refuses an instance without it. It says whose side this playbook is reviewed *as*: `party` (our legal entity/party name) and `counterparty_type` (what the other side typically is, e.g. `"Educational Institution"`). An open-standard OPF instance must say who "us" is — negotiation knowledge is meaningless without it. Owned by OPF (see `OPF-BUNDLE-BOUNDARY.md`).
 - `de_minimis` (array of strings, OPTIONAL) — categories of change accepted even when technically novel (e.g. `"typo fixes"`, `"renumbering with no substantive change"`). This is negotiation knowledge, not a runtime policy, so it lives in OPF rather than the consumer's bundle.
 
   `agreement_type` is the shared cross-tool key for "which contract type is this" — a

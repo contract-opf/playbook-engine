@@ -13,6 +13,12 @@ baseline:
 # Path relative to this config file.
 taxonomy: ../../spec/taxonomy/affiliation-agreement.yaml
 
+# Whose "us" this playbook is reviewed as (OPF-SPEC §3.1). Without it the
+# compiled playbook validates with a warning and the toaster refuses it.
+perspective:
+  party: "FixtureCorp"
+  counterparty_type: "Educational Institution"
+
 provenance:
   our_party_aliases:
     - "FixtureCorp"

@@ -366,8 +366,24 @@ def test_missing_perspective_gets_should_warn() -> None:
     offending = [e for e in result.errors if e.path == "perspective"]
     assert offending, [str(e) for e in result.errors]
     assert "§3.1" in offending[0].message
+    assert "toaster" in offending[0].message  # QA-2026-11-03 #14: honest about who refuses it
     assert all(not e.blocking for e in offending)
     assert result.ok, [str(e) for e in result.errors]
+
+
+def test_stub_basis_present_gets_a_non_blocking_warning() -> None:
+    """QA-2026-11-03 #15: a stub-judged playbook validates OK but says so."""
+    doc = _minimal()
+    doc["compiler"]["stub_basis_present"] = True
+    result = validate_document(_refresh(doc))
+    stub = [e for e in result.errors if e.path == "compiler.stub_basis_present"]
+    assert stub and "toaster" in stub[0].message and not stub[0].blocking
+    assert result.ok, [str(e) for e in result.errors]
+    clean = _minimal()
+    clean["compiler"]["stub_basis_present"] = False
+    assert not any(
+        e.path == "compiler.stub_basis_present" for e in validate_document(_refresh(clean)).errors
+    )
 
 
 def test_perspective_present_suppresses_the_warning() -> None:

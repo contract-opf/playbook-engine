@@ -529,3 +529,23 @@ def test_count_stored_verdicts_counts_distinct_keys_and_ignores_bad_lines(tmp_pa
         encoding="utf-8",
     )
     assert est.count_stored_verdicts(str(tmp_path)) == 2
+
+
+def test_rtf_only_corpus_is_costed_in_seconds_and_asks_no_scanned_pdf_question(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """QA-2026-11-03 #46: RTF goes through pandoc, not docling, so it is costed in
+    seconds, and the scanned-PDF advice appears only when a scan exists."""
+    est = _load_estimator()
+    corpus = tmp_path / "corpus"
+    for i in range(17):
+        (corpus / f"deal{i}").mkdir(parents=True)
+        (corpus / f"deal{i}" / "v1.rtf").write_text(r"{\rtf1 Fictional text.}", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    sys.argv = ["estimate_runtime.py", str(corpus), str(out_dir)]
+    est.main()
+    out = capsys.readouterr().out
+    assert "Scanned PDFs dominate" not in out
+    eta = next(line for line in out.splitlines() if line.startswith("EXTRACTION/OCR ETA"))
+    assert "0m–0m" in eta, eta
