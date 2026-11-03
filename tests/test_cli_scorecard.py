@@ -198,6 +198,8 @@ _FIELD_NAMES = frozenset(
         "signed_on",
         "dated",
         "null_dates",
+        "preamble_signature_conflicts",
+        "reason_flagged",
         # Issue #251: verified absence counts and their sampled check.
         "absence",
         "guard",
@@ -311,6 +313,7 @@ _NDA_FLAT_KEYS = frozenset(
                 "check_sample",
                 "checked",
                 "wrong",
+                "reason_flagged",
             )
         ),
         *(
@@ -516,6 +519,7 @@ _NDA_FLAT_KEYS = frozenset(
         "signed_on.dated",
         "signed_on.in_scope",
         "signed_on.null_dates",
+        "signed_on.preamble_signature_conflicts",
         "signed_on.signed",
         "template.clauses",
         "template.clauses_with_our_standard",
