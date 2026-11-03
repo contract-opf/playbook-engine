@@ -292,6 +292,13 @@ def _render_playbook_clause(
             f"kept it in {clause.get('n_kept_prior', 0)}, moved to today's in "
             f"{clause.get('n_moved_to_current', 0)}"
         )
+    n_absent = (dclause or {}).get("n_signed_without_verified") or 0
+    n_maybe = (dclause or {}).get("n_signed_without_possible") or 0
+    if n_absent or n_maybe:
+        meta.append(
+            f"signed without it: {n_absent} verified absent, {n_maybe} possibly present "
+            "(see the Evidence tab)"
+        )
     positions = (dclause or {}).get("positions") or {}
     pos_bits = [f"{positions['standard']} signed our standard"] if positions.get("standard") else []
     for label in REVIEW_LABEL_ORDER:
@@ -439,6 +446,13 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
         for v in _ingest_records(d)
         if isinstance(v, dict) and v.get("status") == "failed"
     )
+    n_quarantined = sum(1 for d in docs if d.get("x_quarantined") is True)
+    quarantined_note = (
+        f" ({n_quarantined} quarantined document(s) among them: every version failed "
+        "extraction, so they contribute no evidence)"
+        if n_quarantined
+        else ""
+    )
     unclassified = (stats.get("unclassified") or {}).get("count", 0)
     dev_counts: dict[str, int] = {}
     n_obs = 0
@@ -460,6 +474,13 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
             "were never assessed by a real judge"
         )
     content_hash = str(identity.get("content_hash", ""))
+    # QA-2026-11-03 #21: say so only when a record carries an alias, i.e. entities
+    # were configured (with none, pseudonymization is a no-op and the sentence is false).
+    pseudo = (
+        ", and counterparty names are pseudonymized at ingestion"
+        if any(isinstance(r.get("counterparty_ref"), dict) for r in playbook_precedent(doc))
+        else ""
+    )
     return f"""<section class="clause" id="method">
   <h2>Method &amp; provenance</h2>
   <p>This playbook was <b>compiled from evidence, not authored</b>: ingest &rarr;
@@ -468,16 +489,16 @@ def _render_method_panel(doc: dict[str, Any]) -> str:
   deterministic assembly &rarr; schema + normative validation.</p>
   <ul>
     <li><b>Corpus:</b> {n_in_scope} of {n_total} agreements in scope ({n_excluded} excluded with
-      recorded rationale), {n_versions} negotiation versions; {failed_versions} version file(s)
-      failed extraction and are quarantined, not silently dropped.</li>
+      recorded rationale){quarantined_note}, {n_versions} negotiation versions;
+      {failed_versions} version file(s) failed extraction and are quarantined, not silently
+      dropped.</li>
     <li><b>Drafting origin:</b> {n_our} agreements on our paper, {n_cp} on counterparty
       paper{unknown_paper} — judged from each document's recitals and form structure.</li>
     <li><b>Judged evidence:</b> {n_obs} observed clause positions ({dev_line}); {unclassified}
       clause instances remain unclassified and are counted, not hidden.</li>
     <li><b>Judging:</b> {judge_line}.</li>
     <li><b>Traceability:</b> every position cites the exact document, version and character span
-      it came from; source files are pinned by SHA-256 in the machine-readable playbook, and
-      counterparty names are pseudonymized at ingestion.</li>
+      it came from; source files are pinned by SHA-256 in the machine-readable playbook{pseudo}.</li>
     <li><b>Integrity:</b> content hash <code>{_esc(content_hash[:16])}&hellip;</code> — any edit
       to the compiled content changes this fingerprint.</li>
   </ul>
@@ -536,12 +557,48 @@ _OPENED = {
 }
 
 
-def _render_deal_trail(records: list[dict[str, Any]]) -> str:
+_PAPER_NAMES = {"ours": "our paper", "theirs": "their paper", "unknown": "paper unknown"}
+_DATE_BASIS = {
+    "document_text": "document text",
+    "signature_block": "signature block",
+    "filename": "file name",
+    "file_metadata": "file metadata",
+}
+
+
+def _deal_basis_text(record: dict[str, Any], deal: dict[str, Any] | None) -> str:
+    """How this deal's paper, signing date and signed-text label were arrived at
+    (QA-2026-11-03 #43): compact, so an ambiguous or weakly based call is visible
+    next to the deal instead of only in the JSON."""
+    paper = _PAPER_NAMES.get(str(record.get("paper")), "paper unknown")
+    basis = str(record.get("paper_basis") or "").replace("_", " ")
+    conf = record.get("paper_confidence")
+    detail = ", ".join(
+        b for b in (basis, f"{round(conf * 100)}%" if isinstance(conf, int | float) else "") if b
+    )
+    bits = [f"{paper} ({detail})" if detail else paper]
+    if (deal or {}).get("provenance_is_ambiguous") is True:
+        bits[0] += " - AMBIGUOUS: the detection could not tell which side drafted it"
+    date_basis = (deal or {}).get("signed_on_basis")
+    if record.get("signed_on") and date_basis:
+        bits.append(f"date from {_DATE_BASIS.get(str(date_basis), str(date_basis))}")
+    signed = record.get("signed_text")
+    vs = signed.get("vs_standard") if isinstance(signed, dict) else None
+    if isinstance(vs, dict) and vs.get("basis"):
+        check = vs.get("check")
+        bits.append(f"label judged by {vs['basis']}" + (f", {check}" if check else ", unchecked"))
+    return "; ".join(bits)
+
+
+def _render_deal_trail(
+    records: list[dict[str, Any]], deals: dict[str, dict[str, Any]] | None = None
+) -> str:
     """One row per deal: how its draft opened and what was signed.
 
     The Signed column is dropped when no deal carries a ``signed_on`` (a corpus
     whose dates were coarsened away would otherwise show a column of dashes).
     """
+    deals = deals or {}
     dated = any(r.get("signed_on") for r in records)
     rows = "".join(
         "<tr>"
@@ -551,6 +608,7 @@ def _render_deal_trail(records: list[dict[str, Any]]) -> str:
         f"<td>{_esc(_outcome(r))}</td>"
         f'<td class="num">{len(r.get("refused_asks") or [])}</td>'
         f'<td class="num">{r.get("rounds", 0)}</td>'
+        f'<td class="hint">{_esc(_deal_basis_text(r, deals.get(str(r.get("document_id")))))}</td>'
         "</tr>"
         for r in sorted(records, key=lambda r: (str(r.get("document_id")), str(r.get("id"))))
     )
@@ -559,9 +617,32 @@ def _render_deal_trail(records: list[dict[str, Any]]) -> str:
         '<div class="table-wrap"><table><thead><tr><th>Deal</th>'
         + ("<th>Signed</th>" if dated else "")
         + '<th>Opened with</th><th>Result</th><th class="num">Refused asks</th>'
-        '<th class="num">Rounds</th></tr></thead>'
+        '<th class="num">Rounds</th><th>Basis</th></tr></thead>'
         f"<tbody>{rows}</tbody></table></div>"
     )
+
+
+def _render_absence(absent: list[dict[str, Any]]) -> str:
+    """Deals signed WITHOUT this clause (QA-2026-11-03 #19): verified absent (the
+    deal's text was scored against the clause and nothing resembles it) versus
+    possibly present (some unfiled text resembles it, so absence is not claimed)."""
+    verified = sorted(
+        str(a.get("document_id")) for a in absent if a.get("status") == "absent_verified"
+    )
+    possible = sorted(
+        str(a.get("document_id")) for a in absent if a.get("status") == "possibly_present"
+    )
+    if not verified and not possible:
+        return ""
+    bits = []
+    if verified:
+        bits.append(f"verified absent in {len(verified)} ({', '.join(verified)})")
+    if possible:
+        bits.append(
+            f"possibly present in {len(possible)} ({', '.join(possible)}): text resembling it "
+            "sits elsewhere, so absence is not claimed"
+        )
+    return f'<p class="meta">Signed without this clause: {_esc("; ".join(bits))}.</p>'
 
 
 def _render_evidence_clause(
@@ -571,6 +652,8 @@ def _render_evidence_clause(
     number: int,
     *,
     party: str | None,
+    deals: dict[str, dict[str, Any]] | None = None,
+    absence: list[dict[str, Any]] | None = None,
 ) -> str:
     tid = clause.get("taxonomy_id")
     title = _clause_title(clause, tax_labels)
@@ -589,7 +672,8 @@ def _render_evidence_clause(
         f'<details class="clause card" id="ev-{number}">',
         f'<summary><strong class="ev-title">{number}. {_esc(title)}</strong>'
         f'<span class="pills">{meta}</span></summary>',
-        _render_deal_trail(records),
+        _render_deal_trail(records, deals),
+        _render_absence([a for a in absence or [] if a.get("taxonomy_id") == tid]),
     ]
     if groups["signed_variants"]:
         parts.append(
@@ -635,8 +719,20 @@ def _render_evidence_tab(
 ) -> str:
     precedent = playbook_precedent(doc)
     party = perspective_party(doc)
+    deals = {
+        str(d.get("document_id")): d
+        for d in doc.get("corpus", {}).get("documents", [])
+        if isinstance(d, dict)
+    }
+    absence = [
+        a
+        for a in ((doc.get("evidence") or {}).get("absence") or {}).get("records") or []
+        if isinstance(a, dict)
+    ]
     body = "\n".join(
-        _render_evidence_clause(c, precedent, tax_labels, i, party=party)
+        _render_evidence_clause(
+            c, precedent, tax_labels, i, party=party, deals=deals, absence=absence
+        )
         for i, c in enumerate(clauses_sorted, start=1)
     )
     uncovered = [u for u in digest.get("uncovered_clause_types") or [] if isinstance(u, dict)]

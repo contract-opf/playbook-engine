@@ -560,11 +560,14 @@ def test_all_versions_failed_document_is_quarantined(tmp_path: Path) -> None:
     assert "deal-001" in entries
     assert "all versions failed" in entries["deal-001"]["reason"]
 
-    # The quarantined document contributes nothing to the manifest — the
-    # quarantine record is its ONLY durable trace.
+    # QA-2026-11-03 #12: the quarantined document also gets a partial, flagged
+    # corpus record (out of scope, failed version rows) so corpus counts include it.
     manifest = json.loads((out_dir / "corpus_manifest.json").read_text(encoding="utf-8"))
-    assert "deal-001" not in {d["document_id"] for d in manifest}
-    assert "deal-002" in {d["document_id"] for d in manifest}
+    by_id = {d["document_id"]: d for d in manifest}
+    assert by_id["deal-001"]["x_quarantined"] is True
+    assert by_id["deal-001"]["in_scope"] is False
+    assert [v["status"] for v in by_id["deal-001"]["version_ingest"]] == ["failed"]
+    assert "x_quarantined" not in by_id["deal-002"]
 
 
 # ---------------------------------------------------------------------------

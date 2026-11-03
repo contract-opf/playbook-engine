@@ -199,22 +199,22 @@ Then re-run `playbook mine` (no flag needed) followed by `playbook project` to p
 ## Re-running after changes
 
 ```bash
-# Default: resumes from saved observations (fast)
+# Incremental: only new or changed documents are re-mined (also after adding documents)
 playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out
 playbook project ./out --config ./corpus/playbook.config.yaml
 
-# Force full re-run (e.g. after adding new documents) — also forces re-extraction, even if the documents were already extracted once
+# Rebuild from scratch (suspect extractions only) — re-extracts the whole corpus
 playbook mine ./corpus --config ./corpus/playbook.config.yaml --out ./out --no-cache
 playbook project ./out --config ./corpus/playbook.config.yaml
 ```
 
-The engine auto-detects corpus changes (new files, modified files) and forces a full re-run even without `--no-cache`.
+The engine auto-detects corpus changes (new files, modified files) and re-mines just those documents, so adding documents does not need `--no-cache`.
 
 ---
 
 ## For LLM judgment stages
 
-The engine ships with **stub judges** that run without LLM access. They produce valid output but do not perform semantic judgment:
+The engine ships with **stub judges** that run without LLM access. They produce valid output but do not perform semantic judgment, and the result is watermarked `stub_basis_present` — the toaster refuses it, so it is for looking at, not for sharing or installing (`playbook validate` warns about it):
 
 - Every document is accepted as in-scope.
 - Clause deviations are not judged: each is the deterministic standard
@@ -224,9 +224,11 @@ The engine ships with **stub judges** that run without LLM access. They produce 
 
 For real semantic judgment, you don't write code: use the packaged
 [`playbook-from-corpus` skill](../.claude/skills/playbook-from-corpus/SKILL.md)
-(Claude acts as the judge on your plan — no API key) or configure an
-`ANTHROPIC_API_KEY` for headless judges; [PLAN-FIRST.md](PLAN-FIRST.md)
-compares the two, stage by stage.
+(Claude acts as the judge on your plan — no API key). There is no
+headless judging path: an `ANTHROPIC_API_KEY` only powers LLM segmentation
+and the equivalence blind-check queue, so `mine` + `project` alone always
+produce a stub-basis playbook. [PLAN-FIRST.md](PLAN-FIRST.md) lists what
+needs a key, stage by stage.
 
 Once judgment is real, how far you take the playbook from there — your
 own intent and signed hard lines — is entirely optional:

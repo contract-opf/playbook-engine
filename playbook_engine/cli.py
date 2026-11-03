@@ -1735,7 +1735,9 @@ def stage_cmd(
             click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
         click.echo(f"plan   : {executed_plan_file} (preserved as the staging record)")
         _scaffold_config_or_exit(resolved, dest, prior_templates)
-        click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
+        click.echo(
+            f"config : {dest / 'playbook.config.yaml'} (skeleton — confirm agreement_type.id, choose or confirm the taxonomy)"
+        )
         click.secho(f"OK  {dest}", fg="green")
         return
 
@@ -1776,7 +1778,9 @@ def stage_cmd(
         click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
 
     _scaffold_config_or_exit(resolved, dest, prior_templates)
-    click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
+    click.echo(
+        f"config : {dest / 'playbook.config.yaml'} (skeleton — confirm agreement_type.id, choose or confirm the taxonomy)"
+    )
 
     if result.missing:
         click.secho(
