@@ -17,7 +17,7 @@ Turn a folder of contract files into a negotiation playbook — without writing 
    semantically blank (see the banner above). Deviation is not a judgment
    stage by default: every clause gets the deterministic standard check
    (does its text match your template clause?).
-4. **Emits** a validated `playbook.opf.json` you can review and share.
+4. **Emits** a validated `playbook.opf.json` you can look at. It is stub-judged, so it is not ready to share or install in the toaster.
 
 ---
 

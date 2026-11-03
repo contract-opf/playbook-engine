@@ -3612,8 +3612,10 @@ def apply_overrides_cmd(out_dir: Path) -> None:
     the engine, and the result is validated. ``playbook project`` folds the
     same file in on every projection.
 
-    A malformed file, or an entry naming an id the playbook does not carry,
-    is rejected with the reason and NOTHING changes. Re-applying an applied
+    A malformed file is rejected with the reason and NOTHING changes. An
+    entry that cannot be applied (an id the playbook does not carry, a signed
+    Floor line, a Posture/Floor edited since the page was made) is refused
+    and named; the other entries are still applied. Re-applying an applied
     file is a no-op. Rebuild the page afterwards: ``playbook view bundle``.
     """
     from playbook_engine.overrides import (  # noqa: PLC0415
@@ -3624,7 +3626,7 @@ def apply_overrides_cmd(out_dir: Path) -> None:
 
     resolved = out_dir.resolve()
     try:
-        result = apply_overrides_to_dir(resolved)
+        result = apply_overrides_to_dir(resolved, strict=False)
     except FileNotFoundError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
@@ -3636,6 +3638,15 @@ def apply_overrides_cmd(out_dir: Path) -> None:
             click.secho(f"  {problem}", fg="red", err=True)
         raise SystemExit(1) from exc
 
+    if result.skipped:
+        click.secho(
+            f"WARN {len(result.skipped)} override(s) refused (the others were applied; the "
+            f"refused ones stay in {OVERRIDES_FILENAME} until you fix or remove them):",
+            fg="yellow",
+            err=True,
+        )
+        for problem in result.skipped:
+            click.secho(f"  {problem}", fg="yellow", err=True)
     if result.n_changed:
         bits = ", ".join(f"{n} {target}" for target, n in result.changed.items() if n)
         click.secho(
@@ -3650,6 +3661,8 @@ def apply_overrides_cmd(out_dir: Path) -> None:
             f"{resolved / 'playbook.opf.json'}",
             fg="green",
         )
+    if result.skipped:
+        raise SystemExit(1)
 
 
 @cli.command(name="install-steps")
