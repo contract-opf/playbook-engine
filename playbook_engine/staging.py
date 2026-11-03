@@ -834,7 +834,7 @@ def scaffold_config(
         "  known_entities: []",
         "  known_entities: []  # counterparty names to pseudonymize at ingest\n"
         "  #   (born-safe, issue #153). Full legal name PLUS its abbreviation/acronym\n"
-        "  #   (e.g. 'The City University of New York' AND 'CUNY') — empty = NO\n"
+        "  #   (e.g. 'The Placeholder State University' AND 'PSU') — empty = NO\n"
         "  #   pseudonymization. Derive these from the corpus, not guesswork.",
     )
     # Older versions of our form: always shown, as an in-file reminder that
