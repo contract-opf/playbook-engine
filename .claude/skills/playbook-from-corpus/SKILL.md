@@ -213,6 +213,31 @@ Record the answers; they decide whether the run is template mode or emergent
 mode. Do **not** ask "who are your counterparties", and ask "which party is us"
 only as the multiple-choice question below, after you have read the recitals.
 
+## Choose the taxonomy and confirm the agreement id (Route A and C, before `lint-corpus`)
+
+`playbook.config.yaml` needs a `taxonomy:` (the clause vocabulary) and an
+`agreement_type.id` (the key the toaster identifies this playbook by). Neither
+is the lawyer's engineering problem: decide the taxonomy yourself, then show both
+for ONE confirm.
+
+- **Taxonomy.** `playbook stage` fills in `builtin:nda.yaml` or
+  `builtin:affiliation-agreement.yaml` when the folder name says so, and
+  otherwise leaves `FILL_IN_TAXONOMY_PATH` (lint errors until it is set). The
+  four bundled choices (`spec/taxonomy/`) are written `builtin:<file>`:
+  `nda.yaml` (NDAs), `affiliation-agreement.yaml` (educational affiliation),
+  `general-commercial.yaml` (indemnification, force majeure, boilerplate) and
+  `cuad-base.yaml` (the 41 CUAD categories, type-neutral — the default when
+  nothing fits the agreement type). If none fits well, derive one from the
+  corpus: `playbook induce-taxonomy` (see `docs/ADOPTING.md`), then curate the
+  result (prune with `status: inactive`, never delete).
+- **Agreement id.** `agreement_type.id` is the slug of the source folder name
+  unless the config already carries one. Show it with the display name. It is the
+  toaster's playbook key: changing it later makes the toaster treat the playbook
+  as a different one, so pick it deliberately now (an `aliases:` entry can keep
+  an older id bound). On Route C keep the id already in the restored config.
+- Ask once, as a clickable choice: "Use `<taxonomy>` and id `<id>`?" with the
+  alternatives as the other options.
+
 ## Derive party names automatically (do this before `mine`)
 
 Provenance judgment and born-safe pseudonymization both hinge on party names,
@@ -666,6 +691,8 @@ exit 0. Common fixes:
 | `CORPUS_DANGLING_SYMLINKS` | The corpus is symlinks pointing at files that aren't reachable from here — re-run `playbook stage` (real copies are the default). This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it (see the Step 1 warning above). |
 | `CONFIG_NOT_FOUND` | Create `playbook.config.yaml` from the example |
 | `CONFIG_TEMPLATE_NOT_FOUND` | Fix the `baseline.template` path or set to `null` |
+| `CONFIG_TAXONOMY_NOT_FOUND` (e.g. `FILL_IN_TAXONOMY_PATH`) | `playbook stage` could not tell which vocabulary fits. Do the "Choose the taxonomy" step below, then set `taxonomy:` in `playbook.config.yaml` |
+| `DOC_PDF_NO_TEXT` (warning) | The PDF is a scan with no text layer. Check the docling/OCR tooling is present (Step 2b); otherwise ask for a text PDF or DOCX. A deal whose every file fails is quarantined and left out of the playbook, never silently |
 | `CONFIG_EXTRACTION_DOCLING_MISSING` | The config declares docling and it isn't installed — run in the container, or change `extraction.extractor` |
 
 These same checks now run automatically as a preflight inside `mine`,
@@ -1362,12 +1389,12 @@ ship as-is — evidence is advisory by contract (OPF-SPEC.md §5), and a consume
 that wants binding guidance asks for a Posture and a Floor.
 
 **What a consuming review application sees at Rung 0:** stopping here is a
-legitimate endpoint, but it is not free for the consumer. In
-`contract-toaster`, an empty `posture` makes review composition refuse to run
-until the operator explicitly passes `accept_empty_posture=True` — a
-deliberate, on-the-record choice, never a silent default. Say this to the
-user before they walk away: whoever consumes this artifact for review will
-hit that refusal (or have to opt into it) the first time they run one.
+legitimate endpoint. `contract-toaster` accepts an empty `posture` and runs the
+review on the Evidence alone (its review pipeline always passes
+`accept_empty_posture=True`, so there is no refusal and nothing to opt into).
+What it loses is binding guidance: with no Posture and no Floor the reviewing
+model weighs the precedent without the owner's stated intent or walk-away lines.
+Say this to the user before they walk away.
 
 ### Step 7b — Floor: propose, then let the human sign (Rung 2)
 
