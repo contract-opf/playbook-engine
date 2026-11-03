@@ -106,6 +106,9 @@ _DOCLING_STACK = "docling=2.140.0;ocr=tesseract;lang=iso:en"
 _T_BORN_DIGITAL = 60  # ~1 min
 _T_SCANNED = 120  # ~2 min (measured 30-180 s)
 _T_DOCX = 45  # docx: docling or fast legacy fallback
+# RTF never goes through docling: it is converted by pandoc (a NDA corpus of 17
+# RTF versions mined in about 8 s), so it costs seconds, not the docx rate.
+_T_RTF = 1
 # very rough: extracted tokens per MB of raw source, from observed runs.
 _TOKENS_PER_MB = 13_800
 
@@ -309,7 +312,7 @@ def main() -> None:
                 per_file = _T_DOCX
             elif low.endswith(".rtf"):
                 n_rtf += 1
-                per_file = _T_DOCX
+                per_file = _T_RTF
             elif is_scanned_pdf(f):
                 n_pdf_scanned += 1
                 per_file = _T_SCANNED
@@ -388,8 +391,9 @@ def main() -> None:
     print("                            deterministic standard check)")
     print("=" * 60)
     if n_uncached:
-        print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")
-        print("separately, exclude them, or accept the wait. Confirm before proceeding.")
+        if n_pdf_scanned:
+            print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")
+            print("separately, exclude them, or accept the wait. Confirm before proceeding.")
         print("Point --out at a prior run's out dir to reuse its extraction cache.")
 
 

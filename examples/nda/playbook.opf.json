@@ -6904,7 +6904,8 @@
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
         "x_signed_at": "2026-10-21T12:34:11+00:00",
-        "x_taxonomy_id": "limitation_of_liability"
+        "x_taxonomy_id": "limitation_of_liability",
+        "x_signed_hash": "sha256:15f79b7ea7089ce45867a57c8539684d6fc0e13a998b68615d16173dcac278da"
       }
     ]
   },
@@ -10830,11 +10831,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:d5df096e604dfbe0e088d09a0fc79a6a9799d833eae6f676c16cb9334e0c0596",
+    "content_hash": "sha256:709061543cbd8aef309bd9873b513976ed8bbff1f7b17d30e2492604a54496e3",
     "section_digests": {
       "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
       "posture": "sha256:2917e416528a64c119934e8b7b1b69a3d5d3671978ec4d7d80ced9845aa8a4d6",
-      "floor": "sha256:8fea54a4f67eafb57e32f063c4a8f34d060bdf574662d0f515a17f39dab3edeb"
+      "floor": "sha256:0a9150fe26d2e8c8638be70685aa060d199da1d2836bf27bcee188b641fd7011"
     }
   }
 }
