@@ -2457,6 +2457,9 @@ def judge_cmd(
     # contract SKILL.md documents). PendingQueue appends and never truncates,
     # so without this a re-run after judge-apply keeps the prior round's stale
     # entries and the drain loop can never reach empty (issue #182).
+    # The previous queue is kept in memory and put back if this round fails, so a
+    # crash mid-round never leaves a partial queue that looks complete (QA-2026-11-03 #40).
+    prior_pending = pending_path.read_bytes() if pending_path.is_file() else None
     pending_path.unlink(missing_ok=True)
 
     pending_queue = PendingQueue(pending_path)
@@ -2518,9 +2521,15 @@ def judge_cmd(
             taxonomy,
             StoreBackedAbsenceCheckJudge(store=store, pending=pending_queue, rubric=rubric_policy),
         )
-    except PipelineError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
+    except BaseException as exc:
+        if prior_pending is not None:
+            pending_path.write_bytes(prior_pending)
+        else:
+            pending_path.unlink(missing_ok=True)
+        if isinstance(exc, PipelineError):
+            click.secho(f"ERROR: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        raise
 
     # Stamp the out-dir with the environment that just wrote into it (issue
     # #121). Normal mode only — the --plan branch above returns before this,
@@ -2593,6 +2602,8 @@ def judge_cmd(
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
         _echo_rubric_report(rubric_policy, click.echo)
 
+    _record_judged_counts(store, out_dir)
+
     # This round ran mine_corpus to completion (the except PipelineError
     # branch above exits before here). pending_path is unlinked at the top
     # of this function and PendingQueue only creates the file lazily via
@@ -2607,6 +2618,33 @@ def judge_cmd(
         tmp_pending = pending_path.with_name(pending_path.name + ".tmp")
         tmp_pending.write_text("", encoding="utf-8")
         os.replace(tmp_pending, pending_path)
+
+
+def _record_judged_counts(store: Any, out_dir: Path) -> None:
+    """Print and record how many judgments the verdict store holds, by kind.
+
+    The agent that judges is billed outside the engine, so no token or dollar
+    figure can be measured here; the item counts are the honest record of the
+    judging work behind this out-dir (QA-2026-11-03 #41). Best-effort, like the
+    run manifest.
+    """
+    import json  # noqa: PLC0415
+
+    from playbook_engine.agent_judge import count_judged_items  # noqa: PLC0415
+
+    counts = count_judged_items(store)
+    total = sum(v for k, v in counts.items() if not k.startswith(("blind_", "adjud")))
+    detail = ", ".join(f"{k}: {c}" for k, c in sorted(counts.items()))
+    click.echo(f"Judged items in the verdict store: {total}" + (f" ({detail})" if detail else ""))
+    try:
+        target = out_dir / "judge" / "judged_counts.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps({"total": total, "by_kind": counts}, indent=1, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:  # pragma: no cover - read-only out-dir
+        click.secho(f"note: could not write judged_counts.json ({exc})", fg="yellow", err=True)
 
 
 def _check_file_kind(check_path: Path) -> str:
@@ -2826,6 +2864,8 @@ def judge_apply_cmd(
     pending_part_ids: dict[str, list[str]] = {}
     # deal_date items: the passages the answer's quote must occur in (issue #247).
     pending_payloads: dict[str, dict[str, Any]] = {}
+    # classify items: the taxonomy ids the answer may name (QA-2026-11-03 #40).
+    pending_taxonomy_ids: dict[str, set[str]] = {}
     pending_path = out_dir_resolved / "judge" / "pending.jsonl"
     if pending_path.is_file():
         for pline in pending_path.read_text(encoding="utf-8").splitlines():
@@ -2847,6 +2887,9 @@ def judge_apply_cmd(
                     pending_part_ids[pitem["key"]] = [
                         str(p.get("part_id")) for p in std_parts if isinstance(p, dict)
                     ]
+                tax_ids = payload.get("taxonomy_ids") if isinstance(payload, dict) else None
+                if pitem["kind"] == "classify" and isinstance(tax_ids, list):
+                    pending_taxonomy_ids[pitem["key"]] = {str(t) for t in tax_ids}
                 if pitem["kind"] in ("deal_date", "subsplit") and isinstance(payload, dict):
                     pending_payloads[pitem["key"]] = payload
 
@@ -2900,6 +2943,19 @@ def judge_apply_cmd(
             raise SystemExit(1)
         try:
             validate_verdict(kind, record["verdict"])
+            allowed_ids = pending_taxonomy_ids.get(record["key"])
+            given_id = record["verdict"].get("taxonomy_id")
+            if (
+                kind == "classify"
+                and allowed_ids is not None
+                and given_id is not None
+                and given_id not in allowed_ids
+            ):
+                raise ValueError(
+                    f"taxonomy_id {given_id!r} is not in the taxonomy this item was asked "
+                    f"against (allowed: {', '.join(sorted(allowed_ids))}); use one of those "
+                    "ids, or null if no clause type fits"
+                )
             if kind == "equivalence":
                 # Issue #243: stored with its DERIVED label, and checked
                 # against the parts of our standard the item asked about.

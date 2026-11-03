@@ -750,8 +750,8 @@ def _render_review_tab(doc: dict[str, Any], review: ReviewRows) -> str:
 labels themselves are in the digest of <code>{PLAYBOOK_FILE}</code>.</section></noscript>
 <div class="filters" role="group" aria-label="Filter">{filters}</div>
 <div class="bulk">
-  <button type="button" class="btn secondary" id="bulk-confirm">Confirm all in this view</button>
-  <button type="button" class="btn secondary" id="bulk-undo">Undo all in this view</button>
+  <button type="button" class="btn secondary" id="bulk-confirm">Confirm unreviewed shown</button>
+  <button type="button" class="btn secondary" id="bulk-undo">Undo shown</button>
 </div>
 <div id="review-list"></div>
 <p id="review-empty" hidden class="muted">Nothing to show for this filter.</p>
@@ -876,6 +876,29 @@ def _initial_overrides(out_dir: Path) -> str | None:
         return None
 
 
+def _invalid_banner(doc: dict[str, Any]) -> str:
+    """A banner when *doc* fails validation, so the page is never read as a clean playbook."""
+    from playbook_engine.validator import validate_document
+
+    try:
+        blocking = [e for e in validate_document(doc).errors if e.blocking]
+    except Exception as exc:  # a malformed document must still render, with the warning
+        return (
+            '<section class="pending" role="alert"><strong>This playbook could not be '
+            f"validated</strong> ({_esc(type(exc).__name__)}). Do not install or share it.</section>\n"
+        )
+    if not blocking:
+        return ""
+    shown = "".join(f"<li>{_esc(str(e))}</li>" for e in blocking[:5])
+    more = f"<li>and {len(blocking) - 5} more</li>" if len(blocking) > 5 else ""
+    return (
+        '<section class="pending" role="alert"><strong>This playbook fails validation '
+        f"({len(blocking)} error{'' if len(blocking) == 1 else 's'}).</strong> Do not install "
+        "or share it. Run <code>playbook validate</code> for the full list."
+        f"<ul>{shown}{more}</ul></section>\n"
+    )
+
+
 def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
     """Render ``index.html`` for the playbook in *out_dir*; write it to *out_file* when given.
 
@@ -969,6 +992,7 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
         + (_json_block("overrides-initial", initial) if initial is not None else "")
     )
 
+    invalid_banner = _invalid_banner(doc)
     html_out = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -980,7 +1004,7 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
 </head>
 <body>
 <main>
-<header class="cover">
+{invalid_banner}<header class="cover">
   <div class="subtitle">Negotiation Playbook</div>
   <h1>{_esc(name)}</h1>
   <p class="meta">{_esc(version_line)}</p>

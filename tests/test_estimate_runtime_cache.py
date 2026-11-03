@@ -515,3 +515,17 @@ def test_is_scanned_pdf_warns_only_once(
     assert err.count("WARNING") == 1, (
         f"expected exactly one warning across repeated calls, got {err.count('WARNING')}"
     )
+
+
+def test_count_stored_verdicts_counts_distinct_keys_and_ignores_bad_lines(tmp_path: Path) -> None:
+    """QA-2026-11-03 #41: the estimate reports what a prior run already judged."""
+    est = _load_estimator()
+    assert est.count_stored_verdicts(str(tmp_path)) == 0
+    judge = tmp_path / "judge"
+    judge.mkdir()
+    (judge / "verdicts.jsonl").write_text(
+        '{"key": "a", "verdict": {}}\n{"key": "b", "verdict": {}}\n'
+        '{"key": "a", "verdict": {"x": 1}}\nnot json\n\n',
+        encoding="utf-8",
+    )
+    assert est.count_stored_verdicts(str(tmp_path)) == 2

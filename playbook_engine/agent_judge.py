@@ -212,6 +212,10 @@ class VerdictStore:
         """Return the full stored record (verdict + rubric stamp), or ``None``."""
         return self._lookup(_payload_key(payload))
 
+    def all_verdicts(self) -> list[dict[str, Any]]:
+        """Every stored verdict dict (last write per key), in no particular order."""
+        return [record.verdict for record in self._store.values()]
+
     @contextmanager
     def capture_lookups(self) -> Iterator[set[str]]:
         """Collect every key looked up through ``get``/``get_record`` meanwhile.
@@ -662,6 +666,28 @@ def infer_verdict_kind(verdict: dict[str, Any]) -> str | None:
         if matches(verdict):
             return kind
     return None
+
+
+def count_judged_items(store: VerdictStore) -> dict[str, int]:
+    """Count the verdicts held in *store* by kind (``"other"`` when undecidable).
+
+    Judging is done by the invoking agent, so the engine cannot measure tokens or
+    dollars; the number of items judged is the honest measure of the work done
+    (QA-2026-11-03 #41). Blind checks and adjudications live on the
+    verdict (``check``/``adjudicated``) and count under their own keys, on top of it.
+    """
+    counts: dict[str, int] = {}
+    for verdict in store.all_verdicts():
+        if not isinstance(verdict, dict):
+            continue
+        kind = infer_verdict_kind(verdict) or "other"
+        counts[kind] = counts.get(kind, 0) + 1
+        check = verdict.get("check")
+        if isinstance(check, dict):
+            counts["blind_checked"] = counts.get("blind_checked", 0) + 1
+            if check.get("adjudicated") is True:
+                counts["adjudicated"] = counts.get("adjudicated", 0) + 1
+    return counts
 
 
 # ---------------------------------------------------------------------------

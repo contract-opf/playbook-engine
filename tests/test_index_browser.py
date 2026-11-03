@@ -926,3 +926,32 @@ def test_editing_the_posture_and_a_floor_statement_writes_entries_the_engine_app
     assert after["posture"]["system_prompt"] == new_posture
     assert after["posture"]["version"] == doc["posture"]["version"] + 1
     assert after["floor"]["invariants"][0]["statement"] == new_statement
+
+
+def test_bulk_confirm_covers_only_rendered_rows_and_skips_disputed_ones(
+    out_dir: Path,
+) -> None:
+    """QA-2026-11-03 #20: the bulk button stamps what is on screen, never the unrendered
+    tail, and never a row whose blind check is still disputed."""
+    assert _EXE is not None
+    rows = build_review_rows(_doc(out_dir)).rows
+    assert len(rows) > 25, "premise: more rows than one page"
+    page = out_dir / "index.html"
+    html = page.read_text(encoding="utf-8")
+    assert '"check": "unchecked"' in html
+    page.write_text(html.replace('"check": "unchecked"', '"check": "disputed"', 1), "utf-8")
+    with Browser(_EXE) as browser:
+        browser.goto(page.as_uri())
+        browser.eval("document.querySelector('[data-tab=review]').click()")
+        _click(browser, "[data-filter=all]")
+        label = browser.eval("document.getElementById('bulk-confirm').textContent")
+        assert "24" in label and "shown" in label, label
+        _click(browser, "#bulk-confirm")
+        edits = json.loads(
+            browser.eval("JSON.stringify(window.__indexPage.fileObject().overrides)")
+        )
+        assert len(edits) == 24  # 25 rendered, one disputed; the other rows were never shown
+        shown_keys = {r["key"] for r in rows[:25]}
+        assert {e["id"] for e in edits} <= shown_keys
+        assert rows[0]["key"] not in {e["id"] for e in edits}
+        assert browser.problems() == []
