@@ -280,6 +280,22 @@ def fmt(seconds: float) -> str:
     return f"{h}h{m:02d}m" if h else f"{m}m"
 
 
+def count_stored_verdicts(out_dir: str) -> int:
+    """Number of distinct verdict keys in ``<out_dir>/judge/verdicts.jsonl`` (0 if none)."""
+    path = os.path.join(out_dir, "judge", "verdicts.jsonl")
+    keys: set[str] = set()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    keys.add(str(json.loads(line)["key"]))
+                except (ValueError, KeyError, TypeError):
+                    continue
+    except OSError:
+        return 0
+    return len(keys)
+
+
 def main() -> None:
     args = sys.argv[1:]
     corpus = args[0] if args else "."
@@ -382,10 +398,16 @@ def main() -> None:
         print(f"EXTRACTION/OCR ETA        : ~{fmt(lo)}–{fmt(hi)} wall-clock (CPU), {label}")
         print("                            (this is the expensive step; render is seconds)")
     print("LLM API cost              : $0  (key-free; agent is the judge)")
-    print(f"Judgment load (rough)     : ~{versions} scope+provenance + deduped")
-    print("                            classification items for the agent to judge")
-    print("                            (no deviation items — deviation is the")
-    print("                            deterministic standard check)")
+    print(f"Judgment load (FLOOR)     : at least ~{versions} scope+provenance items, plus")
+    print("                            deduped classification items, for the agent to judge.")
+    print("                            This is the first round only: later rounds (equivalence")
+    print("                            drafts, blind checks, adjudications, sub-splits, absence")
+    print("                            checks, origin and date items) scale with clauses and")
+    print("                            deals and can multiply the total many times over.")
+    print("                            Each item is an agent call; spend is not measured here.")
+    stored = count_stored_verdicts(out_dir)
+    if stored:
+        print(f"Already judged in {out_dir}: {stored:,} verdict(s) stored (reused, not re-judged)")
     print("=" * 60)
     if n_uncached:
         print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")

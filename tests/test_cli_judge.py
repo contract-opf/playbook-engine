@@ -1181,3 +1181,99 @@ def test_judge_apply_loads_nothing_when_a_later_line_fails(tmp_path: Path) -> No
             "judge-apply must validate all lines before loading any"
         )
     # else: store file was never created at all, which also satisfies "nothing loaded".
+
+
+# ---------------------------------------------------------------------------
+# QA-2026-11-03 #40 / #41: out-of-taxonomy verdicts, partial queues, judged counts
+# ---------------------------------------------------------------------------
+
+
+def _judge_round(out: Path) -> tuple[int, str]:
+    return _invoke("judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out))
+
+
+def _first_pending(out: Path, kind: str) -> dict[str, Any]:
+    for line in (out / "judge" / "pending.jsonl").read_text(encoding="utf-8").splitlines():
+        item = json.loads(line)
+        if item["kind"] == kind:
+            return item
+    pytest.fail(f"no pending {kind} item")
+
+
+def test_judge_apply_refuses_an_out_of_taxonomy_classify_verdict(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    code, output = _judge_round(out)
+    assert code == 0, output
+    item = _first_pending(out, "classify")
+    allowed = item["payload"]["taxonomy_ids"]
+    assert "made_up_type" not in allowed
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text(
+        json.dumps(
+            {
+                "key": item["key"],
+                "verdict": {"basis": "judge", "confidence": 0.9, "taxonomy_id": "made_up_type"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pending_before = (out / "judge" / "pending.jsonl").read_bytes()
+    code, output = _invoke("judge-apply", str(out), "--verdicts", str(bad))
+    assert code == 1
+    assert "made_up_type" in output and "not in the taxonomy" in output
+    assert not (out / "judge" / "verdicts.jsonl").exists()
+    assert (out / "judge" / "pending.jsonl").read_bytes() == pending_before
+
+    good = tmp_path / "good.jsonl"
+    good.write_text(
+        json.dumps(
+            {
+                "key": item["key"],
+                "verdict": {"basis": "judge", "confidence": 0.9, "taxonomy_id": allowed[0]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    code, output = _invoke("judge-apply", str(out), "--verdicts", str(good))
+    assert code == 0, output
+
+
+def test_a_judge_round_that_crashes_restores_the_previous_pending_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "out"
+    code, output = _judge_round(out)
+    assert code == 0, output
+    pending = out / "judge" / "pending.jsonl"
+    before = pending.read_bytes()
+    assert before
+
+    def _boom(*args: Any, **kwargs: Any) -> None:
+        pending.write_text('{"partial": true}\n', encoding="utf-8")
+        raise RuntimeError("simulated crash mid-round")
+
+    monkeypatch.setattr("playbook_engine.cli.mine_corpus", _boom)
+    result = CliRunner().invoke(
+        cli, ["judge", str(_CORPUS_DIR), "--config", str(_CONFIG_PATH), "--out", str(out)]
+    )
+    assert result.exit_code != 0
+    assert pending.read_bytes() == before
+
+
+def test_judge_reports_and_records_how_many_items_are_judged(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    code, output = _judge_round(out)
+    assert code == 0, output
+    assert "Judged items in the verdict store: 0" in output
+    code, output = _invoke("judge-apply", str(out), "--verdicts", str(_CANNED_VERDICTS))
+    assert code == 0, output
+    code, output = _judge_round(out)
+    assert code == 0, output
+    counts = json.loads((out / "judge" / "judged_counts.json").read_text(encoding="utf-8"))
+    assert counts["total"] > 0
+    assert counts["total"] == sum(
+        v for k, v in counts["by_kind"].items() if k not in ("blind_checked", "adjudicated")
+    )
+    assert f"Judged items in the verdict store: {counts['total']}" in output
