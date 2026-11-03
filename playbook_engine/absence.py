@@ -160,6 +160,16 @@ scored on its own (the node as a whole always is)."""
 _CLASSIFIED_SCORE = 1.0
 
 
+def _wire_score(score: float) -> int | float:
+    """A candidate score as written to the document (OPF-SPEC §3.10 number rule).
+
+    A whole-number score (the classifier's 1.0, or a Jaccard of identical token sets) is
+    written as the integer ``1``: Python would serialize ``1.0`` into the canonical form,
+    which a verifier built on a standard JSON parser (one that cannot tell ``1`` from
+    ``1.0``) would hash differently."""
+    return int(score) if float(score).is_integer() else score
+
+
 def absence_id(agreement_type_id: str, document_id: str, taxonomy_id: str) -> str:
     """The stable id of one absence record.
 
@@ -378,7 +388,7 @@ def build_absence(
                     "candidates": [
                         {
                             "ref": _citation(node),
-                            "score": score,
+                            "score": _wire_score(score),
                             "filed_under": node.taxonomy_id,
                         }
                         for score, node in candidates[:MAX_CANDIDATES]

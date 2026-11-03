@@ -455,6 +455,25 @@ def _check_duplicate_ids(doc: dict[str, Any], result: ValidationResult) -> None:
         else:
             seen_document_ids[document_id] = i
 
+    # OPF-SPEC §3.13: taxonomy entry ids are unique too (QA-2026-11-03): two entries
+    # sharing an id make "classify only into active entries" ambiguous.
+    taxonomy = doc.get("taxonomy")
+    entries = taxonomy.get("entries") if isinstance(taxonomy, dict) else None
+    seen_taxonomy_ids: dict[str, int] = {}
+    for i, entry in enumerate(entries if isinstance(entries, list) else []):
+        entry_id = entry.get("id") if isinstance(entry, dict) else None
+        if not isinstance(entry_id, str):
+            continue
+        first_index = seen_taxonomy_ids.get(entry_id)
+        if first_index is not None:
+            result.add(
+                f"duplicate taxonomy entry id {entry_id!r} "
+                f"(first seen at taxonomy.entries[{first_index}])",
+                path=f"taxonomy.entries[{i}].id",
+            )
+        else:
+            seen_taxonomy_ids[entry_id] = i
+
 
 def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> None:
     """Non-blocking SHOULD-warn: name each ``floor.invariants[]`` entry that
@@ -1816,6 +1835,39 @@ def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
                 )
 
 
+def _check_portable_numbers(doc: dict[str, Any], result: ValidationResult) -> None:
+    """OPF-SPEC §3.10 number rule (QA-2026-11-03 #18): the canonical form is
+    reproducible by a verifier on a standard JSON parser only when no whole-number
+    value is written as a float (``1.0``) and no float needs exponent notation
+    (Python writes ``1e-05``, JavaScript ``0.00001``). A document that breaks the rule
+    keeps its hash (the rule is the reference serializer's), so this is advisory."""
+    found: list[str] = []
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, float):
+            if value.is_integer() or (value != 0 and not 1e-4 <= abs(value) < 1e16):
+                found.append(path)
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, list):
+            for i, child in enumerate(value):
+                walk(child, f"{path}.{i}" if path else str(i))
+
+    walk(doc, "")
+    if found:
+        result.add(
+            f"{len(found)} number(s) break the OPF-SPEC §3.10 number rule (a whole number "
+            "written as a float such as 1.0, or a float in exponent form); a verifier on a "
+            "standard non-Python JSON parser cannot reproduce this document's content_hash. "
+            "Re-derive with a current engine",
+            path=found[0],
+            blocking=False,
+        )
+
+
 def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) -> ValidationResult:
     """Validate *doc* against the OPF 0.6 schema and normative rules.
 
@@ -1857,6 +1909,7 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_posture_floor_conflict(doc, result)
     _check_posture_interview_provenance(doc, result)
     _check_perspective_present(doc, result)
+    _check_portable_numbers(doc, result)
     _check_identity_hash(doc, result)
     _check_digest(doc, result)
     _check_floor_rules(doc, result)

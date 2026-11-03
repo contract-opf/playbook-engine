@@ -292,6 +292,10 @@ def test_a_node_filed_under_the_clause_but_too_short_for_precedent_is_possibly_p
     record = _records(_evidence())[("deal-g", ASSIGN)]
     assert record["status"] == absence.STATUS_POSSIBLE
     assert record["candidates"][0]["score"] == 1.0
+    # A whole-number score is written as an integer (OPF-SPEC §3.10 number rule): a
+    # verifier on a standard JSON parser cannot tell 1.0 from 1, so a float would make
+    # its content_hash differ (QA-2026-11-03 #18).
+    assert type(record["candidates"][0]["score"]) is int
     assert record["candidates"][0]["ref"]["clause_path"] == "4"
 
 
