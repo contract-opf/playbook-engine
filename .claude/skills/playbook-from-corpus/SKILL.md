@@ -384,8 +384,11 @@ out-dir to anyone outside the org on the assumption that removing
 now stale-clears and rewrites the whole directory — tree content, the
 directory name, AND the per-version filename — under the ALIASED
 document_id/version after the born-safe pseudonymization pass, mirroring
-`trail/`'s treatment, so it is safe to share alongside the compiled playbook
-once those files are removed.
+`trail/`'s treatment, so the *registered names* no longer appear in its
+paths, filenames or `source_file`. That is name pseudonymization only: the
+tree text itself, contact data (e-mail domains, phone numbers, street
+addresses) and any name `known_entities` was not told about are still in
+there, so it still needs its own review before it leaves the org.
 
 ---
 
@@ -1536,7 +1539,7 @@ Writes exactly **one** human-readable artifact, self-contained, no network
   above); a misconfigured or incomplete `known_entities` list leaves real
   counterparty names in this file (skill-QA finding #57, 2026-08-24: hundreds
   of real-name occurrences reached `playbook.opf.json`/the page this way). Run
-  the **mandatory residue check** below before calling this file shareable.
+  the **mandatory residue check** below before treating its *names* as scrubbed (it does not cover contact data).
   The engine has no command that anonymizes a playbook for public release;
   treat anything leaving the org as needing its own review.
 
@@ -1557,8 +1560,8 @@ disk** — the page contains it, never replaces it. A consumer extracts the
 `opf-canonical` block, JSON-parses it, and verifies `identity.content_hash`
 against `playbook_engine.canonicalize.content_hash`.
 
-**Mandatory residue check (issue #136) — run before calling anything from
-this step shareable.** `$OUT/alias_map.json` (written by `mine
+**Mandatory residue check (issue #136) — run before sharing anything from
+this step; it checks registered *names* only, not contact data.** `$OUT/alias_map.json` (written by `mine
 --entity-registry`, see "Born-safe sidecar" above) holds every real name the
 registry actually registered. A plain substring search for those values is
 NOT enough: `pseudonymize_text` registers whatever spelling
@@ -1599,8 +1602,13 @@ else:
 
 A hit means a real name likely survived pseudonymization; fix
 `known_entities` (verbatim spelling — see above), re-run `mine`, and
-re-check before treating `index.html` as shareable. Two honest
-limits, not overclaimed: (1) a hit can be a coincidental match of a
+re-check. A clean result does **not** make `index.html` "shareable": the
+engine pseudonymizes the *names* you registered and nothing else — it does
+not scrub contact data (e-mail domains, phone numbers, postal addresses),
+which can still identify a counterparty, and this check cannot see it.
+Anything leaving the org needs its own review. Three honest
+limits, not overclaimed: (0) names only — contact data is out of scope for
+both the pseudonymizer and this check; (1) a hit can be a coincidental match of a
 short/common word that slipped the stopword filter — read the flagged token
 in context before assuming a leak; (2) an empty result confirms only that no
 distinctive token of a name `known_entities` was told about survived — it is

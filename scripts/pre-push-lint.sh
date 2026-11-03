@@ -4,8 +4,10 @@
 # consecutive commits — one with zero CI coverage at all — before anyone
 # noticed, because nothing checked formatting before push).
 #
-# Deliberately generic: no confidentiality/secrets logic lives here, so this
-# file is safe to track and publish. Install it as this clone's pre-push
+# Deliberately generic: no names or secrets live here, so this file is safe to
+# track and publish. (It does DELEGATE to the equally name-free
+# scripts/pre-push-confidentiality.py when present, which reads its term list
+# from a private, untracked directory and fails closed without one.) Install it as this clone's pre-push
 # hook with `make hooks` — that works from a fresh clone, no `ignore/`
 # required. The maintainer's fuller local hook
 # (`ignore/git-hooks/pre-push`, gitignored — it additionally scans for
@@ -32,6 +34,21 @@
 set -eo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
+
+# Confidentiality scan of every commit being pushed (QA-2026-11-03 #3). The
+# pushed refs arrive on stdin; capture them (when there is any stdin to read)
+# so the scanner sees them. Fail closed: a missing term list or a scanner
+# error blocks the push.
+refs=""
+[ -t 0 ] || refs="$(cat 2>/dev/null || true)"
+scanner="$repo_root/scripts/pre-push-confidentiality.py"
+if [ -f "$scanner" ] && [ -n "$refs" ]; then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "pre-push BLOCKED: python3 not found, so the confidentiality scan cannot run." >&2
+    exit 1
+  fi
+  printf '%s\n' "$refs" | python3 "$scanner" "${1:-}" "${2:-}" || exit 1
+fi
 
 if [ -x "$repo_root/.venv/bin/ruff" ]; then
   ruff_bin="$repo_root/.venv/bin/ruff"

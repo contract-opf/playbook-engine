@@ -118,6 +118,9 @@ hooks:
 	cp "$$src" "$$dest"; \
 	chmod +x "$$dest"; \
 	echo "installed lint/format pre-push gate -> $$dest"; \
+	if [ -f "$$(git rev-parse --show-toplevel)/scripts/pre-push-confidentiality.py" ]; then \
+		python3 "$$(git rev-parse --show-toplevel)/scripts/pre-push-confidentiality.py" --generate-names || echo "NOTE: no confidential term list generated (no entity registry yet) - the confidentiality scan in the gate FAILS CLOSED and blocks pushes until you add terms (see scripts/pre-push-confidentiality.py) or push with --no-verify." >&2; \
+	fi; \
 	if [ ! -x "$(RUN)/ruff" ] && ! command -v ruff >/dev/null 2>&1; then \
 		echo "WARNING: ruff not found ($(RUN)/ruff or PATH) — this looks like a developer checkout (pyproject.toml is tracked here), so scripts/pre-push-lint.sh fails CLOSED: the gate just installed will BLOCK EVERY PUSH until you run: make install" >&2; \
 	fi; \
