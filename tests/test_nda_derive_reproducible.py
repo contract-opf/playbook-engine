@@ -23,9 +23,8 @@ Hermetic, same guarantees as test_nda_smoke.py:
   - All output written under pytest's tmp_path.
 
 This is deliberately NOT byte-identical reproduction: `compiler.generated_at`
-and `posture.generation.generated_at` are wall-clock timestamps, and
-`baseline.template_ref.source` is the deriving machine's own absolute
-filesystem path, so `identity.content_hash` legitimately differs run to run.
+and `posture.generation.generated_at` are wall-clock timestamps,
+so `identity.content_hash` legitimately differs run to run.
 What must be reproducible is the
 *semantic* content:
 same clause/observation counts, same reversal, same Floor invariants, same
@@ -90,14 +89,12 @@ def _strip_volatile(doc: dict[str, Any]) -> dict[str, Any]:
     doc.get("compiler", {}).pop("generated_at", None)
     doc.get("posture", {}).get("generation", {}).pop("generated_at", None)
     doc.pop("identity", None)
-    # baseline.template_ref.source is the derivation machine's own absolute
-    # filesystem path to standard-form.rtf -- it differs by checkout root
-    # (contributor clone, CI runner, Docker image) even when every other
-    # field reproduces exactly. The committed artifact ships with this key
-    # scrubbed entirely (issue #9 fix round 1 findings 1/2); a freshly
-    # derived doc still carries the deriving machine's own path, so drop it
-    # here too rather than asserting path equality.
-    doc.get("baseline", {}).get("template_ref", {}).pop("source", None)
+    # baseline.template_ref.source is the template's file NAME only (QA-2026-11-03
+    # #42): an absolute host path would make content_hash machine-dependent and
+    # leak a home directory. Assert that, then drop it (the committed artifact
+    # ships with the key scrubbed, issue #9).
+    source = doc.get("baseline", {}).get("template_ref", {}).pop("source", None)
+    assert source is None or ("/" not in source and "\\" not in source), source
     # issue #127: `playbook floor sign` stamps `x_signed_at` with the
     # wall-clock time it ran -- same volatility class as the fields above.
     for invariant in doc.get("floor", {}).get("invariants", []) or []:

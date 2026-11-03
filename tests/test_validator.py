@@ -485,6 +485,42 @@ def test_validate_rejects_duplicate_corpus_document_id() -> None:
     assert offending and offending[0].path == "corpus.documents[1].document_id"
 
 
+def test_validate_rejects_duplicate_taxonomy_entry_id() -> None:
+    doc = _minimal()
+    entries = doc["taxonomy"]["entries"]
+    entries[:] = [{"id": "governing_law", "label": "Governing Law", "status": "active"}] * 2
+    entries[1] = {**entries[1], "status": "inactive"}
+    result = validate_document(doc)
+    assert not result.ok
+    offending = [e for e in result.errors if "duplicate taxonomy entry id" in e.message]
+    assert offending and offending[0].path == "taxonomy.entries[1].id"
+
+
+# ---------------------------------------------------------------------------
+# OPF-SPEC §3.10 number rule (QA-2026-11-03 #18)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [1.0, 0.00001, 1e16, -3.0])
+def test_validate_warns_on_numbers_a_standard_json_parser_would_hash_differently(
+    value: float,
+) -> None:
+    doc = _minimal()
+    doc["corpus"]["stats"]["ratio"] = value
+    result = validate_document(doc)
+    portable = [e for e in result.errors if "number rule" in e.message]
+    assert portable and not portable[0].blocking
+    assert portable[0].path == "corpus.stats.ratio"
+    assert result.ok  # advisory: the hash is the reference serializer's
+
+
+@pytest.mark.parametrize("value", [0, 3, 0.5, 0.0001, -0.25, 1234567.5])
+def test_validate_accepts_portable_numbers(value: float) -> None:
+    doc = _minimal()
+    doc["corpus"]["stats"]["ratio"] = value
+    assert not [e for e in validate_document(doc).errors if "number rule" in e.message]
+
+
 # ---------------------------------------------------------------------------
 # _check_floor_attribution — issue #127
 # ---------------------------------------------------------------------------

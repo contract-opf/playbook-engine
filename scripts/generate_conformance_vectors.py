@@ -1672,6 +1672,7 @@ def build_vectors_v06() -> list[tuple[str, dict[str, Any]]]:
     # 013 - a former form rebuilt from the corpus (issue #250).
     vectors.append(build_vector_013())
     vectors.append(build_vector_014())
+    vectors.append(build_vector_015())
     return vectors
 
 
@@ -2625,6 +2626,43 @@ def build_vector_014() -> tuple[str, dict[str, Any]]:
     )
 
 
+def build_vector_015() -> tuple[str, dict[str, Any]]:
+    """The canonical-form number and key-order rules (OPF-SPEC §3.10, QA-2026-11-03 #18).
+
+    ``corpus.stats`` is a free-form object, so it carries the edge cases a verifier
+    written on another language's JSON parser gets wrong."""
+    doc = _base_v06()
+    doc["corpus"]["stats"] = {
+        "whole_number": 3,
+        "fraction": 0.5,
+        "small_decimal": 0.0001,
+        "negative": -0.25,
+        "large_decimal": 1234567.5,
+        "\uffff": "last BMP code point",
+        "\U0001f600": "astral code point",
+        "nfc": "caf\u00e9",
+        "nfd": "cafe\u0301",
+    }
+    return (
+        "015-number-and-key-rules",
+        _vector_v06(
+            "number-and-key-rules",
+            "The canonical-form rules a verifier on a standard non-Python JSON parser "
+            "must reproduce (OPF-SPEC §3.10). corpus.stats (a free-form object) holds a "
+            "whole number written as an integer (3, never 3.0: a standard parser cannot "
+            "tell 3 from 3.0, so producers write a whole number as an integer), decimals "
+            "that need no exponent (0.5, 0.0001, -0.25, 1234567.5; a number below 1e-4 or "
+            "from 1e16 up is never emitted, because Python and JavaScript spell its "
+            "exponent differently), and keys that pin the sort order: object keys sort by "
+            "Unicode code point, so U+FFFF sorts BEFORE U+1F600 (a UTF-16 code unit sort "
+            "puts the astral key first), and the NFC and NFD spellings of the same word "
+            "stay two distinct keys' values, hashed as written, never normalized. Non-ASCII "
+            "is emitted literally as UTF-8.",
+            doc,
+        ),
+    )
+
+
 def main_v06() -> None:
     VECTORS_DIR_V06.mkdir(parents=True, exist_ok=True)
     vectors = build_vectors_v06()
@@ -2652,8 +2690,9 @@ def main_v06() -> None:
         # updated. "../manifest.json" was the retired 0.3 set's manifest;
         # spec/conformance/README.md carries the algorithm it described.
         "algorithm": (
-            "canonical / content_hash / section_digests: exactly as the 0.3 set "
-            "(../manifest.json). digest: playbook_engine.digest.build_digest_v5(input) "
+            "canonical / content_hash / section_digests: OPF-SPEC.md §3.10 "
+            "(language-neutral number, string and key-order rules; "
+            "spec/conformance/README.md gives the reference call; vector 015). digest: playbook_engine.digest.build_digest_v5(input) "
             "with the default token_budget, which for opf_version 0.6 is "
             "build_digest_v5 (OPF-SPEC.md §3.12.2): signed variants, refused asks and "
             "changed openings grouped by the grouping key of OPF-SPEC.md §3.5.4 (precedent."
