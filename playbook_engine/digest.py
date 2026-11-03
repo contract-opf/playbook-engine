@@ -7,8 +7,8 @@ per-deal precedent record. Per clause: our standard, how many deals signed
 it, how many opened with it and kept it, a positions count (signed our
 standard, or each ``vs_standard`` label, or unjudged), the non-standard signed
 variants (each saying how many deals conceded it from our standard and how
-many signed it exactly as the counterparty proposed), the refused asks and
-the non-standard openings that were not signed as proposed, grouped by
+many signed it exactly as the clause opened, whoever's paper it was on), the
+refused asks and the non-standard openings that were not signed as proposed, grouped by
 OPF-SPEC §3.5.4's exact grouping key (``precedent.normalize_variant_text``)
 with distinct-deal counts, citations and precedent ids; plus ``perspective``,
 ``agreement_type``, corpus counts and the clause types the playbook has no
