@@ -1255,8 +1255,59 @@ def sign_floor_invariant(
         raise FloorCandidateError(
             "floor sign: " + "; ".join(rule_errors) + " (pass --clause to name the clause)"
         )
+    # QA-2026-11-03 #8: bind the sign-off to exactly the fields signed, so a
+    # later edit of the text is detectable instead of inheriting "signed by".
+    entry[SIGNED_HASH_FIELD] = signed_fields_hash(entry)
     merged.append(entry)
     return merged
+
+
+#: The invariant field that binds a sign-off to the fields it covered.
+SIGNED_HASH_FIELD = "x_signed_hash"
+#: The fields a sign-off covers (the hash itself is excluded).
+SIGNED_FIELDS = (
+    "id",
+    "statement",
+    "rationale",
+    "x_taxonomy_id",
+    "x_required_presence",
+    "x_condition",
+    "x_permissible_proof",
+    "x_signed_by",
+    "x_signed_at",
+)
+
+
+def signed_fields_hash(entry: dict[str, Any]) -> str:
+    """``sha256:`` over the canonical JSON of the signed fields present on *entry*."""
+    from playbook_engine.canonicalize import canonicalize, sha256_hex  # noqa: PLC0415
+
+    return sha256_hex(canonicalize({k: entry[k] for k in SIGNED_FIELDS if k in entry}))
+
+
+def signed_binding_status(entry: Any) -> str | None:
+    """How a signed invariant's sign-off relates to its text.
+
+    ``None`` when *entry* carries no ``x_signed_by``; ``"bound"`` when its
+    ``x_signed_hash`` matches the signed fields; ``"unbound"`` for a sign-off
+    made before the hash existed (nothing to compare — reported, not failed);
+    ``"altered"`` when the hash no longer matches (the text changed after
+    signing, or the hash is malformed).
+    """
+    if not isinstance(entry, dict) or floor_invariant_attribution(entry) != "signed":
+        return None
+    recorded = entry.get(SIGNED_HASH_FIELD)
+    if recorded is None:
+        return "unbound"
+    return "bound" if recorded == signed_fields_hash(entry) else "altered"
+
+
+def altered_signed_invariants(floor: Any) -> list[str]:
+    """Ids of the Floor's invariants whose sign-off no longer matches their text."""
+    invariants = floor.get("invariants") if isinstance(floor, dict) else None
+    return [
+        str(inv.get("id")) for inv in invariants or [] if signed_binding_status(inv) == "altered"
+    ]
 
 
 def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:

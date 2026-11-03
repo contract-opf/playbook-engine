@@ -234,6 +234,9 @@ JS = r"""
     list.sort(function (a, b) { return ekey(a) < ekey(b) ? -1 : ekey(a) > ekey(b) ? 1 : 0; });
     var out = { overrides_version: 1 };
     if (META.content_hash) out.based_on = META.content_hash;
+    if (META.section_digests && META.section_digests.posture && META.section_digests.floor) {
+      out.based_on_sections = { posture: META.section_digests.posture, floor: META.section_digests.floor };
+    }
     out.overrides = list;
     return out;
   }
