@@ -42,6 +42,7 @@ from playbook_engine.overrides import (
     parse_overrides,
 )
 from playbook_engine.review_rows import build_review_rows
+from playbook_engine.validator import validate_document
 
 _ROOT = Path(__file__).resolve().parent.parent
 _NDA_DIR = _ROOT / "examples" / "nda"
@@ -442,7 +443,7 @@ def test_a_malformed_file_is_rejected_with_a_clear_error_and_changes_nothing(
     assert _snapshot(out_dir) == before
 
 
-def test_an_unknown_id_is_rejected_and_nothing_else_in_the_file_is_applied(
+def test_a_refused_entry_is_named_and_the_good_ones_are_still_applied(
     out_dir: Path,
 ) -> None:
     doc = _load(out_dir)
@@ -450,7 +451,7 @@ def test_an_unknown_id_is_rejected_and_nothing_else_in_the_file_is_applied(
     _write_overrides(
         out_dir,
         [
-            _vs(row["key"], "equivalent"),  # valid, and must NOT be applied alone
+            _vs(row["key"], "equivalent"),  # valid: applied despite the refused ones
             _vs(_KEY, "equivalent"),
             {
                 "target": "floor",
@@ -461,12 +462,14 @@ def test_an_unknown_id_is_rejected_and_nothing_else_in_the_file_is_applied(
             },
         ],
     )
-    before = _snapshot(out_dir)
     result = _invoke(["apply-overrides", str(out_dir)])
-    assert result.exit_code == 1
+    assert result.exit_code == 1, "a refused entry is reported by the exit status"
     assert "no judged text in this playbook has that verdict key" in result.output
     assert "the Floor has no invariant with that id" in result.output
-    assert _snapshot(out_dir) == before, "one bad entry must leave every file untouched"
+    assert "2 override(s) refused" in result.output and "1 vs_standard" in result.output
+    edited = _load(out_dir)
+    assert edited["identity"]["content_hash"] != doc["identity"]["content_hash"]
+    assert validate_document(edited).errors == []
 
 
 def test_apply_overrides_needs_both_files(tmp_path: Path) -> None:
@@ -685,3 +688,188 @@ def test_the_page_offers_no_edit_box_where_the_engine_refuses_the_edit(out_dir: 
     assert f'data-target="floor" data-id="{q4["id"]}" data-field="statement"' in page
     assert f'data-target="floor" data-id="{q4["id"]}" data-field="rationale"' not in page
     assert "Not editable here" in page
+
+
+# ---------------------------------------------------------------------------
+# QA-2026-11-03 #8 / #9 / #33 / #35 / #45: signatures bound to text, stale
+# overrides, empty/misspelled Floor fields, refused edits reported
+# ---------------------------------------------------------------------------
+
+
+def _write_doc(out_dir: Path, doc: dict[str, Any]) -> None:
+    from playbook_engine.overrides import refresh_after_edit  # noqa: PLC0415
+
+    refresh_after_edit(doc)
+    (out_dir / "playbook.opf.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+
+def _messages(doc: dict[str, Any], *, blocking: bool) -> list[str]:
+    return [e.message for e in validate_document(doc).errors if e.blocking is blocking]
+
+
+def _signed(doc: dict[str, Any]) -> dict[str, Any]:
+    return next(i for i in doc["floor"]["invariants"] if i["id"] == "liability-carveout")
+
+
+def test_sign_stamps_a_hash_of_the_signed_fields(out_dir: Path) -> None:
+    _sign(out_dir)
+    inv = _signed(_load(out_dir))
+    assert inv["x_signed_hash"].startswith("sha256:")
+    assert not any("x_signed_hash" in m for m in _messages(_load(out_dir), blocking=True))
+
+
+def test_a_hand_edited_signed_line_fails_validate_even_after_a_restamp(out_dir: Path) -> None:
+    _sign(out_dir)
+    doc = _load(out_dir)
+    _signed(doc)["statement"] = "Liability caps may reach a confidentiality breach."
+    _write_doc(out_dir, doc)  # identity, manifest and dossiers all re-derived
+    edited = _load(out_dir)
+    blocking = _messages(edited, blocking=True)
+    assert any("no longer match x_signed_hash" in m for m in blocking), blocking
+    assert not any("project" in m and "x_signed_hash" in m and "re-run" in m for m in blocking)
+    result = _invoke(["validate", str(out_dir / "playbook.opf.json")])
+    assert result.exit_code != 0
+    # the page does not show "signed by" on text whose hash fails
+    from playbook_engine.document_renderer import render_index_html  # noqa: PLC0415
+
+    page = render_index_html(out_dir)
+    assert "signed by Legal Owner" not in page
+    assert "sign-off no longer matches this text" in page
+
+
+def test_project_refuses_a_floor_with_an_altered_signed_line(out_dir: Path) -> None:
+    _sign(out_dir)
+    doc = _load(out_dir)
+    _signed(doc)["statement"] = "Edited after signing."
+    _write_doc(out_dir, doc)
+    before = _snapshot(out_dir)
+    result = _invoke(["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
+    assert result.exit_code == 1
+    assert "no longer matches what was signed" in result.output
+    assert _snapshot(out_dir) == before
+
+
+def test_a_signature_without_a_hash_is_reported_unbound_not_failed(out_dir: Path) -> None:
+    _sign(out_dir)
+    doc = _load(out_dir)
+    del _signed(doc)["x_signed_hash"]
+    _write_doc(out_dir, doc)
+    legacy = _load(out_dir)
+    assert not any("x_signed" in m for m in _messages(legacy, blocking=True))
+    assert any("unbound" in m for m in _messages(legacy, blocking=False))
+    assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0
+    project = _invoke(["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
+    assert project.exit_code == 0, project.output
+
+
+def test_project_refuses_a_prior_playbook_that_does_not_parse(out_dir: Path) -> None:
+    path = out_dir / "playbook.opf.json"
+    path.write_text(path.read_text(encoding="utf-8").replace('"posture"', '"posture",', 1))
+    before = _snapshot(out_dir)
+    result = _invoke(["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
+    assert result.exit_code == 1
+    assert "cannot be read" in result.output and "Nothing was written" in result.output
+    assert _snapshot(out_dir) == before
+
+
+def test_empty_floor_statements_and_unknown_taxonomy_ids_fail_validate(out_dir: Path) -> None:
+    doc = _load(out_dir)
+    doc["floor"]["invariants"][0]["statement"] = "   "
+    doc["floor"]["invariants"][1]["x_taxonomy_id"] = "no_such_clause_id"
+    _write_doc(out_dir, doc)
+    blocking = _messages(_load(out_dir), blocking=True)
+    assert any("empty statement" in m for m in blocking), blocking
+    assert any("not in this playbook's taxonomy" in m for m in blocking), blocking
+
+
+def test_a_content_hash_mismatch_names_a_remedy_that_needs_no_observation_store(
+    out_dir: Path,
+) -> None:
+    doc = _load(out_dir)
+    doc["posture"]["system_prompt"] += " Edited."
+    blocking = _messages(doc, blocking=True)
+    mismatch = next(m for m in blocking if "identity.content_hash" in m)
+    assert "playbook apply-overrides" in mismatch and "restore the file" in mismatch
+
+
+def _posture_override(value: str, **top: Any) -> dict[str, Any]:
+    entry = {"target": "posture", "id": "system_prompt", "value": value, "basis": "owner"}
+    return {"overrides_version": 1, "overrides": [entry], **top}
+
+
+def test_an_override_made_before_a_newer_interview_is_refused_not_reverted(out_dir: Path) -> None:
+    old = _load(out_dir)
+    sections = old["identity"]["section_digests"]
+    (out_dir / OVERRIDES_FILENAME).write_text(
+        json.dumps(
+            _posture_override(
+                "Old owner prose.",
+                based_on=old["identity"]["content_hash"],
+                based_on_sections={"posture": sections["posture"], "floor": sections["floor"]},
+            )
+        ),
+        encoding="utf-8",
+    )
+    # a newer interview changes the Posture after the page was made
+    newer = json.loads(json.dumps(old))
+    newer["posture"]["system_prompt"] = "Prose from the newer interview."
+    newer["posture"]["version"] += 1
+    _write_doc(out_dir, newer)
+
+    result = _invoke(["apply-overrides", str(out_dir)])
+    assert result.exit_code == 1
+    assert "stale, not applied" in result.output and "posture changed" in result.output
+    assert _load(out_dir)["posture"]["system_prompt"] == "Prose from the newer interview."
+
+
+def test_a_legacy_override_with_only_based_on_is_refused_when_the_playbook_moved(
+    out_dir: Path,
+) -> None:
+    old = _load(out_dir)
+    (out_dir / OVERRIDES_FILENAME).write_text(
+        json.dumps(_posture_override("Old owner prose.", based_on=old["identity"]["content_hash"])),
+        encoding="utf-8",
+    )
+    newer = json.loads(json.dumps(old))
+    newer["posture"]["system_prompt"] = "Newer."
+    _write_doc(out_dir, newer)
+    result = _invoke(["apply-overrides", str(out_dir)])
+    assert result.exit_code == 1 and "stale, not applied" in result.output
+    assert _load(out_dir)["posture"]["system_prompt"] == "Newer."
+
+
+def test_a_current_override_applies_and_reapplying_it_is_not_stale(out_dir: Path) -> None:
+    old = _load(out_dir)
+    sections = old["identity"]["section_digests"]
+    (out_dir / OVERRIDES_FILENAME).write_text(
+        json.dumps(
+            _posture_override(
+                "Fresh owner prose.",
+                based_on=old["identity"]["content_hash"],
+                based_on_sections={"posture": sections["posture"], "floor": sections["floor"]},
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert _invoke(["apply-overrides", str(out_dir)]).exit_code == 0
+    assert _load(out_dir)["posture"]["system_prompt"] == "Fresh owner prose."
+    again = _invoke(["apply-overrides", str(out_dir)])
+    assert again.exit_code == 0 and "no change" in again.output
+
+
+def test_the_page_records_the_section_digests_an_edit_was_made_against(out_dir: Path) -> None:
+    from playbook_engine.document_renderer import render_index_html  # noqa: PLC0415
+
+    page = render_index_html(out_dir)
+    digests = _load(out_dir)["identity"]["section_digests"]
+    assert digests["posture"] in page and "based_on_sections" in page
+
+
+def test_a_posture_grounded_in_an_earlier_evidence_is_flagged(out_dir: Path) -> None:
+    doc = _load(out_dir)
+    assert not any("grounded_in" in m for m in _messages(doc, blocking=False))
+    doc["posture"]["generation"]["grounded_in"] = "evidence@sha256:" + "0" * 64
+    _write_doc(out_dir, doc)
+    warnings = _messages(_load(out_dir), blocking=False)
+    assert any("grounded_in names an earlier Evidence" in m for m in warnings)
+    assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0

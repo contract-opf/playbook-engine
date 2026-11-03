@@ -3,9 +3,11 @@
 **Anthropic-native, with honest docs about what needs a key.** The
 `playbook-from-corpus` skill (an operator's Claude Code plan) is the
 first-class way to derive a playbook — not `ANTHROPIC_API_KEY` billing.
-API keys are for headless/batch operation: LLM-first segmentation
-(`llm_segmenter.py` / `llm_segmenter_batch.py`) calls the Anthropic API
-directly and always requires one. Everything else in the pipeline —
+API keys are needed for exactly two things: LLM-first segmentation
+(`llm_segmenter.py` / `llm_segmenter_batch.py`) and the equivalence
+blind-check queue (`playbook judge --check --api`). Neither is headless
+judging; no stage judges scope, provenance or `vs_standard` from a key
+alone. Everything else in the pipeline —
 including every judgment stage — is either fully deterministic or is
 performed by the agent running the skill, reasoning on your existing
 Claude plan, with no API key involved.

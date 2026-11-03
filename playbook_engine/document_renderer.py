@@ -47,6 +47,7 @@ from playbook_engine.digest import (
     clause_precedent_groups,
     digest_token_estimate,
 )
+from playbook_engine.floor_candidates import signed_binding_status
 from playbook_engine.index_page_assets import CSS, JS
 from playbook_engine.opf_accessors import (
     perspective_party,
@@ -801,6 +802,8 @@ def _render_posture_floor_tab(doc: dict[str, Any]) -> str:
         for inv in invariants:
             ident = str(inv.get("id", ""))
             signer = f" · signed by {_esc(inv['x_signed_by'])}" if inv.get("x_signed_by") else ""
+            if signed_binding_status(inv) == "altered":
+                signer = " · sign-off no longer matches this text (edited after signing)"
             fields = []
             for field in FLOOR_FIELDS:
                 if not isinstance(inv.get(field), str):
@@ -933,6 +936,7 @@ def render_index_html(out_dir: Path, out_file: Path | None = None) -> str:
     # writes overrides.json there (the folder must hold THIS playbook).
     meta = {
         "content_hash": identity.get("content_hash"),
+        "section_digests": identity.get("section_digests"),
         "agreement_type": agreement.get("id"),
         "perspective": {
             "party": perspective.get("party"),
