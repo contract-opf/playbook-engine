@@ -18,6 +18,7 @@ import yaml
 from playbook_engine.config import load_config
 from playbook_engine.entity_registry import (
     EntityRegistry,
+    entity_slug,
     pseudonymize_document_id,
     pseudonymize_text,
     write_holdout_map,
@@ -365,10 +366,53 @@ def test_pseudonymize_document_id_replaces_matching_slug_span(tmp_path: Path) ->
     assert alias.lower() in out
 
 
-def test_pseudonymize_document_id_unchanged_when_no_known_entity_present(tmp_path: Path) -> None:
+def test_pseudonymize_document_id_aliases_by_ordinal_when_no_known_entity_present(
+    tmp_path: Path,
+) -> None:
+    """QA-2026-11-03 #22: an id in which no registered name matched (e.g. a
+    truncated folder name) is still replaced by an ordinal alias; the deal
+    hash survives, the alias is stable and idempotent, and with no known
+    entities configured nothing is touched."""
     reg = EntityRegistry.load(tmp_path / "entity_registry.json")
-    out = pseudonymize_document_id("deal-001", [_KNOWN_ENTITY], reg)
-    assert out == "deal-001"
+    raw = "zorblax-polytechnic-institu-2023_ab12cd34"
+    out = pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg)
+    assert out == "document-1-ab12cd34"
+    assert "zorblax" not in out
+    assert pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg) == out  # stable
+    assert pseudonymize_document_id(out, [_KNOWN_ENTITY], reg) == out  # idempotent
+    assert pseudonymize_document_id("other-deal", [_KNOWN_ENTITY], reg) == "document-2"
+    # Persisted: a reloaded registry hands back the same ordinal.
+    reloaded = EntityRegistry.load(tmp_path / "entity_registry.json")
+    assert pseudonymize_document_id(raw, [_KNOWN_ENTITY], reloaded) == out
+    # Pseudonymization disabled (no known entities) -> unchanged.
+    assert pseudonymize_document_id("deal-001", [], reg) == "deal-001"
+
+
+def test_pseudonymize_document_id_keeps_entity_alias_when_a_name_matched(tmp_path: Path) -> None:
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    raw = "agreement-" + entity_slug(_KNOWN_ENTITY) + "-2023_ab12cd34"
+    out = pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg)
+    assert out.startswith("agreement-counterparty-1-")
+    assert pseudonymize_document_id(out, [_KNOWN_ENTITY], reg) == out
+
+
+def test_pseudonymize_text_matches_name_behind_the_staging_prefix_and_underscores(
+    tmp_path: Path,
+) -> None:
+    """QA-2026-11-03 #16: the engine's own ``NN__`` staging prefix (and
+    underscore-joined filenames) must not stop a registered name matching."""
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    known = ["Acme Widgets LLC"]
+    for text in (
+        "01__Acme Widgets LLC 3.9.21.docx",
+        "01__Acme_Widgets_LLC_3.9.21.docx",
+        "Services_Acme Widgets LLC_final.docx",
+    ):
+        out = pseudonymize_text(text, known, reg)
+        assert "acme" not in out.lower(), out
+        assert reg.alias_for("Acme Widgets LLC") in out
+    # Still whole-word: no match inside a longer alphanumeric run.
+    assert pseudonymize_text("XAcme Widgets LLCs", known, reg) == "XAcme Widgets LLCs"
 
 
 def test_write_holdout_map_is_access_restricted_and_reverses_alias(tmp_path: Path) -> None:
