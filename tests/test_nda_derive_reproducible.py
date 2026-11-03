@@ -103,6 +103,8 @@ def _strip_volatile(doc: dict[str, Any]) -> dict[str, Any]:
     for invariant in doc.get("floor", {}).get("invariants", []) or []:
         if isinstance(invariant, dict):
             invariant.pop("x_signed_at", None)
+            # QA-2026-11-03 #8: the sign-off hash covers that timestamp.
+            invariant.pop("x_signed_hash", None)
     return doc
 
 
