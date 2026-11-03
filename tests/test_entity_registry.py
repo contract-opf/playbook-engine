@@ -778,7 +778,7 @@ def test_alias_version_field_aliases_filename_stem(tmp_path: Path) -> None:
     reg = EntityRegistry.load(tmp_path / "reg.json")  # empty registry
     known = ["Placeholder University"]
     out = _alias_version_field(
-        "01__API-Internship Agreement - Placeholder University 3.9.21", known, reg
+        "01__Sample-Services Agreement - Placeholder University 3.9.21", known, reg
     )
     assert "Placeholder" not in out
     assert reg.alias_for("Placeholder University") in out
@@ -792,7 +792,7 @@ def test_pseudonymize_observation_id_aliases_doc_segment(tmp_path: Path) -> None
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
     known = ["Placeholder University"]
-    oid = "API-Internship-Agreement-Placeholder-University-3.9.21_00000000/3/0"
+    oid = "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d/3/0"
     out = _pseudonymize_observation_id(oid, known, reg)
     assert "placeholder" not in out.lower()
     assert out.endswith("/3/0")  # version/clause structure intact
@@ -804,7 +804,7 @@ def test_pseudonymize_trail_aliases_document_id(tmp_path: Path) -> None:
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
     known = ["Placeholder University"]
-    trail = {"document_id": "API-Internship-Agreement-Placeholder-University-3.9.21_00000000"}
+    trail = {"document_id": "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d"}
     out = _pseudonymize_trail(trail, known, reg)
     assert "placeholder" not in out["document_id"].lower()
     # Matches the aliased citation.document_id form pseudonymize_document_id emits.
