@@ -221,7 +221,7 @@ def _fuzzy_name_pattern(name: str) -> re.Pattern[str] | None:
         return None
     # Boundaries are "not adjacent to a letter/digit" -- NOT ``\w``, which counts
     # ``_`` as a word character: the engine's own staging prefix (``NN__Name``)
-    # and underscore-joined filenames (``Name_6.14.23``) would otherwise stop a
+    # and underscore-joined filenames (``Name_3.9.21``) would otherwise stop a
     # name matching. Underscore also counts as inter-word whitespace, so
     # ``Acme_Widgets_LLC`` matches the registered "Acme Widgets LLC".
     body = r"(?:\s|_)+".join(re.escape(w) for w in words)

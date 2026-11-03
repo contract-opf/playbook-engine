@@ -404,8 +404,8 @@ def test_pseudonymize_text_matches_name_behind_the_staging_prefix_and_underscore
     reg = EntityRegistry.load(tmp_path / "entity_registry.json")
     known = ["Acme Widgets LLC"]
     for text in (
-        "01__Acme Widgets LLC 6.14.23.docx",
-        "01__Acme_Widgets_LLC_6.14.23.docx",
+        "01__Acme Widgets LLC 3.9.21.docx",
+        "01__Acme_Widgets_LLC_3.9.21.docx",
         "Services_Acme Widgets LLC_final.docx",
     ):
         out = pseudonymize_text(text, known, reg)
