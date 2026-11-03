@@ -559,6 +559,40 @@ def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _check_text_within_span(entry: dict[str, Any], path: str, result: ValidationResult) -> None:
+    """OPF §4 traceability, as far as the document itself can show it.
+
+    A validator holds no source bytes, so it cannot compare a text with the
+    clause it cites. It can still see the two shapes of a join that is not
+    traceable: a text longer than the one span it cites (a text joined from
+    several clauses that cites only one; a warning), and a list citation (several
+    paths) that also carries a ``char_span``, which no single span covers.
+    """
+    ref, text = entry.get("ref"), entry.get("text")
+    if not isinstance(ref, dict) or not isinstance(text, str):
+        return
+    span = ref.get("char_span")
+    if not (isinstance(span, list) and len(span) == 2 and all(isinstance(n, int) for n in span)):
+        return
+    if "," in str(ref.get("clause_path") or ""):
+        result.add(
+            "citation lists several clauses but also carries a char_span; "
+            "a joined text has no single span — violates OPF §4",
+            path=f"{path}.ref.char_span",
+        )
+    elif len(text) > span[1] - span[0]:
+        result.add(
+            f"text ({len(text)} chars) is longer than the clause span it cites "
+            f"({span[1] - span[0]} chars): a text joined from several clauses must "
+            "cite every one of them (list form) — violates OPF §4",
+            path=f"{path}.ref",
+            # A warning: spans index the producer's normalized text, which a
+            # validator cannot see, so it cannot rule out a shorter span
+            # that is merely the producer's own convention.
+            blocking=False,
+        )
+
+
 def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
     """OPF 0.6 §4: every asserted text carries a citation that resolves.
 
@@ -610,6 +644,7 @@ def _check_citations(doc: dict[str, Any], result: ValidationResult) -> None:
                     corpus_docs,
                     prior_forms,
                 )
+                _check_text_within_span(entry, f"evidence.precedent[{i}].{key}", result)
         for j, ask in enumerate(record.get("refused_asks") or []):
             if isinstance(ask, dict):
                 _check_citation_ref(

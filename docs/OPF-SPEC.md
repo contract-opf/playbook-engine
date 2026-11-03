@@ -302,7 +302,8 @@ Field semantics:
   whose `part_id` or `order` is not the one so computed.
 - `signed_text` — the deal's terminal text for the clause: the executed copy
   when `signed` is true, the last draft when it is false. `null` when the
-  clause was struck before signing.
+  clause was struck before signing. A terminal text joined from several nodes
+  of the clause type cites every one of them (§4 list form).
 - `opened_with`, `opening_text` — what the clause opened with, a fact about
   the deal's first draft, whatever its origin and whatever paper the deal is
   on. Defined in §3.5.5. Never fabricated.
@@ -422,7 +423,8 @@ Definitions (normative):
   aligned row of that `taxonomy_id` — removed rows, and rows whose text still
   occurs in the signed copy, included — joined with a newline in the order of
   the nodes' `char_span` (path order when spans are absent). Its `ref` cites
-  the first of those nodes. The row's `taxonomy_id` is the alignment's, the
+  every one of those nodes (§4 list form: their paths in joined order, no
+  `char_span`); a first draft of a single node cites that node and its span. The row's `taxonomy_id` is the alignment's, the
   same one the terminal record uses.
 - **`opened_with`**, required, one of:
   - `"standard"` — the first-draft text is our standard language. This is the
@@ -1444,7 +1446,7 @@ Every asserted clause text MUST be traceable.
 { "document_id": "string", "version": 4, "clause_path": "8.1", "char_span": [start, end] }
 ```
 - `document_id`, `version`, and `clause_path` are REQUIRED; `char_span` is optional.
-- `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page. A clause the reference engine cut out of another (§3.3, re-segmentation) is numbered `<clause>.r<k>`; its `char_span` lies inside the span of the clause it was cut from. One citation form is a list: an `our_standard` joined from several template clauses (§3.5) cites them all, so its `clause_path` is their dotted paths in document order separated by `, ` (for example `2, 5, 7`), and it carries no `char_span`. A `?` entry stands for a clause the compiler could not number; it has no navigation target. Every other citation names exactly one clause.
+- `clause_path` is the dotted clause numbering in the normalized document, not the raw PDF page. A clause the reference engine cut out of another (§3.3, re-segmentation) is numbered `<clause>.r<k>`; its `char_span` lies inside the span of the clause it was cut from. One citation form is a list: an `our_standard` joined from several template clauses (§3.5), and a `signed_text` or `opening_text` joined from several clauses of one deal (§3.5.5), cite them all, so its `clause_path` is their dotted paths in document order separated by `, ` (for example `2, 5, 7`), and it carries no `char_span`. A `?` entry stands for a clause the compiler could not number; it has no navigation target. Every other citation names exactly one clause. A text asserted from several clauses is never cited by one of them: this section's first sentence outranks any rule that cites only the first node. A validator holds no source bytes and cannot compare a text with its clause, but SHOULD warn on a text longer than the one `char_span` it cites, and MUST reject a list citation that carries a `char_span`.
 - `char_span`, when present, indexes into the document's full normalized text (document-relative — same coordinate system as `ClauseNode.char_span` in the clause-tree artifact), not the clause's own text. It spans the whole cited clause — from the start of its heading line through the end of its own body text (sub-clauses excluded; each carries its own span) — so a consumer resolving it lands on the clause language, not only its heading. (The reference engine also cuts an execution/signature block out of the clause that precedes it, so that block is not part of the clause text or its span.)
 - `version` is the inferred ordinal (1-based); `"template"` is reserved for the baseline, today's form (`document_id` `"template"`), and `"prior_template"` for one of our former forms (§3.5.7), whose `document_id` is `prior_template:` followed by the form's `baseline.prior_templates[].label` (for example `{"document_id": "prior_template:2019 form", "version": "prior_template", ...}`). A former form is never cited as `"template"`: that names today's bytes. Every citation's `(document_id, version)` MUST resolve against `corpus.documents` (or, for `"template"`, `baseline.template_ref`; for `"prior_template"`, a `baseline.prior_templates[]` entry that carries a `sha256`) — dangling citations are non-conformant. When the cited document publishes `version_files` (§3.8), the cited version MUST have an entry there — a citation naming bytes no consumer can verify is likewise non-conformant.
 

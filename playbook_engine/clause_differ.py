@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from playbook_engine.clause_aligner import ClauseAlignment
@@ -86,6 +86,12 @@ class TextHunk:
     kind: str
     old_text: str  # empty string for "insert"
     new_text: str  # empty string for "delete"
+    # The inserted side exactly as the author wrote it (case, punctuation and
+    # inner spacing kept), sliced out of the "after" text. ``new_text`` is the
+    # lowercased ``\w+`` token stream the matcher compared; anything that
+    # quotes a proposal back to a reader must use this. Not serialised
+    # (``to_dict`` is unchanged); "" when the hunk has no inserted side.
+    new_verbatim: str = field(default="", compare=False)
 
     def __post_init__(self) -> None:
         if self.kind not in _HUNK_KINDS:
@@ -568,11 +574,32 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r"\w+", text.lower())
 
 
+def _verbatim_span(text: str, spans: list[tuple[int, int]], j1: int, j2: int) -> str:
+    """The original substring of *text* covering tokens ``[j1, j2)``.
+
+    *spans* holds each token's (start, end) offsets in *text*. Punctuation
+    glued to the run's edges ("(a)", "$1,000", "CLO.") is kept: the slice
+    widens over non-word, non-space characters up to the neighbouring token
+    or whitespace, so a quoted proposal reads as the author wrote it.
+    """
+    if j1 >= j2:
+        return ""
+    start, end = spans[j1][0], spans[j2 - 1][1]
+    floor = spans[j1 - 1][1] if j1 > 0 else 0
+    while start > floor and not text[start - 1].isspace():
+        start -= 1
+    ceil = spans[j2][0] if j2 < len(spans) else len(text)
+    while end < ceil and not text[end].isspace():
+        end += 1
+    return text[start:end]
+
+
 def _word_diff(before: str, after: str) -> tuple[TextHunk, ...]:
     """Word-level diff; equal spans are never emitted."""
     bw = _tokenize(before)
-    aw = _tokenize(after)
-
+    a_matches = list(re.finditer(r"\w+", after))
+    aw = [m.group().lower() for m in a_matches]
+    a_spans = [m.span() for m in a_matches]
     matcher = difflib.SequenceMatcher(None, bw, aw, autojunk=False)
     hunks: list[TextHunk] = []
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -580,6 +607,13 @@ def _word_diff(before: str, after: str) -> tuple[TextHunk, ...]:
             continue  # token discipline: never emit unchanged spans
         old_text = " ".join(bw[i1:i2])
         new_text = " ".join(aw[j1:j2])
-        hunks.append(TextHunk(kind=op, old_text=old_text, new_text=new_text))
+        hunks.append(
+            TextHunk(
+                kind=op,
+                old_text=old_text,
+                new_text=new_text,
+                new_verbatim=_verbatim_span(after, a_spans, j1, j2),
+            )
+        )
 
     return tuple(hunks)
