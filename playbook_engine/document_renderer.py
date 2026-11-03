@@ -629,10 +629,10 @@ def _render_absence(absent: list[dict[str, Any]]) -> str:
     verified = sorted(
         str(a.get("document_id")) for a in absent if a.get("status") == "absent_verified"
     )
-    possible = sorted(
-        str(a.get("document_id")) for a in absent if a.get("status") == "possibly_present"
-    )
-    if not verified and not possible:
+    maybe = [a for a in absent if a.get("status") == "possibly_present"]
+    possible = sorted(str(a.get("document_id")) for a in maybe if a.get("basis") != "unverifiable")
+    unchecked = sorted(str(a.get("document_id")) for a in maybe if a.get("basis") == "unverifiable")
+    if not verified and not possible and not unchecked:
         return ""
     bits = []
     if verified:
@@ -641,6 +641,11 @@ def _render_absence(absent: list[dict[str, Any]]) -> str:
         bits.append(
             f"possibly present in {len(possible)} ({', '.join(possible)}): text resembling it "
             "sits elsewhere, so absence is not claimed"
+        )
+    if unchecked:
+        bits.append(
+            f"not checkable in {len(unchecked)} ({', '.join(unchecked)}): the executed copy is "
+            "unreadable or is another instrument, so absence is not claimed"
         )
     return f'<p class="meta">Signed without this clause: {_esc("; ".join(bits))}.</p>'
 
