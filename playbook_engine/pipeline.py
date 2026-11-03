@@ -5857,7 +5857,10 @@ def project_playbook(
         baseline_dict["template_ref"] = {
             "document_id": "template",
             "title": "Canonical Template",
-            "source": str(config.baseline.template_path),
+            # The file NAME only (QA-2026-11-03 #42): an absolute host path would make
+            # content_hash machine-dependent and put a home directory into a page
+            # that is shared. The content address below identifies the template.
+            "source": Path(config.baseline.template_path).name,
         }
         # Content address for the template (issue #185, §4) — same
         # verification path as corpus version_files. Omitted (never
