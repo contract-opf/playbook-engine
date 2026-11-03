@@ -1256,7 +1256,7 @@ def _terminal_cd(
 def test_multi_node_clause_is_one_signed_observation_from_terminal_tree() -> None:
     """A clause spanning several terminal nodes is ONE precedent: full_text is
     the nodes' text in the terminal tree's document order joined by a single
-    newline, cited to the first node in the signed version."""
+    newline, cited to every node in the signed version."""
     tree = [
         _node_cc("4", "confidentiality", "Each party shall keep it confidential.", (100, 140)),
         _node_cc("4.1", "confidentiality", "Including for three years.", (141, 170)),
@@ -1299,8 +1299,9 @@ def test_multi_node_clause_is_one_signed_observation_from_terminal_tree() -> Non
         "Including for three years.\n"
         "Return or destroy on request."
     )
-    assert conf.citation.clause_path == "4"
-    assert conf.citation.char_span == (100, 140)
+    # Every joined node is cited (OPF §4 list form), in the joined order.
+    assert conf.citation.clause_path == "4, 4.1, 4.2"
+    assert conf.citation.char_span is None
     assert conf.citation.version == 3
     assert conf.citation.version_id == "signed_final"
 
@@ -1353,7 +1354,9 @@ def test_merged_observation_is_one_standard_fact_over_the_merged_text() -> None:
     assert merged.risk_delta == {"direction": "neutral", "magnitude": "none"}
     assert merged.basis == "deterministic"
     assert merged.confidence == 0.6
-    assert merged.citation.clause_path == "1"
+    # Every joined node is cited (OPF §4 list form); no span covers a join.
+    assert merged.citation.clause_path == "1, 2, 3"
+    assert merged.citation.char_span is None
 
 
 def test_all_unchanged_group_keeps_deterministic_none() -> None:
@@ -2406,8 +2409,8 @@ def test_opening_multi_node_standard_with_one_node_struck_is_all_first_draft_nod
     assert terminal.opened_with == "standard"
     assert opening.full_text == f"{node_a}\n{node_b}"
     assert opening.opened_with == "standard"
-    # Cited to the first node in first-draft order, not the struck one.
-    assert (opening.citation.clause_path, opening.citation.char_span) == ("5", (100, 138))
+    # Every first-draft node is cited, in joined order; no single span covers them.
+    assert (opening.citation.clause_path, opening.citation.char_span) == ("5, 6", None)
 
 
 def test_opening_non_standard_changed_to_standard() -> None:
