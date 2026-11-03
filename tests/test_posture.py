@@ -1109,6 +1109,7 @@ def test_cli_posture_interview_prompt_discloses_q4_weight_before_the_answer(
     q4 = next(iq for iq in INTERVIEW_QUESTIONS if iq.q == "sacred_clauses")
 
     replies = "".join(f"{_ANSWERS.get(iq.q, '')}\n" for iq in INTERVIEW_QUESTIONS)
+    replies += "y\nJ. Placeholder\n"  # confirm the echoed hard lines, then the signer
 
     result = CliRunner().invoke(cli, ["posture", "interview", str(tmp_path)], input=replies)
 

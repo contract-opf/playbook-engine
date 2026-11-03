@@ -18,6 +18,8 @@ from playbook_engine.corpus_linter import lint_corpus
 from playbook_engine.dossiers import refresh_derived_sections, validate_condition
 from playbook_engine.floor_candidates import (
     FloorCandidateError,
+    floor_evidence_conflicts,
+    retire_floor_invariant,
     sign_floor_invariant,
     sign_invariant_id,
     write_floor_candidates,
@@ -33,6 +35,7 @@ from playbook_engine.posture import (
     PostureError,
     apply_posture_interview,
     check_posture_floor_conflict,
+    preview_q4_statements,
 )
 from playbook_engine.run_manifest import (
     EnvironmentMismatch,
@@ -3713,8 +3716,19 @@ def posture_questions_cmd() -> None:
         "sufficient there."
     ),
 )
+@click.option(
+    "--signed-by",
+    "signed_by",
+    default=None,
+    help=(
+        "Name of the human legal owner signing the Q4 (sacred_clauses) hard lines. "
+        "Recorded as x_signed_by on each line the interview signs into the Floor. "
+        "Prompted for on the terminal when omitted; without it the lines are "
+        "recorded as named in the interview with no signer."
+    ),
+)
 def posture_interview_cmd(
-    out_dir: Path, answers_file: Path | None, base_version: int | None
+    out_dir: Path, answers_file: Path | None, base_version: int | None, signed_by: str | None
 ) -> None:
     """Run the Posture interview and write a versioned Posture into OUT_DIR/playbook.opf.json.
 
@@ -3734,6 +3748,14 @@ def posture_interview_cmd(
     Warns (non-blocking) if the assembled Posture softens language around a
     concept a Floor invariant protects — a possible Posture-vs-Floor conflict
     for a human to review.
+
+    Q4 (sacred_clauses) is the one answer with binding force: name clause
+    types separated by ';' or ','. Each name is resolved against the
+    playbook's taxonomy, signed into the Floor as a hard line, and the exact
+    statements are printed before they are written. A non-answer ("none")
+    signs nothing, and a name whose direction is unclear is left for
+    'playbook floor sign'. Dropping a name from a later Q4 answer does NOT
+    remove its line: use 'playbook floor retire'.
 
     OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
     followed by 'playbook project').
@@ -3769,12 +3791,30 @@ def posture_interview_cmd(
 
     generated_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
+    # Echo the exact hard lines Q4 will sign BEFORE anything is written.
+    promote_q4 = True
+    try:
+        preview = preview_q4_statements(out_dir_resolved, answers)
+    except (FileNotFoundError, PostureError) as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    if preview:
+        click.secho("Hard lines this interview will sign into your Floor:", bold=True)
+        for statement in preview:
+            click.echo(f"  - {statement}")
+        if answers_file is None:
+            promote_q4 = click.confirm("Sign these into your Floor?", default=True)
+            if promote_q4 and not signed_by:
+                signed_by = click.prompt("Signed by (your name)", default="", show_default=False)
+
     try:
         result = apply_posture_interview(
             out_dir_resolved,
             answers,
             generated_at=generated_at,
             base_version=base_version,
+            signed_by=signed_by,
+            promote_q4=promote_q4,
         )
     except (FileNotFoundError, PostureError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
@@ -3790,6 +3830,12 @@ def posture_interview_cmd(
         )
     for warning in result.warnings:
         click.secho(f"WARN  {warning}", fg="yellow")
+    if preview and promote_q4 and not (signed_by and signed_by.strip()):
+        click.secho(
+            "WARN  No --signed-by given: the Q4 hard lines are recorded as named in the "
+            "interview with no signer. Re-run with --signed-by to record who signed them.",
+            fg="yellow",
+        )
 
 
 @cli.group(name="floor")
@@ -3875,6 +3921,51 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
     click.echo("-" * 70)
     for c in candidates:
         click.echo(f"{c['id']:<10} {c['source']:<14} {len(c['citations']):<10} {c['statement']}")
+
+
+@floor_group.command(name="retire")
+@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--id", "invariant_id", required=True, help="floor.invariants[].id to retire.")
+@click.option(
+    "--signed-by",
+    "signed_by",
+    required=True,
+    help="Name of the human legal owner retiring this hard line (recorded).",
+)
+def floor_retire_cmd(out_dir: Path, invariant_id: str, signed_by: str) -> None:
+    """Retire one Floor invariant: the explicit way to drop a hard line.
+
+    Re-running the Posture interview never removes a hard line, so a line a
+    Q4 answer once signed stays binding after the answer drops it. This
+    removes it from OUT_DIR/playbook.opf.json's ``floor.invariants`` and
+    records who retired it, and when, under ``floor.x_retired``. A later
+    interview re-run will not sign a retired id again.
+
+    OUT_DIR must already contain a playbook.opf.json.
+    """
+    import datetime  # noqa: PLC0415
+
+    opf_path = out_dir.resolve() / "playbook.opf.json"
+    if not opf_path.exists():
+        click.secho(f"ERROR: {opf_path} not found.", fg="red", err=True)
+        raise SystemExit(1)
+    doc = load_opf_file(opf_path)
+    try:
+        doc["floor"] = retire_floor_invariant(
+            doc.get("floor"),
+            invariant_id,
+            signed_by=signed_by,
+            retired_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+        )
+    except FloorCandidateError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    refresh_derived_sections(doc)
+    if "identity" in doc:
+        doc["identity"]["content_hash"] = content_hash(doc)
+        doc["identity"]["section_digests"] = compute_section_digests(doc)
+    write_playbook(doc, opf_path)
+    click.secho(f"OK  floor invariant {invariant_id!r} retired by {signed_by!r}", fg="green")
 
 
 @floor_group.command(name="sign")
@@ -4097,3 +4188,6 @@ def floor_sign_cmd(
     posture_prompt = ((doc.get("posture") or {}).get("system_prompt")) or ""
     for warning in check_posture_floor_conflict(posture_prompt, invariants):
         click.secho(f"WARN  {warning}", fg="yellow")
+    if changed:
+        for warning in floor_evidence_conflicts(doc):
+            click.secho(f"WARN  {warning}", fg="yellow")

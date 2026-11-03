@@ -151,8 +151,11 @@ def derived_nda(tmp_path_factory: pytest.TempPathFactory) -> Path:
     project = _invoke(["project", str(out_dir), "--config", str(_SMOKE_CONFIG)])
     assert project.exit_code == 0, project.output
     interview = _invoke(
-        ["posture", "interview", str(out_dir), "--answers-file", str(_POSTURE_ANSWERS)]
-    )
+        [
+            "posture", "interview", str(out_dir), "--answers-file", str(_POSTURE_ANSWERS),
+            "--signed-by", "Legal Owner",
+        ]
+    )  # fmt: skip
     assert interview.exit_code == 0, interview.output
     assert _invoke(["validate", str(out_dir / "playbook.opf.json")]).exit_code == 0
     return out_dir
@@ -666,6 +669,9 @@ def test_a_statement_override_of_a_q4_invariant_round_trips_through_the_intervie
     # the interview re-run with the same answers is not refused
     rerun = _invoke(["posture", "interview", str(out_dir), "--answers-file", str(_POSTURE_ANSWERS)])
     assert rerun.exit_code == 0, rerun.output
+    # the re-run did not revert the owner's statement (QA-2026-11-03 #32)
+    kept = next(i for i in _load(out_dir)["floor"]["invariants"] if i["id"] == inv_id)
+    assert kept["statement"] == "Owner-worded hard line."
     # and re-applying the overrides (a no-op when already in effect) puts the edit back
     assert _invoke(["apply-overrides", str(out_dir)]).exit_code == 0
     again = next(i for i in _load(out_dir)["floor"]["invariants"] if i["id"] == inv_id)
