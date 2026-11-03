@@ -594,3 +594,19 @@ def render_index_html_from(playbook: dict[str, Any], tmp_path: Path) -> str:
     out.mkdir(exist_ok=True)
     (out / "playbook.opf.json").write_text(json.dumps(playbook, indent=2), encoding="utf-8")
     return render_index_html(out)
+
+
+def test_a_page_built_from_a_playbook_that_fails_validation_carries_a_banner(
+    page_dir: Path,
+) -> None:
+    """QA-2026-11-03 #34: `view bundle` never presents an invalid playbook as clean."""
+    clean = _build(page_dir)
+    assert "fails validation" not in clean
+    path = page_dir / "playbook.opf.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["posture"] = {**(doc.get("posture") or {}), "system_prompt": "Tampered after signing."}
+    path.write_text(json.dumps(doc), encoding="utf-8")  # content_hash no longer matches
+    html = _build(page_dir)
+    assert 'role="alert"' in html
+    assert "fails validation" in html
+    assert "Do not install" in html

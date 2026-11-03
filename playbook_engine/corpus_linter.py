@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -268,11 +269,17 @@ def lint_corpus(
     # (issue #82) know whether a missing docling/pandoc binary matters for
     # THIS corpus without re-walking the tree.
     corpus_suffixes: set[str] = set()
+    deal_fingerprints: dict[Path, frozenset[str]] = {}
     for doc_dir in doc_dirs:
         _lint_doc_dir(doc_dir, report, dangling=symlinks.dangling.get(doc_dir, []))
         versions = _discover_versions(doc_dir)
+        fps = frozenset(h for h in (_file_digest(v) for v in versions) if h)
+        if fps:
+            deal_fingerprints[doc_dir] = fps
         total_supported += len(versions)
         corpus_suffixes.update(vf.suffix.lower() for vf in versions)
+
+    _lint_duplicate_deals(deal_fingerprints, report)
 
     # Only claim "no supported files" when that is actually the problem. When
     # the corpus is full of broken symlinks, _report_symlinks above has already
@@ -401,6 +408,7 @@ def _lint_doc_dir(doc_dir: Path, report: LintReport, dangling: list[Path] | None
     report.add("ok", "DOC_HAS_FILES", f"'{doc_dir.name}': {len(version_files)} version file(s)")
 
     _lint_duplicate_stems(doc_dir, version_files, report)
+    _lint_duplicate_versions(doc_dir, version_files, report)
 
     if len(version_files) < _MIN_VERSIONS_FOR_COMPARISON:
         report.add(
@@ -461,6 +469,60 @@ def _lint_duplicate_stems(doc_dir: Path, version_files: list[Path], report: Lint
             "silently overwrite the other during compile. Rename the files to "
             "unique stems (e.g. 'signed-pdf.pdf', 'signed-docx.docx').",
             doc_dir,
+        )
+
+
+def _file_digest(path: Path) -> str | None:
+    """SHA-256 of a file's bytes, or ``None`` when it cannot be read."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _lint_duplicate_versions(doc_dir: Path, version_files: list[Path], report: LintReport) -> None:
+    """Warn when two version files in one deal are byte-identical.
+
+    Each file is mined as its own round, so an identical copy adds a phantom
+    round to the negotiation trail and double-counts the text in the digest.
+    """
+    by_hash: dict[str, list[Path]] = {}
+    for vf in version_files:
+        h = _file_digest(vf)
+        if h:
+            by_hash.setdefault(h, []).append(vf)
+    for files in by_hash.values():
+        if len(files) < 2:
+            continue
+        names = ", ".join(f.name for f in sorted(files, key=lambda f: f.name))
+        report.add(
+            "warning",
+            "DOC_DUPLICATE_VERSION_CONTENT",
+            f"'{doc_dir.name}': byte-identical version files ({names}). Each is mined as a "
+            "separate round and counted separately; remove the copy unless it is a real round.",
+            doc_dir,
+        )
+
+
+def _lint_duplicate_deals(fingerprints: dict[Path, frozenset[str]], report: LintReport) -> None:
+    """Warn when two deal folders hold exactly the same set of file contents.
+
+    The same agreement filed twice counts as two deals in every digest total
+    (``n_deals``, signed/opened counts).
+    """
+    by_set: dict[frozenset[str], list[Path]] = {}
+    for doc_dir, fps in fingerprints.items():
+        by_set.setdefault(fps, []).append(doc_dir)
+    for dirs in by_set.values():
+        if len(dirs) < 2:
+            continue
+        names = ", ".join(f"'{d.name}'" for d in sorted(dirs))
+        report.add(
+            "warning",
+            "CORPUS_DUPLICATE_DEAL",
+            f"Deal folders {names} hold identical files: the same agreement filed twice, "
+            "counted as separate deals. Remove one.",
+            dirs[0].parent,
         )
 
 
