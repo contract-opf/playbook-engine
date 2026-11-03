@@ -158,6 +158,11 @@ class VersionOrder:
                                 suggesting parallel redlines or a missing draft).
                             ``"gap"`` — a single large cost jump between adjacent
                                 steps (missing intermediate version).
+        timestamp_override: ``True`` when every unsigned version carries a
+                            distinct timestamp and the content-distance chain
+                            orders them differently (QA 2026-11-03 #29: a flag
+                            only; the order is unchanged). Written to the
+                            trail only when ``True``.
     """
 
     ordered_ids: tuple[str, ...]
@@ -166,6 +171,7 @@ class VersionOrder:
     total_distance: float
     pairwise_distances: tuple[PairwiseDistance, ...]
     shape: str = "linear"
+    timestamp_override: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -178,6 +184,7 @@ class VersionOrder:
                 for p in self.pairwise_distances
             ],
             "shape": self.shape,
+            **({"timestamp_override": True} if self.timestamp_override else {}),
         }
 
 
@@ -469,6 +476,7 @@ def order_versions(
     # Build output.
     total, pairs = _chain_cost(chain, dist)
     shape = chain_shape(chain, dist)
+    override = _timestamps_overridden(chain, non_signed_ids, signed_id, effective_hints)
     result = VersionOrder(
         ordered_ids=tuple(chain),
         signed_id=signed_id,
@@ -476,6 +484,7 @@ def order_versions(
         total_distance=total,
         pairwise_distances=tuple(pairs),
         shape=shape,
+        timestamp_override=override,
     )
 
     # Invoke TrailJudge when the chain is ambiguous.
@@ -811,6 +820,18 @@ def _greedy_chain(
         chain.append(signed_id)
 
     return chain, "greedy"
+
+
+def _timestamps_overridden(
+    chain: list[str], non_signed: list[str], signed_id: str | None, hints: Hints | None
+) -> bool:
+    """Whether distinct timestamps on every unsigned version order them differently than *chain*."""
+    if hints is None or len(non_signed) < 2:
+        return False
+    stamps = {vid: hints.timestamps.get(vid) for vid in non_signed}
+    if not all(stamps.values()) or len(set(stamps.values())) != len(stamps):
+        return False
+    return [c for c in chain if c != signed_id] != sorted(non_signed, key=lambda v: stamps[v] or "")
 
 
 def _merge_hints(versions: list[VersionInput], explicit: Hints | None) -> Hints | None:

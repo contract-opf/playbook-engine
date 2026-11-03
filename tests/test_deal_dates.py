@@ -1252,3 +1252,19 @@ def test_the_committed_example_dates_four_of_its_six_deals() -> None:
     assert all("signed_on" in d and "signed_on_basis" in d for d in documents)
     assert sum(1 for d in documents if d["signed_on"]) == 4
     assert sum(1 for d in documents if d["signed_on"] is None) == 2
+
+
+def test_a_preamble_date_that_contradicts_the_signature_block_is_flagged_not_resolved() -> None:
+    """QA 2026-11-03 #26: a flag only; ``signed_on`` still prefers the preamble."""
+    clash = _evidence(document_text="2021-03-04", signature_block="2021-05-06")
+    assert dd.has_date_conflict(clash)
+    assert dd.resolve_signed_on(clash) == ("2021-03-04", dd.BASIS_DOCUMENT_TEXT)
+    same = _evidence(document_text="2021-03-04", signature_block="2021-03-04")
+    assert not dd.has_date_conflict(same)
+    # a month-precision preamble date agrees with a day in that month
+    assert not dd.has_date_conflict(
+        _evidence(document_text="2021-03", signature_block="2021-03-09")
+    )
+    assert dd.has_date_conflict(_evidence(document_text="2021-03", signature_block="2021-04-09"))
+    assert not dd.has_date_conflict(_evidence(document_text="2021-03-04"))
+    assert not dd.has_date_conflict(_evidence())
