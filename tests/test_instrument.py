@@ -60,7 +60,7 @@ def _precedent(obs: list[Observation], doc_ids: list[dict[str, Any]], **kw: Any)
 
 
 def test_a_cover_sheet_and_an_amendment_are_other_instruments() -> None:
-    assert instrument.instrument_reason(COVER_SHEET) == instrument.INSTRUMENT_AMENDMENT
+    assert instrument.instrument_reason(COVER_SHEET) == instrument.INSTRUMENT_INCORPORATION
     assert instrument.instrument_reason(AMENDMENT) == instrument.INSTRUMENT_AMENDMENT
     incorporation = "The Services are governed by the Terms posted at https://example.com/terms."
     assert instrument.instrument_reason(incorporation) == instrument.INSTRUMENT_INCORPORATION
@@ -88,7 +88,7 @@ def test_the_flags_are_read_off_the_executed_copy_per_deal() -> None:
         _obs("deal-x", TERM, TERM_STD, path="2", outcome="opening"),
         _obs("deal-ok", None, UNRELATED, path="1"),
     ]
-    assert instrument.instrument_flags(obs) == {"deal-x": instrument.INSTRUMENT_AMENDMENT}
+    assert instrument.instrument_flags(obs) == {"deal-x": instrument.INSTRUMENT_INCORPORATION}
 
 
 def test_an_other_instrument_copy_never_verifies_an_absence() -> None:
@@ -171,3 +171,35 @@ def test_reason_wording() -> None:
     assert instrument.reason_flags_instrument("This is a cover sheet over hosted terms")
     assert not instrument.reason_flags_instrument("No assignment language appears.")
     assert not instrument.reason_flags_instrument(None)
+
+
+def test_full_agreement_boilerplate_is_not_another_instrument() -> None:
+    """Severability, an Amendment clause and a defined Order Form are boilerplate."""
+    text = (
+        "Mutual Non-Disclosure Agreement\n"
+        "Amendment\n"
+        "This Agreement may be changed only by written amendment signed by both parties.\n"
+        "Amendment. No waiver is effective unless in writing.\n"
+        "Order Form. Each Order Form placed by Customer forms part of this Agreement.\n"
+        "If any provision is held invalid, the remaining provisions remain in full force "
+        "and effect.\n"
+        "The confidentiality obligations survive termination and remain in full force "
+        "and effect."
+    )
+    assert instrument.instrument_reason(text) is None
+
+
+def test_title_lines_flag_the_instrument() -> None:
+    for title in (
+        "Amendment No. 1",
+        "First Amendment to Master Services Agreement",
+        "Addendum to the Services Agreement",
+        "ORDER FORM",
+        "Statement of Work No. 3",
+    ):
+        assert instrument.instrument_reason(title + "\nThe fee is changed.") is not None, title
+
+
+def test_reason_saying_no_amendment_clause_is_not_a_flag() -> None:
+    assert not instrument.reason_flags_instrument("The text holds no amendment provision.")
+    assert instrument.reason_flags_instrument("A short amendment that incorporates the main terms.")

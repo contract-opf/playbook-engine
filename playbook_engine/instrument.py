@@ -13,8 +13,9 @@ before signing".
 :func:`instrument_flags` finds those deals from the text alone, never from a
 corpus-specific name. A flagged deal records absence as ``unverifiable`` and
 records no struck / opening / refused-ask claim (an unflagged deal is unchanged).
-The cues are deliberately conservative towards flagging: an unverified absence
-costs a count, a false verified one is a false fact.
+A flag costs real evidence (the deal's refused asks and opening facts), so each cue
+is one a full agreement's boilerplate does not carry: a title line, not the word
+"amendment"; ratification, not severability.
 """
 
 from __future__ import annotations
@@ -49,19 +50,39 @@ AMENDMENT_TITLE_CHARS = 15000
 """A copy with an instrument title up front is the instrument itself only when it
 is shorter than this (an amended and restated agreement is a full document)."""
 
-_HEAD_CHARS = 700
 _FORM_SWITCH_RATIO = 4
 
-_TITLE_RE = re.compile(
+# Any mention of an instrument: enough only beside a form switch's size evidence.
+_CUE_RE = re.compile(
     r"\b(?:amendment|addendum|amending agreement|order form|statement of work|work order"
     r"|cover sheet|joinder|side letter|supplemental agreement|renewal form)\b",
     re.IGNORECASE,
 )
+# A title line. Boilerplate never matches: an "Amendment." clause heading, "Order
+# Form" as a defined term, "may be changed by written amendment".
+_ORDINAL = (
+    r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+(?:st|nd|rd|th))"
+)
+_TITLE_RE = re.compile(
+    r"^[ \t]*(?:"
+    rf"(?:{_ORDINAL}\s+)(?:amendment|addendum)\b"
+    r"|(?:amendment|addendum)\s+(?:no\b|number\b|#|\d|to\s+(?!this\b))"
+    r"|(?:amending agreement|order form|statement of work|work order|cover sheet|joinder"
+    r"|side letter|supplemental agreement|renewal form)(?:\s+(?:no\.?\s*)?[\w-]+)?[ \t]*$"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Language that keeps another agreement alive. Severability says "remain in full
+# force and effect" too, of this agreement's own terms: see _ratifies.
 _RATIFY_RE = re.compile(
     r"\b(?:remain(?:s)? in full force and effect"
     r"|except as (?:expressly )?(?:amended|modified|supplemented)"
     r"|all other terms[^.]{0,60}(?:remain|unchanged)"
     r"|(?:hereby )?ratif(?:y|ies))\b",
+    re.IGNORECASE,
+)
+_SEVERABILITY_RE = re.compile(
+    r"\b(?:invalid|unenforceable|illegal|severab\w*|void|terminat\w*|expir\w*|surviv\w*)\b",
     re.IGNORECASE,
 )
 _INCORPORATION_RE = re.compile(
@@ -73,12 +94,21 @@ _URL_RE = re.compile(r"https?://|\bwww\.", re.IGNORECASE)
 _TERMS_RE = re.compile(r"\bterms\b", re.IGNORECASE)
 
 _REASON_RE = re.compile(
-    r"\bamendment|\baddendum\b|\bcover sheet\b|\border form\b|\bstatement of work\b"
+    r"(?<!\bno )(?<!\bany )\bamendment\b|\baddendum\b|\bcover sheet\b|\border form\b|\bstatement of work\b"
     r"|\bincorporat\w*\b|\bby reference\b|\bseparate(?:ly)?\s+(?:terms|agreement|document)"
     r"|\bhosted\b|\bdifferent (?:document|agreement|instrument)\b|\bnot the (?:full|whole)\b"
     r"|\bsow\b",
     re.IGNORECASE,
 )
+
+
+def _ratifies(text: str) -> bool:
+    """Whether a sentence of *text* keeps another agreement alive (not severability
+    or survival language, which uses the same words of this agreement's terms)."""
+    return any(
+        _RATIFY_RE.search(sentence) and not _SEVERABILITY_RE.search(sentence)
+        for sentence in re.split(r"(?<=[.;])\s+", text)
+    )
 
 
 def instrument_reason(text: str, *, earlier_chars: int = 0) -> str | None:
@@ -91,9 +121,8 @@ def instrument_reason(text: str, *, earlier_chars: int = 0) -> str | None:
     chars = len(text)
     if not chars:
         return None
-    head = text[:_HEAD_CHARS]
-    title = bool(_TITLE_RE.search(head))
-    ratify = bool(_RATIFY_RE.search(text))
+    title = bool(_TITLE_RE.search(text))
+    ratify = _ratifies(text)
     incorporates = bool(_INCORPORATION_RE.search(text)) or (
         bool(_URL_RE.search(text)) and bool(_TERMS_RE.search(text))
     )
@@ -108,7 +137,7 @@ def instrument_reason(text: str, *, earlier_chars: int = 0) -> str | None:
         earlier_chars
         and chars * _FORM_SWITCH_RATIO <= earlier_chars
         and chars < AMENDMENT_TITLE_CHARS
-        and (ratify or incorporates or _TITLE_RE.search(text))
+        and (ratify or incorporates or _CUE_RE.search(text))
     ):
         return INSTRUMENT_FORM_SWITCH
     return None
