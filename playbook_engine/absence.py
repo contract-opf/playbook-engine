@@ -18,7 +18,9 @@ signed precedent into two facts, recorded in ``evidence.absence``:
     clause type the classifier filed it under or ``null``), or nothing could be
     checked (``basis: "unverifiable"``: the deal's executed copy produced no
     readable text or has big passages that extracted as junk, or the clause type
-    has no reference text).
+    has no reference text, or the executed copy is a different instrument than the
+    negotiated agreement: an amendment, a cover sheet or order form incorporating
+    its terms by reference or URL, a form switch; :mod:`playbook_engine.instrument`).
 
 The nodes scored are every clause node of the executed copy: the ones the
 classifier left unclassified AND the ones it filed under another clause type
@@ -69,6 +71,7 @@ from typing import Any
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.clause_classifier import _content_tokens
 from playbook_engine.clause_position_compiler import OPFCitation, _is_degenerate_observation_text
+from playbook_engine.instrument import instrument_flags
 from playbook_engine.observation_builder import Observation
 from playbook_engine.resegmentation import split_units
 
@@ -316,6 +319,11 @@ def build_absence(
         if obs.non_clause is None and obs.full_text.strip():
             nodes[document_id].append(obs)
 
+    # A signed copy that is a different instrument than the negotiated agreement
+    # (an amendment, a cover sheet over incorporated terms, a form switch) cannot
+    # verify an absence either: the terms live in another document.
+    other_instrument = set(instrument_flags(observations))
+
     # A signed copy with big unreadable passages cannot be verified at all.
     unreadable_deals = {
         document_id
@@ -363,7 +371,10 @@ def build_absence(
                 key=lambda c: (-c[0], c[1].citation.clause_path, str(c[1].citation.version))
             )
             unverifiable = (
-                not nodes[document_id] or not references[tid] or document_id in unreadable_deals
+                not nodes[document_id]
+                or not references[tid]
+                or document_id in unreadable_deals
+                or document_id in other_instrument
             )
             records.append(
                 {

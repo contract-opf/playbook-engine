@@ -1341,3 +1341,31 @@ def test_greedy_chain_ties_break_on_hint_timestamps_then_id() -> None:
     assert all(r == results[0] for r in results)
     chain, _ = results[0]
     assert chain == [f"v{i}" for i in range(10, 0, -1)] + ["sig"]
+
+
+def test_timestamps_that_disagree_with_content_order_are_flagged_not_obeyed() -> None:
+    """QA 2026-11-03 #29: the chain still follows content; the override is recorded."""
+    from dataclasses import replace
+
+    base = [_vi("v1", _V1_TEXT), _vi("v2", _V2_TEXT), _vi("v3", _V3_TEXT, signed=True)]
+    plain = order_versions(base)
+    assert plain.ordered_ids == ("v1", "v2", "v3")
+    assert plain.timestamp_override is False
+    assert "timestamp_override" not in plain.to_dict()
+
+    consistent = [
+        replace(base[0], timestamp="2025-01-01"),
+        replace(base[1], timestamp="2025-01-02"),
+        base[2],
+    ]
+    assert order_versions(consistent).timestamp_override is False
+
+    swapped = [
+        replace(base[0], timestamp="2025-02-01"),
+        replace(base[1], timestamp="2025-01-02"),
+        base[2],
+    ]
+    result = order_versions(swapped)
+    assert result.ordered_ids == plain.ordered_ids
+    assert result.timestamp_override is True
+    assert result.to_dict()["timestamp_override"] is True
