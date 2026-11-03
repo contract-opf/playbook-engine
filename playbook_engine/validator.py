@@ -334,11 +334,30 @@ def _check_perspective_present(doc: dict[str, Any], result: ValidationResult) ->
     if "perspective" not in doc:
         result.add(
             "top-level perspective is absent -- an OPF instance MUST say who "
-            "'us' is (OPF-SPEC.md §3.1). A consumer cannot tell which party "
-            "this playbook reviews as, and will judge one-sided clauses "
+            "'us' is (OPF-SPEC.md §3.1). The schema cannot require it, so this "
+            "is only a warning here, but the contract-toaster REFUSES a "
+            "playbook without it, and any other consumer cannot tell which "
+            "party this playbook reviews as and will judge one-sided clauses "
             "symmetrically. Set perspective.party and "
-            "perspective.counterparty_type in the producing config.",
+            "perspective.counterparty_type in the producing config, then "
+            "re-run `playbook project`.",
             path="perspective",
+            blocking=False,
+        )
+
+
+def _check_stub_basis(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Non-blocking warning: the playbook carries ``compiler.stub_basis_present``
+    (QA-2026-11-03 #15). Some judgments were never made by a real judge, so the
+    playbook is a smoke-test artifact; the contract-toaster refuses it."""
+    if (doc.get("compiler") or {}).get("stub_basis_present") is True:
+        result.add(
+            "compiler.stub_basis_present is true -- part of this playbook was compiled "
+            "from judgment stubs, not a real judge. It is structurally valid but "
+            "semantically blank: do not share it, and the contract-toaster will refuse "
+            "it. Run the judged derivation (the playbook-from-corpus skill: `playbook "
+            "judge` / `judge-apply`), then `playbook project` again.",
+            path="compiler.stub_basis_present",
             blocking=False,
         )
 
@@ -1857,6 +1876,7 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_posture_floor_conflict(doc, result)
     _check_posture_interview_provenance(doc, result)
     _check_perspective_present(doc, result)
+    _check_stub_basis(doc, result)
     _check_identity_hash(doc, result)
     _check_digest(doc, result)
     _check_floor_rules(doc, result)
