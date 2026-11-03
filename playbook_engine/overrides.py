@@ -680,6 +680,9 @@ def apply_overrides(
                 continue
             found[entry.field or ""] = entry.value
             found[OWNER_MARKER] = BASIS_OWNER
+            # A Q4 line is editable here, but its sign-off covered the old text.
+            for signed_key in ("x_signed_by", "x_signed_at", "x_signed_hash"):
+                found.pop(signed_key, None)
             result.changed[TARGET_FLOOR] += 1
     if problems:
         if strict:
