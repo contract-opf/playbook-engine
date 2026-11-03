@@ -6891,12 +6891,20 @@
       {
         "id": "exclusions-from-confidential-information",
         "statement": "Do not concede on Exclusions from Confidential Information.",
-        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
+        "x_signed_by": "Legal Owner",
+        "x_signed_at": "2026-10-21T12:34:10+00:00",
+        "x_taxonomy_id": "exclusions_from_confidential",
+        "x_direction": "hold"
       },
       {
         "id": "survival-of-confidentiality-obligations",
         "statement": "Do not concede on Survival of Confidentiality Obligations.",
-        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
+        "x_signed_by": "Legal Owner",
+        "x_signed_at": "2026-10-21T12:34:10+00:00",
+        "x_taxonomy_id": "survival_period",
+        "x_direction": "hold"
       },
       {
         "id": "limitation-of-liability-confidentiality-carveout",
@@ -9478,23 +9486,23 @@
     "hard_rules": [
       {
         "rule_id": "exclusions-from-confidential-information",
-        "clause_id": null,
-        "taxonomy_id": null,
+        "clause_id": "clause.exclusions_from_confidential",
+        "taxonomy_id": "exclusions_from_confidential",
         "statement": "Do not concede on Exclusions from Confidential Information.",
         "required_presence": false,
         "condition": "judged",
         "permissible_proof": [],
-        "fallback_language": null
+        "fallback_language": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
       },
       {
         "rule_id": "survival-of-confidentiality-obligations",
-        "clause_id": null,
-        "taxonomy_id": null,
+        "clause_id": "clause.survival_period",
+        "taxonomy_id": "survival_period",
         "statement": "Do not concede on Survival of Confidentiality Obligations.",
         "required_presence": false,
         "condition": "judged",
         "permissible_proof": [],
-        "fallback_language": null
+        "fallback_language": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
       },
       {
         "rule_id": "limitation-of-liability-confidentiality-carveout",
@@ -9827,8 +9835,14 @@
           }
         ]
       },
-      "n_floor_rules": 0,
-      "floor_rules": [],
+      "n_floor_rules": 1,
+      "floor_rules": [
+        {
+          "rule_id": "exclusions-from-confidential-information",
+          "statement": "Do not concede on Exclusions from Confidential Information.",
+          "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        }
+      ],
       "excerpts": [
         {
           "precedent_id": "prec.500fb6712293bc21",
@@ -10423,8 +10437,14 @@
           }
         ]
       },
-      "n_floor_rules": 0,
-      "floor_rules": [],
+      "n_floor_rules": 1,
+      "floor_rules": [
+        {
+          "rule_id": "survival-of-confidentiality-obligations",
+          "statement": "Do not concede on Survival of Confidentiality Obligations.",
+          "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        }
+      ],
       "excerpts": [
         {
           "precedent_id": "prec.574e5b7400141bcf",
@@ -10830,11 +10850,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:d5df096e604dfbe0e088d09a0fc79a6a9799d833eae6f676c16cb9334e0c0596",
+    "content_hash": "sha256:47372f41cdbc278ad95aabfb113f2391e5a54a8ff5d832e4e59381a420eaefd6",
     "section_digests": {
       "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
       "posture": "sha256:2917e416528a64c119934e8b7b1b69a3d5d3671978ec4d7d80ced9845aa8a4d6",
-      "floor": "sha256:8fea54a4f67eafb57e32f063c4a8f34d060bdf574662d0f515a17f39dab3edeb"
+      "floor": "sha256:198110cc1757ea0c2b0691003a664079d35cfced19c23ecc80cf2b4f28ce25c9"
     }
   }
 }

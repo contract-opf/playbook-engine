@@ -149,6 +149,8 @@ def test_nda_derivation_reproducible_from_committed_inputs(
             str(out_dir),
             "--answers-file",
             str(_POSTURE_ANSWERS),
+            "--signed-by",
+            _FLOOR_SIGN_ARGS["signed_by"],
         ]
     )
     assert interview_result.exit_code == 0, f"posture interview failed:\n{interview_result.output}"

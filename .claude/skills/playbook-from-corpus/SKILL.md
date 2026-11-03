@@ -1283,10 +1283,23 @@ So offer both kinds and say which kind each is:
 
 - **"don't let them weaken X"** — from the reversal ranking; X is present and
   contested.
-- **"X must be present at all"** — from the absence ranking; the Floor's job
-  here is to fix what the history got wrong, not to encode it. Say the absence
-  rate out loud in the option description ("present in 9 of 43 — your history
-  is the argument FOR this hard line, not against it").
+- **"X must be present at all"** — from the absence ranking, **only for a clause
+  the taxonomy says belongs in this agreement type**; the Floor's job here is
+  to fix what the history got wrong, not to encode it. Say the absence rate out
+  loud in the option description ("present in 9 of 43 — your history is the
+  argument FOR this hard line, not against it").
+
+**Absent does not mean wanted.** The absence ranking only says a clause is
+missing from many documents; it does not say it should be there. Before you
+offer "X must be present", read X's `description` in the taxonomy
+(`$OUT/playbook.opf.json` → `taxonomy.entries[]`, or the taxonomy YAML). If it
+says the clause is normally absent, to be flagged if a counterparty introduces
+it, or that it undercuts the agreement (a mutual NDA's limitation of liability
+or residuals clause is the typical case), the high absence rate is the playbook
+working as intended: offer **"never accept X"** instead (a refuse line), or
+nothing at all. If the description is silent either way, offer neither
+direction as a default and ask which way the owner wants it. Never present a
+clause as a must-have because it is the most-absent one.
 
 An absence-shaped invariant is often the most valuable thing in the whole
 Floor, precisely because the corpus cannot propose it: the corpus is the record
@@ -1301,10 +1314,10 @@ the user their answers:
 playbook posture questions
 
 # Write $OUT/posture-answers.json as you go, then:
-playbook posture interview $OUT --answers-file $OUT/posture-answers.json
+playbook posture interview $OUT --answers-file $OUT/posture-answers.json --signed-by "<the human's name>"
 # Docker form (CORPUS=./out is the harmless Route B placeholder from the
 # mechanical caveat under Step 0 — posture interview never reads /work/corpus):
-# make docker-run CORPUS=./out OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
+# make docker-run CORPUS=./out OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json --signed-by '<the human's name>'"
 ```
 
 Rules that are easy to get wrong:
@@ -1314,6 +1327,28 @@ Rules that are easy to get wrong:
   is legitimate; inventing answers is not. But fewer than 3 answers is
   rejected by `posture interview` (OPF §7) — make sure at least three
   questions get answers before you submit.
+- **Show the binding note before you ask Q4, word for word.** Q4 is the one
+  answer with binding force, and `playbook posture questions` prints the
+  `binding_note` that goes with it. Put that note in front of the user in the
+  same message as the question (as plain text, not folded into an option
+  description), and wait for the answer. Do not paraphrase it away and do not
+  ask Q4 as one of four quick-pick questions without it.
+- **How Q4 is read.** Separate clause names with `;` or `,` (a comma inside
+  parentheses does not split). A non-answer — "none", "n/a", "not sure", "tbd"
+  — signs nothing. Each name is matched against the playbook's own taxonomy by
+  id or label (case, plurals and "&"/"and" are ignored); a match is stamped
+  with `x_taxonomy_id` so the line is tied to its clause. A name that matches
+  nothing is still signed as a plain "Do not concede on ..." line, with no clause
+  tie. A name that points the other way — "no limitation of liability",
+  "uncapped liability", "unilateral termination" — is signed as **"Never accept
+  ..."**, not as a hold-firm line. A name that starts "never", "not", "don't",
+  "without" or "avoid" is **not guessed at**: `posture interview` prints a
+  `floor sign` command so the owner words it themselves. `posture interview`
+  prints every statement it is about to sign *before* it writes anything, and
+  `--signed-by "<the human's name>"` records who signed them (`x_signed_by`);
+  without it the lines are marked as having no signer. **Read the printed
+  statements back to the user and confirm each says what they meant**, or stop
+  and fix the wording with `floor sign`.
 - **Q4 is different in kind, and signs itself — for name-shaped items.** Naming
   what is non-negotiable is a human authoring a hard line in natural language,
   so a bare clause-type name ("Uncapped liability") is written **directly into
@@ -1335,13 +1370,22 @@ Rules that are easy to get wrong:
   hits this path. Always run the printed command and confirm the invariant
   landed — `jq '.floor.invariants[].id' $OUT/playbook.opf.json` — before
   treating the answer as signed.
-- **Re-running is safe.** The same statement always resolves to the same id and
-  updates in place — never a duplicate (a repeated id is a blocking validator
-  error, §3.13). Offer to re-run whenever the user's answers change. A
-  re-run with the SAME (unchanged) answers file is a true no-op end to
-  end: `posture.version` is left untouched too, not just `floor.invariants`
-  (issue #132) — nothing is written, so re-offering the interview "just to
-  be safe" never inflates the version.
+- **Re-running adds and keeps; it never removes.** The same statement always
+  resolves to the same id — never a duplicate (a repeated id is a blocking
+  validator error, §3.13) — and a line the owner edited on the page is left as
+  edited. A re-run with the SAME (unchanged) answers file is a true no-op end
+  to end: `posture.version` is left untouched too, and so is the Posture text
+  (issue #132) — nothing is written, so re-offering the interview "just to be
+  safe" never inflates the version.
+- **Dropping a Q4 name does NOT drop its hard line.** If the user's new answer
+  no longer names something an earlier run signed, the line stays binding in
+  `floor.invariants` and `posture interview` prints a WARN naming it. Tell the
+  user plainly, and if they want it gone run the printed command, with the
+  human's own name:
+  `playbook floor retire $OUT --id <invariant-id> --signed-by "<the human's name>"`.
+  That removes the line and records who retired it and when (`floor.x_retired`);
+  later re-runs will not sign that id again. This is the only sanctioned way to
+  remove a hard line.
 - **`posture.version` only carries forward on its own when OUT_DIR is
   recompiled in place** (Route C reuses the same out-dir, so `project`'s
   carry-forward keeps the version climbing automatically — nothing to do
@@ -1390,7 +1434,8 @@ playbook floor propose $OUT --config $CORPUS/playbook.config.yaml
 
 `floor propose` is a **review artifact only**. It never writes to the OPF `floor`
 section and never promotes a candidate. Accepting is a human act, and it goes
-through `floor sign` — do **not** hand-edit `floor.invariants`. Read the
+through `floor sign` (and removal through `floor retire`) — do **not** hand-edit
+`floor.invariants`. Read the
 printed table (or `$OUT/floor.candidates.json`, where each candidate carries
 its evidence citations) with the human, one candidate at a time, and for each
 one they want as a hard line, sign it (below) using the candidate's
@@ -1441,7 +1486,8 @@ verbatim into every consumer's model-facing review prompt, while `x_signed_by`/
 
 Re-running with the identical `--statement` under the same id is a no-op;
 re-running with a different `--statement` under an id that already carries one
-is refused, never silently overwritten. This is the ONLY sanctioned way to put
+is refused, never silently overwritten: retire the old one first with
+`playbook floor retire $OUT --id <id> --signed-by "<the human's name>"`. This is the ONLY sanctioned way to put
 a hand-authored statement into `floor.invariants` outside of Q4 —
 never hand-edit `floor.invariants` directly, even for
 a one-word fix.
