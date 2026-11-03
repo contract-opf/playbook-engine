@@ -5935,13 +5935,36 @@ def project_playbook(
     existing_posture: dict[str, Any] | None = None
     existing_floor: dict[str, Any] | None = None
     if out_file.exists():
+        # QA-2026-11-03 #8: an unreadable prior playbook is REFUSED, not treated
+        # as "nothing to carry forward" — that silently wrote empty posture/floor
+        # over a signed Floor with no backup.
         try:
             prior_playbook = json.loads(out_file.read_text(encoding="utf-8"))
-            existing_posture = prior_playbook.get("posture")
-            existing_floor = prior_playbook.get("floor")
-        except (json.JSONDecodeError, OSError):
-            existing_posture = None
-            existing_floor = None
+        except (ValueError, OSError) as exc:
+            raise PipelineError(
+                f"project: the existing {out_file} cannot be read ({exc}), so its signed "
+                "Posture and Floor cannot be carried forward. Nothing was written. Repair or "
+                "restore that file (or move it aside to start without a Posture/Floor), then "
+                "re-run."
+            ) from exc
+        if not isinstance(prior_playbook, dict):
+            raise PipelineError(
+                f"project: the existing {out_file} is not a JSON object, so its signed Posture "
+                "and Floor cannot be carried forward. Nothing was written."
+            )
+        existing_posture = prior_playbook.get("posture")
+        existing_floor = prior_playbook.get("floor")
+        from playbook_engine.floor_candidates import altered_signed_invariants  # noqa: PLC0415
+
+        altered = altered_signed_invariants(existing_floor)
+        if altered:
+            raise PipelineError(
+                f"project: Floor invariant(s) {altered} carry a sign-off (x_signed_by) but their "
+                "text no longer matches what was signed. `project` carries the Floor forward "
+                "as it stands and would stamp the edit as signed. Nothing was written. Restore "
+                "the signed text (the sign-off covers exactly that text); a changed hard line "
+                "needs a new sign-off under a new --id."
+            )
 
     playbook = assemble_playbook(
         agreement_type=agreement_type_dict,

@@ -498,25 +498,94 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     :func:`load_opf_file` from this module at ITS top level, so a top-level
     import here the other way would cycle.
     """
-    from playbook_engine.floor_candidates import floor_invariant_attribution  # noqa: PLC0415
+    from playbook_engine.floor_candidates import (  # noqa: PLC0415
+        floor_invariant_attribution,
+        signed_binding_status,
+    )
 
     floor_section = doc.get("floor")
     invariants = floor_section.get("invariants") if isinstance(floor_section, dict) else None
     if not isinstance(invariants, list):
         return
+    taxonomy = doc.get("taxonomy")
+    entries = taxonomy.get("entries") if isinstance(taxonomy, dict) else None
+    known_ids = {e.get("id") for e in entries or [] if isinstance(e, dict)}
     for i, invariant in enumerate(invariants):
         if not isinstance(invariant, dict):
             continue
-        if floor_invariant_attribution(invariant) is not None:
-            continue
         invariant_id = invariant.get("id")
         label = f"{invariant_id!r} " if isinstance(invariant_id, str) else ""
+        statement = invariant.get("statement")
+        if isinstance(statement, str) and not statement.strip():
+            result.add(
+                f"floor invariant {label}has an empty statement — a hard line with no text "
+                "binds nothing; write the statement or remove the invariant",
+                path=f"floor.invariants[{i}].statement",
+            )
+        tid = invariant.get("x_taxonomy_id")
+        if isinstance(tid, str) and known_ids and tid not in known_ids:
+            result.add(
+                f"floor invariant {label}names x_taxonomy_id {tid!r}, which is not in this "
+                "playbook's taxonomy — the hard line would silently bind to no clause; "
+                "correct the id",
+                path=f"floor.invariants[{i}].x_taxonomy_id",
+            )
+        binding = signed_binding_status(invariant)
+        if binding == "altered":
+            result.add(
+                f"floor invariant {label}carries a sign-off (x_signed_by) but its signed "
+                "fields no longer match x_signed_hash — the text changed after it was signed. "
+                "Restore the signed text (the sign-off covers exactly that text); a changed "
+                "hard line needs a new sign-off under a new --id. `playbook project` does not "
+                "repair this",
+                path=f"floor.invariants[{i}]",
+            )
+        elif binding == "unbound":
+            result.add(
+                f"floor invariant {label}was signed before sign-offs recorded x_signed_hash, "
+                "so the signature is not bound to its text (unbound); re-sign it with "
+                "`playbook floor sign` to bind it.",
+                path=f"floor.invariants[{i}]",
+                blocking=False,
+            )
+        if floor_invariant_attribution(invariant) is not None:
+            continue
         result.add(
             f"floor invariant {label}carries no structural attribution — no "
             "x_signed_by, and its rationale doesn't match a Posture-interview "
             "promotion marker; confirm a human actually "
             "authored/signed this hard line.",
             path=f"floor.invariants[{i}]",
+            blocking=False,
+        )
+
+
+def _check_posture_grounding(doc: dict[str, Any], result: ValidationResult) -> None:
+    """Non-blocking warning: the Posture was grounded in an earlier derivation.
+
+    ``posture.generation.grounded_in`` is ``evidence@<section digest>`` of the
+    Evidence the interview read. A Route C recompile carries the Posture
+    forward verbatim but replaces the Evidence, so the digest goes stale
+    (QA-2026-11-03 #45); the Posture may no longer match the new evidence.
+    """
+    posture = doc.get("posture")
+    generation = posture.get("generation") if isinstance(posture, dict) else None
+    grounded = generation.get("grounded_in") if isinstance(generation, dict) else None
+    identity = doc.get("identity")
+    digests = identity.get("section_digests") if isinstance(identity, dict) else None
+    current = digests.get("evidence") if isinstance(digests, dict) else None
+    if (
+        isinstance(grounded, str)
+        and grounded.startswith("evidence@")
+        and isinstance(current, str)
+        and grounded != f"evidence@{current}"
+    ):
+        result.add(
+            "posture.generation.grounded_in names an earlier Evidence than this playbook "
+            "carries (the corpus was re-derived since the Posture was written); re-read the "
+            "Posture against the new Evidence, then re-run `playbook posture interview` with "
+            "the same answers to refresh the grounding.",
+            path="posture.generation.grounded_in",
             blocking=False,
         )
 
@@ -1806,7 +1875,9 @@ def _check_manifest_and_dossiers(doc: dict[str, Any], result: ValidationResult) 
         if doc[name] != expected[name]:
             result.add(
                 f"{name} does not equal its recomputation from the document — it was edited, "
-                "or built from a different Floor or evidence (re-run `playbook project`)",
+                "or built from a different Floor or evidence (if the Floor was hand-edited, undo "
+                "that edit: `playbook project` carries the Floor forward as it stands and does "
+                "not repair it; otherwise re-run `playbook project`)",
                 path=name,
             )
 
@@ -1849,7 +1920,11 @@ def _check_identity_hash(doc: dict[str, Any], result: ValidationResult) -> None:
                 f"identity.content_hash {doc_hash!r} does not match the hash recomputed "
                 f"over the document's current content ({expected_hash!r}) — the document "
                 "was hand-edited or otherwise changed after its identity was stamped "
-                "(OPF-SPEC.md §3.10/§8)",
+                "(OPF-SPEC.md §3.10/§8). To fix it: restore the file from the copy you "
+                "edited; or make the change through the page's Review tab and run "
+                "`playbook apply-overrides <out-dir>` (re-derives and re-stamps from the "
+                "playbook alone, no observation store needed); or, where the out-dir still "
+                "has its observation store, `playbook project` re-stamps it",
                 path="identity.content_hash",
             )
 
@@ -1943,6 +2018,7 @@ def validate_document(doc: dict[str, Any], *, verdict_store: Any | None = None) 
     _check_equivalence(doc, result, verdict_store)
     _check_posture_floor_conflict(doc, result)
     _check_posture_interview_provenance(doc, result)
+    _check_posture_grounding(doc, result)
     _check_perspective_present(doc, result)
     _check_portable_numbers(doc, result)
     _check_identity_hash(doc, result)
