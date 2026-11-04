@@ -257,6 +257,12 @@ def _joined_citation_path(paths: list[str]) -> str:
     return ", ".join(p or "?" for p in paths)
 
 
+def primary_clause_path(path: str | None) -> str:
+    """The node a citation leads with: the first of a list form, ``"?"`` for none.
+    Lookups keyed by one node use this, since a list form names no single node."""
+    return (path or "?").split(", ", 1)[0]
+
+
 @dataclass(frozen=True)
 class Observation:
     """One clause observation feeding the L5 compiler.
