@@ -1631,7 +1631,7 @@ def test_join_passages_are_cut_in_the_right_places_when_names_are_pseudonymized(
     tmp_path: Path,
 ) -> None:
     out = _mine_redlined(tmp_path, known_entities=[_ENTITY])
-    tree = ClauseTree.load(out / "normalized" / "deal-001" / "v1.clauses.json")
+    tree = ClauseTree.load(out / "normalized" / "document-1" / "v1.clauses.json")
     joined = next(n for n in tree.all_nodes() if n.x_resegmented)
     assert _ENTITY not in joined.text  # the name was aliased, so the text changed length
     (subject,) = rs.check_subjects(out)
