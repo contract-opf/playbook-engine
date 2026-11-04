@@ -122,6 +122,22 @@ def test_blocks_a_file_name_slug(clone: Path, names_dir: Path) -> None:
     assert "file name" in res.stderr
 
 
+def test_blocks_a_name_added_by_a_merge_resolution(clone: Path, names_dir: Path) -> None:
+    """Neither parent has the name: only the merge commit's own resolution adds it."""
+    base = _commit(clone, {"a.txt": "base\n"})
+    _git(clone, "checkout", "-q", "-b", "side")
+    _commit(clone, {"a.txt": "side\n"})
+    _git(clone, "checkout", "-q", "-")
+    _commit(clone, {"a.txt": "main\n"})
+    subprocess.run(["git", "merge", "-q", "side"], cwd=clone, capture_output=True)
+    (clone / "a.txt").write_text(f"{_NAME}\n", encoding="utf-8")
+    _git(clone, "add", "-A")
+    _git(clone, "commit", "-q", "-m", "merge")
+    terms = scanner.load_terms(names_dir)
+    merge = _git(clone, "rev-parse", "HEAD")
+    assert base and scanner.scan_commit(merge, terms, str(clone))
+
+
 def test_blocks_a_commit_message(clone: Path, names_dir: Path) -> None:
     _commit(clone, {"a.py": "x = 1\n"}, f"fix: handle {_NAME} edge case")
     res = _run_hook(clone, _push_line(clone))

@@ -10,6 +10,7 @@
     "template_ref": {
       "document_id": "template",
       "title": "Canonical Template",
+      "source": "standard-form.rtf",
       "sha256": "sha256:06255d9ffda1850430f73b3d99952593994fd8ca5f84cc4f1648f634c2f59d54"
     }
   },
@@ -6850,7 +6851,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-21T12:34:10+00:00",
+      "generated_at": "2026-11-04T00:04:05+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -6891,21 +6892,31 @@
       {
         "id": "exclusions-from-confidential-information",
         "statement": "Do not concede on Exclusions from Confidential Information.",
-        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
+        "x_signed_by": "Legal Owner",
+        "x_signed_at": "2026-11-04T00:04:05+00:00",
+        "x_taxonomy_id": "exclusions_from_confidential",
+        "x_direction": "hold",
+        "x_signed_hash": "sha256:7fc093754465a4555bf34139a78c26bb54d0f957c2edd361fc7c5884e0c0a640"
       },
       {
         "id": "survival-of-confidentiality-obligations",
         "statement": "Do not concede on Survival of Confidentiality Obligations.",
-        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
+        "x_signed_by": "Legal Owner",
+        "x_signed_at": "2026-11-04T00:04:05+00:00",
+        "x_taxonomy_id": "survival_period",
+        "x_direction": "hold",
+        "x_signed_hash": "sha256:b5ed2c042e64f0c8bee6ba36abab20d06e26faca6d903e367d422ac1432d7b95"
       },
       {
         "id": "limitation-of-liability-confidentiality-carveout",
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-21T12:34:11+00:00",
+        "x_signed_at": "2026-11-04T00:04:05+00:00",
         "x_taxonomy_id": "limitation_of_liability",
-        "x_signed_hash": "sha256:15f79b7ea7089ce45867a57c8539684d6fc0e13a998b68615d16173dcac278da"
+        "x_signed_hash": "sha256:12ebcec1dd80200344f09174f0066fc10da4f62f3346379541d27307bd4b26b3"
       }
     ]
   },
@@ -7295,7 +7306,7 @@
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-21T12:34:09+00:00",
+    "generated_at": "2026-11-04T00:04:03+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -9479,23 +9490,23 @@
     "hard_rules": [
       {
         "rule_id": "exclusions-from-confidential-information",
-        "clause_id": null,
-        "taxonomy_id": null,
+        "clause_id": "clause.exclusions_from_confidential",
+        "taxonomy_id": "exclusions_from_confidential",
         "statement": "Do not concede on Exclusions from Confidential Information.",
         "required_presence": false,
         "condition": "judged",
         "permissible_proof": [],
-        "fallback_language": null
+        "fallback_language": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies."
       },
       {
         "rule_id": "survival-of-confidentiality-obligations",
-        "clause_id": null,
-        "taxonomy_id": null,
+        "clause_id": "clause.survival_period",
+        "taxonomy_id": "survival_period",
         "statement": "Do not concede on Survival of Confidentiality Obligations.",
         "required_presence": false,
         "condition": "judged",
         "permissible_proof": [],
-        "fallback_language": null
+        "fallback_language": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement."
       },
       {
         "rule_id": "limitation-of-liability-confidentiality-carveout",
@@ -9828,8 +9839,14 @@
           }
         ]
       },
-      "n_floor_rules": 0,
-      "floor_rules": [],
+      "n_floor_rules": 1,
+      "floor_rules": [
+        {
+          "rule_id": "exclusions-from-confidential-information",
+          "statement": "Do not concede on Exclusions from Confidential Information.",
+          "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        }
+      ],
       "excerpts": [
         {
           "precedent_id": "prec.500fb6712293bc21",
@@ -10424,8 +10441,14 @@
           }
         ]
       },
-      "n_floor_rules": 0,
-      "floor_rules": [],
+      "n_floor_rules": 1,
+      "floor_rules": [
+        {
+          "rule_id": "survival-of-confidentiality-obligations",
+          "statement": "Do not concede on Survival of Confidentiality Obligations.",
+          "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses."
+        }
+      ],
       "excerpts": [
         {
           "precedent_id": "prec.574e5b7400141bcf",
@@ -10831,11 +10854,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:709061543cbd8aef309bd9873b513976ed8bbff1f7b17d30e2492604a54496e3",
+    "content_hash": "sha256:a4db22773913a7be08de7801b39160e03aa7dda28effa071eefe7135d35ff449",
     "section_digests": {
       "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
-      "posture": "sha256:2917e416528a64c119934e8b7b1b69a3d5d3671978ec4d7d80ced9845aa8a4d6",
-      "floor": "sha256:0a9150fe26d2e8c8638be70685aa060d199da1d2836bf27bcee188b641fd7011"
+      "posture": "sha256:377b5734124e3620c134caaaf3cfce4916b98949563511baea5d51be1f350cde",
+      "floor": "sha256:c75a8f82813bcd4e85d4daf896d0ec0a9c1c6c3d85ebf2eeeb7dba6c5676f780"
     }
   }
 }

@@ -380,7 +380,11 @@ _MEDIA_TYPES: dict[str, str] = {
 # change for identical inputs, and so do the proposed_then_reversed observations
 # built from them (a heading or body row of a differently extracted draft is no
 # longer a refused ask); the net diff's rows and the OPF/digest formats do not.
-_DEVIATION_VS_TEMPLATE_VERSION = 24
+#
+# v25 (QA-2026-11-03 #4, #27): a refused ask is the author's verbatim words, not
+# the matcher's token stream, and a long proposal signed on another row is not a
+# refusal. L4's reversal records change for identical inputs.
+_DEVIATION_VS_TEMPLATE_VERSION = 25
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage

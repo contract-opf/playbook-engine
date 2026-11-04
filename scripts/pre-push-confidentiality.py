@@ -132,7 +132,13 @@ def scan_commit(sha: str, terms: Terms, cwd: str | None = None) -> list[str]:
     if terms.find(meta):
         problems.append(f"{sha[:10]}: commit message or author/committer identity")
     parents = _git(["rev-list", "--parents", "-n", "1", sha], cwd).split()[1:]
-    if len(parents) > 1:  # a merge adds nothing its (separately scanned) parents lack
+    if len(parents) > 1:
+        # Only what the merge itself introduced: a conflict resolution can add
+        # lines neither (separately scanned) parent has.
+        for line in _git(["diff-tree", "--cc", "--no-commit-id", "-U0", sha], cwd).splitlines():
+            if line[:2].strip(" ") in ("+", "++") and terms.find(line[2:]):
+                problems.append(f"{sha[:10]}: content added by the merge")
+                break
         return problems
     base = ["diff-tree", "-r", "--root", "--no-commit-id", "--no-renames"]
     for path in filter(None, _git([*base, "--name-only", "-z", sha], cwd).split("\0")):
