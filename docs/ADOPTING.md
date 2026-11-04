@@ -101,7 +101,10 @@ Two of these matter more than they look:
   entity-registry guardrail). `normalized/<document_id>/` is stale-cleared
   and rewritten under the ALIASED document_id/version after the
   pseudonymization pass (mirroring `trail/`), so — unlike the files
-  above — it is safe to share alongside the compiled playbook. The reverse
+  above — registered names no longer appear in it; it is still name
+  pseudonymization only (contact data such as e-mail domains, phone numbers
+  and addresses is never scrubbed), so it needs its own review before it
+  leaves the org. The reverse
   map is written to a restricted sidecar that never enters the playbook. If
   you skip `known_entities` entirely, real names flow into every artifact,
   including the compiled playbook — configure it before the first real

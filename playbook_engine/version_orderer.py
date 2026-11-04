@@ -228,7 +228,7 @@ class HintsError(ValueError):
 
 # Real document extensions the engine ingests. Only these are stripped from a
 # hint value — a trailing dotted segment that is NOT one of these (a date like
-# "6.14.23", a form number like "01.29.25") must be preserved, or Path.stem
+# "3.9.21", a form number like "01.29.25") must be preserved, or Path.stem
 # would eat it and the hint would never match the real version_id (issue #182).
 _HINT_EXTENSIONS = frozenset({".docx", ".pdf", ".rtf"})
 
@@ -245,7 +245,7 @@ def _strip_hint_ext(value: str) -> str:
 
     Only a genuine ``.docx``/``.pdf``/``.rtf`` suffix is removed.
     ``Path.stem`` alone would strip a trailing dotted segment even when it is
-    part of the name (``...6.14.23`` -> ``...6.14``), so a hint written by
+    part of the name (``...3.9.21`` -> ``...3.9``), so a hint written by
     ``playbook stage`` for a dotted filename would double-strip and match
     nothing — the exact silent-no-op this function exists to prevent
     (issue #182).

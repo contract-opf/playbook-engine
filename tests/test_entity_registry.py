@@ -18,6 +18,7 @@ import yaml
 from playbook_engine.config import load_config
 from playbook_engine.entity_registry import (
     EntityRegistry,
+    entity_slug,
     pseudonymize_document_id,
     pseudonymize_text,
     write_holdout_map,
@@ -236,11 +237,11 @@ def test_pseudonymize_text_matches_name_ending_in_punctuation(tmp_path: Path) ->
     assert "Acme Corp." not in out
     assert reg.alias_for("Acme Corp.") in out
 
-    # Substring protection at non-word edges must still hold: "CUNY" inside
-    # "CUNYA" is not a known-name-then-non-word-boundary match.
+    # Substring protection at non-word edges must still hold: "PSU" inside
+    # "PSUA" is not a known-name-then-non-word-boundary match.
     reg2 = EntityRegistry.load(tmp_path / "entity_registry2.json")
-    out2 = pseudonymize_text("CUNYA is unaffected.", ["CUNY"], reg2)
-    assert out2 == "CUNYA is unaffected."
+    out2 = pseudonymize_text("PSUA is unaffected.", ["PSU"], reg2)
+    assert out2 == "PSUA is unaffected."
 
 
 # ---------------------------------------------------------------------------
@@ -365,10 +366,53 @@ def test_pseudonymize_document_id_replaces_matching_slug_span(tmp_path: Path) ->
     assert alias.lower() in out
 
 
-def test_pseudonymize_document_id_unchanged_when_no_known_entity_present(tmp_path: Path) -> None:
+def test_pseudonymize_document_id_aliases_by_ordinal_when_no_known_entity_present(
+    tmp_path: Path,
+) -> None:
+    """QA-2026-11-03 #22: an id in which no registered name matched (e.g. a
+    truncated folder name) is still replaced by an ordinal alias; the deal
+    hash survives, the alias is stable and idempotent, and with no known
+    entities configured nothing is touched."""
     reg = EntityRegistry.load(tmp_path / "entity_registry.json")
-    out = pseudonymize_document_id("deal-001", [_KNOWN_ENTITY], reg)
-    assert out == "deal-001"
+    raw = "zorblax-polytechnic-institu-2023_ab12cd34"
+    out = pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg)
+    assert out == "document-1-ab12cd34"
+    assert "zorblax" not in out
+    assert pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg) == out  # stable
+    assert pseudonymize_document_id(out, [_KNOWN_ENTITY], reg) == out  # idempotent
+    assert pseudonymize_document_id("other-deal", [_KNOWN_ENTITY], reg) == "document-2"
+    # Persisted: a reloaded registry hands back the same ordinal.
+    reloaded = EntityRegistry.load(tmp_path / "entity_registry.json")
+    assert pseudonymize_document_id(raw, [_KNOWN_ENTITY], reloaded) == out
+    # Pseudonymization disabled (no known entities) -> unchanged.
+    assert pseudonymize_document_id("deal-001", [], reg) == "deal-001"
+
+
+def test_pseudonymize_document_id_keeps_entity_alias_when_a_name_matched(tmp_path: Path) -> None:
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    raw = "agreement-" + entity_slug(_KNOWN_ENTITY) + "-2023_ab12cd34"
+    out = pseudonymize_document_id(raw, [_KNOWN_ENTITY], reg)
+    assert out.startswith("agreement-counterparty-1-")
+    assert pseudonymize_document_id(out, [_KNOWN_ENTITY], reg) == out
+
+
+def test_pseudonymize_text_matches_name_behind_the_staging_prefix_and_underscores(
+    tmp_path: Path,
+) -> None:
+    """QA-2026-11-03 #16: the engine's own ``NN__`` staging prefix (and
+    underscore-joined filenames) must not stop a registered name matching."""
+    reg = EntityRegistry.load(tmp_path / "entity_registry.json")
+    known = ["Acme Widgets LLC"]
+    for text in (
+        "01__Acme Widgets LLC 3.9.21.docx",
+        "01__Acme_Widgets_LLC_3.9.21.docx",
+        "Services_Acme Widgets LLC_final.docx",
+    ):
+        out = pseudonymize_text(text, known, reg)
+        assert "acme" not in out.lower(), out
+        assert reg.alias_for("Acme Widgets LLC") in out
+    # Still whole-word: no match inside a longer alphanumeric run.
+    assert pseudonymize_text("XAcme Widgets LLCs", known, reg) == "XAcme Widgets LLCs"
 
 
 def test_write_holdout_map_is_access_restricted_and_reverses_alias(tmp_path: Path) -> None:
@@ -776,12 +820,12 @@ def test_alias_version_field_aliases_filename_stem(tmp_path: Path) -> None:
     from playbook_engine.pipeline import _alias_version_field
 
     reg = EntityRegistry.load(tmp_path / "reg.json")  # empty registry
-    known = ["Oglethorpe University"]
+    known = ["Placeholder University"]
     out = _alias_version_field(
-        "01__API-Internship Agreement - Oglethorpe University 6.14.23", known, reg
+        "01__Sample-Services Agreement - Placeholder University 3.9.21", known, reg
     )
-    assert "Oglethorpe" not in out
-    assert reg.alias_for("Oglethorpe University") in out
+    assert "Placeholder" not in out
+    assert reg.alias_for("Placeholder University") in out
     # A plain ordinal carries no name and passes through untouched.
     assert _alias_version_field(3, known, reg) == 3
 
@@ -791,10 +835,10 @@ def test_pseudonymize_observation_id_aliases_doc_segment(tmp_path: Path) -> None
     from playbook_engine.pipeline import _pseudonymize_observation_id
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    oid = "API-Internship-Agreement-Oglethorpe-University-6.14.23_ff1a5b80/3/0"
+    known = ["Placeholder University"]
+    oid = "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d/3/0"
     out = _pseudonymize_observation_id(oid, known, reg)
-    assert "oglethorpe" not in out.lower()
+    assert "placeholder" not in out.lower()
     assert out.endswith("/3/0")  # version/clause structure intact
 
 
@@ -803,10 +847,10 @@ def test_pseudonymize_trail_aliases_document_id(tmp_path: Path) -> None:
     from playbook_engine.pipeline import _pseudonymize_trail
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    trail = {"document_id": "API-Internship-Agreement-Oglethorpe-University-6.14.23_ff1a5b80"}
+    known = ["Placeholder University"]
+    trail = {"document_id": "Sample-Services-Agreement-Placeholder-University-3.9.21_0a1b2c3d"}
     out = _pseudonymize_trail(trail, known, reg)
-    assert "oglethorpe" not in out["document_id"].lower()
+    assert "placeholder" not in out["document_id"].lower()
     # Matches the aliased citation.document_id form pseudonymize_document_id emits.
     assert out["document_id"] == pseudonymize_document_id(trail["document_id"], known, reg)
 
@@ -825,10 +869,10 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
     from playbook_engine.pipeline import _pseudonymize_trail
 
     reg = EntityRegistry.load(tmp_path / "reg.json")
-    known = ["Oglethorpe University"]
-    v1 = "01__Affiliation Agreement - Oglethorpe University 1.1.24"
-    v2 = "02__Affiliation Agreement - Oglethorpe University 1.5.24"
-    v3 = "03__Affiliation Agreement - Oglethorpe University 1.10.24"
+    known = ["Placeholder University"]
+    v1 = "01__Affiliation Agreement - Placeholder University 1.1.24"
+    v2 = "02__Affiliation Agreement - Placeholder University 1.5.24"
+    v3 = "03__Affiliation Agreement - Placeholder University 1.10.24"
     trail = {
         "document_id": "deal-001",
         "ordered_versions": [v1, v2, v3],
@@ -846,7 +890,7 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
                 "clause_path": "1",
                 "version_inserted": v2,
                 "version_removed": v3,
-                "proposed_text": "Oglethorpe University shall retain audit rights.",
+                "proposed_text": "Placeholder University shall retain audit rights.",
                 "char_span": [0, 10],
             }
         ],
@@ -854,7 +898,7 @@ def test_pseudonymize_trail_aliases_version_order_and_reversals(tmp_path: Path) 
 
     out = _pseudonymize_trail(trail, known, reg)
     serialized = json.dumps(out).lower()
-    assert "oglethorpe" not in serialized, f"raw counterparty name leaked into trail: {out}"
+    assert "placeholder" not in serialized, f"raw counterparty name leaked into trail: {out}"
 
     # Structure preserved: same number of entries, same non-name fields intact.
     assert len(out["ordered_versions"]) == 3
