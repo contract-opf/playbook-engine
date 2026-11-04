@@ -1315,7 +1315,8 @@ def test_mine_splits_the_mixed_deal_and_records_it(tmp_path: Path) -> None:
     assert split_row["taxonomy_id"] == "insurance"
     assert split_row["x_classification_basis"] == "resegmented"
     assert split_row["x_resegmented"]["split_from"] == "1"
-    assert split_row["citation"]["clause_path"] == "1.r1"
+    # The insurance text joins the split passage and clause 2, so both are cited.
+    assert split_row["citation"]["clause_path"] == "1.r1, 2"
     # The preamble observation no longer carries the passage.
     assert "co-insured" not in by_tid[_PARTIES_ID]["full_text"]
     assert "co-insured" in split_row["full_text"]

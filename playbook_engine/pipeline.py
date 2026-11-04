@@ -114,6 +114,7 @@ from playbook_engine.observation_builder import (
     build_observations,
     build_round_moves,
     observations_jsonl_text,
+    primary_clause_path,
     read_observations_jsonl,
     read_round_moves_jsonl,
     round_move_from_dict,
@@ -1698,7 +1699,9 @@ def _observation_classification_basis(
     cit = obs.citation
     if cit.version_id is None:
         return None
-    classification = classification_by_node.get((cit.version_id, cit.clause_path or "?"))
+    classification = classification_by_node.get(
+        (cit.version_id, primary_clause_path(cit.clause_path))
+    )
     if classification is None:
         return None
     if classification.taxonomy_id != obs.taxonomy_id:
@@ -1718,7 +1721,7 @@ def _with_node_provenance(
     cit = obs.citation
     if cit.version_id is None:
         return obs
-    node = node_by_path.get((cit.version_id, cit.clause_path or "?"))
+    node = node_by_path.get((cit.version_id, primary_clause_path(cit.clause_path)))
     if node is None:
         return obs
     non_clause = node.x_non_clause if obs.taxonomy_id is None else None

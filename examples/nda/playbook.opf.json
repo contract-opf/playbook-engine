@@ -6851,7 +6851,7 @@
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-11-04T00:04:05+00:00",
+      "generated_at": "2026-11-04T00:21:31+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -6894,29 +6894,29 @@
         "statement": "Do not concede on Exclusions from Confidential Information.",
         "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-11-04T00:04:05+00:00",
+        "x_signed_at": "2026-11-04T00:21:31+00:00",
         "x_taxonomy_id": "exclusions_from_confidential",
         "x_direction": "hold",
-        "x_signed_hash": "sha256:7fc093754465a4555bf34139a78c26bb54d0f957c2edd361fc7c5884e0c0a640"
+        "x_signed_hash": "sha256:b5039257219e96265f7ac09f5ded5147050151f556a1c13b36165f5202723e40"
       },
       {
         "id": "survival-of-confidentiality-obligations",
         "statement": "Do not concede on Survival of Confidentiality Obligations.",
         "rationale": "Authored by the legal owner in posture interview v1, question sacred_clauses.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-11-04T00:04:05+00:00",
+        "x_signed_at": "2026-11-04T00:21:31+00:00",
         "x_taxonomy_id": "survival_period",
         "x_direction": "hold",
-        "x_signed_hash": "sha256:b5ed2c042e64f0c8bee6ba36abab20d06e26faca6d903e367d422ac1432d7b95"
+        "x_signed_hash": "sha256:0ed66ae3603bc4e0ec2821cd49893c9f4bc5ff7bec4778fb48572bdcf4714a0b"
       },
       {
         "id": "limitation-of-liability-confidentiality-carveout",
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-11-04T00:04:05+00:00",
+        "x_signed_at": "2026-11-04T00:21:31+00:00",
         "x_taxonomy_id": "limitation_of_liability",
-        "x_signed_hash": "sha256:12ebcec1dd80200344f09174f0066fc10da4f62f3346379541d27307bd4b26b3"
+        "x_signed_hash": "sha256:0654532efdbb2bc707e58c410c59e688b806d2bfc9e3b6a44991fc975f5821f6"
       }
     ]
   },
@@ -7305,8 +7305,8 @@
   },
   "compiler": {
     "name": "playbook-engine",
-    "version": "1.0.1",
-    "generated_at": "2026-11-04T00:04:03+00:00",
+    "version": "2.0.0",
+    "generated_at": "2026-11-04T00:21:29+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
@@ -10546,7 +10546,7 @@
   "provenance_index": {
     "compiler": {
       "name": "playbook-engine",
-      "version": "1.0.1"
+      "version": "2.0.0"
     },
     "corpus_manifest_hash": "sha256:44b0f13a0ce91dc7fc939deffc4ec0898b50c29132e693196f0ead4f5cb31e6b",
     "documents": [
@@ -10854,11 +10854,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:a4db22773913a7be08de7801b39160e03aa7dda28effa071eefe7135d35ff449",
+    "content_hash": "sha256:893695218ad4f0850d0c4896ef3e9152be1e682b3a7ab644ef54975bd0582a76",
     "section_digests": {
       "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
-      "posture": "sha256:377b5734124e3620c134caaaf3cfce4916b98949563511baea5d51be1f350cde",
-      "floor": "sha256:c75a8f82813bcd4e85d4daf896d0ec0a9c1c6c3d85ebf2eeeb7dba6c5676f780"
+      "posture": "sha256:772d83bf3976064d68019a8e99b9f4fb72f7e5f9641275b2a583b36c2ec3f2d5",
+      "floor": "sha256:a9df5a314f8d69cbbc734f7c40aec6f9fa7c7fc4eaca089f3e637e39c031824c"
     }
   }
 }
