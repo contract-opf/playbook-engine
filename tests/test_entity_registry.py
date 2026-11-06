@@ -1295,3 +1295,13 @@ def test_opening_evidence_is_born_safe_from_observation_to_playbook(tmp_path: Pa
     assert record["opened_with"] == "non_standard"
     assert record["opening_text"]["text"] == opening["full_text"]
     assert _KNOWN_ENTITY.lower() not in json.dumps(playbook).lower()
+
+
+def test_pseudonymize_document_id_never_aliases_the_reserved_template_id(tmp_path):
+    """The format's own ``template`` document id is not a deal id: aliasing it to an
+    ordinal made every our_standard citation dangle on a run with known entities."""
+    reg = EntityRegistry(tmp_path / "registry.json")
+    known = ["Acme University"]
+    assert pseudonymize_document_id("template", known, reg) == "template"
+    # an ordinary unmatched id still gets the ordinal alias
+    assert pseudonymize_document_id("some-other-deal", known, reg).startswith("document-")
