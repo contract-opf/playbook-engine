@@ -238,7 +238,7 @@ def _strip_hint_ext(value: str) -> str:
 
     Only a genuine ``.docx``/``.pdf``/``.rtf`` suffix is removed.
     ``Path.stem`` alone would strip a trailing dotted segment even when it is
-    part of the name (``...3.9.21`` -> ``...6.14``), so a hint written by
+    part of the name (``...3.9.21`` -> ``...3.9``), so a hint written by
     ``playbook stage`` for a dotted filename would double-strip and match
     nothing — the exact silent-no-op this function exists to prevent
     (issue #182).
@@ -732,10 +732,13 @@ def _exhaustive_chain(
             ):
                 best_chain = chain
                 hint_decided = new_score > old_score
-        elif math.isclose(cost, best_cost, abs_tol=1e-9) and (not hints):
+        elif (
+            math.isclose(cost, best_cost, abs_tol=1e-9)
+            and (not hints)
             # Lexicographic tie-break when no hints available.
-            if not best_chain or chain < best_chain:
-                best_chain = chain
+            and (not best_chain or chain < best_chain)
+        ):
+            best_chain = chain
 
     if not best_chain:
         best_chain = list(non_signed) + anchor
