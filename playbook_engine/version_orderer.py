@@ -732,10 +732,13 @@ def _exhaustive_chain(
             ):
                 best_chain = chain
                 hint_decided = new_score > old_score
-        elif math.isclose(cost, best_cost, abs_tol=1e-9) and (not hints):
+        elif (
+            math.isclose(cost, best_cost, abs_tol=1e-9)
+            and (not hints)
             # Lexicographic tie-break when no hints available.
-            if not best_chain or chain < best_chain:
-                best_chain = chain
+            and (not best_chain or chain < best_chain)
+        ):
+            best_chain = chain
 
     if not best_chain:
         best_chain = list(non_signed) + anchor
