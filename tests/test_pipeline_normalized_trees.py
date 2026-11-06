@@ -261,7 +261,7 @@ def test_normalized_tree_filename_and_metadata_aliased_when_version_stem_embeds_
     documents and handles everywhere else (``_alias_version_field``'s
     docstring, ``test_entity_registry.py``'s fixtures): a STAGED version
     filename whose stem embeds the raw counterparty name, e.g.
-    "01__Affiliation Agreement - Example University 6.14.23". Before this
+    "01__Affiliation Agreement - Example University 3.9.21". Before this
     fix, ``ClauseTree.version``/``source_file`` traveled into
     ``normalized/`` unaliased, AND the on-disk filename was built from the
     same raw, never-aliased dict key — so the raw name survived verbatim in
@@ -271,7 +271,7 @@ def test_normalized_tree_filename_and_metadata_aliased_when_version_stem_embeds_
     corpus_dir = tmp_path / "corpus"
     doc_dir = corpus_dir / f"{ENTITY_SLUG}-delta"
     doc_dir.mkdir(parents=True)
-    raw_stem = f"01__Affiliation Agreement - {ENTITY_NAME} 6.14.23"
+    raw_stem = f"01__Affiliation Agreement - {ENTITY_NAME} 3.9.21"
     _write_rtf(doc_dir / f"{raw_stem}.rtf", _doc_body("delta"))
 
     config_path = _write_config(tmp_path)

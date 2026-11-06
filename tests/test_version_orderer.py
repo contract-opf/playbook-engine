@@ -525,15 +525,15 @@ def test_strip_hint_ext_preserves_dotted_stem() -> None:
     # A dotted stem WITHOUT a real extension is preserved verbatim — Path.stem
     # alone would eat the trailing ".25"/".23".
     assert _strip_hint_ext("01__Form_01.29.25") == "01__Form_01.29.25"
-    assert _strip_hint_ext("03__Deal 6.14.23") == "03__Deal 6.14.23"
+    assert _strip_hint_ext("03__Deal 3.9.21") == "03__Deal 3.9.21"
     # A dotted stem WITH a real extension loses only the extension.
-    assert _strip_hint_ext("03__Deal 6.14.23.pdf") == "03__Deal 6.14.23"
+    assert _strip_hint_ext("03__Deal 3.9.21.pdf") == "03__Deal 3.9.21"
 
 
 def test_hints_load_dotted_names_not_truncated(tmp_path: Path) -> None:
     """order/signed_version hints for dotted filenames survive load (issue #182).
 
-    Regression: version ids legitimately contain dots (dates like 6.14.23, form
+    Regression: version ids legitimately contain dots (dates like 3.9.21, form
     numbers like Form_01.29.25). A double extension-strip truncated the hint at
     the first dot from the right, so it matched no discovered version and was
     silently ignored — signed-copy + ordering hints had no effect.

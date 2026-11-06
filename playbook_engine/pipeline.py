@@ -1930,7 +1930,7 @@ def _alias_version_field(
     """Alias a citation/manifest ``version``/``version_id`` field (issue #182).
 
     These are staged filename stems that embed the counterparty name (e.g.
-    "01__… Oglethorpe University 6.14.23"), so run them through the whole-word
+    "01__… Placeholder University 3.9.21"), so run them through the whole-word
     text pseudonymizer. A plain ordinal (``int``) carries no name and is
     returned unchanged.
 
@@ -2179,7 +2179,7 @@ def _pseudonymize_clause_tree(
     loop) and ``source_file`` is that stem's full filename with extension
     (``path.name``) — and the codebase's own ``_alias_version_field``
     docstring documents that a staged version filename routinely embeds the
-    raw counterparty name (e.g. "01__… Oglethorpe University 6.14.23"). Both
+    raw counterparty name (e.g. "01__… Placeholder University 3.9.21"). Both
     are aliased the same way ``citation.version``/``citation.version_id``
     already are: an exact match against *version_alias_map* (issue #143's
     ``{raw stem: ordinal label}`` map for this document, built by
