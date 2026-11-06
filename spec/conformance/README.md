@@ -53,7 +53,11 @@ with that format (issue #238; git history keeps it).
 ## Format version binding
 
 Per the OPF-SPEC.md §11 immutability rule, these vectors are never edited in
-place for the same format-version stamp. A format-version bump (a new
+place for the same format-version stamp. **One recorded exception (maintainer
+decision, 2026-11-06):** the 2.0.0 QA-sweep rule changes ship inside 0.6, so
+vector 014 under `0.6/` was re-stamped in place (a whole-number score `1.0` is
+now `1`) and vector 015 was added. Consumers must re-vendor `0.6/`. This does
+not set a precedent. A format-version bump (a new
 `opf_version` or a new `DIGEST_VERSION`) gets a **new, separately-stamped**
 vector set, not an overwrite — exactly like a schema file itself. See
 [`0.6/README.md`](0.6/README.md) for the vector-by-vector rationale and file
