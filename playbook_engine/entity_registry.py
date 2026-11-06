@@ -56,6 +56,12 @@ _DOC_HASH_SUFFIX_RE = re.compile(r"-(?=[0-9a-f]*\d)[0-9a-f]{8}$")
 # an entity alias (``counterparty-<n>``).
 _DOC_ALIASED_RE = re.compile(r"^document-\d+(-[0-9a-f]{8})?$|(^|-)counterparty-\d+(-|$)")
 
+# Ids the format itself defines (OPF §4: a citation to the current form cites the
+# document ``template``). They name no counterparty and the validator compares
+# against the literal, so they are never aliased (found by the first real-corpus
+# run on 2.0.0: the ordinal alias turned every template citation into a dangling one).
+_RESERVED_DOCUMENT_IDS = frozenset({"template"})
+
 _WS_RE = re.compile(r"\s+")
 _SLUG_SEP_RE = re.compile(r"[^a-z0-9]+")
 
@@ -289,6 +295,8 @@ def pseudonymize_document_id(
     when no known entity's slug form appears in it.
     """
     if not document_id or not known_entities:
+        return document_id
+    if document_id in _RESERVED_DOCUMENT_IDS:
         return document_id
     tokens = entity_slug(document_id).split("-")
     matched = False
