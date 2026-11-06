@@ -12,6 +12,27 @@ changes` heading in the release it ships under.
 
 ## [2.0.0] - 2026-11-03
 
+### Breaking changes (read before upgrading)
+
+- **`apply-overrides` exit codes changed.** It applies the good entries and names
+  the refused ones, and now exits 1 if any entry was refused (it used to exit 0).
+  Scripts that treat any non-zero exit as failure will start failing on stale or
+  invalid `overrides.json` entries.
+- **`validate` has new blocking checks.** Playbooks that validated before can now
+  fail (a producer MUST emit `perspective`; a list citation carrying a
+  `char_span`; empty Floor statements; unknown `x_taxonomy_id`; an altered signed
+  Floor line). **Existing playbooks must be re-derived** (or re-projected) with
+  this engine.
+- **Persisted document ids change when known entities are configured.** A
+  document id in which no registered name matched becomes an ordinal alias
+  (`document-N-<hash>`), so observation ids, citations, trail and `normalized/`
+  names differ from earlier runs. Re-mine to get them; ids in older out-dirs and
+  playbooks stay as they were.
+- **OPF stays 0.6, deliberately.** Vector 014 of the 0.6 conformance set is
+  re-stamped in place and vector 015 is new, which departs from the §11
+  immutability rule. Maintainer decision, 2026-11-06: no OPF 0.7. Consumers must
+  re-vendor `spec/conformance/0.6/`.
+
 Fixes from the 2026-11-03 product QA sweep. `opf_version` stays 0.6 and
 `digest_version` stays 5, with no schema change. The major version follows §11:
 new blocking checks can fail a playbook that validated before, and

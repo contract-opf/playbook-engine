@@ -38,8 +38,10 @@ No schema file changes; `opf_version` stays "0.6" and `digest_version` stays
 "5". Conformance vector 014 is re-stamped (a whole-number score is written `1`)
 and vector 015 is added (§3.10 number and key rules). Rule changes are listed in
 the root `CHANGELOG.md` under 2.0.0. Editing rules and vector 014 in place within
-0.6 departs from §11's immutability rule; 0.6 has no installed consumer other
-than the toaster, which accepts both forms.
+0.6 departs from §11's immutability rule. This is a deliberate maintainer decision
+(2026-11-06): the changes ship inside 0.6 and there is no OPF 0.7. Consumers
+(contract-toaster, contract-opf/opf) must re-vendor the changed 0.6 conformance
+set; the toaster accepts both number forms.
 
 ### 2026-10-21 — OPF 0.6 / digest 5: verified absence counts (issue #251)
 
