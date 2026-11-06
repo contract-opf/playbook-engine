@@ -21,7 +21,6 @@ the assembler itself remains deterministic and testable without time mocking.
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import os
 import re
@@ -30,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from playbook_engine import __version__
 from playbook_engine.canonicalize import (
     canonicalize,
     compute_section_digests,
@@ -243,10 +243,8 @@ def _sanitize_corpus_documents_for_schema(
 
 
 def _compiler_version() -> str:
-    try:
-        return importlib.metadata.version("playbook-engine")
-    except importlib.metadata.PackageNotFoundError:
-        return "0.1.0"
+    # The code's own version: installed metadata goes stale in an editable install.
+    return __version__
 
 
 # ---------------------------------------------------------------------------

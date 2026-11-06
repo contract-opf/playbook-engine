@@ -10,12 +10,130 @@ changes` heading in the release it ships under.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-03
+
+### Breaking changes (read before upgrading)
+
+- **`apply-overrides` exit codes changed.** It applies the good entries and names
+  the refused ones, and now exits 1 if any entry was refused (it used to exit 0).
+  Scripts that treat any non-zero exit as failure will start failing on stale or
+  invalid `overrides.json` entries.
+- **`validate` has new blocking checks.** Playbooks that validated before can now
+  fail (a producer MUST emit `perspective`; a list citation carrying a
+  `char_span`; empty Floor statements; unknown `x_taxonomy_id`; an altered signed
+  Floor line). **Existing playbooks must be re-derived** (or re-projected) with
+  this engine.
+- **Persisted document ids change when known entities are configured.** A
+  document id in which no registered name matched becomes an ordinal alias
+  (`document-N-<hash>`), so observation ids, citations, trail and `normalized/`
+  names differ from earlier runs. Re-mine to get them; ids in older out-dirs and
+  playbooks stay as they were.
+- **OPF stays 0.6, deliberately.** Vector 014 of the 0.6 conformance set is
+  re-stamped in place and vector 015 is new, which departs from the §11
+  immutability rule. Maintainer decision, 2026-11-06: no OPF 0.7. Consumers must
+  re-vendor `spec/conformance/0.6/`.
+
+Fixes from the 2026-11-03 product QA sweep. `opf_version` stays 0.6 and
+`digest_version` stays 5, with no schema change. The major version follows §11:
+new blocking checks can fail a playbook that validated before, and
+`apply-overrides` exit codes changed. Re-derive existing playbooks.
+
+### Normative rule changes
+
+- §3.1: a producer MUST emit `perspective` (the toaster already refused a
+  playbook without it).
+- §3.5.5, §4: a text joined from several clauses cites every one of them in list
+  form with no `char_span`, and a validator MUST reject a list citation that
+  carries a `char_span`.
+- §3.7, §10.1: `x_signed_hash`, `x_direction` and `floor.x_retired` are reserved
+  keys, and an invariant whose `x_signed_hash` does not match MUST NOT be
+  presented as signed.
+- §3.10: the number rule moves into the spec. §3.13: the id-uniqueness list is
+  complete, including taxonomy entry ids.
+- §10.1, §11: reserved and vendor `x_*` keys are separated, and the stability
+  policy now states what actually binds and discloses the 0.4 to 0.6 history.
+
+### Evidence
+
+- A refused ask is the counterparty's verbatim words, never the diff's token
+  stream, and a proposal of 8 or more words signed on another row is not a refusal.
+- Joined signed and opening texts cite every node they join.
+- New `instrument` detection: a deal whose executed copy is an amendment, a cover
+  sheet over incorporated terms or a form switch records absence as unverifiable
+  and makes no struck, opening or refused-ask claim. The scorecard also scores the
+  absence judge's stated reason.
+
+### Floor and Posture
+
+- Q4 rejects non-answers, splits comma lists, binds items to taxonomy clauses,
+  keeps polarity ("Never accept ..."), holds back what it cannot read, and echoes
+  the exact statements before writing. `posture interview --signed-by` records a
+  signer.
+- New `playbook floor retire`. A Q4 re-run warns about dropped lines, which stay
+  binding until retired, and never reverts an owner's page edit.
+- A sign-off is bound to its text. `validate` and `project` refuse an altered
+  signed line; a page edit of a signed Q4 line drops the sign-off.
+- `project` refuses an unreadable prior playbook. Stale `overrides.json` entries
+  are refused instead of reverting newer work. `apply-overrides` applies good
+  entries and names the refused ones, exiting 1 if any were refused.
+- `validate` blocks empty Floor statements and unknown `x_taxonomy_id`s, and warns
+  on stale `grounded_in`, stub output and non-portable numbers.
+
+### Confidentiality
+
+- Real names removed from engine source and tests. History is not rewritten.
+- New tracked `scripts/pre-push-confidentiality.py` scans every pushed commit's
+  message, identities, paths and added lines, including merge resolutions, against
+  a private term list, and fails closed.
+- Pseudonymization now matches behind the `NN__` staging prefix, and a document id
+  with no registered name becomes an ordinal alias.
+
+### Pages, onboarding and robustness
+
+- A deal whose files all fail extraction is counted as quarantined. Pages show
+  absence and per-deal basis, and state pseudonymization only when it happened.
+  `view bundle` banners an invalid playbook. Bulk confirm covers only rows shown
+  and never disputed ones.
+- The skill covers taxonomy choice, and `stage` picks a builtin when the folder
+  name is unmistakable. The quickstart yields a playbook the toaster accepts. API-key
+  headless judging claims are removed.
+- `lint-corpus` flags text-less PDFs and duplicate deals or versions. `judge-apply`
+  refuses out-of-taxonomy verdicts, and judged item counts are recorded.
+- `template_ref.source` is a file name, not a host path. L1-L4 cache version is 25.
+
 - **The interactive Q4 prompt now says it is binding before you answer (issue
   #125).** `playbook posture interview` (without `--answers-file`) prints a
   warning ahead of the `sacred_clauses` question that each bare clause-type
   name is signed into the Floor as a hard line no review may override, and
   `playbook posture questions` lists the same note. The question text and the
   promotion rules are unchanged; the skill already led with this disclosure.
+
+- **A clause left on two rows by two extractions no longer reads as a removal
+  plus an addition in a round (issue #122, the two gaps left when it closed).**
+  When the aligner could not bind a heading split off its body, round moves
+  reported the whole clause removed and the heading (and body) added.
+  `clause_differ` now reconciles each consecutive version pair: a removed and an
+  added row with the same words (numbering, quote style and whitespace folded;
+  case kept, except between two bare headings) are one relocated clause; a row
+  that is exactly a bare
+  heading plus a body, against a heading row and a body row on the other side,
+  is one clause (a run-in heading with a closing `.` or `:` counts); a bound row
+  whose sides differ only by a heading that sits on the other side as its own
+  row is unchanged; and a bare heading row the other version carries at the
+  start of a row is dropped from the changes. The rows are relabeled
+  `unchanged`, never removed, and only in the consecutive diffs: the net diff's
+  rows and the OPF/digest formats are unchanged, but round moves, reversal
+  records, and the `proposed_then_reversed` observations built from them, lose
+  the false entries a differently extracted draft produced (a heading or body
+  row there is no longer a refused ask). Only a heading's words are compared
+  without regard to case: a body whose case differs (a defined term) is a real
+  edit and still surfaces, as does a `[Reserved]` / `Intentionally Omitted`
+  placeholder (striking a clause is a change), a heading nobody carries and any
+  other change of wording. The other gap, unrelated clauses paired by index drift, no longer
+  exists: since #222 the aligner binds only on similarity (Jaccard of at least
+  0.70, or the single-edit rescue), so it cannot pair them; a regression test
+  now pins that through the real aligner. The L1-L4 stage-cache version
+  (`_DEVIATION_VS_TEMPLATE_VERSION`) is bumped to 24.
 
 - **Version-pair diffs no longer report partition artifacts as changes (issue
   #122).** When two versions of one agreement were extracted differently, the

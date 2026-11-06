@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from playbook_engine import clause_differ
 from playbook_engine.clause_aligner import AlignmentSlot, ClauseAlignment, align_versions
 from playbook_engine.clause_classifier import ClassifiedClause, ClauseClassification
 from playbook_engine.clause_differ import (
@@ -18,6 +19,8 @@ from playbook_engine.clause_differ import (
     diff_aligned,
 )
 from playbook_engine.clause_tree import ClauseNode
+from playbook_engine.observation_builder import build_round_moves
+from playbook_engine.reversal_detector import detect_reversals
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -415,3 +418,294 @@ def test_one_sided_clause_addition_still_surfaces() -> None:
     doc = _align_and_diff([("v1", v1), ("v2", v2)])
     changed = doc.consecutive[0].changed()
     assert [(cd.taxonomy_id, cd.kind) for cd in changed] == [("notice", "added")]
+
+
+# ---------------------------------------------------------------------------
+# One clause left on two rows by two extractions (issue #122)
+# ---------------------------------------------------------------------------
+
+_HEAD = "NOTICES AND COMMUNICATION"
+_WHOLE = f"10. {_HEAD} {_BODY}"
+
+
+def _rows(*specs: tuple[str | None, str | None, str]) -> list[ClauseAlignment]:
+    """One alignment row per ``(text in v1, text in v2, taxonomy_id)``; a
+    ``None`` text is a row with no clause in that version (built directly, so
+    the shape the aligner left is exactly what is diffed)."""
+    return [
+        ClauseAlignment(
+            taxonomy_id=tid,
+            slots=(
+                AlignmentSlot(
+                    version="v1", clause=None if before is None else _cc(str(n), tid, before)
+                ),
+                AlignmentSlot(
+                    version="v2", clause=None if after is None else _cc(str(n), tid, after)
+                ),
+            ),
+        )
+        for n, (before, after, tid) in enumerate(specs, start=1)
+    ]
+
+
+def _round_kinds(*specs: tuple[str | None, str | None, str]) -> list[str]:
+    return [cd.kind for cd in diff_aligned(_rows(*specs), ["v1", "v2"]).consecutive[0].diffs]
+
+
+def test_whole_clause_against_heading_and_body_rows_is_unchanged() -> None:
+    """One extraction kept heading and body whole, the other put them on two
+    rows: the removal plus two additions is one clause, either way round."""
+    assert (
+        _round_kinds((_WHOLE, None, "notice"), (None, _HEAD, "notice"), (None, _BODY, "notice"))
+        == ["unchanged"] * 3
+    )
+    assert (
+        _round_kinds((None, _WHOLE, "notice"), (_HEAD, None, "notice"), (_BODY, None, "notice"))
+        == ["unchanged"] * 3
+    )
+
+
+def test_split_heading_is_carried_but_a_real_body_removal_still_surfaces() -> None:
+    """The heading row is explained by the whole row; the body is gone."""
+    assert _round_kinds((_WHOLE, None, "notice"), (None, _HEAD, "notice")) == [
+        "removed",
+        "unchanged",
+    ]
+
+
+def test_heading_nobody_carries_still_surfaces() -> None:
+    assert _round_kinds((None, "INDEMNIFICATION", "ind"), ("Alice shall pay.", None, "pay")) == [
+        "added",
+        "removed",
+    ]
+
+
+def test_relocated_identical_words_are_unchanged() -> None:
+    """The same words removed from one row and added on another, once numbering
+    and quote style are folded, are one clause relocated."""
+    assert _round_kinds(
+        ("2.9. Alice’s notice “shall” be in writing.", None, "a"),
+        (None, 'Alice\'s  notice "shall" be in writing.', "b"),
+    ) == ["unchanged", "unchanged"]
+
+
+def test_relocated_placeholder_still_surfaces() -> None:
+    """Striking a clause to '[Reserved]' is a change even when another
+    '[Reserved]' sat elsewhere in the earlier draft."""
+    assert _round_kinds(("[Reserved]", None, "a"), (None, "[Reserved]", "b")) == [
+        "removed",
+        "added",
+    ]
+
+
+def test_unrelated_removed_and_added_rows_still_surface() -> None:
+    assert _round_kinds(
+        ("Alice shall indemnify Beta Ltd against third party claims.", None, "ind"),
+        (None, "Each party shall keep the other party's records confidential.", "conf"),
+    ) == ["removed", "added"]
+
+
+def test_bound_row_differing_only_by_a_split_off_heading_is_unchanged() -> None:
+    assert _round_kinds((_WHOLE, _BODY, "notice"), (None, _HEAD, "notice")) == [
+        "unchanged",
+        "unchanged",
+    ]
+    assert _round_kinds((_BODY, _WHOLE, "notice"), (_HEAD, None, "notice")) == [
+        "unchanged",
+        "unchanged",
+    ]
+
+
+def test_bound_row_with_a_real_edit_keeps_its_change() -> None:
+    edited = _BODY.replace("in writing", "in writing or by email")
+    assert _round_kinds((_WHOLE, edited, "notice"), (None, _HEAD, "notice")) == [
+        "modified",
+        "unchanged",
+    ]
+
+
+def test_reconciliation_keeps_every_row_and_leaves_the_net_diff_alone() -> None:
+    """Rows are relabeled, never dropped, and only the consecutive diffs: the
+    net diff keeps one row per after-slot for build_observations."""
+    doc = diff_aligned(
+        _rows((_WHOLE, None, "notice"), (None, _HEAD, "notice"), (None, _BODY, "notice")),
+        ["v1", "v2"],
+    )
+    consecutive = doc.consecutive[0].diffs
+    assert len(consecutive) == 3
+    whole, head, _body = consecutive
+    assert (whole.kind, whole.hunks, whole.clause_path_after) == ("unchanged", (), None)
+    assert whole.text_before == _WHOLE and whole.text_after == ""
+    assert head.clause_path_before is None and head.text_after == _HEAD
+    assert [cd.kind for cd in doc.net.diffs] == ["removed", "added", "added"]
+
+
+def test_split_rows_produce_no_round_moves() -> None:
+    doc = diff_aligned(
+        _rows((_WHOLE, None, "notice"), (None, _HEAD, "notice"), (None, _BODY, "notice")),
+        ["v1", "v2"],
+    )
+    assert build_round_moves("doc", doc) == []
+
+
+def test_split_rows_in_a_middle_draft_are_not_reversals() -> None:
+    """v2 alone was extracted differently. Its heading and body rows are not
+    asks the signed copy later refused (each would otherwise be reported as a
+    reversal, and become a fabricated refused ask), and its round moves go too."""
+    doc = diff_aligned(
+        [
+            ClauseAlignment(
+                taxonomy_id="notice",
+                slots=tuple(
+                    AlignmentSlot(
+                        version=f"v{n}", clause=None if text is None else _cc("1", "notice", text)
+                    )
+                    for n, text in enumerate(texts, start=1)
+                ),
+            )
+            for texts in ((_WHOLE, None, _WHOLE), (None, _HEAD, None), (None, _BODY, None))
+        ],
+        ["v1", "v2", "v3"],
+    )
+    assert detect_reversals(doc) == []
+    assert build_round_moves("doc", doc) == []
+
+
+def test_case_only_edit_next_to_a_split_off_heading_is_not_hidden() -> None:
+    """Only a heading's words are compared without regard to case: a defined
+    term changing case in the body is a real edit and keeps its row 'modified'."""
+    before = "NOTICES Notices to the Company shall be given in writing."
+    after = "Notices to the company shall be given in writing."
+    assert _round_kinds((before, after, "notice"), (None, "NOTICES", "notice")) == [
+        "modified",
+        "unchanged",
+    ]
+
+
+def test_relocated_bodies_differing_only_in_case_still_surface() -> None:
+    assert _round_kinds(
+        ("The Company shall pay.", None, "a"), (None, "The company shall pay.", "b")
+    ) == ["removed", "added"]
+
+
+def test_relocated_headings_differing_only_in_case_are_unchanged() -> None:
+    assert _round_kinds(("NOTICES", None, "a"), (None, "Notices", "b")) == [
+        "unchanged",
+        "unchanged",
+    ]
+
+
+def test_heading_case_never_matches_a_body() -> None:
+    """Case is ignored between two bare headings only: an upper-cased heading
+    is not 'the same words' as a lower-case body row."""
+    assert _round_kinds(("THE COMPANY", None, "a"), (None, "the company", "b")) == [
+        "removed",
+        "added",
+    ]
+
+
+def test_upper_cased_heading_row_matches_a_title_cased_whole() -> None:
+    """An extraction may upper-case a heading it split off; the heading's words
+    still open the whole row, in both the whole-vs-split and bound-row shapes."""
+    whole = f"Notices and Communication {_BODY}"
+    assert (
+        _round_kinds((whole, None, "notice"), (None, _HEAD, "notice"), (None, _BODY, "notice"))
+        == ["unchanged"] * 3
+    )
+    assert _round_kinds((whole, _BODY, "notice"), (None, _HEAD, "notice")) == [
+        "unchanged",
+        "unchanged",
+    ]
+
+
+def test_case_differing_body_next_to_a_split_heading_row_is_not_matched() -> None:
+    """The whole-vs-split shape compares the body case-sensitively: a defined
+    term changing case leaves the whole as a removal and the body as an
+    addition (only the heading row, carried by the whole, is explained)."""
+    assert _round_kinds(
+        ("NOTICES Notices to the Company shall be given.", None, "notice"),
+        (None, "NOTICES", "notice"),
+        (None, "Notices to the company shall be given.", "notice"),
+    ) == ["removed", "unchanged", "added"]
+
+
+def test_removed_heading_carried_by_a_later_row_is_unchanged() -> None:
+    """The mirror of a carried added heading: the heading was a row of its own
+    in the earlier draft and opens a row in the later one. The later row is a
+    genuine addition (its body has no counterpart), so it still surfaces."""
+    assert _round_kinds((_HEAD, None, "notice"), (None, _WHOLE, "notice")) == [
+        "unchanged",
+        "added",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[Reserved for future use by agreement of both of the parties]",
+        "This Section is intentionally left blank by agreement of the parties hereto.",
+    ],
+    ids=["long-bracketed", "long-prose"],
+)
+def test_long_placeholder_still_surfaces(text: str) -> None:
+    assert _round_kinds((text, None, "a"), (None, text, "b")) == ["removed", "added"]
+
+
+@pytest.mark.parametrize("run_in", ["Notices. ", "NOTICES: "], ids=["period", "colon"])
+def test_run_in_heading_with_closing_punctuation_is_matched(run_in: str) -> None:
+    """A heading run into its body ('10. Notices. All notices...') is the same
+    whole-vs-split shape; the heading row need not repeat the punctuation."""
+    assert (
+        _round_kinds(
+            (f"10. {run_in}{_BODY}", None, "notice"),
+            (None, run_in.split(".")[0].split(":")[0], "notice"),
+            (None, _BODY, "notice"),
+        )
+        == ["unchanged"] * 3
+    )
+
+
+def test_many_identical_headings_are_matched_once_per_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole-vs-split rule matches a heading's words against a row once,
+    however many identical heading rows there are (a real document repeats
+    'NOTICES' per clause section): it must not cost one comparison per (row,
+    heading) pair. Pins that rule's memo only; heading rows with distinct words
+    are still compared pairwise."""
+    calls = 0
+    real = clause_differ._after_heading
+
+    def counting(whole: str, heading: str) -> str | None:
+        nonlocal calls
+        calls += 1
+        return real(whole, heading)
+
+    monkeypatch.setattr(clause_differ, "_after_heading", counting)
+    n = 300
+    specs: list[tuple[str | None, str | None, str]] = [(None, "NOTICES", "n")] * n
+    specs += [(f"NOTICES body number {k} differs entirely here.", None, "w") for k in range(n)]
+    kinds = _round_kinds(*specs)
+    assert kinds.count("unchanged") == n and kinds.count("removed") == n
+    assert calls <= 2 * n
+
+
+def test_unrelated_clauses_at_the_same_position_are_not_paired() -> None:
+    """Index drift (the issue's second shape) cannot reach the differ: the
+    aligner binds only on similarity, so two unrelated clauses of one type at
+    the same position are a removal plus an addition, never one 'modified'."""
+    v1 = [_cc("1", "ind", "Alice shall indemnify Beta Ltd against third party claims.")]
+    v2 = [_cc("1", "ind", "Each party shall keep the other party's records confidential.")]
+    doc = _align_and_diff([("v1", v1), ("v2", v2)])
+    assert sorted(cd.kind for cd in doc.consecutive[0].changed()) == ["added", "removed"]
+
+
+def test_near_miss_clauses_at_the_same_position_are_not_paired() -> None:
+    """Pins the aligner's threshold the claim above rests on: a pair with a
+    Jaccard of about 0.65 (below 0.70) and several separate edits (so not the
+    single-edit rescue) is a removal plus an addition, not one 'modified'."""
+    shared = " against third party claims arising from the {} under this Agreement."
+    v1 = [_cc("1", "ind", "Alice shall indemnify Beta Ltd" + shared.format("services provided"))]
+    v2 = [_cc("1", "ind", "Alice shall defend Beta Ltd" + shared.format("goods supplied"))]
+    doc = _align_and_diff([("v1", v1), ("v2", v2)])
+    assert sorted(cd.kind for cd in doc.consecutive[0].changed()) == ["added", "removed"]

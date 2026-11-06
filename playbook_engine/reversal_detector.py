@@ -84,6 +84,11 @@ _STOP_WORDS: frozenset[str] = frozenset(
 #: At or above it the proposal was accepted, possibly with edits.
 REVERSAL_RETAINED_THRESHOLD: float = 0.5
 
+# A proposal this many words or longer that sits contiguously elsewhere in the
+# signed copy was signed. A shorter one proves nothing: a refused "sole" or
+# "gross negligence" occurs in most contracts for unrelated reasons.
+SIGNED_ELSEWHERE_MIN_WORDS: int = 8
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -196,6 +201,15 @@ def detect_reversals(
     # or both ``None``, get distinct alignment_index values and are tracked
     # independently).
     signed_tokens: dict[int, frozenset[str]] = {}
+    # The whole signed copy as one padded word sequence: a proposal whose
+    # words appear there contiguously was signed, wherever it now sits
+    # (renumbered, re-aligned onto another row), so it is not a refusal.
+    signed_words: list[str] = []
+    for cd in doc_diff.net.diffs:
+        if cd.kind != "removed" and cd.text_after:
+            signed_words.extend(_words(cd.text_after))
+            signed_words.append("\x00")  # clause boundary: never matched across
+    signed_stream = " " + " ".join(signed_words) + " "
     for cd in doc_diff.net.diffs:
         if (
             cd.kind != "removed"
@@ -234,8 +248,10 @@ def detect_reversals(
             if cd.kind == "added":
                 proposals = [cd.text_after]
             else:
+                # The hunk's verbatim words (case, punctuation kept), never
+                # the lowercased token stream the matcher compared.
                 proposals = [
-                    hunk.new_text
+                    hunk.new_verbatim or hunk.new_text
                     for hunk in cd.hunks
                     if hunk.kind in ("insert", "replace") and hunk.new_text
                 ]
@@ -246,6 +262,14 @@ def detect_reversals(
                     continue
                 retained = len(proposed_toks & signed) / len(proposed_toks)
                 if retained < REVERSAL_RETAINED_THRESHOLD:
+                    # Issue QA-2026-11-03 #27: the same words elsewhere in the
+                    # signed copy are a signed proposal, not a refused one.
+                    words = _words(proposed_text)
+                    if (
+                        len(words) >= SIGNED_ELSEWHERE_MIN_WORDS
+                        and " " + " ".join(words) + " " in signed_stream
+                    ):
+                        continue
                     reversals.append(
                         ReversalRecord(
                             taxonomy_id=cd.taxonomy_id,
@@ -269,6 +293,10 @@ def detect_reversals(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"\w+", text.lower())
 
 
 def _tokens(text: str) -> frozenset[str]:

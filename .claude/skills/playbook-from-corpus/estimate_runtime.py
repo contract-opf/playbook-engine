@@ -106,6 +106,9 @@ _DOCLING_STACK = "docling=2.140.0;ocr=tesseract;lang=iso:en"
 _T_BORN_DIGITAL = 60  # ~1 min
 _T_SCANNED = 120  # ~2 min (measured 30-180 s)
 _T_DOCX = 45  # docx: docling or fast legacy fallback
+# RTF never goes through docling: it is converted by pandoc (a NDA corpus of 17
+# RTF versions mined in about 8 s), so it costs seconds, not the docx rate.
+_T_RTF = 1
 # very rough: extracted tokens per MB of raw source, from observed runs.
 _TOKENS_PER_MB = 13_800
 
@@ -280,6 +283,22 @@ def fmt(seconds: float) -> str:
     return f"{h}h{m:02d}m" if h else f"{m}m"
 
 
+def count_stored_verdicts(out_dir: str) -> int:
+    """Number of distinct verdict keys in ``<out_dir>/judge/verdicts.jsonl`` (0 if none)."""
+    path = os.path.join(out_dir, "judge", "verdicts.jsonl")
+    keys: set[str] = set()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    keys.add(str(json.loads(line)["key"]))
+                except (ValueError, KeyError, TypeError):
+                    continue
+    except OSError:
+        return 0
+    return len(keys)
+
+
 def main() -> None:
     args = sys.argv[1:]
     corpus = args[0] if args else "."
@@ -309,7 +328,7 @@ def main() -> None:
                 per_file = _T_DOCX
             elif low.endswith(".rtf"):
                 n_rtf += 1
-                per_file = _T_DOCX
+                per_file = _T_RTF
             elif is_scanned_pdf(f):
                 n_pdf_scanned += 1
                 per_file = _T_SCANNED
@@ -382,14 +401,21 @@ def main() -> None:
         print(f"EXTRACTION/OCR ETA        : ~{fmt(lo)}–{fmt(hi)} wall-clock (CPU), {label}")
         print("                            (this is the expensive step; render is seconds)")
     print("LLM API cost              : $0  (key-free; agent is the judge)")
-    print(f"Judgment load (rough)     : ~{versions} scope+provenance + deduped")
-    print("                            classification items for the agent to judge")
-    print("                            (no deviation items — deviation is the")
-    print("                            deterministic standard check)")
+    print(f"Judgment load (FLOOR)     : at least ~{versions} scope+provenance items, plus")
+    print("                            deduped classification items, for the agent to judge.")
+    print("                            This is the first round only: later rounds (equivalence")
+    print("                            drafts, blind checks, adjudications, sub-splits, absence")
+    print("                            checks, origin and date items) scale with clauses and")
+    print("                            deals and can multiply the total many times over.")
+    print("                            Each item is an agent call; spend is not measured here.")
+    stored = count_stored_verdicts(out_dir)
+    if stored:
+        print(f"Already judged in {out_dir}: {stored:,} verdict(s) stored (reused, not re-judged)")
     print("=" * 60)
     if n_uncached:
-        print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")
-        print("separately, exclude them, or accept the wait. Confirm before proceeding.")
+        if n_pdf_scanned:
+            print("Scanned PDFs dominate wall-clock. To finish faster you can OCR them")
+            print("separately, exclude them, or accept the wait. Confirm before proceeding.")
         print("Point --out at a prior run's out dir to reuse its extraction cache.")
 
 

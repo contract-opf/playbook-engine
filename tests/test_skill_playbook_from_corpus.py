@@ -475,7 +475,7 @@ def test_skill_body_does_not_understate_sensitive_artifacts() -> None:
     # Whitespace-normalized: the prose wraps at ~100 cols, so a multi-word
     # phrase can straddle a hard newline in the raw markdown.
     flat_body = " ".join(body.split())
-    assert "not on this list" in flat_body or "is safe to share" in flat_body, (
+    assert "*not* on this list" in flat_body or "not on this list" in flat_body, (
         "SKILL.md must affirmatively state that normalized/ is no longer "
         "one of the sensitive artifacts, now that issue #139's code fix "
         "aliases it (otherwise a reader has no way to tell the omission "

@@ -101,6 +101,7 @@ def test_help_tree_walk_reaches_every_known_command() -> None:
         "doctor",
         "floor",
         "floor propose",
+        "floor retire",
         "floor sign",
         "induce-taxonomy",
         "inspect",

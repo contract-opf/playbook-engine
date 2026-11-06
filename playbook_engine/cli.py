@@ -18,6 +18,8 @@ from playbook_engine.corpus_linter import lint_corpus
 from playbook_engine.dossiers import refresh_derived_sections, validate_condition
 from playbook_engine.floor_candidates import (
     FloorCandidateError,
+    floor_evidence_conflicts,
+    retire_floor_invariant,
     sign_floor_invariant,
     sign_invariant_id,
     write_floor_candidates,
@@ -33,6 +35,7 @@ from playbook_engine.posture import (
     PostureError,
     apply_posture_interview,
     check_posture_floor_conflict,
+    preview_q4_statements,
 )
 from playbook_engine.run_manifest import (
     EnvironmentMismatch,
@@ -1732,7 +1735,9 @@ def stage_cmd(
             click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
         click.echo(f"plan   : {executed_plan_file} (preserved as the staging record)")
         _scaffold_config_or_exit(resolved, dest, prior_templates)
-        click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
+        click.echo(
+            f"config : {dest / 'playbook.config.yaml'} (skeleton — confirm agreement_type.id, choose or confirm the taxonomy)"
+        )
         click.secho(f"OK  {dest}", fg="green")
         return
 
@@ -1773,7 +1778,9 @@ def stage_cmd(
         click.secho(_SYMLINK_STAGING_NOTICE, fg="yellow", err=True)
 
     _scaffold_config_or_exit(resolved, dest, prior_templates)
-    click.echo(f"config : {dest / 'playbook.config.yaml'} (skeleton — fill in taxonomy path)")
+    click.echo(
+        f"config : {dest / 'playbook.config.yaml'} (skeleton — confirm agreement_type.id, choose or confirm the taxonomy)"
+    )
 
     if result.missing:
         click.secho(
@@ -2457,6 +2464,9 @@ def judge_cmd(
     # contract SKILL.md documents). PendingQueue appends and never truncates,
     # so without this a re-run after judge-apply keeps the prior round's stale
     # entries and the drain loop can never reach empty (issue #182).
+    # The previous queue is kept in memory and put back if this round fails, so a
+    # crash mid-round never leaves a partial queue that looks complete (QA-2026-11-03 #40).
+    prior_pending = pending_path.read_bytes() if pending_path.is_file() else None
     pending_path.unlink(missing_ok=True)
 
     pending_queue = PendingQueue(pending_path)
@@ -2518,9 +2528,15 @@ def judge_cmd(
             taxonomy,
             StoreBackedAbsenceCheckJudge(store=store, pending=pending_queue, rubric=rubric_policy),
         )
-    except PipelineError as exc:
-        click.secho(f"ERROR: {exc}", fg="red", err=True)
-        raise SystemExit(1) from exc
+    except BaseException as exc:
+        if prior_pending is not None:
+            pending_path.write_bytes(prior_pending)
+        else:
+            pending_path.unlink(missing_ok=True)
+        if isinstance(exc, PipelineError):
+            click.secho(f"ERROR: {exc}", fg="red", err=True)
+            raise SystemExit(1) from exc
+        raise
 
     # Stamp the out-dir with the environment that just wrote into it (issue
     # #121). Normal mode only — the --plan branch above returns before this,
@@ -2593,6 +2609,8 @@ def judge_cmd(
         click.secho(f"OK  {out_dir / 'observations.jsonl'} (0 pending items)", fg="green")
         _echo_rubric_report(rubric_policy, click.echo)
 
+    _record_judged_counts(store, out_dir)
+
     # This round ran mine_corpus to completion (the except PipelineError
     # branch above exits before here). pending_path is unlinked at the top
     # of this function and PendingQueue only creates the file lazily via
@@ -2607,6 +2625,33 @@ def judge_cmd(
         tmp_pending = pending_path.with_name(pending_path.name + ".tmp")
         tmp_pending.write_text("", encoding="utf-8")
         os.replace(tmp_pending, pending_path)
+
+
+def _record_judged_counts(store: Any, out_dir: Path) -> None:
+    """Print and record how many judgments the verdict store holds, by kind.
+
+    The agent that judges is billed outside the engine, so no token or dollar
+    figure can be measured here; the item counts are the honest record of the
+    judging work behind this out-dir (QA-2026-11-03 #41). Best-effort, like the
+    run manifest.
+    """
+    import json  # noqa: PLC0415
+
+    from playbook_engine.agent_judge import count_judged_items  # noqa: PLC0415
+
+    counts = count_judged_items(store)
+    total = sum(v for k, v in counts.items() if not k.startswith(("blind_", "adjud")))
+    detail = ", ".join(f"{k}: {c}" for k, c in sorted(counts.items()))
+    click.echo(f"Judged items in the verdict store: {total}" + (f" ({detail})" if detail else ""))
+    try:
+        target = out_dir / "judge" / "judged_counts.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps({"total": total, "by_kind": counts}, indent=1, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:  # pragma: no cover - read-only out-dir
+        click.secho(f"note: could not write judged_counts.json ({exc})", fg="yellow", err=True)
 
 
 def _check_file_kind(check_path: Path) -> str:
@@ -2826,6 +2871,8 @@ def judge_apply_cmd(
     pending_part_ids: dict[str, list[str]] = {}
     # deal_date items: the passages the answer's quote must occur in (issue #247).
     pending_payloads: dict[str, dict[str, Any]] = {}
+    # classify items: the taxonomy ids the answer may name (QA-2026-11-03 #40).
+    pending_taxonomy_ids: dict[str, set[str]] = {}
     pending_path = out_dir_resolved / "judge" / "pending.jsonl"
     if pending_path.is_file():
         for pline in pending_path.read_text(encoding="utf-8").splitlines():
@@ -2847,6 +2894,9 @@ def judge_apply_cmd(
                     pending_part_ids[pitem["key"]] = [
                         str(p.get("part_id")) for p in std_parts if isinstance(p, dict)
                     ]
+                tax_ids = payload.get("taxonomy_ids") if isinstance(payload, dict) else None
+                if pitem["kind"] == "classify" and isinstance(tax_ids, list):
+                    pending_taxonomy_ids[pitem["key"]] = {str(t) for t in tax_ids}
                 if pitem["kind"] in ("deal_date", "subsplit") and isinstance(payload, dict):
                     pending_payloads[pitem["key"]] = payload
 
@@ -2900,6 +2950,19 @@ def judge_apply_cmd(
             raise SystemExit(1)
         try:
             validate_verdict(kind, record["verdict"])
+            allowed_ids = pending_taxonomy_ids.get(record["key"])
+            given_id = record["verdict"].get("taxonomy_id")
+            if (
+                kind == "classify"
+                and allowed_ids is not None
+                and given_id is not None
+                and given_id not in allowed_ids
+            ):
+                raise ValueError(
+                    f"taxonomy_id {given_id!r} is not in the taxonomy this item was asked "
+                    f"against (allowed: {', '.join(sorted(allowed_ids))}); use one of those "
+                    "ids, or null if no clause type fits"
+                )
             if kind == "equivalence":
                 # Issue #243: stored with its DERIVED label, and checked
                 # against the parts of our standard the item asked about.
@@ -3612,8 +3675,10 @@ def apply_overrides_cmd(out_dir: Path) -> None:
     the engine, and the result is validated. ``playbook project`` folds the
     same file in on every projection.
 
-    A malformed file, or an entry naming an id the playbook does not carry,
-    is rejected with the reason and NOTHING changes. Re-applying an applied
+    A malformed file is rejected with the reason and NOTHING changes. An
+    entry that cannot be applied (an id the playbook does not carry, a signed
+    Floor line, a Posture/Floor edited since the page was made) is refused
+    and named; the other entries are still applied. Re-applying an applied
     file is a no-op. Rebuild the page afterwards: ``playbook view bundle``.
     """
     from playbook_engine.overrides import (  # noqa: PLC0415
@@ -3624,7 +3689,7 @@ def apply_overrides_cmd(out_dir: Path) -> None:
 
     resolved = out_dir.resolve()
     try:
-        result = apply_overrides_to_dir(resolved)
+        result = apply_overrides_to_dir(resolved, strict=False)
     except FileNotFoundError as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
         raise SystemExit(1) from exc
@@ -3636,6 +3701,15 @@ def apply_overrides_cmd(out_dir: Path) -> None:
             click.secho(f"  {problem}", fg="red", err=True)
         raise SystemExit(1) from exc
 
+    if result.skipped:
+        click.secho(
+            f"WARN {len(result.skipped)} override(s) refused (the others were applied; the "
+            f"refused ones stay in {OVERRIDES_FILENAME} until you fix or remove them):",
+            fg="yellow",
+            err=True,
+        )
+        for problem in result.skipped:
+            click.secho(f"  {problem}", fg="yellow", err=True)
     if result.n_changed:
         bits = ", ".join(f"{n} {target}" for target, n in result.changed.items() if n)
         click.secho(
@@ -3650,6 +3724,8 @@ def apply_overrides_cmd(out_dir: Path) -> None:
             f"{resolved / 'playbook.opf.json'}",
             fg="green",
         )
+    if result.skipped:
+        raise SystemExit(1)
 
 
 @cli.command(name="install-steps")
@@ -3713,8 +3789,19 @@ def posture_questions_cmd() -> None:
         "sufficient there."
     ),
 )
+@click.option(
+    "--signed-by",
+    "signed_by",
+    default=None,
+    help=(
+        "Name of the human legal owner signing the Q4 (sacred_clauses) hard lines. "
+        "Recorded as x_signed_by on each line the interview signs into the Floor. "
+        "Prompted for on the terminal when omitted; without it the lines are "
+        "recorded as named in the interview with no signer."
+    ),
+)
 def posture_interview_cmd(
-    out_dir: Path, answers_file: Path | None, base_version: int | None
+    out_dir: Path, answers_file: Path | None, base_version: int | None, signed_by: str | None
 ) -> None:
     """Run the Posture interview and write a versioned Posture into OUT_DIR/playbook.opf.json.
 
@@ -3734,6 +3821,14 @@ def posture_interview_cmd(
     Warns (non-blocking) if the assembled Posture softens language around a
     concept a Floor invariant protects — a possible Posture-vs-Floor conflict
     for a human to review.
+
+    Q4 (sacred_clauses) is the one answer with binding force: name clause
+    types separated by ';' or ','. Each name is resolved against the
+    playbook's taxonomy, signed into the Floor as a hard line, and the exact
+    statements are printed before they are written. A non-answer ("none")
+    signs nothing, and a name whose direction is unclear is left for
+    'playbook floor sign'. Dropping a name from a later Q4 answer does NOT
+    remove its line: use 'playbook floor retire'.
 
     OUT_DIR must already contain a playbook.opf.json (from 'playbook mine'
     followed by 'playbook project').
@@ -3769,12 +3864,30 @@ def posture_interview_cmd(
 
     generated_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
 
+    # Echo the exact hard lines Q4 will sign BEFORE anything is written.
+    promote_q4 = True
+    try:
+        preview = preview_q4_statements(out_dir_resolved, answers)
+    except (FileNotFoundError, PostureError) as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    if preview:
+        click.secho("Hard lines this interview will sign into your Floor:", bold=True)
+        for statement in preview:
+            click.echo(f"  - {statement}")
+        if answers_file is None:
+            promote_q4 = click.confirm("Sign these into your Floor?", default=True)
+            if promote_q4 and not signed_by:
+                signed_by = click.prompt("Signed by (your name)", default="", show_default=False)
+
     try:
         result = apply_posture_interview(
             out_dir_resolved,
             answers,
             generated_at=generated_at,
             base_version=base_version,
+            signed_by=signed_by,
+            promote_q4=promote_q4,
         )
     except (FileNotFoundError, PostureError) as exc:
         click.secho(f"ERROR: {exc}", fg="red", err=True)
@@ -3790,6 +3903,12 @@ def posture_interview_cmd(
         )
     for warning in result.warnings:
         click.secho(f"WARN  {warning}", fg="yellow")
+    if preview and promote_q4 and not (signed_by and signed_by.strip()):
+        click.secho(
+            "WARN  No --signed-by given: the Q4 hard lines are recorded as named in the "
+            "interview with no signer. Re-run with --signed-by to record who signed them.",
+            fg="yellow",
+        )
 
 
 @cli.group(name="floor")
@@ -3875,6 +3994,51 @@ def floor_propose_cmd(out_dir: Path, config_path: Path | None, min_deals: int) -
     click.echo("-" * 70)
     for c in candidates:
         click.echo(f"{c['id']:<10} {c['source']:<14} {len(c['citations']):<10} {c['statement']}")
+
+
+@floor_group.command(name="retire")
+@click.argument("out_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--id", "invariant_id", required=True, help="floor.invariants[].id to retire.")
+@click.option(
+    "--signed-by",
+    "signed_by",
+    required=True,
+    help="Name of the human legal owner retiring this hard line (recorded).",
+)
+def floor_retire_cmd(out_dir: Path, invariant_id: str, signed_by: str) -> None:
+    """Retire one Floor invariant: the explicit way to drop a hard line.
+
+    Re-running the Posture interview never removes a hard line, so a line a
+    Q4 answer once signed stays binding after the answer drops it. This
+    removes it from OUT_DIR/playbook.opf.json's ``floor.invariants`` and
+    records who retired it, and when, under ``floor.x_retired``. A later
+    interview re-run will not sign a retired id again.
+
+    OUT_DIR must already contain a playbook.opf.json.
+    """
+    import datetime  # noqa: PLC0415
+
+    opf_path = out_dir.resolve() / "playbook.opf.json"
+    if not opf_path.exists():
+        click.secho(f"ERROR: {opf_path} not found.", fg="red", err=True)
+        raise SystemExit(1)
+    doc = load_opf_file(opf_path)
+    try:
+        doc["floor"] = retire_floor_invariant(
+            doc.get("floor"),
+            invariant_id,
+            signed_by=signed_by,
+            retired_at=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+        )
+    except FloorCandidateError as exc:
+        click.secho(f"ERROR: {exc}", fg="red", err=True)
+        raise SystemExit(1) from exc
+    refresh_derived_sections(doc)
+    if "identity" in doc:
+        doc["identity"]["content_hash"] = content_hash(doc)
+        doc["identity"]["section_digests"] = compute_section_digests(doc)
+    write_playbook(doc, opf_path)
+    click.secho(f"OK  floor invariant {invariant_id!r} retired by {signed_by!r}", fg="green")
 
 
 @floor_group.command(name="sign")
@@ -4097,3 +4261,6 @@ def floor_sign_cmd(
     posture_prompt = ((doc.get("posture") or {}).get("system_prompt")) or ""
     for warning in check_posture_floor_conflict(posture_prompt, invariants):
         click.secho(f"WARN  {warning}", fg="yellow")
+    if changed:
+        for warning in floor_evidence_conflicts(doc):
+            click.secho(f"WARN  {warning}", fg="yellow")

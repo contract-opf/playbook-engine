@@ -156,6 +156,14 @@ def test_quickstart_commands_run(quickstart_run: _QuickstartRun) -> None:
     blocking = [str(e) for e in result.errors if e.blocking]
     assert result.ok, f"quickstart-produced playbook fails validation: {blocking}"
 
+    # QA-2026-11-03 #14: the contract-toaster refuses a playbook without a
+    # perspective, so the README path must produce one -- and validate must
+    # not have warned about its absence.
+    assert doc.get("perspective", {}).get("party"), "quickstart playbook has no perspective"
+    assert not [e for e in result.errors if e.path == "perspective"], (
+        "validate warned about a missing perspective on the quickstart playbook"
+    )
+
     # The canned verdicts cover every clause in the fixture — the whole point
     # of pre-loading the verdict store before the first `mine` — so no
     # observation should be left dangling as needs_review.

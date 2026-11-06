@@ -234,6 +234,9 @@ JS = r"""
     list.sort(function (a, b) { return ekey(a) < ekey(b) ? -1 : ekey(a) > ekey(b) ? 1 : 0; });
     var out = { overrides_version: 1 };
     if (META.content_hash) out.based_on = META.content_hash;
+    if (META.section_digests && META.section_digests.posture && META.section_digests.floor) {
+      out.based_on_sections = { posture: META.section_digests.posture, floor: META.section_digests.floor };
+    }
     out.overrides = list;
     return out;
   }
@@ -610,9 +613,10 @@ JS = r"""
     var more = $('#review-more');
     if (more) { more.hidden = list.length <= shown; more.textContent = 'Show ' + Math.min(25, list.length - shown) + ' more (' + (list.length - shown) + ' left)'; }
     var empty = $('#review-empty'); if (empty) empty.hidden = list.length > 0;
-    var todo = list.filter(function (r) { return !rowEdit(r); }).length;
-    if (bulkConfirm) { bulkConfirm.textContent = 'Confirm all ' + todo + ' unreviewed in this view'; bulkConfirm.disabled = !todo; }
-    if (bulkUndo) { bulkUndo.disabled = list.length === todo; }
+    var nBulk = bulkTargets().length;
+    if (bulkConfirm) { bulkConfirm.textContent = 'Confirm the ' + nBulk + ' unreviewed shown (not disputed)';
+      bulkConfirm.title = 'Only rows listed on screen are confirmed, and rows whose blind check is still disputed are skipped: decide those one at a time.'; bulkConfirm.disabled = !nBulk; }
+    if (bulkUndo) { bulkUndo.disabled = !list.slice(0, shown).some(rowEdit); }
     updateProgress();
   }
   function updateProgress() {
@@ -633,14 +637,17 @@ JS = r"""
   var more = $('#review-more');
   if (more) more.addEventListener('click', function () { shown += 25; renderReview(); });
   var bulkConfirm = $('#bulk-confirm'), bulkUndo = $('#bulk-undo');
+  function bulkTargets() {
+    return ROWS.filter(matches).slice(0, shown).filter(function (r) { return !rowEdit(r) && r.check !== 'disputed'; });
+  }
   if (bulkConfirm) bulkConfirm.addEventListener('click', function () {
-    ROWS.filter(matches).forEach(function (r) {
-      if (!rowEdit(r)) edits['vs_standard|' + r.key + '|'] = entry('vs_standard', r.key, null, { label: r.label });
+    bulkTargets().forEach(function (r) {
+      edits['vs_standard|' + r.key + '|'] = entry('vs_standard', r.key, null, { label: r.label });
     });
     changed(); renderReview();
   });
   if (bulkUndo) bulkUndo.addEventListener('click', function () {
-    ROWS.filter(matches).forEach(function (r) { delete edits['vs_standard|' + r.key + '|']; });
+    ROWS.filter(matches).slice(0, shown).forEach(function (r) { delete edits['vs_standard|' + r.key + '|']; });
     changed(); renderReview();
   });
 
