@@ -1352,8 +1352,10 @@ def floor_evidence_conflicts(doc: dict[str, Any]) -> list[str]:
       - "refuse" lines ("Never accept ..."): signed deals contain the clause;
       - ``x_required_presence``: signed deals were verified to lack the clause.
     """
-    floor = doc.get("floor") if isinstance(doc.get("floor"), dict) else {}
-    evidence = doc.get("evidence") if isinstance(doc.get("evidence"), dict) else {}
+    raw_floor = doc.get("floor")
+    floor: dict[str, Any] = raw_floor if isinstance(raw_floor, dict) else {}
+    raw_evidence = doc.get("evidence")
+    evidence: dict[str, Any] = raw_evidence if isinstance(raw_evidence, dict) else {}
     clauses = {
         c.get("taxonomy_id"): c
         for c in evidence.get("clauses") or []
