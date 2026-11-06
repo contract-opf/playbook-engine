@@ -114,6 +114,7 @@ from playbook_engine.observation_builder import (
     build_observations,
     build_round_moves,
     observations_jsonl_text,
+    primary_clause_path,
     read_observations_jsonl,
     read_round_moves_jsonl,
     round_move_from_dict,
@@ -372,7 +373,19 @@ _MEDIA_TYPES: dict[str, str] = {
 # (clause_differ._version_diff) instead of "modified". L4's round moves change
 # for identical inputs; a warm cache would otherwise replay those partition
 # artifacts as negotiated changes forever.
-_DEVIATION_VS_TEMPLATE_VERSION = 23
+#
+# v24 (issue #122): the consecutive version-pair diffs also relabel a clause
+# the aligner left on two rows (a heading split off its body, or the same words
+# relocated to another row) "unchanged" instead of a removal plus an addition
+# (clause_differ._reconcile_partitions). L4's round moves and reversal records
+# change for identical inputs, and so do the proposed_then_reversed observations
+# built from them (a heading or body row of a differently extracted draft is no
+# longer a refused ask); the net diff's rows and the OPF/digest formats do not.
+#
+# v25 (QA-2026-11-03 #4, #27): a refused ask is the author's verbatim words, not
+# the matcher's token stream, and a long proposal signed on another row is not a
+# refusal. L4's reversal records change for identical inputs.
+_DEVIATION_VS_TEMPLATE_VERSION = 25
 
 # Bump whenever the SHAPE of what _compute_doc_result records into
 # version_ingest changes in a way that must invalidate a warm L1-L4 stage
@@ -1686,7 +1699,9 @@ def _observation_classification_basis(
     cit = obs.citation
     if cit.version_id is None:
         return None
-    classification = classification_by_node.get((cit.version_id, cit.clause_path or "?"))
+    classification = classification_by_node.get(
+        (cit.version_id, primary_clause_path(cit.clause_path))
+    )
     if classification is None:
         return None
     if classification.taxonomy_id != obs.taxonomy_id:
@@ -1706,7 +1721,7 @@ def _with_node_provenance(
     cit = obs.citation
     if cit.version_id is None:
         return obs
-    node = node_by_path.get((cit.version_id, cit.clause_path or "?"))
+    node = node_by_path.get((cit.version_id, primary_clause_path(cit.clause_path)))
     if node is None:
         return obs
     non_clause = node.x_non_clause if obs.taxonomy_id is None else None
@@ -4879,6 +4894,19 @@ def mine_corpus(
                 reason += " (timeout: not cached, the next run will retry)"
             progress(f"    QUARANTINED {doc_id}: {reason}")
             quarantined.append({"document_id": doc_id, "reason": reason})
+            # QA-2026-11-03 #12: give the document the same durable partial
+            # record the QA-gate path gets, so the corpus numbers (and the
+            # page's "failed extraction" count) include it.
+            if doc_l1 is not None:
+                corpus_documents.append(
+                    _build_quarantine_corpus_doc(
+                        doc_id,
+                        version_files,
+                        doc_l1.version_ingest,
+                        doc_l1.sha256_by_vid,
+                        doc_l1.media_type_by_vid,
+                    )
+                )
             continue
 
         # Replay the scope decision into scope_log (required whether result came from
@@ -5849,7 +5877,10 @@ def project_playbook(
         baseline_dict["template_ref"] = {
             "document_id": "template",
             "title": "Canonical Template",
-            "source": str(config.baseline.template_path),
+            # The file NAME only (QA-2026-11-03 #42): an absolute host path would make
+            # content_hash machine-dependent and put a home directory into a page
+            # that is shared. The content address below identifies the template.
+            "source": Path(config.baseline.template_path).name,
         }
         # Content address for the template (issue #185, §4) — same
         # verification path as corpus version_files. Omitted (never
@@ -5924,13 +5955,36 @@ def project_playbook(
     existing_posture: dict[str, Any] | None = None
     existing_floor: dict[str, Any] | None = None
     if out_file.exists():
+        # QA-2026-11-03 #8: an unreadable prior playbook is REFUSED, not treated
+        # as "nothing to carry forward" — that silently wrote empty posture/floor
+        # over a signed Floor with no backup.
         try:
             prior_playbook = json.loads(out_file.read_text(encoding="utf-8"))
-            existing_posture = prior_playbook.get("posture")
-            existing_floor = prior_playbook.get("floor")
-        except (json.JSONDecodeError, OSError):
-            existing_posture = None
-            existing_floor = None
+        except (ValueError, OSError) as exc:
+            raise PipelineError(
+                f"project: the existing {out_file} cannot be read ({exc}), so its signed "
+                "Posture and Floor cannot be carried forward. Nothing was written. Repair or "
+                "restore that file (or move it aside to start without a Posture/Floor), then "
+                "re-run."
+            ) from exc
+        if not isinstance(prior_playbook, dict):
+            raise PipelineError(
+                f"project: the existing {out_file} is not a JSON object, so its signed Posture "
+                "and Floor cannot be carried forward. Nothing was written."
+            )
+        existing_posture = prior_playbook.get("posture")
+        existing_floor = prior_playbook.get("floor")
+        from playbook_engine.floor_candidates import altered_signed_invariants  # noqa: PLC0415
+
+        altered = altered_signed_invariants(existing_floor)
+        if altered:
+            raise PipelineError(
+                f"project: Floor invariant(s) {altered} carry a sign-off (x_signed_by) but their "
+                "text no longer matches what was signed. `project` carries the Floor forward "
+                "as it stands and would stamp the edit as signed. Nothing was written. Restore "
+                "the signed text (the sign-off covers exactly that text); a changed hard line "
+                "needs a new sign-off under a new --id."
+            )
 
     playbook = assemble_playbook(
         agreement_type=agreement_type_dict,

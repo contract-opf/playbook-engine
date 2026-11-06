@@ -56,6 +56,7 @@ from playbook_engine.clause_position_compiler import (
     OPFCitation,
     _is_degenerate_observation_text,
 )
+from playbook_engine.instrument import instrument_flags
 from playbook_engine.observation_builder import (
     OPENED_NON_STANDARD,
     OPENED_PRIOR_STANDARD,
@@ -356,6 +357,12 @@ def build_precedent_evidence(
             continue
         rounds_by_key.setdefault((move.document_id, move.taxonomy_id), set()).add(move.round)
 
+    # A deal whose executed copy is another instrument (an amendment, a cover
+    # sheet over incorporated terms, a form switch) says nothing of what the
+    # negotiated agreement's clauses became: no struck / opening / refused-ask
+    # claim, no rounds, and a clause with no text in that copy has no record.
+    other_instrument = set(instrument_flags(observations))
+
     precedent: list[dict[str, Any]] = []
     for document_id, tid in sorted(groups):
         rows = groups[(document_id, tid)]
@@ -370,8 +377,13 @@ def build_precedent_evidence(
         # not established. observation_builder no longer writes such rows;
         # this also keeps an observations.jsonl mined before the fix from
         # reintroducing them at project time.
-        refused = [o for o in rows if o.outcome == _REFUSED_OUTCOME] if signed else []
+        mismatched = document_id in other_instrument
+        refused = (
+            [o for o in rows if o.outcome == _REFUSED_OUTCOME] if signed and not mismatched else []
+        )
         if terminal is None and opening is None and not refused:
+            continue
+        if mismatched and terminal is None:
             continue
         paper, paper_basis, paper_confidence = _paper(corpus_doc, rows)
         signed_text = _text_entry(terminal) if terminal is not None else None
@@ -387,7 +399,7 @@ def build_precedent_evidence(
                 ),
                 None,
             )
-            if signed
+            if signed and not mismatched
             else None
         )
         opened_with_form = (
@@ -423,7 +435,7 @@ def build_precedent_evidence(
             ),
             key=lambda a: (a["round"], a["text"], canonicalize(a["ref"])),
         )
-        n_rounds = len(rounds_by_key.get((document_id, tid), set()))
+        n_rounds = 0 if mismatched else len(rounds_by_key.get((document_id, tid), set()))
         counterparty_ref = next(
             (o.counterparty_ref for o in rows if o.counterparty_ref is not None), None
         )

@@ -790,6 +790,29 @@ class TestScaffoldConfig:
         skeleton = scaffold_config(src, tmp_path / "out")
         assert skeleton["taxonomy"] == "FILL_IN_TAXONOMY_PATH"
 
+    @pytest.mark.parametrize(
+        ("folder", "expected"),
+        [
+            ("nda-corpus", "builtin:nda.yaml"),
+            ("Mutual NDA", "builtin:nda.yaml"),
+            ("Non-Disclosure", "builtin:nda.yaml"),
+            ("affiliation_agreements", "builtin:affiliation-agreement.yaml"),
+            ("vendor-msa", "FILL_IN_TAXONOMY_PATH"),
+            ("standard-dental", "FILL_IN_TAXONOMY_PATH"),
+        ],
+    )
+    def test_taxonomy_suggested_only_when_the_folder_name_says_so(
+        self, tmp_path: Path, folder: str, expected: str
+    ) -> None:
+        """QA-2026-11-03 #13: a clear name picks a bundled taxonomy (which loads);
+        anything else stays the placeholder; the file lists the bundled choices."""
+        src = tmp_path / folder
+        src.mkdir()
+        out = tmp_path / "out"
+        skeleton = scaffold_config(src, out)
+        assert skeleton["taxonomy"] == expected
+        assert "induce-taxonomy" in (out / "playbook.config.yaml").read_text(encoding="utf-8")
+
     def test_our_party_aliases_empty_list(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         src.mkdir()

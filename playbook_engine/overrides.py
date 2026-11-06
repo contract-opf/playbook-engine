@@ -125,7 +125,7 @@ POSTURE_FIELD = "system_prompt"
 #: The Floor invariant fields an override can replace.
 FLOOR_FIELDS = ("statement", "rationale")
 
-_TOP_KEYS = frozenset({"overrides_version", "based_on", "overrides"})
+_TOP_KEYS = frozenset({"overrides_version", "based_on", "based_on_sections", "overrides"})
 _ENTRY_KEYS = frozenset({"target", "id", "field", "value", "basis", "note"})
 _KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -191,6 +191,10 @@ class Override:
     field: str | None = None
     note: str | None = None
     index: int = 0
+    #: ``identity.content_hash`` the page showed (file-level ``based_on``).
+    based_on: str | None = None
+    #: ``identity.section_digests`` (``posture``, ``floor``) the page showed.
+    based_on_sections: Mapping[str, str] | None = None
 
     @property
     def identity(self) -> tuple[str, str, str | None]:
@@ -246,6 +250,14 @@ def parse_overrides(raw: Any) -> list[Override]:
     based_on = raw.get("based_on")
     if based_on is not None and not _nonempty_str(based_on):
         problems.append("based_on must be a non-empty string when present")
+        based_on = None
+    sections = raw.get("based_on_sections")
+    if sections is not None and not (
+        isinstance(sections, dict)
+        and all(_nonempty_str(k) and _nonempty_str(v) for k, v in sections.items())
+    ):
+        problems.append("based_on_sections must map section names to digests when present")
+        sections = None
     entries = raw.get("overrides")
     if not isinstance(entries, list):
         problems.append("overrides must be a list")
@@ -315,7 +327,16 @@ def parse_overrides(raw: Any) -> list[Override]:
                 ok = False
         if not ok:
             continue
-        item = Override(target=target, id=ident, value=value, field=fld, note=note or None, index=i)
+        item = Override(
+            target=target,
+            id=ident,
+            value=value,
+            field=fld,
+            note=note or None,
+            index=i,
+            based_on=based_on,
+            based_on_sections=sections,
+        )
         if item.identity in seen:
             problems.append(
                 f"{where}: duplicates overrides[{seen[item.identity]}] "
@@ -493,6 +514,40 @@ def _stored_verdict(vs: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _stale_reason(playbook: Mapping[str, Any], entry: Override) -> str | None:
+    """Why a Posture/Floor *entry* was made against a different state than *playbook*'s.
+
+    The page records the playbook it showed (``based_on``, plus the Posture
+    and Floor section digests). When the section the entry edits has changed
+    since (e.g. a newer Posture interview), applying the old text would
+    silently revert the newer work. ``None`` when the entry is current or
+    carries nothing to compare.
+    """
+    section = TARGET_POSTURE if entry.target == TARGET_POSTURE else TARGET_FLOOR
+    identity = playbook.get("identity")
+    identity = identity if isinstance(identity, dict) else {}
+    if entry.based_on_sections and section in entry.based_on_sections:
+        digests = identity.get("section_digests")
+        current = digests.get(section) if isinstance(digests, dict) else None
+        if current is not None and current != entry.based_on_sections[section]:
+            return (
+                f"the {section} changed since this edit was made (the page showed a "
+                f"different {section}, e.g. a newer interview or sign-off)"
+            )
+        return None
+    current_hash = identity.get("content_hash")
+    if entry.based_on and isinstance(current_hash, str) and entry.based_on != current_hash:
+        return "the playbook changed since this edit was made (based_on no longer matches)"
+    return None
+
+
+def _stale_message(entry: Override, reason: str) -> str:
+    return (
+        f"{entry.describe()}: stale, not applied: {reason}. Re-open the rebuilt index.html and "
+        f"redo the edit if it is still wanted, or remove the entry from {OVERRIDES_FILENAME}"
+    )
+
+
 def apply_overrides(
     playbook: dict[str, Any], entries: list[Override], *, strict: bool = True
 ) -> ApplyResult:
@@ -560,6 +615,10 @@ def apply_overrides(
             if posture.get(POSTURE_FIELD) == entry.value:
                 result.unchanged += 1
                 continue
+            stale = _stale_reason(playbook, entry)
+            if stale is not None:
+                problems.append(_stale_message(entry, stale))
+                continue
             prior = posture.get("version")
             posture[POSTURE_FIELD] = entry.value
             posture["version"] = (prior if isinstance(prior, int) and prior >= 1 else 0) + 1
@@ -615,8 +674,15 @@ def apply_overrides(
             if found.get(entry.field or "") == entry.value:
                 result.unchanged += 1
                 continue
+            stale = _stale_reason(playbook, entry)
+            if stale is not None:
+                problems.append(_stale_message(entry, stale))
+                continue
             found[entry.field or ""] = entry.value
             found[OWNER_MARKER] = BASIS_OWNER
+            # A Q4 line is editable here, but its sign-off covered the old text.
+            for signed_key in ("x_signed_by", "x_signed_at", "x_signed_hash"):
+                found.pop(signed_key, None)
             result.changed[TARGET_FLOOR] += 1
     if problems:
         if strict:
@@ -707,11 +773,15 @@ def fold_overrides(
     return edited, result
 
 
-def apply_overrides_to_dir(out_dir: Path, overrides_path: Path | None = None) -> ApplyResult:
+def apply_overrides_to_dir(
+    out_dir: Path, overrides_path: Path | None = None, *, strict: bool = True
+) -> ApplyResult:
     """``playbook apply-overrides``: fold ``<out>/overrides.json`` into ``<out>/playbook.opf.json``.
 
     Rewrites the playbook (and ``precedent.jsonl``) only when an entry changed
-    something; re-applying an applied file is a no-op.
+    something; re-applying an applied file is a no-op. Lenient (``strict=False``,
+    the CLI): an entry that cannot be applied is left out and named in
+    :attr:`ApplyResult.skipped`; the others are applied.
 
     Raises:
         FileNotFoundError: no ``playbook.opf.json`` / ``overrides.json``.
@@ -728,7 +798,7 @@ def apply_overrides_to_dir(out_dir: Path, overrides_path: Path | None = None) ->
         playbook = json.loads(opf_path.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise OverridesError([f"{opf_path} is not valid JSON: {exc}"]) from exc
-    edited, result = fold_overrides(playbook, entries, out_dir)
+    edited, result = fold_overrides(playbook, entries, out_dir, strict=strict)
     if result.n_changed:
         write_playbook(edited, opf_path)
         write_precedent_sidecar(edited, opf_path)

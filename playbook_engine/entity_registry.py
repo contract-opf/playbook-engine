@@ -47,6 +47,15 @@ DEFAULT_REGISTRY_PATH = Path.home() / ".cache" / "playbook-engine" / "entity_reg
 
 _ALIAS_PREFIX = "Counterparty"
 
+_DOCUMENT_ALIAS_PREFIX = "document"
+# The deal hash the engine appends to every document id (``<slug>_<8 hex>``;
+# ``-<8 hex>`` once slugged). It identifies a deal without naming anyone, so it
+# survives document aliasing.
+_DOC_HASH_SUFFIX_RE = re.compile(r"-(?=[0-9a-f]*\d)[0-9a-f]{8}$")
+# An id that is already pseudonymous: a document ordinal alias, or one carrying
+# an entity alias (``counterparty-<n>``).
+_DOC_ALIASED_RE = re.compile(r"^document-\d+(-[0-9a-f]{8})?$|(^|-)counterparty-\d+(-|$)")
+
 _WS_RE = re.compile(r"\s+")
 _SLUG_SEP_RE = re.compile(r"[^a-z0-9]+")
 
@@ -81,6 +90,9 @@ class EntityRegistry:
     _canonical: dict[str, str] = field(
         default_factory=dict
     )  # normalized name -> first-seen spelling
+    _documents: dict[str, str] = field(
+        default_factory=dict
+    )  # raw document id (slug) -> ordinal alias slug (QA-2026-11-03 #22)
 
     @classmethod
     def load(cls, path: Path) -> EntityRegistry:
@@ -90,6 +102,7 @@ class EntityRegistry:
             raw = json.loads(path.read_text(encoding="utf-8"))
             reg._aliases = dict(raw.get("aliases", {}))
             reg._canonical = dict(raw.get("canonical", {}))
+            reg._documents = dict(raw.get("documents", {}))
         return reg
 
     def save(self) -> None:
@@ -107,7 +120,11 @@ class EntityRegistry:
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        payload = {"aliases": self._aliases, "canonical": self._canonical}
+        payload = {
+            "aliases": self._aliases,
+            "canonical": self._canonical,
+            "documents": self._documents,
+        }
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         os.fchmod(fd, 0o600)  # enforce on the fd: O_CREAT's mode is ignored if tmp pre-existed
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -130,6 +147,21 @@ class EntityRegistry:
         self._aliases[key] = alias
         self._canonical[key] = entity_name
         self.save()
+        return alias
+
+    def document_alias_for(self, document_slug: str) -> str:
+        """Return the stable ordinal alias slug (``document-<n>``) for a document id.
+
+        Used for document ids in which no registered entity was recognised, so
+        a name the matcher cannot see (a truncated folder name, an unregistered
+        third party) still never reaches the output. Written through to disk on
+        first sight, like :meth:`alias_for`.
+        """
+        alias = self._documents.get(document_slug)
+        if alias is None:
+            alias = f"{_DOCUMENT_ALIAS_PREFIX}-{len(self._documents) + 1}"
+            self._documents[document_slug] = alias
+            self.save()
         return alias
 
     def alias_map(self) -> dict[str, str]:
@@ -187,8 +219,13 @@ def _fuzzy_name_pattern(name: str) -> re.Pattern[str] | None:
     words = [w for w in name.split() if w]
     if not words:
         return None
-    body = r"\s+".join(re.escape(w) for w in words)
-    return re.compile(r"(?<!\w)" + body + r"(?!\w)", re.IGNORECASE)
+    # Boundaries are "not adjacent to a letter/digit" -- NOT ``\w``, which counts
+    # ``_`` as a word character: the engine's own staging prefix (``NN__Name``)
+    # and underscore-joined filenames (``Name_3.9.21``) would otherwise stop a
+    # name matching. Underscore also counts as inter-word whitespace, so
+    # ``Acme_Widgets_LLC`` matches the registered "Acme Widgets LLC".
+    body = r"(?:\s|_)+".join(re.escape(w) for w in words)
+    return re.compile(r"(?<![^\W_])" + body + r"(?![^\W_])", re.IGNORECASE)
 
 
 def known_entities_with_no_match(
@@ -254,6 +291,7 @@ def pseudonymize_document_id(
     if not document_id or not known_entities:
         return document_id
     tokens = entity_slug(document_id).split("-")
+    matched = False
     for name in sorted((n for n in known_entities if n), key=len, reverse=True):
         name_tokens = entity_slug(name).split("-")
         n = len(name_tokens)
@@ -263,8 +301,20 @@ def pseudonymize_document_id(
             if tokens[i : i + n] == name_tokens:
                 alias = registry.alias_for(name)
                 tokens = tokens[:i] + [entity_slug(alias)] + tokens[i + n :]
+                matched = True
                 break
-    return "-".join(tokens)
+    slug = "-".join(tokens)
+    if matched:
+        return slug
+    # No registered entity was recognised in this id (a truncated folder name,
+    # an unregistered third party, ...): replace it by an ordinal alias rather
+    # than let whatever it spells out through. Idempotent on an id that is
+    # already an alias; the deal-hash suffix is kept so a deal stays citable.
+    if _DOC_ALIASED_RE.search(slug):
+        return slug
+    hash_match = _DOC_HASH_SUFFIX_RE.search(slug)
+    suffix = hash_match.group(0) if hash_match else ""
+    return registry.document_alias_for(slug) + suffix
 
 
 # ---------------------------------------------------------------------------

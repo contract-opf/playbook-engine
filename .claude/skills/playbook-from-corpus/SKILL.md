@@ -213,6 +213,31 @@ Record the answers; they decide whether the run is template mode or emergent
 mode. Do **not** ask "who are your counterparties", and ask "which party is us"
 only as the multiple-choice question below, after you have read the recitals.
 
+## Choose the taxonomy and confirm the agreement id (Route A and C, before `lint-corpus`)
+
+`playbook.config.yaml` needs a `taxonomy:` (the clause vocabulary) and an
+`agreement_type.id` (the key the toaster identifies this playbook by). Neither
+is the lawyer's engineering problem: decide the taxonomy yourself, then show both
+for ONE confirm.
+
+- **Taxonomy.** `playbook stage` fills in `builtin:nda.yaml` or
+  `builtin:affiliation-agreement.yaml` when the folder name says so, and
+  otherwise leaves `FILL_IN_TAXONOMY_PATH` (lint errors until it is set). The
+  four bundled choices (`spec/taxonomy/`) are written `builtin:<file>`:
+  `nda.yaml` (NDAs), `affiliation-agreement.yaml` (educational affiliation),
+  `general-commercial.yaml` (indemnification, force majeure, boilerplate) and
+  `cuad-base.yaml` (the 41 CUAD categories, type-neutral — the default when
+  nothing fits the agreement type). If none fits well, derive one from the
+  corpus: `playbook induce-taxonomy` (see `docs/ADOPTING.md`), then curate the
+  result (prune with `status: inactive`, never delete).
+- **Agreement id.** `agreement_type.id` is the slug of the source folder name
+  unless the config already carries one. Show it with the display name. It is the
+  toaster's playbook key: changing it later makes the toaster treat the playbook
+  as a different one, so pick it deliberately now (an `aliases:` entry can keep
+  an older id bound). On Route C keep the id already in the restored config.
+- Ask once, as a clickable choice: "Use `<taxonomy>` and id `<id>`?" with the
+  alternatives as the other options.
+
 ## Derive party names automatically (do this before `mine`)
 
 Provenance judgment and born-safe pseudonymization both hinge on party names,
@@ -384,8 +409,11 @@ out-dir to anyone outside the org on the assumption that removing
 now stale-clears and rewrites the whole directory — tree content, the
 directory name, AND the per-version filename — under the ALIASED
 document_id/version after the born-safe pseudonymization pass, mirroring
-`trail/`'s treatment, so it is safe to share alongside the compiled playbook
-once those files are removed.
+`trail/`'s treatment, so the *registered names* no longer appear in its
+paths, filenames or `source_file`. That is name pseudonymization only: the
+tree text itself, contact data (e-mail domains, phone numbers, street
+addresses) and any name `known_entities` was not told about are still in
+there, so it still needs its own review before it leaves the org.
 
 ---
 
@@ -666,6 +694,8 @@ exit 0. Common fixes:
 | `CORPUS_DANGLING_SYMLINKS` | The corpus is symlinks pointing at files that aren't reachable from here — re-run `playbook stage` (real copies are the default). This wipes the staging directory first, so back up `playbook.config.yaml`, the template, and any hand-edited `hints.yaml` before re-running it (see the Step 1 warning above). |
 | `CONFIG_NOT_FOUND` | Create `playbook.config.yaml` from the example |
 | `CONFIG_TEMPLATE_NOT_FOUND` | Fix the `baseline.template` path or set to `null` |
+| `CONFIG_TAXONOMY_NOT_FOUND` (e.g. `FILL_IN_TAXONOMY_PATH`) | `playbook stage` could not tell which vocabulary fits. Do the "Choose the taxonomy" step below, then set `taxonomy:` in `playbook.config.yaml` |
+| `DOC_PDF_NO_TEXT` (warning) | The PDF is a scan with no text layer. Check the docling/OCR tooling is present (Step 2b); otherwise ask for a text PDF or DOCX. A deal whose every file fails is quarantined and left out of the playbook, never silently |
 | `CONFIG_EXTRACTION_DOCLING_MISSING` | The config declares docling and it isn't installed — run in the container, or change `extraction.extractor` |
 
 These same checks now run automatically as a preflight inside `mine`,
@@ -1283,10 +1313,23 @@ So offer both kinds and say which kind each is:
 
 - **"don't let them weaken X"** — from the reversal ranking; X is present and
   contested.
-- **"X must be present at all"** — from the absence ranking; the Floor's job
-  here is to fix what the history got wrong, not to encode it. Say the absence
-  rate out loud in the option description ("present in 9 of 43 — your history
-  is the argument FOR this hard line, not against it").
+- **"X must be present at all"** — from the absence ranking, **only for a clause
+  the taxonomy says belongs in this agreement type**; the Floor's job here is
+  to fix what the history got wrong, not to encode it. Say the absence rate out
+  loud in the option description ("present in 9 of 43 — your history is the
+  argument FOR this hard line, not against it").
+
+**Absent does not mean wanted.** The absence ranking only says a clause is
+missing from many documents; it does not say it should be there. Before you
+offer "X must be present", read X's `description` in the taxonomy
+(`$OUT/playbook.opf.json` → `taxonomy.entries[]`, or the taxonomy YAML). If it
+says the clause is normally absent, to be flagged if a counterparty introduces
+it, or that it undercuts the agreement (a mutual NDA's limitation of liability
+or residuals clause is the typical case), the high absence rate is the playbook
+working as intended: offer **"never accept X"** instead (a refuse line), or
+nothing at all. If the description is silent either way, offer neither
+direction as a default and ask which way the owner wants it. Never present a
+clause as a must-have because it is the most-absent one.
 
 An absence-shaped invariant is often the most valuable thing in the whole
 Floor, precisely because the corpus cannot propose it: the corpus is the record
@@ -1301,10 +1344,10 @@ the user their answers:
 playbook posture questions
 
 # Write $OUT/posture-answers.json as you go, then:
-playbook posture interview $OUT --answers-file $OUT/posture-answers.json
+playbook posture interview $OUT --answers-file $OUT/posture-answers.json --signed-by "<the human's name>"
 # Docker form (CORPUS=./out is the harmless Route B placeholder from the
 # mechanical caveat under Step 0 — posture interview never reads /work/corpus):
-# make docker-run CORPUS=./out OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json"
+# make docker-run CORPUS=./out OUT=./out ARGS="posture interview /work/out --answers-file /work/out/posture-answers.json --signed-by '<the human's name>'"
 ```
 
 Rules that are easy to get wrong:
@@ -1314,6 +1357,28 @@ Rules that are easy to get wrong:
   is legitimate; inventing answers is not. But fewer than 3 answers is
   rejected by `posture interview` (OPF §7) — make sure at least three
   questions get answers before you submit.
+- **Show the binding note before you ask Q4, word for word.** Q4 is the one
+  answer with binding force, and `playbook posture questions` prints the
+  `binding_note` that goes with it. Put that note in front of the user in the
+  same message as the question (as plain text, not folded into an option
+  description), and wait for the answer. Do not paraphrase it away and do not
+  ask Q4 as one of four quick-pick questions without it.
+- **How Q4 is read.** Separate clause names with `;` or `,` (a comma inside
+  parentheses does not split). A non-answer — "none", "n/a", "not sure", "tbd"
+  — signs nothing. Each name is matched against the playbook's own taxonomy by
+  id or label (case, plurals and "&"/"and" are ignored); a match is stamped
+  with `x_taxonomy_id` so the line is tied to its clause. A name that matches
+  nothing is still signed as a plain "Do not concede on ..." line, with no clause
+  tie. A name that points the other way — "no limitation of liability",
+  "uncapped liability", "unilateral termination" — is signed as **"Never accept
+  ..."**, not as a hold-firm line. A name that starts "never", "not", "don't",
+  "without" or "avoid" is **not guessed at**: `posture interview` prints a
+  `floor sign` command so the owner words it themselves. `posture interview`
+  prints every statement it is about to sign *before* it writes anything, and
+  `--signed-by "<the human's name>"` records who signed them (`x_signed_by`);
+  without it the lines are marked as having no signer. **Read the printed
+  statements back to the user and confirm each says what they meant**, or stop
+  and fix the wording with `floor sign`.
 - **Q4 is different in kind, and signs itself — for name-shaped items.** Naming
   what is non-negotiable is a human authoring a hard line in natural language,
   so a bare clause-type name ("Uncapped liability") is written **directly into
@@ -1335,13 +1400,22 @@ Rules that are easy to get wrong:
   hits this path. Always run the printed command and confirm the invariant
   landed — `jq '.floor.invariants[].id' $OUT/playbook.opf.json` — before
   treating the answer as signed.
-- **Re-running is safe.** The same statement always resolves to the same id and
-  updates in place — never a duplicate (a repeated id is a blocking validator
-  error, §3.13). Offer to re-run whenever the user's answers change. A
-  re-run with the SAME (unchanged) answers file is a true no-op end to
-  end: `posture.version` is left untouched too, not just `floor.invariants`
-  (issue #132) — nothing is written, so re-offering the interview "just to
-  be safe" never inflates the version.
+- **Re-running adds and keeps; it never removes.** The same statement always
+  resolves to the same id — never a duplicate (a repeated id is a blocking
+  validator error, §3.13) — and a line the owner edited on the page is left as
+  edited. A re-run with the SAME (unchanged) answers file is a true no-op end
+  to end: `posture.version` is left untouched too, and so is the Posture text
+  (issue #132) — nothing is written, so re-offering the interview "just to be
+  safe" never inflates the version.
+- **Dropping a Q4 name does NOT drop its hard line.** If the user's new answer
+  no longer names something an earlier run signed, the line stays binding in
+  `floor.invariants` and `posture interview` prints a WARN naming it. Tell the
+  user plainly, and if they want it gone run the printed command, with the
+  human's own name:
+  `playbook floor retire $OUT --id <invariant-id> --signed-by "<the human's name>"`.
+  That removes the line and records who retired it and when (`floor.x_retired`);
+  later re-runs will not sign that id again. This is the only sanctioned way to
+  remove a hard line.
 - **`posture.version` only carries forward on its own when OUT_DIR is
   recompiled in place** (Route C reuses the same out-dir, so `project`'s
   carry-forward keeps the version climbing automatically — nothing to do
@@ -1362,12 +1436,12 @@ ship as-is — evidence is advisory by contract (OPF-SPEC.md §5), and a consume
 that wants binding guidance asks for a Posture and a Floor.
 
 **What a consuming review application sees at Rung 0:** stopping here is a
-legitimate endpoint, but it is not free for the consumer. In
-`contract-toaster`, an empty `posture` makes review composition refuse to run
-until the operator explicitly passes `accept_empty_posture=True` — a
-deliberate, on-the-record choice, never a silent default. Say this to the
-user before they walk away: whoever consumes this artifact for review will
-hit that refusal (or have to opt into it) the first time they run one.
+legitimate endpoint. `contract-toaster` accepts an empty `posture` and runs the
+review on the Evidence alone (its review pipeline always passes
+`accept_empty_posture=True`, so there is no refusal and nothing to opt into).
+What it loses is binding guidance: with no Posture and no Floor the reviewing
+model weighs the precedent without the owner's stated intent or walk-away lines.
+Say this to the user before they walk away.
 
 ### Step 7b — Floor: propose, then let the human sign (Rung 2)
 
@@ -1390,7 +1464,8 @@ playbook floor propose $OUT --config $CORPUS/playbook.config.yaml
 
 `floor propose` is a **review artifact only**. It never writes to the OPF `floor`
 section and never promotes a candidate. Accepting is a human act, and it goes
-through `floor sign` — do **not** hand-edit `floor.invariants`. Read the
+through `floor sign` (and removal through `floor retire`) — do **not** hand-edit
+`floor.invariants`. Read the
 printed table (or `$OUT/floor.candidates.json`, where each candidate carries
 its evidence citations) with the human, one candidate at a time, and for each
 one they want as a hard line, sign it (below) using the candidate's
@@ -1441,7 +1516,8 @@ verbatim into every consumer's model-facing review prompt, while `x_signed_by`/
 
 Re-running with the identical `--statement` under the same id is a no-op;
 re-running with a different `--statement` under an id that already carries one
-is refused, never silently overwritten. This is the ONLY sanctioned way to put
+is refused, never silently overwritten: retire the old one first with
+`playbook floor retire $OUT --id <id> --signed-by "<the human's name>"`. This is the ONLY sanctioned way to put
 a hand-authored statement into `floor.invariants` outside of Q4 —
 never hand-edit `floor.invariants` directly, even for
 a one-word fix.
@@ -1536,7 +1612,7 @@ Writes exactly **one** human-readable artifact, self-contained, no network
   above); a misconfigured or incomplete `known_entities` list leaves real
   counterparty names in this file (skill-QA finding #57, 2026-08-24: hundreds
   of real-name occurrences reached `playbook.opf.json`/the page this way). Run
-  the **mandatory residue check** below before calling this file shareable.
+  the **mandatory residue check** below before treating its *names* as scrubbed (it does not cover contact data).
   The engine has no command that anonymizes a playbook for public release;
   treat anything leaving the org as needing its own review.
 
@@ -1557,8 +1633,8 @@ disk** — the page contains it, never replaces it. A consumer extracts the
 `opf-canonical` block, JSON-parses it, and verifies `identity.content_hash`
 against `playbook_engine.canonicalize.content_hash`.
 
-**Mandatory residue check (issue #136) — run before calling anything from
-this step shareable.** `$OUT/alias_map.json` (written by `mine
+**Mandatory residue check (issue #136) — run before sharing anything from
+this step; it checks registered *names* only, not contact data.** `$OUT/alias_map.json` (written by `mine
 --entity-registry`, see "Born-safe sidecar" above) holds every real name the
 registry actually registered. A plain substring search for those values is
 NOT enough: `pseudonymize_text` registers whatever spelling
@@ -1599,8 +1675,13 @@ else:
 
 A hit means a real name likely survived pseudonymization; fix
 `known_entities` (verbatim spelling — see above), re-run `mine`, and
-re-check before treating `index.html` as shareable. Two honest
-limits, not overclaimed: (1) a hit can be a coincidental match of a
+re-check. A clean result does **not** make `index.html` "shareable": the
+engine pseudonymizes the *names* you registered and nothing else — it does
+not scrub contact data (e-mail domains, phone numbers, postal addresses),
+which can still identify a counterparty, and this check cannot see it.
+Anything leaving the org needs its own review. Three honest
+limits, not overclaimed: (0) names only — contact data is out of scope for
+both the pseudonymizer and this check; (1) a hit can be a coincidental match of a
 short/common word that slipped the stopword filter — read the flagged token
 in context before assuming a leak; (2) an empty result confirms only that no
 distinctive token of a name `known_entities` was told about survived — it is

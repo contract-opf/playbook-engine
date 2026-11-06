@@ -47,12 +47,13 @@ from pathlib import Path
 from typing import Any
 
 from playbook_engine import absence as absence_mod
+from playbook_engine import instrument as instrument_mod
 from playbook_engine.absence import CHECK_KIND as ABSENCE_CHECK_KIND
 from playbook_engine.agent_judge import VerdictStore
 from playbook_engine.agent_segmenter import AGENT_SEGMENTER_MODEL
 from playbook_engine.canonicalize import canonicalize
 from playbook_engine.deal_dates import BASES as SIGNED_ON_BASES
-from playbook_engine.deal_dates import DEAL_DATE_KIND, coverage
+from playbook_engine.deal_dates import DEAL_DATE_KIND, DealDateEvidence, coverage, has_date_conflict
 from playbook_engine.dossiers import DOSSIER_MIN_BUDGET, dossier_budget, dossier_standard_text
 from playbook_engine.equivalence import (
     ADDITION_TOKENS,
@@ -643,7 +644,7 @@ def _absence_section(
             subjects = []
     store = VerdictStore(out_dir / "judge" / "verdicts.jsonl")
     current = rubric_version(ABSENCE_CHECK_KIND)
-    checked = wrong = 0
+    checked = wrong = reason_flagged = 0
     for subject in subjects:
         stored = store.get_record_by_key(subject.key)
         if stored is None or stored.rubric_version != current:
@@ -652,7 +653,12 @@ def _absence_section(
         if not isinstance(absent, bool):
             continue
         checked += 1
-        wrong += 0 if absent else 1
+        # An "absent: true" whose stated reason says the signed text is an
+        # amendment / cover sheet incorporating terms elsewhere is not a
+        # verified absence either (QA 2026-11-03 #5): score the reason too.
+        flagged = absent and instrument_mod.reason_flags_instrument(stored.verdict.get("reason"))
+        reason_flagged += 1 if flagged else 0
+        wrong += 0 if absent and not flagged else 1
     return {
         "guard": guard if isinstance(guard, (int, float)) and not isinstance(guard, bool) else None,
         "pairs": len(records),
@@ -671,6 +677,7 @@ def _absence_section(
         "check_sample": len(subjects),
         "checked": checked,
         "wrong": wrong,
+        "reason_flagged": reason_flagged,
     }
 
 
@@ -822,12 +829,18 @@ def _prior_reconstruction_section(out_dir: Path) -> dict[str, Any] | None:
     return section
 
 
-def _signed_on_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None:
+def _signed_on_section(
+    playbook: dict[str, Any] | None, manifest: Any = None
+) -> dict[str, Any] | None:
     """Counts of signed deals by how their signing date was established (issue #247).
 
     Read from the playbook's own ``corpus.documents[]``. ``null_dates`` are
     signed deals with no date; ``unsigned`` in-scope deals have none by
     definition. Counts only: no date value leaves the playbook.
+    ``preamble_signature_conflicts`` counts signed deals whose preamble date and
+    signature-block date were both read and disagree (read from the mining
+    evidence in ``corpus_manifest.json``; the recorded ``signed_on`` is
+    unchanged, QA 2026-11-03 #26).
     """
     if playbook is None:
         return None
@@ -842,7 +855,23 @@ def _signed_on_section(playbook: dict[str, Any] | None) -> dict[str, Any] | None
         "dated": cov.dated,
         "null_dates": cov.null_dates,
         "by_basis": {_label(b, frozenset(SIGNED_ON_BASES)): n for b, n in cov.by_basis.items()},
+        "preamble_signature_conflicts": _date_conflicts(manifest),
     }
+
+
+def _date_conflicts(manifest: Any) -> int:
+    """Signed deals in *manifest* whose preamble and signature-block dates disagree."""
+    docs = manifest.get("documents") if isinstance(manifest, dict) else None
+    if not isinstance(docs, list):
+        return 0
+    return sum(
+        1
+        for d in docs
+        if isinstance(d, dict)
+        and d.get("in_scope", True)
+        and d.get("signed_version") is not None
+        and has_date_conflict(DealDateEvidence.from_dict(d.get("deal_date_evidence")))
+    )
 
 
 def _opened_with(record: dict[str, Any]) -> str:
@@ -1324,7 +1353,7 @@ def build_scorecard(out_dir: Path) -> dict[str, Any]:
         "precedent": _precedent_section(playbook),
         "prior_standards": _prior_standards_section(playbook),
         "prior_reconstruction": _prior_reconstruction_section(out_dir),
-        "signed_on": _signed_on_section(playbook),
+        "signed_on": _signed_on_section(playbook, manifest),
         "template_drift": _template_drift_section(playbook),
         # Issue #233: the drift of what each clause OPENED with — per clause
         # with our_standard, our-paper signed deals opening with our standard

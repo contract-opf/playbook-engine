@@ -556,7 +556,8 @@ def test_validator_clean_posture_raises_no_warning() -> None:
     )
     result = validate_document(doc)
     assert result.ok
-    assert result.errors == []
+    # A hand-built sign-off with no x_signed_hash is reported unbound, nothing else.
+    assert [e for e in result.errors if "unbound" not in e.message] == []
 
 
 def test_validator_empty_posture_and_floor_still_valid() -> None:
@@ -1109,6 +1110,7 @@ def test_cli_posture_interview_prompt_discloses_q4_weight_before_the_answer(
     q4 = next(iq for iq in INTERVIEW_QUESTIONS if iq.q == "sacred_clauses")
 
     replies = "".join(f"{_ANSWERS.get(iq.q, '')}\n" for iq in INTERVIEW_QUESTIONS)
+    replies += "y\nJ. Placeholder\n"  # confirm the echoed hard lines, then the signer
 
     result = CliRunner().invoke(cli, ["posture", "interview", str(tmp_path)], input=replies)
 

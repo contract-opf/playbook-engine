@@ -382,15 +382,47 @@ def derive_reversal_candidates(
 # ---------------------------------------------------------------------------
 
 
+def _split_top_level(text: str, seps: str) -> list[str]:
+    """Split *text* on any character in *seps*, ignoring separators inside
+    parentheses or brackets (e.g. "Confidentiality (including residuals, survival)")."""
+    parts: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in text:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]" and depth:
+            depth -= 1
+        if depth == 0 and ch in seps:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+
+_LEADING_CONJ_RE = re.compile(r"^(?:and|or|&)\s+", re.IGNORECASE)
+
+
 def _q4_items(answer: str | None) -> list[str]:
     """Split a Q4 ("sacred_clauses") answer into its named clause-type items.
 
-    The interview names clause TYPES as semicolon-separated free text (e.g.
-    "uncapped liability; IP assignment") — this is the one splitting rule
-    shared by every consumer of the Q4 answer
+    The interview names clause TYPES as free text separated by semicolons,
+    commas or line breaks (e.g. "uncapped liability; IP assignment" or
+    "confidentiality, residuals") — this is the one splitting rule shared by
+    every consumer of the Q4 answer
     (:func:`derive_interview_q4_candidates` below, and
     :func:`promote_interview_q4_invariants`), so they always agree on what
     counts as "one named item."
+
+    Semicolons and line breaks always separate items. A comma separates items
+    only inside a segment with no conditional/imperative marker word
+    (``_Q4_SENTENCE_MARKERS``): "limitation of liability, if
+    present, must not be unilateral" stays whole so it can be routed to
+    ``playbook floor sign`` instead of being shredded into three fragments.
+    Commas inside parentheses never split. A leading "and"/"or" on an item
+    ("A, B, and C") is dropped.
 
     Returns:
         Items in the order named, stripped, blank items dropped. Empty when
@@ -398,7 +430,19 @@ def _q4_items(answer: str | None) -> list[str]:
     """
     if not answer or not answer.strip():
         return []
-    return [item.strip() for item in answer.split(";") if item.strip()]
+    items: list[str] = []
+    for segment in _split_top_level(answer, ";\n"):
+        segment = segment.strip()
+        if not segment:
+            continue
+        padded = f" {segment.lower()} "
+        has_marker = any(marker in padded for marker in _Q4_SENTENCE_MARKERS)
+        pieces = [segment] if has_marker else _split_top_level(segment, ",")
+        for piece in pieces:
+            piece = _LEADING_CONJ_RE.sub("", piece.strip()).strip().rstrip(".!").strip()
+            if piece:
+                items.append(piece)
+    return items
 
 
 _Q4_SENTENCE_MARKERS: tuple[str, ...] = (" if ", " unless ", " must ", " shall ", " provided ")
@@ -473,6 +517,165 @@ def q4_sentence_shaped_items(interview_answers: dict[str, str] | None) -> list[s
     return [item for item in items if is_q4_item_sentence_shaped(item)]
 
 
+# ---------------------------------------------------------------------------
+# Q4 item resolution (QA-2026-11-03 #6): reject non-answers, bind an item to a
+# taxonomy clause, and keep the polarity honest
+# ---------------------------------------------------------------------------
+
+# Whole answers only for words that also open real clause names ("pass-through
+# costs", "nil-rate"); the phrases below can only be non-answers.
+_Q4_NULL_RE = re.compile(
+    r"^(?:(?:none|n/?a|nil|nothing|tbd|tba|skip|pass)(?:\s+(?:yet|for now|at this time|really)|\s+[-–—:].*)?$"
+    r"|not sure|unsure|i(?:'| a)?m not sure|i am not sure|i do(?:n't| not) know|dunno"
+    r"|no comment)",
+    re.IGNORECASE,
+)
+_Q4_NULL_EXACT = frozenset({"no", "nope", "-", "--", "\u2014", "?", "??", ".", "..."})
+
+
+def is_q4_null_like(item: str) -> bool:
+    """Whether a Q4 *item* is a non-answer ("None", "N/A", "not sure yet",
+    "-", ...) rather than a clause-type name. Such an item must never become a
+    binding Floor line (QA-2026-11-03 #6)."""
+    text = item.strip().strip(".!").strip().lower()
+    return not text or text in _Q4_NULL_EXACT or bool(_Q4_NULL_RE.match(text))
+
+
+# Items opening with one of these words state a direction the engine cannot
+# turn into a checkable rule without guessing ("never assign", "without a
+# survival period", "don't let them weaken X"): held back, owner asked to word
+# it themselves with `playbook floor sign`.
+_Q4_AMBIGUOUS_LEAD_RE = re.compile(
+    r"^(?:never|not|don'?t|do not|cannot|can'?t|won'?t|without|avoid|reject|refuse|"
+    r"no longer|any)\b",
+    re.IGNORECASE,
+)
+_Q4_NO_PREFIX_RE = re.compile(r"^no\s+(.+)$", re.IGNORECASE)
+# Modifiers that name something to REFUSE ("uncapped liability" means never
+# accept uncapped liability, not hold firm on it).
+_Q4_REFUSED_MODIFIERS = frozenset(
+    {
+        "uncapped",
+        "unlimited",
+        "unilateral",
+        "unrestricted",
+        "unconditional",
+        "unreasonable",
+        "onerous",
+        "overbroad",
+        "one-sided",
+    }
+)
+
+_NORM_NOISE = frozenset({"the", "a", "an", "clause", "clauses", "provision", "provisions"})
+
+
+def _normalize_clause_name(text: str) -> str:
+    """Lowercase, '&'->'and', punctuation/underscores dropped, articles and
+    the generic words "clause"/"provision" removed, simple plurals folded."""
+    words = re.sub(r"[^a-z0-9]+", " ", text.lower().replace("&", " and ")).split()
+    folded = [
+        w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words
+    ]
+    return " ".join(w for w in folded if w not in _NORM_NOISE)
+
+
+def match_taxonomy_entry(item: str, taxonomy_entries: list[dict[str, Any]] | None) -> str | None:
+    """The taxonomy id *item* names, by exact id/label or a normalized
+    (case, punctuation, '&'/'and', plural, "clause") match; else ``None``.
+    Only active/custom entries can match; an ambiguous match returns ``None``."""
+    if not taxonomy_entries:
+        return None
+    key = _normalize_clause_name(item)
+    if not key:
+        return None
+    hits: set[str] = set()
+    for entry in taxonomy_entries:
+        if not isinstance(entry, dict) or entry.get("status") == "inactive":
+            continue
+        entry_id = entry.get("id")
+        if not isinstance(entry_id, str):
+            continue
+        names = [entry_id, entry.get("label")]
+        if any(isinstance(n, str) and _normalize_clause_name(n) == key for n in names):
+            hits.add(entry_id)
+    return next(iter(hits)) if len(hits) == 1 else None
+
+
+@dataclass(frozen=True)
+class Q4Item:
+    """One Q4 item after resolution.
+
+    ``kind`` is ``"promote"`` (``statement``/``direction`` set, safe to sign),
+    ``"null"`` (a non-answer), ``"sentence"`` (a full sentence: sign it
+    verbatim) or ``"ambiguous"`` (direction unclear: sign it verbatim).
+    """
+
+    text: str
+    kind: str
+    statement: str | None = None
+    taxonomy_id: str | None = None
+    direction: str | None = None  # "hold" | "refuse"
+
+    @property
+    def inv_id(self) -> str:
+        return _slugify(self.text, fallback="sacred-clause")
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:] if text[1:2].islower() else text
+
+
+def resolve_q4_items(
+    answer: str | None, taxonomy_entries: list[dict[str, Any]] | None = None
+) -> list[Q4Item]:
+    """Classify each item of a Q4 answer (QA-2026-11-03 #6).
+
+    Order: non-answer -> sentence-shaped -> ambiguous-direction lead word ->
+    "no X" / refused modifier (direction REFUSE: "Never accept ...") -> any
+    other name (direction HOLD: "Do not concede on ..."). A name that matches
+    the taxonomy (exact or normalized) carries its ``taxonomy_id``. The hold
+    reading is the interview question's own ("which clause TYPES are
+    non-negotiable"); whenever the wording points anywhere else the item is
+    held back for the owner to word with ``playbook floor sign`` instead of
+    being guessed at.
+    """
+    out: list[Q4Item] = []
+    for item in _q4_items(answer):
+        if is_q4_null_like(item):
+            out.append(Q4Item(item, "null"))
+        elif is_q4_item_sentence_shaped(item):
+            out.append(Q4Item(item, "sentence"))
+        elif _Q4_AMBIGUOUS_LEAD_RE.match(item):
+            out.append(Q4Item(item, "ambiguous"))
+        elif m := _Q4_NO_PREFIX_RE.match(item):
+            rest = m.group(1).strip()
+            out.append(
+                Q4Item(
+                    item,
+                    "promote",
+                    f"Never accept {_lower_first(rest)}.",
+                    match_taxonomy_entry(rest, taxonomy_entries),
+                    "refuse",
+                )
+            )
+        elif {w.lower() for w in re.findall(r"[\w-]+", item)} & _Q4_REFUSED_MODIFIERS:
+            out.append(
+                Q4Item(item, "promote", f"Never accept {_lower_first(item)}.", None, "refuse")
+            )
+        else:
+            out.append(
+                Q4Item(
+                    item,
+                    "promote",
+                    _q4_promoted_statement(item),
+                    match_taxonomy_entry(item, taxonomy_entries),
+                    "hold",
+                )
+            )
+    return out
+
+
 def _q4_statement(item: str) -> str:
     """The single checkable Floor sentence one Q4-named *item* becomes in a
     PROPOSED candidate (:func:`derive_interview_q4_candidates`, written to
@@ -542,7 +745,7 @@ def derive_interview_q4_candidates(
     """
     if not interview_answers:
         return []
-    items = _q4_items(interview_answers.get(INTERVIEW_Q4_ID))
+    items = [i for i in _q4_items(interview_answers.get(INTERVIEW_Q4_ID)) if not is_q4_null_like(i)]
 
     return [
         FloorCandidate(
@@ -839,9 +1042,8 @@ def _slugify_statement_item(item: str) -> str:
 
 
 _Q4_ATTRIBUTION_RE = re.compile(
-    r"^Authored by the legal owner in posture interview v\d+, question "
-    + re.escape(INTERVIEW_Q4_ID)
-    + r"\.$"
+    r"^(?:Authored by the legal owner|Named, with no signer recorded,)"
+    r" in posture interview v\d+, question " + re.escape(INTERVIEW_Q4_ID) + r"\.$"
 )
 
 
@@ -869,6 +1071,10 @@ def promote_interview_q4_invariants(
     *,
     posture_version: int,
     existing_invariants: list[dict[str, Any]] | None = None,
+    taxonomy_entries: list[dict[str, Any]] | None = None,
+    signed_by: str | None = None,
+    signed_at: str | None = None,
+    retired_ids: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Promote each Q4 ("sacred_clauses") item directly into ``floor.invariants``.
 
@@ -923,6 +1129,18 @@ def promote_interview_q4_invariants(
     this function itself only ever silently skips; it raises no error and
     emits no warning of its own.
 
+    QA-2026-11-03 #6/#30/#32: each item is first resolved by
+    :func:`resolve_q4_items` — a non-answer is never promoted, an item that
+    names a clause in *taxonomy_entries* carries ``x_taxonomy_id``, and an item
+    that names something to refuse reads "Never accept ...". A promoted entry
+    records *signed_by*/*signed_at* as ``x_signed_by``/``x_signed_at`` when a
+    signer is given (its rationale then claims owner authorship); with no
+    signer the rationale says so instead. An existing entry carrying this
+    function's marker is NEVER rewritten, so a statement the owner edited on
+    the page survives a re-run; the only thing added to one is a missing
+    signer, when *signed_by* is given. An id in *retired_ids* (see
+    :func:`retire_floor_invariant`) is not promoted again.
+
     Invariants this run's Q4 answer doesn't name — hand-authored, or
     promoted by an earlier interview run naming a since-dropped item — are
     left exactly as they are: this is an upsert, never a delete, so a legal
@@ -956,7 +1174,11 @@ def promote_interview_q4_invariants(
             with an *existing_invariants* entry this function did not
             itself promote (see above) — never overwritten.
     """
-    items = _q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID))
+    items = [
+        i
+        for i in resolve_q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID), taxonomy_entries)
+        if i.kind == "promote"
+    ]
     merged: list[dict[str, Any]] = list(existing_invariants or [])
     if not items:
         return merged
@@ -966,16 +1188,17 @@ def promote_interview_q4_invariants(
         for i, inv in enumerate(merged)
         if isinstance(inv, dict) and isinstance(inv.get("id"), str)
     }
+    signer = signed_by.strip() if isinstance(signed_by, str) and signed_by.strip() else None
+    stamp = (
+        signed_at.strip()
+        if isinstance(signed_at, str) and signed_at.strip()
+        else datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    )
 
     for item in items:
-        if is_q4_item_sentence_shaped(item):
-            # issue #104: a sentence-shaped item is never templated or
-            # promoted — treated as unnamed this run (see docstring above);
-            # posture.apply_posture_interview surfaces the actionable
-            # warning separately, via q4_sentence_shaped_items().
+        inv_id = item.inv_id
+        if inv_id in retired_ids:
             continue
-        inv_id = _slugify_statement_item(item)
-        statement = _q4_promoted_statement(item)
         existing_index = index_by_id.get(inv_id)
         if existing_index is not None:
             # existing_index only ever comes from a dict entry with a
@@ -988,27 +1211,197 @@ def promote_interview_q4_invariants(
                     f"(statement={existing_entry.get('statement')!r}, rationale="
                     f"{existing_entry.get('rationale')!r}) that this posture "
                     "interview's Q4 promotion did not itself author — refusing "
-                    "to silently overwrite it. Rename or remove the conflicting "
-                    "invariant, or reword the sacred_clauses answer so it "
-                    "slugifies to a different id."
+                    "to silently overwrite it. Retire the conflicting invariant "
+                    "(`playbook floor retire`), or reword the sacred_clauses "
+                    "answer so it slugifies to a different id."
                 )
-            if existing_entry.get("statement") == statement:
-                continue  # true no-op: same id, same statement, nothing changed
-        entry = {
-            "id": inv_id,
-            "statement": statement,
-            "rationale": (
+            # Our own earlier promotion: never rewritten (a statement the
+            # owner edited on the page must survive a re-run). Only a missing
+            # signer is added, and only when one was given.
+            if signer and not existing_entry.get("x_signed_by"):
+                signed = {**existing_entry, "x_signed_by": signer, "x_signed_at": stamp}
+                signed[SIGNED_HASH_FIELD] = signed_fields_hash(signed)
+                merged[existing_index] = signed
+            continue
+        if signer:
+            rationale = (
                 f"Authored by the legal owner in posture interview v{posture_version}, "
                 f"question {INTERVIEW_Q4_ID}."
-            ),
-        }
-        if existing_index is not None:
-            merged[existing_index] = entry
+            )
         else:
-            index_by_id[inv_id] = len(merged)
-            merged.append(entry)
+            rationale = (
+                f"Named, with no signer recorded, in posture interview v{posture_version}, "
+                f"question {INTERVIEW_Q4_ID}."
+            )
+        entry: dict[str, Any] = {
+            "id": inv_id,
+            "statement": item.statement,
+            "rationale": rationale,
+        }
+        if signer:
+            entry["x_signed_by"] = signer
+            entry["x_signed_at"] = stamp
+        if item.taxonomy_id:
+            entry["x_taxonomy_id"] = item.taxonomy_id
+        if item.direction:
+            entry["x_direction"] = item.direction
+        if signer:
+            entry[SIGNED_HASH_FIELD] = signed_fields_hash(entry)
+        index_by_id[inv_id] = len(merged)
+        merged.append(entry)
 
     return merged
+
+
+def dropped_q4_invariants(
+    interview_answers: dict[str, str] | None,
+    existing_invariants: list[dict[str, Any]] | None,
+    taxonomy_entries: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Invariants an earlier interview promoted (they carry the Q4 marker) that
+    this run's Q4 answer no longer names (QA-2026-11-03 #7).
+
+    They stay binding: re-running never deletes. The caller warns and points at
+    ``playbook floor retire``. Returned in Floor order.
+    """
+    named = {
+        i.inv_id
+        for i in resolve_q4_items((interview_answers or {}).get(INTERVIEW_Q4_ID), taxonomy_entries)
+        if i.kind == "promote"
+    }
+    return [
+        inv
+        for inv in existing_invariants or []
+        if isinstance(inv, dict)
+        and isinstance(inv.get("id"), str)
+        and _is_own_q4_promotion(inv)
+        and inv["id"] not in named
+    ]
+
+
+def retired_floor_ids(floor: dict[str, Any] | None) -> frozenset[str]:
+    """Ids recorded under ``floor.x_retired`` (see :func:`retire_floor_invariant`)."""
+    records = (floor or {}).get("x_retired")
+    return frozenset(
+        r["id"] for r in records or [] if isinstance(r, dict) and isinstance(r.get("id"), str)
+    )
+
+
+def retire_floor_invariant(
+    floor: dict[str, Any] | None,
+    invariant_id: str,
+    *,
+    signed_by: str | None,
+    retired_at: str | None = None,
+) -> dict[str, Any]:
+    """Remove one invariant from a ``floor`` section, leaving a revocation record.
+
+    The explicit, signed way to drop a binding line (QA-2026-11-03 #7): the
+    entry leaves ``invariants`` and its id, statement, who retired it and when
+    are appended to ``floor.x_retired`` (``x_`` keys are allowed on the Floor).
+    A later interview re-run will not re-promote a retired id.
+
+    Raises:
+        FloorCandidateError: *signed_by* blank, or no invariant has that id.
+    """
+    if not isinstance(signed_by, str) or not signed_by.strip():
+        raise FloorCandidateError(
+            "floor retire: --signed-by must name the human legal owner retiring this hard line."
+        )
+    section = dict(floor or {})
+    invariants = list(section.get("invariants") or [])
+    idx = next(
+        (
+            i
+            for i, inv in enumerate(invariants)
+            if isinstance(inv, dict) and inv.get("id") == invariant_id
+        ),
+        None,
+    )
+    if idx is None:
+        ids = [inv.get("id") for inv in invariants if isinstance(inv, dict)]
+        raise FloorCandidateError(
+            f"floor retire: no floor invariant has id {invariant_id!r}. Present ids: {ids!r}"
+        )
+    removed = invariants.pop(idx)
+    stamp = (
+        retired_at.strip()
+        if isinstance(retired_at, str) and retired_at.strip()
+        else datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    )
+    section["invariants"] = invariants
+    section["x_retired"] = [
+        *(section.get("x_retired") or []),
+        {
+            "id": invariant_id,
+            "statement": removed.get("statement"),
+            "x_retired_by": signed_by.strip(),
+            "x_retired_at": stamp,
+        },
+    ]
+    return section
+
+
+def floor_evidence_conflicts(doc: dict[str, Any]) -> list[str]:
+    """Warnings for Floor lines that contradict what the signed Evidence shows
+    (QA-2026-11-03 #31). Advisory only: it never blocks anything.
+
+    Checked per invariant bound to a clause (``x_taxonomy_id``):
+      - "hold" lines ("Do not concede on ..."): signed deals took text other
+        than our standard, or our own ask was refused;
+      - "refuse" lines ("Never accept ..."): signed deals contain the clause;
+      - ``x_required_presence``: signed deals were verified to lack the clause.
+    """
+    raw_floor = doc.get("floor")
+    floor: dict[str, Any] = raw_floor if isinstance(raw_floor, dict) else {}
+    raw_evidence = doc.get("evidence")
+    evidence: dict[str, Any] = raw_evidence if isinstance(raw_evidence, dict) else {}
+    clauses = {
+        c.get("taxonomy_id"): c
+        for c in evidence.get("clauses") or []
+        if isinstance(c, dict) and isinstance(c.get("taxonomy_id"), str)
+    }
+    absence = (evidence.get("absence") or {}).get("records") or []
+    warnings: list[str] = []
+    for inv in floor.get("invariants") or []:
+        if not isinstance(inv, dict):
+            continue
+        tid = inv.get("x_taxonomy_id")
+        if not isinstance(tid, str):
+            continue
+        clause = clauses.get(tid)
+        facts: list[str] = []
+        direction = inv.get("x_direction")
+        if clause and direction != "refuse":
+            variants = clause.get("n_variants") or 0
+            refused = clause.get("n_refused") or 0
+            if variants:
+                facts.append(
+                    f"{variants} non-standard text(s) were signed on {tid} "
+                    f"(our standard signed in {clause.get('n_signed_standard', 0)} of "
+                    f"{clause.get('n_deals', 0)} deals)"
+                )
+            if refused:
+                facts.append(f"our ask on {tid} was refused in {refused} deal(s)")
+        if clause and direction == "refuse" and (clause.get("n_deals") or 0):
+            facts.append(f"{clause['n_deals']} signed deal(s) contain {tid}")
+        if inv.get("x_required_presence") is True:
+            lacking = {
+                r.get("document_id")
+                for r in absence
+                if isinstance(r, dict)
+                and r.get("taxonomy_id") == tid
+                and r.get("status") == "absent_verified"
+            }
+            if lacking:
+                facts.append(f"{len(lacking)} signed deal(s) were verified to lack {tid}")
+        if facts:
+            warnings.append(
+                f"Floor invariant {inv.get('id')!r} ({inv.get('statement')!r}) contradicts "
+                f"signed Evidence: {'; '.join(facts)}. This line would have flagged deals "
+                "you signed. Warning only — keep it if that is intended."
+            )
+    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -1204,8 +1597,9 @@ def sign_floor_invariant(
             f"floor.invariants already has an entry with id {inv_id!r} "
             f"(statement={existing_entry.get('statement')!r}) that does not "
             f"match the statement being signed ({statement!r}) — refusing to "
-            "overwrite. Pass a different --id, or edit/remove the conflicting "
-            "invariant first if it should be replaced."
+            "overwrite. Pass a different --id, or retire the conflicting "
+            "invariant first (`playbook floor retire --id ... --signed-by ...`) "
+            "if it should be replaced."
         )
 
     # issue #209 (2026-08-24 skill QA audit, finding #92): --signed-by is the
@@ -1255,8 +1649,61 @@ def sign_floor_invariant(
         raise FloorCandidateError(
             "floor sign: " + "; ".join(rule_errors) + " (pass --clause to name the clause)"
         )
+    # QA-2026-11-03 #8: bind the sign-off to exactly the fields signed, so a
+    # later edit of the text is detectable instead of inheriting "signed by".
+    entry[SIGNED_HASH_FIELD] = signed_fields_hash(entry)
     merged.append(entry)
     return merged
+
+
+#: The invariant field that binds a sign-off to the fields it covered.
+SIGNED_HASH_FIELD = "x_signed_hash"
+#: The fields a sign-off covers (the hash itself is excluded).
+SIGNED_FIELDS = (
+    "id",
+    "statement",
+    "rationale",
+    "x_taxonomy_id",
+    "x_direction",
+    "x_required_presence",
+    "x_condition",
+    "x_permissible_proof",
+    "x_signed_by",
+    "x_signed_at",
+)
+
+
+def signed_fields_hash(entry: dict[str, Any]) -> str:
+    """``sha256:`` over the canonical JSON of the signed fields present on *entry*."""
+    from playbook_engine.canonicalize import canonicalize, sha256_hex  # noqa: PLC0415
+
+    return sha256_hex(canonicalize({k: entry[k] for k in SIGNED_FIELDS if k in entry}))
+
+
+def signed_binding_status(entry: Any) -> str | None:
+    """How a signed invariant's sign-off relates to its text.
+
+    ``None`` when *entry* carries no ``x_signed_by``; ``"bound"`` when its
+    ``x_signed_hash`` matches the signed fields; ``"unbound"`` for a sign-off
+    made before the hash existed (nothing to compare — reported, not failed);
+    ``"altered"`` when the hash no longer matches (the text changed after
+    signing, or the hash is malformed).
+    """
+    signer = entry.get("x_signed_by") if isinstance(entry, dict) else None
+    if not (isinstance(signer, str) and signer.strip()):
+        return None
+    recorded = entry.get(SIGNED_HASH_FIELD)
+    if recorded is None:
+        return "unbound"
+    return "bound" if recorded == signed_fields_hash(entry) else "altered"
+
+
+def altered_signed_invariants(floor: Any) -> list[str]:
+    """Ids of the Floor's invariants whose sign-off no longer matches their text."""
+    invariants = floor.get("invariants") if isinstance(floor, dict) else None
+    return [
+        str(inv.get("id")) for inv in invariants or [] if signed_binding_status(inv) == "altered"
+    ]
 
 
 def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
@@ -1288,14 +1735,15 @@ def floor_invariant_attribution(entry: dict[str, Any]) -> str | None:
     """
     if not isinstance(entry, dict):
         return None
+    rationale = entry.get("rationale")
+    # The interview marker wins over a signer stamp: an interview-promoted line
+    # can be edited on the page (its signer signed the ANSWER), while a
+    # `floor sign` line is frozen to its signed text.
+    if isinstance(rationale, str) and _Q4_ATTRIBUTION_RE.match(rationale):
+        return "posture_interview"
     signed_by = entry.get("x_signed_by")
     if isinstance(signed_by, str) and signed_by.strip():
         return "signed"
-    rationale = entry.get("rationale")
-    if not isinstance(rationale, str):
-        return None
-    if _Q4_ATTRIBUTION_RE.match(rationale):
-        return "posture_interview"
     return None
 
 

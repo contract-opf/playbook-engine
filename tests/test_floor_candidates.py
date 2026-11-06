@@ -568,10 +568,12 @@ def test_promote_q4_writes_new_invariants_with_attribution() -> None:
     assert len(result) == 2
     for inv in result:
         assert inv["id"]
-        assert inv["statement"].startswith("Do not concede on ")
+        assert inv["statement"].startswith(("Do not concede on ", "Never accept "))
         assert "posture interview v1" in inv["rationale"]
         assert "sacred_clauses" in inv["rationale"]
     statements = {inv["statement"] for inv in result}
+    # "uncapped liability" names something to refuse (QA-2026-11-03 #6)
+    assert "Never accept uncapped liability." in statements
     assert any("uncapped liability" in s for s in statements)
     assert any("IP assignment" in s for s in statements)
     # Every id is a stable slug of its statement's named item, not a
@@ -637,36 +639,23 @@ def test_promote_q4_rerun_same_answer_is_true_noop() -> None:
     assert len(ids) == len(set(ids))  # OPF-SPEC.md §3.13: no duplicate sibling ids
 
 
-def test_promote_q4_rerun_with_changed_wording_updates_in_place() -> None:
-    """Issue #89 review finding 4: this test must actually drive the
-    ``existing_index is not None`` branch with a DIFFERING ``statement`` for
-    the SAME slug. Pre-fix, this test ran the identical answer twice (a
-    no-op) and then a genuinely different item (an append) — the
-    update-in-place branch (the one branch that can rewrite an existing
-    entry, and so the one finding 2 guards) was never exercised at all."""
+def test_promote_q4_rerun_with_changed_wording_keeps_the_existing_line() -> None:
+    """QA-2026-11-03 #32 (supersedes the old update-in-place rule): an entry
+    carrying this function's own marker is never rewritten, so a statement the
+    owner edited on the page survives a re-run. Same slug, different casing is
+    therefore a no-op, not an update."""
     first = promote_interview_q4_invariants(
-        {"sacred_clauses": "uncapped liability"}, posture_version=1, existing_invariants=[]
+        {"sacred_clauses": "IP assignment"}, posture_version=1, existing_invariants=[]
     )
     assert len(first) == 1
-    assert first[0]["id"] == "uncapped-liability"
-    assert first[0]["statement"] == "Do not concede on uncapped liability."
+    assert first[0]["id"] == "ip-assignment"
+    assert first[0]["statement"] == "Do not concede on IP assignment."
 
-    # Re-run with different casing for the SAME item: same slug
-    # ("uncapped-liability"), a genuinely different statement string. The
-    # existing entry carries THIS function's own attribution marker (it was
-    # itself written by the promotion above), so this is the legitimate
-    # update-in-place case — not the foreign-collision case finding 2
-    # guards against (see
-    # test_promote_q4_refuses_to_overwrite_colliding_hand_authored_id).
     second = promote_interview_q4_invariants(
-        {"sacred_clauses": "Uncapped Liability"}, posture_version=2, existing_invariants=first
+        {"sacred_clauses": "Ip Assignment"}, posture_version=2, existing_invariants=first
     )
 
-    assert len(second) == 1  # updated in place, not appended alongside
-    assert second[0]["id"] == "uncapped-liability"
-    assert second[0]["statement"] == "Do not concede on Uncapped Liability."
-    assert second[0]["statement"] != first[0]["statement"]
-    assert "posture interview v2" in second[0]["rationale"]
+    assert second == first  # untouched, not appended alongside, not rewritten
 
 
 def test_promote_q4_rerun_dropped_item_is_not_deleted() -> None:
@@ -1607,6 +1596,7 @@ def test_cli_floor_sign_writes_verbatim_statement(tmp_path: Path) -> None:
     invariant = written["floor"]["invariants"][0]
     signed_at = invariant.pop("x_signed_at")
     assert isinstance(signed_at, str) and signed_at
+    assert invariant.pop("x_signed_hash").startswith("sha256:")
     assert invariant == {
         "id": sign_invariant_id(_CONDITIONAL_STATEMENT),
         "statement": _CONDITIONAL_STATEMENT,

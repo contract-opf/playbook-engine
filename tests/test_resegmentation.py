@@ -1315,7 +1315,8 @@ def test_mine_splits_the_mixed_deal_and_records_it(tmp_path: Path) -> None:
     assert split_row["taxonomy_id"] == "insurance"
     assert split_row["x_classification_basis"] == "resegmented"
     assert split_row["x_resegmented"]["split_from"] == "1"
-    assert split_row["citation"]["clause_path"] == "1.r1"
+    # The insurance text joins the split passage and clause 2, so both are cited.
+    assert split_row["citation"]["clause_path"] == "1.r1, 2"
     # The preamble observation no longer carries the passage.
     assert "co-insured" not in by_tid[_PARTIES_ID]["full_text"]
     assert "co-insured" in split_row["full_text"]
@@ -1631,7 +1632,7 @@ def test_join_passages_are_cut_in_the_right_places_when_names_are_pseudonymized(
     tmp_path: Path,
 ) -> None:
     out = _mine_redlined(tmp_path, known_entities=[_ENTITY])
-    tree = ClauseTree.load(out / "normalized" / "deal-001" / "v1.clauses.json")
+    tree = ClauseTree.load(out / "normalized" / "document-1" / "v1.clauses.json")
     joined = next(n for n in tree.all_nodes() if n.x_resegmented)
     assert _ENTITY not in joined.text  # the name was aliased, so the text changed length
     (subject,) = rs.check_subjects(out)

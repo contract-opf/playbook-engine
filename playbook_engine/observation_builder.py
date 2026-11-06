@@ -250,6 +250,19 @@ class ObservationCitation:
         }
 
 
+def _joined_citation_path(paths: list[str]) -> str:
+    """The ``clause_path`` of a text joined from several nodes (OPF §4 list
+    form): their paths in joined order separated by ``", "``; ``"?"`` stands
+    for an unnumbered node. One node cites its own path, unchanged."""
+    return ", ".join(p or "?" for p in paths)
+
+
+def primary_clause_path(path: str | None) -> str:
+    """The node a citation leads with: the first of a list form, ``"?"`` for none.
+    Lookups keyed by one node use this, since a list form names no single node."""
+    return (path or "?").split(", ", 1)[0]
+
+
 @dataclass(frozen=True)
 class Observation:
     """One clause observation feeding the L5 compiler.
@@ -1765,7 +1778,8 @@ def build_observations(
 
     for group in groups:
         first = group[0]
-        full_text = "\n".join(n.text for n in group if n.text)
+        cited = [n for n in group if n.text] or group[:1]
+        full_text = "\n".join(n.text for n in cited)
         rows = [n.row for n in group]
         rep_idx = max(rows, key=lambda r: _row_severity(r[2]))[0]
         confidences = [c for c in (_confidence(r[0]) for r in rows) if c is not None]
@@ -1795,11 +1809,18 @@ def build_observations(
                 taxonomy_id=first.taxonomy_id,
                 text_summary=summarize_clause_text(full_text),
                 full_text=full_text,
+                # Every node the text was joined from is cited (OPF §4 list
+                # form); one span cannot cover a join, so a joined text
+                # carries none.
                 citation=ObservationCitation(
                     document_id=document_id,
                     version=_cite_version(first.version_id),
-                    clause_path=first.clause_path,
-                    char_span=first.char_span,
+                    clause_path=(
+                        first.clause_path
+                        if len(cited) == 1
+                        else _joined_citation_path([n.clause_path for n in cited])
+                    ),
+                    char_span=first.char_span if len(cited) == 1 else None,
                     version_id=first.version_id,
                 ),
                 deviation=obs_deviation,
@@ -1918,6 +1939,10 @@ def build_observations(
         first_idx, first_diff = draft.rows[0]
         opening_standard = _standard_fact(draft.text, tid)
         clause_path = first_diff.clause_path_before or "?"
+        # Every first-draft node the text joins, in joined order (OPF §4).
+        draft_paths = [d.clause_path_before or "?" for _, d in draft.rows if d.text_before] or [
+            clause_path
+        ]
         bound = [
             d.alignment_confidence for _, d in draft.rows if d.alignment_confidence is not None
         ]
@@ -1930,8 +1955,10 @@ def build_observations(
                 citation=ObservationCitation(
                     document_id=document_id,
                     version=_cite_version(first_diff.clause_version_before),
-                    clause_path=clause_path,
-                    char_span=first_diff.char_span_before,
+                    clause_path=(
+                        clause_path if len(draft_paths) == 1 else _joined_citation_path(draft_paths)
+                    ),
+                    char_span=first_diff.char_span_before if len(draft_paths) == 1 else None,
                     version_id=first_diff.clause_version_before,
                 ),
                 deviation=_deviation_of(opening_standard),

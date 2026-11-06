@@ -366,8 +366,24 @@ def test_missing_perspective_gets_should_warn() -> None:
     offending = [e for e in result.errors if e.path == "perspective"]
     assert offending, [str(e) for e in result.errors]
     assert "§3.1" in offending[0].message
+    assert "toaster" in offending[0].message  # QA-2026-11-03 #14: honest about who refuses it
     assert all(not e.blocking for e in offending)
     assert result.ok, [str(e) for e in result.errors]
+
+
+def test_stub_basis_present_gets_a_non_blocking_warning() -> None:
+    """QA-2026-11-03 #15: a stub-judged playbook validates OK but says so."""
+    doc = _minimal()
+    doc["compiler"]["stub_basis_present"] = True
+    result = validate_document(_refresh(doc))
+    stub = [e for e in result.errors if e.path == "compiler.stub_basis_present"]
+    assert stub and "toaster" in stub[0].message and not stub[0].blocking
+    assert result.ok, [str(e) for e in result.errors]
+    clean = _minimal()
+    clean["compiler"]["stub_basis_present"] = False
+    assert not any(
+        e.path == "compiler.stub_basis_present" for e in validate_document(_refresh(clean)).errors
+    )
 
 
 def test_perspective_present_suppresses_the_warning() -> None:
@@ -483,6 +499,42 @@ def test_validate_rejects_duplicate_corpus_document_id() -> None:
     assert not result.ok
     offending = [e for e in result.errors if "duplicate corpus document_id" in e.message]
     assert offending and offending[0].path == "corpus.documents[1].document_id"
+
+
+def test_validate_rejects_duplicate_taxonomy_entry_id() -> None:
+    doc = _minimal()
+    entries = doc["taxonomy"]["entries"]
+    entries[:] = [{"id": "governing_law", "label": "Governing Law", "status": "active"}] * 2
+    entries[1] = {**entries[1], "status": "inactive"}
+    result = validate_document(doc)
+    assert not result.ok
+    offending = [e for e in result.errors if "duplicate taxonomy entry id" in e.message]
+    assert offending and offending[0].path == "taxonomy.entries[1].id"
+
+
+# ---------------------------------------------------------------------------
+# OPF-SPEC §3.10 number rule (QA-2026-11-03 #18)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [1.0, 0.00001, 1e16, -3.0])
+def test_validate_warns_on_numbers_a_standard_json_parser_would_hash_differently(
+    value: float,
+) -> None:
+    doc = _minimal()
+    doc["corpus"]["stats"]["ratio"] = value
+    result = validate_document(doc)
+    portable = [e for e in result.errors if "number rule" in e.message]
+    assert portable and not portable[0].blocking
+    assert portable[0].path == "corpus.stats.ratio"
+    assert result.ok  # advisory: the hash is the reference serializer's
+
+
+@pytest.mark.parametrize("value", [0, 3, 0.5, 0.0001, -0.25, 1234567.5])
+def test_validate_accepts_portable_numbers(value: float) -> None:
+    doc = _minimal()
+    doc["corpus"]["stats"]["ratio"] = value
+    assert not [e for e in validate_document(doc).errors if "number rule" in e.message]
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +685,28 @@ def test_v06_rejects_signed_text_edit_without_restamp() -> None:
     record["signed_text"]["text"] += " Edited."
     errors = _blocking(_restamp_identity(doc))
     assert any("does not match the id recomputed" in e for e in errors), errors
+
+
+def test_v06_rejects_a_joined_text_citing_one_shorter_span() -> None:
+    """QA-2026-11-03 #11: a signed text longer than the single span it cites
+    is a join that cites only one node (OPF §4)."""
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    entry = record["signed_text"]
+    entry["ref"]["char_span"] = [0, max(1, len(entry["text"]) - 1)]
+    result = validate_document(_restamp_identity(doc))
+    warned = [e for e in result.errors if "longer than the clause span it cites" in e.message]
+    assert warned and not warned[0].blocking
+
+
+def test_v06_rejects_a_list_citation_that_carries_a_span() -> None:
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    ref = record["signed_text"]["ref"]
+    ref["clause_path"] = f"{ref['clause_path']}, 99"
+    ref["char_span"] = [0, 10_000]
+    errors = _blocking(_restamp_identity(doc))
+    assert any("lists several clauses but also carries a char_span" in e for e in errors), errors
 
 
 def test_v06_rejects_two_precedents_for_one_deal_and_clause() -> None:

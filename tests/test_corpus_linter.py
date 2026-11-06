@@ -29,7 +29,8 @@ _UNSET = object()  # sentinel: distinguishes "key omitted" from "key: null" (pro
 def _write_docx_stub(path: Path) -> None:
     """Write a minimal PK-magic-bytes stub so the file has the right extension."""
     # A real .docx is a ZIP; we just need a non-empty file recognised by extension.
-    path.write_bytes(b"PK\x03\x04" + b"\x00" * 20)
+    # Unique per path so the duplicate-content lint (QA #39) does not fire on fixtures.
+    path.write_bytes(b"PK\x03\x04" + b"\x00" * 20 + f"{path.parent.name}/{path.name}".encode())
 
 
 def _write_pdf_stub(path: Path) -> None:
@@ -1209,3 +1210,43 @@ def test_lint_corpus_cmd_config_errors_exit_nonzero(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "ERR" in result.output
+
+
+def test_byte_identical_version_files_in_one_deal_are_flagged(tmp_path: Path) -> None:
+    """QA-2026-11-03 #39: a copied version file is a phantom round; warn, do not count silently."""
+    corpus = tmp_path / "corpus"
+    deal = corpus / "deal-alice"
+    deal.mkdir(parents=True)
+    (deal / "v1.pdf").write_bytes(b"%PDF-1.4\n%one")
+    (deal / "v2.pdf").write_bytes(b"%PDF-1.4\n%one")
+    (deal / "v3.pdf").write_bytes(b"%PDF-1.4\n%three")
+    report = lint_corpus(corpus)
+    hits = [i for i in report.warnings() if i.code == "DOC_DUPLICATE_VERSION_CONTENT"]
+    assert len(hits) == 1
+    assert "v1.pdf" in hits[0].message and "v2.pdf" in hits[0].message
+    assert "v3.pdf" not in hits[0].message
+
+
+def test_the_same_agreement_filed_as_two_deals_is_flagged(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    for name in ("deal-alice", "deal-alice-copy", "deal-bob"):
+        (corpus / name).mkdir(parents=True)
+    for name in ("deal-alice", "deal-alice-copy"):
+        (corpus / name / "v1.pdf").write_bytes(b"%PDF-1.4\n%same")
+        (corpus / name / "v2.pdf").write_bytes(b"%PDF-1.4\n%same2")
+    (corpus / "deal-bob" / "v1.pdf").write_bytes(b"%PDF-1.4\n%other")
+    report = lint_corpus(corpus)
+    hits = [i for i in report.warnings() if i.code == "CORPUS_DUPLICATE_DEAL"]
+    assert len(hits) == 1
+    assert "'deal-alice'" in hits[0].message and "'deal-alice-copy'" in hits[0].message
+    assert "deal-bob" not in hits[0].message
+
+
+def test_distinct_deals_and_versions_raise_no_duplicate_warning(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    for i, name in enumerate(("deal-a", "deal-b")):
+        (corpus / name).mkdir(parents=True)
+        (corpus / name / "v1.pdf").write_bytes(f"%PDF-1.4\n%x{i}".encode())
+    report = lint_corpus(corpus)
+    codes = {i.code for i in report.warnings()}
+    assert not codes & {"DOC_DUPLICATE_VERSION_CONTENT", "CORPUS_DUPLICATE_DEAL"}

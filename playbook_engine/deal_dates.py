@@ -66,6 +66,7 @@ __all__ = [
     "date_from_filename",
     "date_from_signature_block",
     "extract_evidence",
+    "has_date_conflict",
     "find_mentions",
     "is_signed_on",
     "resolve_corpus_documents",
@@ -686,6 +687,19 @@ class _Judge(Protocol):
     """What :func:`resolve_signed_on` needs of a judge (``StoreBackedDealDateJudge``)."""
 
     def judge(self, subject: DealDateSubject) -> DealDate | None: ...
+
+
+def has_date_conflict(evidence: DealDateEvidence) -> bool:
+    """Whether the preamble date and the signature-block date are both read and disagree.
+
+    A flag only (QA 2026-11-03 #26): the choice of ``signed_on`` is unchanged
+    (document text first). A month-precision preamble date is consistent with
+    a day in that month; any other difference is a conflict.
+    """
+    text, block = evidence.document_text, evidence.signature_block
+    if text is None or block is None:
+        return False
+    return not block.startswith(text) if len(text) < len(block) else text != block
 
 
 def resolve_signed_on(

@@ -1050,7 +1050,7 @@ def test_quarantine_error_never_leaks_raw_entity_name(tmp_path: Path) -> None:
     )
 
     quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
-    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    assert [q["document_id"] for q in quarantine] == ["document-1"]
 
     # issue #83: read the WRITTEN corpus_manifest.json, not an in-memory dict.
     manifest_text = (out_dir / "corpus_manifest.json").read_text(encoding="utf-8")
@@ -1117,7 +1117,7 @@ def test_taxonomy_gate_error_never_leaks_raw_entity_name(tmp_path: Path) -> None
     )
 
     quarantine = json.loads((out_dir / "quarantine.json").read_text(encoding="utf-8"))
-    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    assert [q["document_id"] for q in quarantine] == ["document-1"]
 
     # issue #83 precedent: read the WRITTEN corpus_manifest.json, not an
     # in-memory dict.
@@ -1660,7 +1660,7 @@ def test_quarantine_reason_defense_in_depth_pseudonymization_fires(tmp_path: Pat
     # issue #83 precedent: read the WRITTEN quarantine.json, not an in-memory dict.
     quarantine_text = (out_dir / "quarantine.json").read_text(encoding="utf-8")
     quarantine = json.loads(quarantine_text)
-    assert [q["document_id"] for q in quarantine] == ["deal-001"]
+    assert [q["document_id"] for q in quarantine] == ["document-1"]
     reason = quarantine[0]["reason"]
     # Sanity: the dangerous input really did trigger NormalizeTrailError (not
     # some other quarantine reason) — otherwise this test would vacuously

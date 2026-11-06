@@ -60,9 +60,13 @@ from typing import Any
 from playbook_engine.canonicalize import compute_section_digests, content_hash
 from playbook_engine.dossiers import refresh_derived_sections
 from playbook_engine.floor_candidates import (
+    INTERVIEW_Q4_ID,
     FloorCandidateError,
+    dropped_q4_invariants,
+    floor_evidence_conflicts,
     promote_interview_q4_invariants,
-    q4_sentence_shaped_items,
+    resolve_q4_items,
+    retired_floor_ids,
 )
 from playbook_engine.playbook_assembler import write_playbook
 from playbook_engine.validator import load_opf_file
@@ -75,6 +79,7 @@ __all__ = [
     "apply_posture_interview",
     "check_posture_floor_conflict",
     "generate_posture",
+    "preview_q4_statements",
 ]
 
 
@@ -123,8 +128,9 @@ INTERVIEW_QUESTIONS: tuple[InterviewQuestion, ...] = (
         binding_note=(
             "Note: this is the one answer with binding force. Each bare "
             "clause-type name you give is signed into your Floor as a hard "
-            "line that no review may override. Answer only with what you "
-            "would sign."
+            "line that no review may override. Separate names with ';' or ','. "
+            'Answer only with what you would sign; a non-answer ("none") '
+            "signs nothing."
         ),
     ),
     InterviewQuestion(
@@ -203,7 +209,24 @@ def _terminate(field: str) -> str:
     return field
 
 
-def _assemble_system_prompt(answers: dict[str, str]) -> str:
+def _q4_prose(promoted: list[str], held: list[str]) -> list[str]:
+    """The sacred_clauses sentence(s) when the caller knows which Q4 items
+    were actually signed into the Floor (QA-2026-11-03 #30): only signed items
+    are listed as hard lines; a named-but-unsigned item is labelled as such."""
+    out: list[str] = []
+    if promoted:
+        out.append(_PROSE_TEMPLATES["sacred_clauses"].format(answer="; ".join(promoted)))
+    if held:
+        out.append(
+            "Also named in interview but NOT signed into the Floor (not a hard line): "
+            + "; ".join(held)
+        )
+    return out
+
+
+def _assemble_system_prompt(
+    answers: dict[str, str], q4_split: tuple[list[str], list[str]] | None = None
+) -> str:
     """Deterministically assemble ``system_prompt`` from *answers*.
 
     One templated sentence per answered question, in ``INTERVIEW_QUESTIONS``
@@ -213,11 +236,14 @@ def _assemble_system_prompt(answers: dict[str, str]) -> str:
     fragment answer still ends its sentence — see that function's
     docstring.
     """
-    sentences = [
-        _terminate(_PROSE_TEMPLATES[iq.q].format(answer=answers[iq.q].strip()))
-        for iq in INTERVIEW_QUESTIONS
-        if iq.q in answers
-    ]
+    sentences: list[str] = []
+    for iq in INTERVIEW_QUESTIONS:
+        if iq.q not in answers:
+            continue
+        if iq.q == INTERVIEW_Q4_ID and q4_split is not None:
+            sentences.extend(_terminate(f) for f in _q4_prose(*q4_split))
+            continue
+        sentences.append(_terminate(_PROSE_TEMPLATES[iq.q].format(answer=answers[iq.q].strip())))
     return " ".join(sentences)
 
 
@@ -229,8 +255,13 @@ def generate_posture(
     grounded_in: str | None = None,
     existing_posture: dict[str, Any] | None = None,
     base_version: int | None = None,
+    q4_split: tuple[list[str], list[str]] | None = None,
 ) -> dict[str, Any]:
     """Assemble a schema-shaped ``posture`` dict from interview *answers*.
+
+    *q4_split* is ``(signed_items, unsigned_items)`` for the Q4 answer; when
+    given, the prose lists only the signed items as hard lines (QA-2026-11-03
+    #30). ``None`` keeps the verbatim answer.
 
     Args:
         answers:          ``{question_id: answer_text}`` for >= 3 of the
@@ -283,7 +314,7 @@ def generate_posture(
             f"at least {_MIN_ANSWERS} (OPF §7)"
         )
 
-    system_prompt = _assemble_system_prompt(answered)
+    system_prompt = _assemble_system_prompt(answered, q4_split)
 
     interview = [
         {"q": iq.q, "question": iq.question, "answer": answered[iq.q].strip()}
@@ -491,6 +522,27 @@ class PostureApplyResult:
     warnings: tuple[str, ...]
     path: Path
     changed: bool
+    # The exact Floor statements this run's Q4 answer produces (new or already
+    # present), for the caller to echo (QA-2026-11-03 #6).
+    q4_statements: tuple[str, ...] = ()
+
+
+def preview_q4_statements(out_dir: Path, answers: dict[str, str]) -> list[str]:
+    """The exact Floor statements *answers*' Q4 would sign into
+    ``out_dir/playbook.opf.json`` (QA-2026-11-03 #6), for the caller to show
+    before anything is written. Lines already present are included."""
+    opf_path = out_dir / "playbook.opf.json"
+    if not opf_path.exists():
+        raise FileNotFoundError(
+            f"{opf_path} not found — run 'playbook mine' and 'playbook project' first."
+        )
+    doc = load_opf_file(opf_path)
+    entries = (doc.get("taxonomy") or {}).get("entries")
+    return [
+        i.statement
+        for i in resolve_q4_items(answers.get(INTERVIEW_Q4_ID), entries)
+        if i.kind == "promote" and i.statement
+    ]
 
 
 def apply_posture_interview(
@@ -500,6 +552,8 @@ def apply_posture_interview(
     generated_at: str,
     generated_by: str = "playbook-engine",
     base_version: int | None = None,
+    signed_by: str | None = None,
+    promote_q4: bool = True,
 ) -> PostureApplyResult:
     """Read ``{out_dir}/playbook.opf.json``, write a freshly generated,
     versioned Posture into it — promoting the Q4 ("sacred_clauses") answer
@@ -562,6 +616,17 @@ def apply_posture_interview(
     (``posture.generation.interview`` — see ``generate_posture()``); only
     the Floor-promotion and templating steps skip it.
 
+    QA-2026-11-03: Q4 items are resolved against the playbook's own taxonomy
+    (a match stamps ``x_taxonomy_id``), non-answers are never signed, an item
+    naming something to refuse reads "Never accept ...", and anything whose
+    direction is unclear is held back for ``playbook floor sign`` (#6). A Q4
+    item an earlier run signed but this answer drops stays in the Floor with a
+    warning naming ``playbook floor retire`` (#7). *signed_by* is recorded on
+    each new Q4 line (#30). Posture prose lists only signed items as hard lines
+    (#30). A re-run with unchanged answers never rewrites the Posture prose or
+    a Q4 statement the owner edited (#32), so ``version`` does not churn.
+    *promote_q4* ``False`` signs nothing.
+
     Args:
         out_dir:       Directory containing ``playbook.opf.json`` (produced
                        by ``playbook mine``/``project``). Also the
@@ -610,6 +675,12 @@ def apply_posture_interview(
     if evidence_digest:
         grounded_in = f"evidence@{evidence_digest}"
 
+    taxonomy_entries = (doc.get("taxonomy") or {}).get("entries")
+    resolved = resolve_q4_items(answers.get(INTERVIEW_Q4_ID), taxonomy_entries)
+    signable = [i for i in resolved if i.kind == "promote"] if promote_q4 else []
+    signed_texts = [i.text for i in signable]
+    held_texts = [i.text for i in resolved if i.kind != "null" and i.text not in signed_texts]
+
     posture = generate_posture(
         answers,
         generated_at=generated_at,
@@ -617,6 +688,7 @@ def apply_posture_interview(
         grounded_in=grounded_in,
         existing_posture=existing_posture,
         base_version=base_version,
+        q4_split=(signed_texts, held_texts),
     )
 
     # Issue #132: a no-op re-run — same answers, so the freshly assembled
@@ -626,11 +698,14 @@ def apply_posture_interview(
     # non-empty existing Posture can be a no-op target (a first-ever
     # interview, `existing_posture == {}`, is always a real change:
     # `version` correctly starts at 1).
-    existing_prompt = existing_posture.get("system_prompt")
+    # QA-2026-11-03 #32: "unchanged" means the recorded INTERVIEW is
+    # unchanged. The prose is then left exactly as stored even if it differs
+    # from a fresh assembly (an owner's page edit, or an older template):
+    # comparing prose would revert the edit and bump `version` twice per
+    # interview + apply-overrides cycle.
     existing_interview = (existing_posture.get("generation") or {}).get("interview")
     posture_is_noop = bool(existing_posture) and (
-        existing_prompt == posture["system_prompt"]
-        and existing_interview == posture["generation"]["interview"]
+        existing_interview == posture["generation"]["interview"]
     )
     # Issue #132 review finding 1: a no-op on answers alone is not
     # necessarily a no-op on grounding — the Evidence this Posture is
@@ -658,29 +733,62 @@ def apply_posture_interview(
             posture = existing_posture
 
     existing_invariants = (doc.get("floor") or {}).get("invariants") or []
+    retired = retired_floor_ids(doc.get("floor"))
     try:
         floor_invariants = promote_interview_q4_invariants(
-            answers,
+            {INTERVIEW_Q4_ID: "; ".join(signed_texts)} if promote_q4 else None,
             posture_version=posture["version"],
             existing_invariants=existing_invariants,
+            taxonomy_entries=taxonomy_entries,
+            signed_by=signed_by,
+            signed_at=generated_at,
+            retired_ids=retired,
         )
     except FloorCandidateError as exc:
         raise PostureError(str(exc)) from exc
-    # issue #104: a sentence-shaped Q4 item was skipped, silently, by
-    # promote_interview_q4_invariants above (it neither templates nor
-    # promotes one) — surface it here as an actionable warning naming the
-    # exact `playbook floor sign` command instead of letting it vanish.
-    sentence_shaped_warnings = [
-        (
-            f'Posture interview Q4 ("sacred_clauses") item {item!r} reads as a full '
-            "sentence, not a clause-type name — not templated or promoted into "
-            f"floor.invariants. To record it verbatim, run: playbook floor sign {out_dir} "
-            f'--statement "{item}" --signed-by "<your name>"'
+    # Items not signed: surface each with the exact command to word it
+    # yourself (issue #104; QA-2026-11-03 #6) instead of letting it vanish.
+    q4_warnings: list[str] = []
+    for item in resolved:
+        if item.kind == "null":
+            q4_warnings.append(
+                f'Posture interview Q4 ("sacred_clauses") item {item.text!r} is not a '
+                "clause name — nothing was signed for it."
+            )
+        elif item.kind in ("sentence", "ambiguous"):
+            why = (
+                "reads as a full sentence, not a clause-type name"
+                if item.kind == "sentence"
+                else "does not say whether to hold firm on it or refuse it"
+            )
+            q4_warnings.append(
+                f'Posture interview Q4 ("sacred_clauses") item {item.text!r} {why} — not '
+                f"templated or signed into floor.invariants. To record it in your own "
+                f"words, run: playbook floor sign {out_dir} "
+                f'--statement "{item.text}" --signed-by "<your name>"'
+            )
+        elif item.inv_id in retired:
+            q4_warnings.append(
+                f"Posture interview Q4 item {item.text!r} was retired from the Floor "
+                f"earlier ({item.inv_id!r}) and was not signed again; to restore it use "
+                "`playbook floor sign`."
+            )
+    for inv in dropped_q4_invariants(answers, existing_invariants, taxonomy_entries):
+        q4_warnings.append(
+            f"Floor invariant {inv['id']!r} ({inv.get('statement')!r}) was signed from an "
+            "earlier Q4 answer that no longer names it. It is STILL BINDING — a re-run "
+            f"never removes a hard line. To drop it: playbook floor retire {out_dir} "
+            f'--id {inv["id"]} --signed-by "<your name>"'
         )
-        for item in q4_sentence_shaped_items(answers)
-    ]
-    warnings = sentence_shaped_warnings + check_posture_floor_conflict(
+    warnings = q4_warnings + check_posture_floor_conflict(
         posture["system_prompt"], floor_invariants
+    )
+    if floor_invariants != existing_invariants:
+        warnings += floor_evidence_conflicts({**doc, "floor": {"invariants": floor_invariants}})
+    q4_statements = tuple(
+        inv["statement"]
+        for inv in floor_invariants
+        if isinstance(inv, dict) and inv.get("id") in {i.inv_id for i in signable}
     )
 
     floor_changed = floor_invariants != existing_invariants
@@ -693,7 +801,11 @@ def apply_posture_interview(
     # is the prior, un-bumped version.
     if posture_is_noop and not floor_changed and not grounding_moved:
         return PostureApplyResult(
-            version=posture["version"], warnings=tuple(warnings), path=opf_path, changed=False
+            version=posture["version"],
+            warnings=tuple(warnings),
+            path=opf_path,
+            changed=False,
+            q4_statements=q4_statements,
         )
 
     doc["posture"] = posture
@@ -717,5 +829,9 @@ def apply_posture_interview(
     write_playbook(doc, opf_path)
 
     return PostureApplyResult(
-        version=posture["version"], warnings=tuple(warnings), path=opf_path, changed=True
+        version=posture["version"],
+        warnings=tuple(warnings),
+        path=opf_path,
+        changed=True,
+        q4_statements=q4_statements,
     )

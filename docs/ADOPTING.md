@@ -101,7 +101,10 @@ Two of these matter more than they look:
   entity-registry guardrail). `normalized/<document_id>/` is stale-cleared
   and rewritten under the ALIASED document_id/version after the
   pseudonymization pass (mirroring `trail/`), so — unlike the files
-  above — it is safe to share alongside the compiled playbook. The reverse
+  above — registered names no longer appear in it; it is still name
+  pseudonymization only (contact data such as e-mail domains, phone numbers
+  and addresses is never scrubbed), so it needs its own review before it
+  leaves the org. The reverse
   map is written to a restricted sidecar that never enters the playbook. If
   you skip `known_entities` entirely, real names flow into every artifact,
   including the compiled playbook — configure it before the first real
@@ -121,7 +124,7 @@ playbook project ./out --config ./corpus/playbook.config.yaml
 playbook validate ./out/playbook.opf.json
 ```
 
-The LLM-judgment stages run three ways — pick one
+The LLM-judgment stages run two ways — pick one
 ([docs/PLAN-FIRST.md](PLAN-FIRST.md)):
 
 1. **Claude plan, no API key** (first-class path): the packaged
@@ -138,11 +141,16 @@ The LLM-judgment stages run three ways — pick one
 
    (CLI users: the whole path is one command from the repo root —
    `claude "$(cat docs/prompts/create-playbook.md)"`.)
-2. **API key**: fully headless; batch-friendly.
-3. **Stub judges** (default with no key): everything deterministic still
+2. **Stub judges** (default): everything deterministic still
    runs; judgment-dependent fields are conservatively capped and the
-   playbook is watermarked `stub_basis_present` so downstream consumers
-   know not to trust it for real review.
+   playbook is watermarked `stub_basis_present`. It is a smoke-test
+   artifact: the toaster refuses it, so do not share or install it.
+
+An `ANTHROPIC_API_KEY` does not add a third way. There is no headless
+judging path today: the key only powers LLM segmentation
+(`segmentation.llm`) and the equivalence blind-check queue
+(`playbook judge --check --api`). With a key set, `mine` + `project`
+still produce a stub-basis playbook.
 
 ## Stage 2 — Read what it found
 
