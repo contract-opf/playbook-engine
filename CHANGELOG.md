@@ -16,6 +16,7 @@ changes` heading in the release it ships under.
 
 ### Maintenance
 
+- **New end-to-end test: mine + project with `known_entities` and a template.** The 2.0.0 ordinal document alias once aliased the reserved `template` id, and no test combined the two. The synthetic NDA example now runs both ways and the template-derived standards and precedent count must match (closes #264).
 - **`ruff` and `mypy` are pinned to exact versions in the `dev` extras** (`ruff==0.17.4`, `mypy==2.4.1`), so local, hook and CI lint agree; an unpinned newer ruff had turned `main` red on an untouched line (closes #263).
 
 ## [2.0.0] - 2026-11-03
