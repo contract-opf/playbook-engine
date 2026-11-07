@@ -14,13 +14,18 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **New end-to-end test: mine + project with `known_entities` and a template.** The 2.0.0 ordinal document alias once aliased the reserved `template` id, and no test combined the two. The synthetic NDA example now runs both ways and the template-derived standards and precedent count must match (closes #264).
+- **`ruff` and `mypy` are pinned to exact versions in the `dev` extras** (`ruff==0.17.4`, `mypy==2.4.1`), so local, hook and CI lint agree; an unpinned newer ruff had turned `main` red on an untouched line (closes #263).
+- **`validate` no longer warns that a pseudonymized text is "longer than the clause span it cites" when only the aliases made it longer.** Spans index the original text and `Counterparty-<n>` is usually longer than the name it replaced, so a single clause could trip the warning; each alias now counts as one character. A real join (a whole extra clause) still warns. The warning stays a warning; promoting it to an error waits on a clean real-corpus run (refs #262).
+- **The 0.6 conformance manifest's `engine_version` stays `1.0.0`, and now says why.** It is the stamp every vector input carries (`compiler.version`, which is hashed), not the engine's release; moving it would change the frozen hashes. `spec/conformance/README.md` records this and two tests pin it (closes #274).
+- **`lint-corpus` now checks every PDF page for a text layer.** It used to look at the first three pages only, so a partly scanned PDF passed. A PDF with some pages and not all of them textless draws the new warning `DOC_PDF_PARTIAL_TEXT` (naming how many); `DOC_PDF_NO_TEXT` still means no page has text (refs #270, part 1).
+- **`validate` cross-checks interview-attributed Floor lines against the recorded Q4 answer.** A line whose rationale claims the Posture interview, but whose `id` the recorded `sacred_clauses` answer does not promote, draws a non-blocking warning (a later answer dropped it, or the attribution does not belong). It stays binding; `playbook floor retire` drops it (refs #266, part 1 and 3).
+
 ### Normative rule changes
 
 - **OPF §3.7 item 5 states the Q4 signer rule.** A producer MUST NOT write a Posture-interview Q4 hard line without a named signer (the engine has enforced this since `--signed-by` became required, #267), and a validator SHOULD warn on an interview-attributed Floor line whose `id` the recorded Q4 answer does not promote. The same item documents `floor.x_retired` as the way to drop a line (refs #266).
-
-### Maintenance
-
-- **`validate` cross-checks interview-attributed Floor lines against the recorded Q4 answer.** A line whose rationale claims the Posture interview, but whose `id` the recorded `sacred_clauses` answer does not promote, draws a non-blocking warning (a later answer dropped it, or the attribution does not belong). It stays binding; `playbook floor retire` drops it (refs #266, part 1 and 3).
 
 ## [2.0.0] - 2026-11-03
 

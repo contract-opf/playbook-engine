@@ -690,6 +690,18 @@ def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+#: An entity-registry alias (``Counterparty-<n>``), the text the born-safe pass
+#: writes over a real counterparty name. Spans index the original, unaliased
+#: text, and an alias is usually longer than the name it replaced.
+_ALIAS_RE = re.compile(r"(?<!\w)counterparty-[0-9]+(?!\w)", re.IGNORECASE)
+
+
+def _length_before_aliasing(text: str) -> int:
+    """The least length *text* could have had before pseudonymization: each
+    alias counts as one character (the shortest name it could have replaced)."""
+    return len(_ALIAS_RE.sub("x", text))
+
+
 def _check_text_within_span(entry: dict[str, Any], path: str, result: ValidationResult) -> None:
     """OPF §4 traceability, as far as the document itself can show it.
 
@@ -711,7 +723,7 @@ def _check_text_within_span(entry: dict[str, Any], path: str, result: Validation
             "a joined text has no single span — violates OPF §4",
             path=f"{path}.ref.char_span",
         )
-    elif len(text) > span[1] - span[0]:
+    elif _length_before_aliasing(text) > span[1] - span[0]:
         result.add(
             f"text ({len(text)} chars) is longer than the clause span it cites "
             f"({span[1] - span[0]} chars): a text joined from several clauses must "
