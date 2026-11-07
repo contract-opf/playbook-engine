@@ -699,6 +699,33 @@ def test_v06_rejects_a_joined_text_citing_one_shorter_span() -> None:
     assert warned and not warned[0].blocking
 
 
+def _q4_warnings(doc: dict[str, Any]) -> list[Any]:
+    result = validate_document(_restamp_identity(doc))
+    return [e for e in result.errors if "recorded sacred_clauses answer" in e.message]
+
+
+def test_q4_attributed_lines_matching_the_recorded_answer_draw_no_warning() -> None:
+    """Issue #266 (1): the NDA example's interview lines match its Q4 answer."""
+    assert _q4_warnings(_nda_04()) == []
+
+
+def test_a_q4_attributed_line_the_recorded_answer_does_not_name_warns() -> None:
+    doc = _nda_04()
+    for entry in doc["posture"]["generation"]["interview"]:
+        if entry["q"] == "sacred_clauses":
+            entry["answer"] = "Survival of Confidentiality Obligations"
+    warned = _q4_warnings(doc)
+    assert len(warned) == 1 and not warned[0].blocking
+    assert "exclusions-from-confidential-information" in warned[0].message
+
+
+def test_a_q4_attribution_with_no_recorded_interview_warns() -> None:
+    doc = _nda_04()
+    doc["posture"]["generation"]["interview"] = []
+    warned = _q4_warnings(doc)
+    assert len(warned) == 2 and not any(w.blocking for w in warned)
+
+
 def test_v06_rejects_a_list_citation_that_carries_a_span() -> None:
     doc = _nda_04()
     record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])

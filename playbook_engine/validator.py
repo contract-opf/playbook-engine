@@ -518,7 +518,10 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     import here the other way would cycle.
     """
     from playbook_engine.floor_candidates import (  # noqa: PLC0415
+        INTERVIEW_Q4_ID,
+        _extract_interview_answers,
         floor_invariant_attribution,
+        resolve_q4_items,
         signed_binding_status,
     )
 
@@ -529,11 +532,32 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     taxonomy = doc.get("taxonomy")
     entries = taxonomy.get("entries") if isinstance(taxonomy, dict) else None
     known_ids = {e.get("id") for e in entries or [] if isinstance(e, dict)}
+    # Issue #266: the lines the recorded Q4 answer promotes. A line that claims
+    # the interview as its author must be one of them.
+    q4_answer = (_extract_interview_answers(doc) or {}).get(INTERVIEW_Q4_ID)
+    q4_named = {
+        item.inv_id
+        for item in resolve_q4_items(q4_answer, entries if isinstance(entries, list) else None)
+        if item.kind == "promote"
+    }
     for i, invariant in enumerate(invariants):
         if not isinstance(invariant, dict):
             continue
         invariant_id = invariant.get("id")
         label = f"{invariant_id!r} " if isinstance(invariant_id, str) else ""
+        if floor_invariant_attribution(invariant) == "posture_interview" and (
+            invariant_id not in q4_named
+        ):
+            result.add(
+                f"floor invariant {label}is attributed to the Posture interview, but the "
+                "recorded sacred_clauses answer does not name it"
+                + ("" if q4_answer else " (no answer is recorded)")
+                + " - an earlier interview run promoted it and a later answer dropped it, "
+                "or the attribution does not belong. It stays binding; confirm the owner "
+                "wants it, or drop it with `playbook floor retire`.",
+                path=f"floor.invariants[{i}]",
+                blocking=False,
+            )
         statement = invariant.get("statement")
         if isinstance(statement, str) and not statement.strip():
             result.add(

@@ -14,6 +14,14 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Normative rule changes
+
+- **OPF §3.7 item 5 states the Q4 signer rule.** A producer MUST NOT write a Posture-interview Q4 hard line without a named signer (the engine has enforced this since `--signed-by` became required, #267), and a validator SHOULD warn on an interview-attributed Floor line whose `id` the recorded Q4 answer does not promote. The same item documents `floor.x_retired` as the way to drop a line (refs #266).
+
+### Maintenance
+
+- **`validate` cross-checks interview-attributed Floor lines against the recorded Q4 answer.** A line whose rationale claims the Posture interview, but whose `id` the recorded `sacred_clauses` answer does not promote, draws a non-blocking warning (a later answer dropped it, or the attribution does not belong). It stays binding; `playbook floor retire` drops it (refs #266, part 1 and 3).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)
