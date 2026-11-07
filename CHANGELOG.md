@@ -16,6 +16,7 @@ changes` heading in the release it ships under.
 
 ### Maintenance
 
+- **Instrument detection no longer flags a short full agreement as an amendment or cover sheet on three generic cues.** A web address in a notice block plus the word "terms" anywhere, a governing-law clause ("governed by the laws of ... terms"), and "ratifies" of anything (an authority representation) each flagged the deal, which made its absences `unverifiable` and dropped its opening facts. Now "terms" must sit within a line's distance of the address, a governing-law clause is skipped, and ratification must name the agreement or its terms. A labelled synthetic sample test pins precision and recall. The real-corpus hand-labelled review in #272 is still needed (refs #272).
 - **New end-to-end test: mine + project with `known_entities` and a template.** The 2.0.0 ordinal document alias once aliased the reserved `template` id, and no test combined the two. The synthetic NDA example now runs both ways and the template-derived standards and precedent count must match (closes #264).
 
 ## [2.0.0] - 2026-11-03
