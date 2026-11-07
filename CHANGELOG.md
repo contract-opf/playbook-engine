@@ -14,6 +14,10 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **`lint-corpus` now checks every PDF page for a text layer.** It used to look at the first three pages only, so a partly scanned PDF passed. A PDF with some pages and not all of them textless draws the new warning `DOC_PDF_PARTIAL_TEXT` (naming how many); `DOC_PDF_NO_TEXT` still means no page has text (refs #270, part 1).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)
