@@ -14,6 +14,10 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **`validate` no longer warns that a pseudonymized text is "longer than the clause span it cites" when only the aliases made it longer.** Spans index the original text and `Counterparty-<n>` is usually longer than the name it replaced, so a single clause could trip the warning; each alias now counts as one character. A real join (a whole extra clause) still warns. The warning stays a warning; promoting it to an error waits on a clean real-corpus run (refs #262).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)
