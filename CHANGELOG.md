@@ -17,6 +17,7 @@ changes` heading in the release it ships under.
 ### Maintenance
 
 - **New end-to-end test: mine + project with `known_entities` and a template.** The 2.0.0 ordinal document alias once aliased the reserved `template` id, and no test combined the two. The synthetic NDA example now runs both ways and the template-derived standards and precedent count must match (closes #264).
+- **`ruff` and `mypy` are pinned to exact versions in the `dev` extras** (`ruff==0.17.4`, `mypy==2.4.1`), so local, hook and CI lint agree; an unpinned newer ruff had turned `main` red on an untouched line (closes #263).
 - **`validate` no longer warns that a pseudonymized text is "longer than the clause span it cites" when only the aliases made it longer.** Spans index the original text and `Counterparty-<n>` is usually longer than the name it replaced, so a single clause could trip the warning; each alias now counts as one character. A real join (a whole extra clause) still warns. The warning stays a warning; promoting it to an error waits on a clean real-corpus run (refs #262).
 
 ## [2.0.0] - 2026-11-03
