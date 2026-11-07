@@ -19,6 +19,10 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish (e.g. v2.0.0)
+        required: true
 
 permissions:
   contents: read
@@ -29,6 +33,8 @@ jobs:
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
@@ -51,16 +57,16 @@ jobs:
           # from the stale pyproject.toml version, and PyPI would reject the
           # duplicate filename only after the GitHub Release already exists
           # (issue #114).
-          expected="${{ github.event.release.tag_name }}"
+          expected="${{ github.event.release.tag_name || inputs.tag }}"
           expected="${expected#v}"
           sdist="dist/playbook_engine-${expected}.tar.gz"
           wheel="dist/playbook_engine-${expected}-py3-none-any.whl"
           if [[ ! -f "$sdist" ]]; then
-            echo "::error::built sdist does not match release tag ${{ github.event.release.tag_name }} — expected $sdist, got: $(ls dist/*.tar.gz 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
+            echo "::error::built sdist does not match release tag ${{ github.event.release.tag_name || inputs.tag }} — expected $sdist, got: $(ls dist/*.tar.gz 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
             exit 1
           fi
           if [[ ! -f "$wheel" ]]; then
-            echo "::error::built wheel does not match release tag ${{ github.event.release.tag_name }} — expected $wheel, got: $(ls dist/*.whl 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
+            echo "::error::built wheel does not match release tag ${{ github.event.release.tag_name || inputs.tag }} — expected $wheel, got: $(ls dist/*.whl 2>/dev/null || echo '<none>'). Bump [project].version in pyproject.toml to match the tag (CONTRIBUTING.md 'Cutting a release' step 1)."
             exit 1
           fi
 
@@ -106,7 +112,7 @@ jobs:
     # Belt-and-suspenders on top of the `release: published` trigger
     # (which forks can't fire against this repo, and PRs can't fire at
     # all): refuse to run anywhere but the canonical repo.
-    if: github.repository == 'contract-opf/playbook-engine' && github.event_name == 'release'
+    if: github.repository == 'contract-opf/playbook-engine' && (github.event_name == 'release' || github.event_name == 'workflow_dispatch')
     environment:
       name: pypi
       url: https://pypi.org/p/playbook-engine
