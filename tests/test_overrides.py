@@ -670,7 +670,12 @@ def test_a_statement_override_of_a_q4_invariant_round_trips_through_the_intervie
     validated = _invoke(["validate", str(out_dir / "playbook.opf.json")])
     assert validated.exit_code == 0 and "no structural attribution" not in validated.output
     # the interview re-run with the same answers is not refused
-    rerun = _invoke(["posture", "interview", str(out_dir), "--answers-file", str(_POSTURE_ANSWERS)])
+    rerun = _invoke(
+        [
+            "posture", "interview", str(out_dir), "--answers-file", str(_POSTURE_ANSWERS),
+            "--signed-by", "Legal Owner",
+        ]
+    )  # fmt: skip
     assert rerun.exit_code == 0, rerun.output
     # the re-run did not revert the owner's statement (QA-2026-11-03 #32)
     kept = next(i for i in _load(out_dir)["floor"]["invariants"] if i["id"] == inv_id)

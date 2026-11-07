@@ -1128,7 +1128,13 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     answers_path.write_text(json.dumps(_ANSWERS), encoding="utf-8")
 
     exit_code, output = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code == 0, output
     assert "posture.version=1" in output
@@ -1136,7 +1142,13 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
     # Issue #132: a second run against the SAME answers file is a no-op --
     # the version must NOT bump to 2, and the output must say so.
     exit_code2, output2 = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code2 == 0, output2
     assert "posture.version=1" in output2
@@ -1150,7 +1162,13 @@ def test_cli_posture_interview_answers_file_round_trip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     exit_code3, output3 = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(changed_answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(changed_answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code3 == 0, output3
     assert "posture.version=2" in output3
@@ -1174,6 +1192,8 @@ def test_cli_posture_interview_base_version_continues_counter_across_rederivatio
         str(tmp_path),
         "--answers-file",
         str(answers_path),
+        "--signed-by",
+        "Legal Owner",
         "--base-version",
         "2",
     )
@@ -1215,14 +1235,26 @@ def test_cli_posture_interview_rerun_does_not_duplicate_floor_invariants(tmp_pat
     answers_path.write_text(json.dumps(answers), encoding="utf-8")
 
     exit_code, output = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code == 0, output
     first_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
     assert len(first_invariants) == 1
 
     exit_code2, output2 = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code2 == 0, output2
     second_invariants = json.loads(opf_path.read_text(encoding="utf-8"))["floor"]["invariants"]
@@ -1235,7 +1267,13 @@ def test_cli_posture_interview_missing_out_dir_playbook_fails(tmp_path: Path) ->
     answers_path.write_text(json.dumps(_ANSWERS), encoding="utf-8")
 
     exit_code, output = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code != 0
     assert "not found" in output.lower() or "error" in output.lower()
@@ -1250,7 +1288,29 @@ def test_cli_posture_interview_too_few_answers_fails(tmp_path: Path) -> None:
     answers_path.write_text(json.dumps({"rounds": "2 rounds."}), encoding="utf-8")
 
     exit_code, output = _invoke(
-        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+        "posture",
+        "interview",
+        str(tmp_path),
+        "--answers-file",
+        str(answers_path),
+        "--signed-by",
+        "Legal Owner",
     )
     assert exit_code != 0
     assert "error" in output.lower()
+
+
+def test_cli_posture_interview_refuses_to_sign_q4_without_a_signer(tmp_path: Path) -> None:
+    opf_path = tmp_path / "playbook.opf.json"
+    opf_path.write_text(json.dumps(_minimal_doc()), encoding="utf-8")
+    before = opf_path.read_text(encoding="utf-8")
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(
+        json.dumps({**_ANSWERS, "sacred_clauses": "Liability caps"}), encoding="utf-8"
+    )
+    exit_code, output = _invoke(
+        "posture", "interview", str(tmp_path), "--answers-file", str(answers_path)
+    )
+    assert exit_code == 1
+    assert "--signed-by is required" in output
+    assert opf_path.read_text(encoding="utf-8") == before

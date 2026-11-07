@@ -37,7 +37,7 @@ mkdir -p out/quickstart-demo
 playbook judge-apply out/quickstart-demo --verdicts examples/judge-fixture/canned-verdicts.jsonl
 playbook mine examples/judge-fixture/corpus --config examples/judge-fixture/config.yaml --out out/quickstart-demo
 playbook project out/quickstart-demo --config examples/judge-fixture/config.yaml
-playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
+playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json --signed-by "Your Name"
 playbook validate out/quickstart-demo/playbook.opf.json
 playbook view bundle out/quickstart-demo
 ```

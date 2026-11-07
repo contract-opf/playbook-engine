@@ -221,7 +221,7 @@ playbook lint-corpus examples/nda/corpus --config examples/nda/config.smoke.yaml
 playbook judge-apply "$OUT" --verdicts examples/nda/canned-verdicts.jsonl
 playbook mine        examples/nda/corpus --config examples/nda/config.smoke.yaml --out "$OUT"
 playbook project      "$OUT" --config examples/nda/config.smoke.yaml
-playbook posture interview "$OUT" --answers-file examples/nda/posture-answers.json
+playbook posture interview "$OUT" --answers-file examples/nda/posture-answers.json --signed-by "Your Name"
 playbook floor sign   "$OUT" \
   --statement "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement." \
   --id limitation-of-liability-confidentiality-carveout \

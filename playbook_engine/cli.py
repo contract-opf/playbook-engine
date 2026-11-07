@@ -3880,6 +3880,16 @@ def posture_interview_cmd(
             if promote_q4 and not signed_by:
                 signed_by = click.prompt("Signed by (your name)", default="", show_default=False)
 
+    if preview and promote_q4 and not (signed_by and signed_by.strip()):
+        click.secho(
+            "ERROR: --signed-by is required to sign the Q4 hard lines into the Floor. Re-run "
+            "with --signed-by NAME to record who signed them, or answer n at the prompt to "
+            "save the Posture without signing them.",
+            fg="red",
+            err=True,
+        )
+        raise SystemExit(1)
+
     try:
         result = apply_posture_interview(
             out_dir_resolved,
@@ -3903,12 +3913,6 @@ def posture_interview_cmd(
         )
     for warning in result.warnings:
         click.secho(f"WARN  {warning}", fg="yellow")
-    if preview and promote_q4 and not (signed_by and signed_by.strip()):
-        click.secho(
-            "WARN  No --signed-by given: the Q4 hard lines are recorded as named in the "
-            "interview with no signer. Re-run with --signed-by to record who signed them.",
-            fg="yellow",
-        )
 
 
 @cli.group(name="floor")
