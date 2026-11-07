@@ -419,7 +419,18 @@ def _lint_doc_dir(doc_dir: Path, report: LintReport, dangling: list[Path] | None
             doc_dir,
         )
 
-    textless = [f for f in version_files if f.suffix.lower() == ".pdf" and _pdf_has_no_text(f)]
+    textless: list[Path] = []
+    partial: list[tuple[Path, int, int]] = []
+    for f in version_files:
+        if f.suffix.lower() != ".pdf":
+            continue
+        coverage = _pdf_textless_pages(f)
+        if coverage is None or coverage[0] == 0:
+            continue
+        if coverage[0] == coverage[1]:
+            textless.append(f)
+        else:
+            partial.append((f, coverage[0], coverage[1]))
     if textless:
         names = ", ".join(f.name for f in textless[:5])
         report.add(
@@ -429,6 +440,17 @@ def _lint_doc_dir(doc_dir: Path, report: LintReport, dangling: list[Path] | None
             "They need OCR; where OCR is unavailable the file fails extraction, and a "
             "deal whose every file fails is quarantined (quarantine.json) and absent from "
             "the playbook. Supply a text PDF/DOCX, or install the OCR tooling.",
+            doc_dir,
+        )
+    if partial:
+        names = ", ".join(f"{f.name} ({n} of {total} pages)" for f, n, total in partial[:5])
+        report.add(
+            "warning",
+            "DOC_PDF_PARTIAL_TEXT",
+            f"'{doc_dir.name}': PDF(s) with some pages that have no text layer ({names}) - "
+            "partly scanned. The scanned pages need OCR; where OCR is unavailable their "
+            "clauses are missing from the extracted text, which can read as a clause "
+            "struck or absent. Supply a text PDF/DOCX, or install the OCR tooling.",
             doc_dir,
         )
 
@@ -450,20 +472,25 @@ def _lint_doc_dir(doc_dir: Path, report: LintReport, dangling: list[Path] | None
         )
 
 
-def _pdf_has_no_text(path: Path) -> bool:
-    """True when the first pages of a PDF yield no text at all (an image-only scan).
+def _pdf_textless_pages(path: Path) -> tuple[int, int] | None:
+    """``(pages with no text, total pages)`` for a PDF, every page checked.
 
-    Needs ``pdfplumber``; where it is missing or the file cannot be opened the
-    answer is False (no claim made) so the check never invents a finding.
+    A page with no text is an image-only scan (issue #270: a PDF can be scanned
+    only in part, which the first pages alone do not show). ``None`` when the
+    count cannot be made: ``pdfplumber`` is missing, or the file cannot be
+    opened, so the check never invents a finding.
     """
     try:
         import pdfplumber  # noqa: PLC0415
 
         with pdfplumber.open(path) as pdf:
-            pages = pdf.pages[:3]
-            return bool(pages) and not any((p.extract_text() or "").strip() for p in pages)
+            pages = pdf.pages
+            if not pages:
+                return None
+            blank = sum(1 for p in pages if not (p.extract_text() or "").strip())
+            return blank, len(pages)
     except Exception:  # noqa: BLE001 - advisory check only
-        return False
+        return None
 
 
 def _lint_duplicate_stems(doc_dir: Path, version_files: list[Path], report: LintReport) -> None:
