@@ -1376,7 +1376,7 @@ Rules that are easy to get wrong:
   `floor sign` command so the owner words it themselves. `posture interview`
   prints every statement it is about to sign *before* it writes anything, and
   `--signed-by "<the human's name>"` records who signed them (`x_signed_by`);
-  without it the lines are marked as having no signer. **Read the printed
+  without it the command refuses to sign them (2.0.0+). **Read the printed
   statements back to the user and confirm each says what they meant**, or stop
   and fix the wording with `floor sign`.
 - **Q4 is different in kind, and signs itself — for name-shaped items.** Naming

@@ -132,7 +132,7 @@ skipped instead and needs a follow-up `playbook floor sign` — see
 ADOPTING.md.
 
 ```sh
-playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json
+playbook posture interview out/quickstart-demo --answers-file examples/judge-fixture/posture-answers.json --signed-by "Your Name"
 ```
 
 Expected output:
@@ -226,7 +226,7 @@ docker run --rm -it \
 docker run --rm -it \
   -v "$PWD/examples/judge-fixture":/work/corpus:ro \
   -v "$PWD/out/quickstart-demo":/work/out \
-  playbook-engine posture interview /work/out --answers-file /work/corpus/posture-answers.json
+  playbook-engine posture interview /work/out --answers-file /work/corpus/posture-answers.json --signed-by "Your Name"
 
 docker run --rm -it \
   -v "$PWD/out/quickstart-demo":/work/out \
