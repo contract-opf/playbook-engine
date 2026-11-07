@@ -11,7 +11,9 @@ comment. Generate the entity-registry part with::
 
 (``make hooks`` does this when a registry exists). Add hand-picked terms
 (codenames, internal domains, people) as extra ``*.txt`` files in the same
-directory.
+directory. A term that proves to be generic (it matches ordinary text) goes in
+``allow.txt`` in the same directory: it is never generated and never blocked, so
+it survives every ``make hooks``.
 
 It FAILS CLOSED: if there are refs to push and no term list can be found (or it
 is empty), the push is blocked. Bypass a verified false positive with
@@ -105,11 +107,29 @@ def names_dir(cwd: str | None = None) -> Path:
     return Path(common) / "confidentiality"
 
 
+ALLOW_FILE = "allow.txt"
+
+
+def load_allow(directory: Path) -> set[str]:
+    """Terms the maintainer has ruled harmless (``allow.txt``), normalized."""
+    f = directory / ALLOW_FILE
+    if not f.is_file():
+        return set()
+    return {normalize(t) for t in parse_names_file(f.read_text(encoding="utf-8", errors="replace"))}
+
+
 def load_terms(directory: Path) -> Terms:
     raw: list[str] = []
     if directory.is_dir():
+        allow = load_allow(directory)
         for f in sorted(directory.glob("*.txt")):
-            raw += parse_names_file(f.read_text(encoding="utf-8", errors="replace"))
+            if f.name == ALLOW_FILE:
+                continue
+            raw += [
+                t
+                for t in parse_names_file(f.read_text(encoding="utf-8", errors="replace"))
+                if normalize(t) not in allow
+            ]
     return Terms(raw)
 
 
@@ -174,7 +194,21 @@ def scan_push(
 def generate_names(registry: Path, out_dir: Path) -> int:
     """Write ``entity-registry.txt`` (real names from the private registry) into *out_dir*."""
     data = json.loads(registry.read_text(encoding="utf-8"))
-    names = sorted({v for v in data.get("canonical", {}).values() if v and v.strip()})
+    allow = load_allow(out_dir)
+    names = sorted(
+        {
+            v
+            for v in data.get("canonical", {}).values()
+            if v and v.strip() and normalize(v) not in allow
+        }
+    )
+    for n in names:
+        if len(n.split()) <= 2 and not any(c.isdigit() for c in n):
+            print(
+                f"warning: generated term {n!r} is one or two plain words and may match "
+                f"ordinary text; list it in {out_dir}/{ALLOW_FILE} if it is generic",
+                file=sys.stderr,
+            )
     out_dir.mkdir(parents=True, exist_ok=True)
     fd = os.open(out_dir / "entity-registry.txt", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:

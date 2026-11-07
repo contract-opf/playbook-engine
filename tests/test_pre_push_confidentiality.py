@@ -218,3 +218,45 @@ def test_scanner_source_names_nothing_real() -> None:
     src = _SCRIPT.read_text(encoding="utf-8")
     assert "university" not in src.lower()
     assert "contract-opf" not in src
+
+
+def test_allow_list_survives_generation_and_is_not_scanned(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = tmp_path / "entity_registry.json"
+    registry.write_text(
+        json.dumps({"canonical": {"x": _NAME, "y": "Generic Plain Words"}}), encoding="utf-8"
+    )
+    out = tmp_path / "gen"
+    out.mkdir()
+    (out / "allow.txt").write_text("# ruled generic\ngeneric plain words\n", encoding="utf-8")
+    monkeypatch.setenv("PLAYBOOK_CONFIDENTIAL_NAMES_DIR", str(out))
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--generate-names", "--registry", str(registry)],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    generated = (out / "entity-registry.txt").read_text(encoding="utf-8")
+    assert "Generic Plain Words" not in generated
+    assert _NAME in generated
+    # a hand-added copy of the allowed term is dropped by the scanner too
+    (out / "extra.txt").write_text("Generic Plain Words\n", encoding="utf-8")
+    assert not scanner.load_terms(out).find("some generic plain words here")
+    assert scanner.load_terms(out).find(_NAME)
+
+
+def test_generation_warns_on_one_or_two_word_terms(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = tmp_path / "entity_registry.json"
+    registry.write_text(json.dumps({"canonical": {"y": "Plain Words"}}), encoding="utf-8")
+    monkeypatch.setenv("PLAYBOOK_CONFIDENTIAL_NAMES_DIR", str(tmp_path / "gen"))
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--generate-names", "--registry", str(registry)],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+    )
+    assert "allow.txt" in proc.stderr
