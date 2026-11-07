@@ -14,6 +14,10 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **The 0.6 conformance manifest's `engine_version` stays `1.0.0`, and now says why.** It is the stamp every vector input carries (`compiler.version`, which is hashed), not the engine's release; moving it would change the frozen hashes. `spec/conformance/README.md` records this and two tests pin it (closes #274).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)

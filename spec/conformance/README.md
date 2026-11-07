@@ -62,3 +62,18 @@ not set a precedent. A format-version bump (a new
 vector set, not an overwrite — exactly like a schema file itself. See
 [`0.6/README.md`](0.6/README.md) for the vector-by-vector rationale and file
 layout.
+
+## Why `engine_version` stays `1.0.0`
+
+`format_version.engine_version` in `0.6/manifest.json` is not the engine's
+current release. It is the version the vector inputs are stamped with: every
+vector's `input.compiler.version` is `1.0.0`, and `compiler.version` is part of
+the canonical form (only `compiler.generated_at` and `compiler.run_id` are
+removed before hashing), so it is covered by every `content_hash` and
+`section_digests` value. Re-stamping the inputs to a newer engine version would
+change those frozen hashes, and the manifest alone cannot move without the
+inputs it describes. The 2.0.0 re-stamp of vector 014 and the new vector 015
+changed vector content, not this stamp. It changes only with a new, separately
+stamped vector set (issue #274). `tests/test_conformance_vectors.py` pins both
+halves: the manifest and every input agree, and bumping the input stamp changes
+the hash.
