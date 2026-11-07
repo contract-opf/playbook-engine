@@ -14,6 +14,10 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **`ruff` and `mypy` are pinned to exact versions in the `dev` extras** (`ruff==0.17.4`, `mypy==2.4.1`), so local, hook and CI lint agree; an unpinned newer ruff had turned `main` red on an untouched line (closes #263).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)

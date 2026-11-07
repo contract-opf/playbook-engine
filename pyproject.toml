@@ -58,8 +58,10 @@ dev = [
     "hatchling>=1.27",
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.4",
-    "mypy>=1.10",
+    # Pinned exactly (issue #263): an unpinned newer ruff turned main red on a
+    # rule the local ruff passed. Bump deliberately, with the code fixes.
+    "ruff==0.17.4",
+    "mypy==2.4.1",
     "types-PyYAML>=6.0",
 ]
 
