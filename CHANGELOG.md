@@ -14,6 +14,10 @@ changes` heading in the release it ships under.
 
 - **`posture interview` now refuses to sign Q4 hard lines into the Floor without a signer.** It exits 1 and writes nothing when the interview would sign Q4 lines and no `--signed-by` is given (or answered at the prompt). Scripts that ran it without `--signed-by` must add it. Answering `n` at the sign prompt still saves the Posture without signing the lines (closes #267).
 
+### Maintenance
+
+- **New end-to-end test: mine + project with `known_entities` and a template.** The 2.0.0 ordinal document alias once aliased the reserved `template` id, and no test combined the two. The synthetic NDA example now runs both ways and the template-derived standards and precedent count must match (closes #264).
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking changes (read before upgrading)
