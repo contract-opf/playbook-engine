@@ -518,7 +518,10 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     import here the other way would cycle.
     """
     from playbook_engine.floor_candidates import (  # noqa: PLC0415
+        INTERVIEW_Q4_ID,
+        _extract_interview_answers,
         floor_invariant_attribution,
+        resolve_q4_items,
         signed_binding_status,
     )
 
@@ -529,11 +532,32 @@ def _check_floor_attribution(doc: dict[str, Any], result: ValidationResult) -> N
     taxonomy = doc.get("taxonomy")
     entries = taxonomy.get("entries") if isinstance(taxonomy, dict) else None
     known_ids = {e.get("id") for e in entries or [] if isinstance(e, dict)}
+    # Issue #266: the lines the recorded Q4 answer promotes. A line that claims
+    # the interview as its author must be one of them.
+    q4_answer = (_extract_interview_answers(doc) or {}).get(INTERVIEW_Q4_ID)
+    q4_named = {
+        item.inv_id
+        for item in resolve_q4_items(q4_answer, entries if isinstance(entries, list) else None)
+        if item.kind == "promote"
+    }
     for i, invariant in enumerate(invariants):
         if not isinstance(invariant, dict):
             continue
         invariant_id = invariant.get("id")
         label = f"{invariant_id!r} " if isinstance(invariant_id, str) else ""
+        if floor_invariant_attribution(invariant) == "posture_interview" and (
+            invariant_id not in q4_named
+        ):
+            result.add(
+                f"floor invariant {label}is attributed to the Posture interview, but the "
+                "recorded sacred_clauses answer does not name it"
+                + ("" if q4_answer else " (no answer is recorded)")
+                + " - an earlier interview run promoted it and a later answer dropped it, "
+                "or the attribution does not belong. It stays binding; confirm the owner "
+                "wants it, or drop it with `playbook floor retire`.",
+                path=f"floor.invariants[{i}]",
+                blocking=False,
+            )
         statement = invariant.get("statement")
         if isinstance(statement, str) and not statement.strip():
             result.add(
@@ -666,6 +690,18 @@ def _evidence_list(doc: dict[str, Any], key: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+#: An entity-registry alias (``Counterparty-<n>``), the text the born-safe pass
+#: writes over a real counterparty name. Spans index the original, unaliased
+#: text, and an alias is usually longer than the name it replaced.
+_ALIAS_RE = re.compile(r"(?<!\w)counterparty-[0-9]+(?!\w)", re.IGNORECASE)
+
+
+def _length_before_aliasing(text: str) -> int:
+    """The least length *text* could have had before pseudonymization: each
+    alias counts as one character (the shortest name it could have replaced)."""
+    return len(_ALIAS_RE.sub("x", text))
+
+
 def _check_text_within_span(entry: dict[str, Any], path: str, result: ValidationResult) -> None:
     """OPF §4 traceability, as far as the document itself can show it.
 
@@ -687,7 +723,7 @@ def _check_text_within_span(entry: dict[str, Any], path: str, result: Validation
             "a joined text has no single span — violates OPF §4",
             path=f"{path}.ref.char_span",
         )
-    elif len(text) > span[1] - span[0]:
+    elif _length_before_aliasing(text) > span[1] - span[0]:
         result.add(
             f"text ({len(text)} chars) is longer than the clause span it cites "
             f"({span[1] - span[0]} chars): a text joined from several clauses must "

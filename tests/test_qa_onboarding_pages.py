@@ -85,6 +85,42 @@ def test_lint_corpus_warns_about_a_textless_pdf(tmp_path: Path) -> None:
     assert hits and hits[0].level == "warning" and "v1.pdf" in hits[0].message
 
 
+def _mixed_pdf(dest: Path, pages: list[str | None]) -> None:
+    """A PDF with one page per entry: its text, or ``None`` for a blank (scanned) page."""
+    fpdf = pytest.importorskip("fpdf")
+    pdf = fpdf.FPDF()
+    pdf.set_font("Helvetica", size=12)
+    for text in pages:
+        pdf.add_page()
+        if text is not None:
+            pdf.multi_cell(0, 10, text)
+    pdf.output(str(dest))
+
+
+def test_lint_corpus_warns_about_a_partially_scanned_pdf(tmp_path: Path) -> None:
+    """Issue #270: text on the first pages and a scanned page after them is not
+    caught by looking at the first three pages only."""
+    corpus = tmp_path / "corpus"
+    deal = corpus / "deal-mixed"
+    deal.mkdir(parents=True)
+    _mixed_pdf(
+        deal / "v1.pdf", ["Clause one.", "Clause two.", "Clause three.", "Clause four.", None]
+    )
+    report = lint_corpus(corpus)
+    hits = [i for i in report.items if i.code == "DOC_PDF_PARTIAL_TEXT"]
+    assert hits and hits[0].level == "warning"
+    assert "v1.pdf" in hits[0].message and "1 of 5" in hits[0].message
+    assert not [i for i in report.items if i.code == "DOC_PDF_NO_TEXT"]
+
+
+def test_lint_corpus_does_not_flag_a_fully_texted_pdf(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    (corpus / "deal").mkdir(parents=True)
+    _mixed_pdf(corpus / "deal" / "v1.pdf", ["Clause one.", "Clause two.", "Clause three.", "Four."])
+    codes = {i.code for i in lint_corpus(corpus).items}
+    assert "DOC_PDF_PARTIAL_TEXT" not in codes and "DOC_PDF_NO_TEXT" not in codes
+
+
 def test_lint_corpus_does_not_flag_an_unreadable_pdf_stub(tmp_path: Path) -> None:
     corpus = tmp_path / "corpus"
     (corpus / "deal").mkdir(parents=True)

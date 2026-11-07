@@ -699,6 +699,59 @@ def test_v06_rejects_a_joined_text_citing_one_shorter_span() -> None:
     assert warned and not warned[0].blocking
 
 
+def _q4_warnings(doc: dict[str, Any]) -> list[Any]:
+    result = validate_document(_restamp_identity(doc))
+    return [e for e in result.errors if "recorded sacred_clauses answer" in e.message]
+
+
+def test_q4_attributed_lines_matching_the_recorded_answer_draw_no_warning() -> None:
+    """Issue #266 (1): the NDA example's interview lines match its Q4 answer."""
+    assert _q4_warnings(_nda_04()) == []
+
+
+def test_a_q4_attributed_line_the_recorded_answer_does_not_name_warns() -> None:
+    doc = _nda_04()
+    for entry in doc["posture"]["generation"]["interview"]:
+        if entry["q"] == "sacred_clauses":
+            entry["answer"] = "Survival of Confidentiality Obligations"
+    warned = _q4_warnings(doc)
+    assert len(warned) == 1 and not warned[0].blocking
+    assert "exclusions-from-confidential-information" in warned[0].message
+
+
+def test_a_q4_attribution_with_no_recorded_interview_warns() -> None:
+    doc = _nda_04()
+    doc["posture"]["generation"]["interview"] = []
+    warned = _q4_warnings(doc)
+    assert len(warned) == 2 and not any(w.blocking for w in warned)
+
+
+def _span_warnings(text: str, span_len: int) -> list[Any]:
+    doc = _nda_04()
+    record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])
+    record["signed_text"]["text"] = text
+    record["signed_text"]["ref"]["char_span"] = [0, span_len]
+    result = validate_document(_restamp_identity(doc))
+    return [e for e in result.errors if "longer than the clause span it cites" in e.message]
+
+
+def test_a_counterparty_alias_longer_than_the_name_it_replaced_is_not_a_join() -> None:
+    """Issue #262: spans index the original text; the born-safe pass writes
+    ``Counterparty-<n>`` over a (shorter) real name, so a single clause's
+    pseudonymized text can run a few characters past its span. That is not
+    a join and must not warn."""
+    original = "Acme shall keep Zed confidential"
+    text = "Counterparty-12 shall keep Counterparty-3 confidential"
+    assert len(text) > len(original)
+    assert _span_warnings(text, len(original)) == []
+
+
+def test_a_real_join_still_warns_when_aliases_are_present() -> None:
+    """The alias allowance is one character per alias, not a free pass."""
+    text = "Counterparty-12 shall keep it. " + "A second clause joined in. " * 3
+    assert _span_warnings(text, len("Acme shall keep it.")) != []
+
+
 def test_v06_rejects_a_list_citation_that_carries_a_span() -> None:
     doc = _nda_04()
     record = next(p for p in doc["evidence"]["precedent"] if p["signed_text"])

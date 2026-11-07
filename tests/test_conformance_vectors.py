@@ -91,6 +91,23 @@ def test_v06_manifest_is_stamped_0_6_digest_5() -> None:
 
 
 @pytest.mark.parametrize("filename", _vector_files_v06())
+def test_v06_manifest_engine_version_is_the_stamp_every_input_carries(filename: str) -> None:
+    """Issue #274: the manifest's engine_version is the vectors' input stamp
+    (``compiler.version``), not the engine's current release."""
+    stamp = _load_manifest_v06()["format_version"]["engine_version"]
+    assert _load_vector_v06(filename)["input"]["compiler"]["version"] == stamp
+
+
+def test_v06_restamping_the_input_engine_version_would_change_the_hashes() -> None:
+    """Why the stamp cannot follow the engine: ``compiler.version`` is hashed,
+    so a newer stamp breaks every frozen ``content_hash`` (spec/conformance/README.md)."""
+    doc = copy.deepcopy(_load_vector_v06(_vector_files_v06()[0])["input"])
+    before = content_hash(doc)
+    doc["compiler"]["version"] = "2.0.0"
+    assert content_hash(doc) != before
+
+
+@pytest.mark.parametrize("filename", _vector_files_v06())
 def test_v06_vector_reproduces_exactly(filename: str) -> None:
     vector = _load_vector_v06(filename)
     doc = vector["input"]
