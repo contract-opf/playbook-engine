@@ -78,7 +78,8 @@ _RATIFY_RE = re.compile(
     r"\b(?:remain(?:s)? in full force and effect"
     r"|except as (?:expressly )?(?:amended|modified|supplemented)"
     r"|all other terms[^.]{0,60}(?:remain|unchanged)"
-    r"|(?:hereby )?ratif(?:y|ies))\b",
+    r"|(?:hereby )?ratif(?:y|ies)(?:\s+and\s+confirm\w*)?\s+(?:the|this|that|all|each|its|such)?"
+    r"[^.]{0,60}\b(?:agreement|contract|terms)\b)",
     re.IGNORECASE,
 )
 _SEVERABILITY_RE = re.compile(
@@ -87,11 +88,16 @@ _SEVERABILITY_RE = re.compile(
 )
 _INCORPORATION_RE = re.compile(
     r"\bincorporated\s+(?:herein\s+|into\s+[^.]{0,40}\s+)?by\s+reference\b"
-    r"|\bgoverned\s+by\s+(?:the\s+)?[^.]{0,80}\bterms\b",
+    r"|\bgoverned\s+by\s+(?:the\s+)?(?:(?!laws?\b)[^.]){0,80}\bterms\b",
     re.IGNORECASE,
 )
-_URL_RE = re.compile(r"https?://|\bwww\.", re.IGNORECASE)
-_TERMS_RE = re.compile(r"\bterms\b", re.IGNORECASE)
+# A URL and the word "terms" together are incorporation only when they sit close
+# on one line (terms hosted at an address), not anywhere in a short agreement
+# that has a web address in its notice block and says "terms" in its definitions.
+_URL_TERMS_RE = re.compile(
+    r"\bterms\b[^\n]{0,80}?(?:https?://|\bwww\.)|(?:https?://|\bwww\.)[^\n]{0,120}?\bterms\b",
+    re.IGNORECASE,
+)
 
 _REASON_RE = re.compile(
     r"(?<!\bno )(?<!\bany )\bamendment\b|\baddendum\b|\bcover sheet\b|\border form\b|\bstatement of work\b"
@@ -123,9 +129,7 @@ def instrument_reason(text: str, *, earlier_chars: int = 0) -> str | None:
         return None
     title = bool(_TITLE_RE.search(text))
     ratify = _ratifies(text)
-    incorporates = bool(_INCORPORATION_RE.search(text)) or (
-        bool(_URL_RE.search(text)) and bool(_TERMS_RE.search(text))
-    )
+    incorporates = bool(_INCORPORATION_RE.search(text)) or bool(_URL_TERMS_RE.search(text))
     if title and chars < AMENDMENT_TITLE_CHARS:
         return INSTRUMENT_AMENDMENT
     if chars < SHORT_INSTRUMENT_CHARS:

@@ -76,7 +76,7 @@ def test_a_plain_agreement_or_a_short_one_without_a_cue_is_not_flagged() -> None
 
 
 def test_a_form_switch_needs_a_cue_and_a_much_shorter_copy() -> None:
-    mid = (UNRELATED + " ") * 60 + " The parties ratify the above."
+    mid = (UNRELATED + " ") * 60 + " The parties ratify the Agreement."
     assert len(mid) > instrument.SHORT_INSTRUMENT_CHARS
     assert instrument.instrument_reason(mid, earlier_chars=len(mid) * 5) == "form_switch"
     assert instrument.instrument_reason(mid, earlier_chars=len(mid)) is None
@@ -203,3 +203,48 @@ def test_title_lines_flag_the_instrument() -> None:
 def test_reason_saying_no_amendment_clause_is_not_a_flag() -> None:
     assert not instrument.reason_flags_instrument("The text holds no amendment provision.")
     assert instrument.reason_flags_instrument("A short amendment that incorporates the main terms.")
+
+
+# ---------------------------------------------------------------------------
+# Issue #272: a short full agreement must not read as another instrument.
+# Labelled synthetic sample: (text, expected reason or None).
+# ---------------------------------------------------------------------------
+
+_SHORT_NDA_URL = (
+    "Mutual Nondisclosure Agreement. Confidential Information is information disclosed "
+    "under the terms of this Agreement.\n"
+    "Notices to Alpha Corp may be sent to https://alpha.example/legal or by mail."
+)
+_SHORT_NDA_GOVERNING_LAW = (
+    "Mutual Nondisclosure Agreement. This Agreement shall be governed by the laws of "
+    "Delaware, without regard to conflict-of-law terms."
+)
+_SHORT_NDA_AUTHORITY = (
+    "Mutual Nondisclosure Agreement. Each party hereby ratifies that its signatory has "
+    "authority to sign."
+)
+
+_LABELLED = [
+    (COVER_SHEET, instrument.INSTRUMENT_INCORPORATION),
+    (AMENDMENT, instrument.INSTRUMENT_AMENDMENT),
+    (
+        "The Services are governed by the Terms posted at https://example.com/terms.",
+        "incorporation",
+    ),
+    ("Order governed by the terms of the Master Agreement between the parties.", "incorporation"),
+    ("The parties hereby ratify and confirm the Agreement. All else is unchanged.", "amendment"),
+    (_SHORT_NDA_URL, None),
+    (_SHORT_NDA_GOVERNING_LAW, None),
+    (_SHORT_NDA_AUTHORITY, None),
+    (FULL_AGREEMENT, None),
+]
+
+
+def test_labelled_sample_has_perfect_precision_and_recall() -> None:
+    got = [(text, instrument.instrument_reason(text)) for text, _ in _LABELLED]
+    wrong = [
+        (text[:50], r, want)
+        for (text, want), (_, r) in zip(_LABELLED, got, strict=True)
+        if r != want
+    ]
+    assert not wrong, wrong
